@@ -1,5 +1,6 @@
 #include <unistd.h>  // for getopt
 #include <cstdint>
+#include <future>
 #include <limits>
 #include <vector>
 
@@ -18,7 +19,7 @@ class two_pass {
     uint64_t first_even_nl{null_pos};
     uint64_t first_odd_nl{null_pos};
   };
-  stats first_pass_chunk(const uint8_t* buf, size_t start, size_t end) {
+  static stats first_pass_chunk(const uint8_t* buf, size_t start, size_t end) {
     stats out;
     uint64_t i = start;
     /* TODO: use SIMD to make search faster */
@@ -40,8 +41,8 @@ class two_pass {
     return out;
   }
 
-  size_t second_pass_chunk(const uint8_t* buf, size_t start, size_t end, index* out,
-                           size_t thread_id) {
+  static uint64_t second_pass_chunk(const uint8_t* buf, size_t start, size_t end,
+                                    index* out, size_t thread_id) {
     bool is_quoted = false;
     uint64_t pos = start;
     size_t n_indexes = 0;
@@ -62,18 +63,23 @@ class two_pass {
 
   index parse(const uint8_t* buf, size_t len, size_t n_threads) {
     size_t chunk_size = len / n_threads;
-    std::vector<stats> chunk_stats(n_threads);
     std::vector<uint64_t> chunk_pos(n_threads + 1);
+    std::vector<std::future<stats>> first_pass_fut(n_threads);
+    std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
+
     for (int i = 0; i < n_threads; ++i) {
-      chunk_stats[i] = first_pass_chunk(buf, chunk_size * i, chunk_size * (i + 1));
+      first_pass_fut[i] = std::async(std::launch::async, first_pass_chunk, buf,
+                                     chunk_size * i, chunk_size * (i + 1));
+    }
+    for (int i = 0; i < n_threads; ++i) {
     }
 
-    size_t n_quotes = chunk_stats[0].n_quotes;
+    size_t n_quotes = first_pass_fut[0].get().n_quotes;
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
-      chunk_pos[i] = (n_quotes % 2) == 0 ? chunk_stats[i].first_even_nl
-                                         : chunk_stats[i].first_odd_nl;
-      n_quotes += chunk_stats[i].n_quotes;
+      auto st = first_pass_fut[i].get();
+      chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
+      n_quotes += st.n_quotes;
     }
     chunk_pos[n_threads] = len;
 
@@ -83,7 +89,12 @@ class two_pass {
 
     out.indexes = new uint64_t[len];
     for (int i = 0; i < n_threads; ++i) {
-      out.n_indexes[i] = second_pass_chunk(buf, chunk_pos[i], chunk_pos[i + 1], &out, i);
+      second_pass_fut[i] = std::async(std::launch::async, second_pass_chunk, buf,
+                                      chunk_pos[i], chunk_pos[i + 1], &out, i);
+    }
+
+    for (int i = 0; i < n_threads; ++i) {
+      out.n_indexes[i] = second_pass_fut[i].get();
     }
     return out;
   }

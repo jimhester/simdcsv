@@ -34,6 +34,7 @@ class TimingAccumulator {
     attribs.disabled = 1;
     attribs.exclude_kernel = 1;
     attribs.exclude_hv = 1;
+    attribs.inherit = 1;
 
     attribs.sample_period = 0;
     attribs.read_format = PERF_FORMAT_GROUP | PERF_FORMAT_ID;

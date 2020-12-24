@@ -11,9 +11,21 @@ using namespace std;
 
 int main(int argc, char* argv[]) {
   int c;
+  int n_threads = 1;
+  bool verbose = false;
+  bool dump = false;
 
-  while ((c = getopt(argc, argv, "")) != -1) {
-    switch (c) {}
+  while ((c = getopt(argc, argv, "vdt:s")) != -1) {
+    switch (c) {
+      case 'v':
+        verbose = true;
+        break;
+      case 'd':
+        dump = true;
+        break;
+      case 't':
+        n_threads = atoi(optarg);
+    }
   }
   if (optind >= argc) {
     cerr << "Usage: " << argv[0] << " <csvfile>" << endl;
@@ -42,35 +54,60 @@ int main(int argc, char* argv[]) {
   TimingAccumulator ta(2, evts);
 #endif  //__linux__
 
-  double total = 0;         // naive accumulator
-  clock_t start = clock();  // brutally portable
-
   simdcsv::index res;
+  double volume = p.size();
+
+  struct timespec start, finish;
+  clock_gettime(CLOCK_MONOTONIC, &start);
 #ifdef __linux__
   {
     TimingPhase p1(ta, 0);
 #endif  // __linux__
-    res = parser.parse(p.data(), p.size(), 16);
+    res = parser.parse(p.data(), p.size(), n_threads);
 #ifdef __linux__
   }
   {
     TimingPhase p2(ta, 1);
   }     // the scoping business is an instance of C++ extreme programming
 #endif  // __linux__
-  total += clock() - start;  // brutally portable
+  clock_gettime(CLOCK_MONOTONIC, &finish);
 
-  double time_in_s = total / CLOCKS_PER_SEC;
+  double time_in_s =
+      (finish.tv_sec - start.tv_sec) + ((finish.tv_nsec - start.tv_nsec) / 1000000000.0);
 
   printf("Total time in (s) = %f\n", time_in_s);
-  printf("GB/s: %f\n", p.size() / time_in_s / (1024 * 1024 * 1024));
+  printf("GB/s: %f\n", volume / time_in_s / (1024 * 1024 * 1024));
 #ifdef __linux__
-  printf("Cycles per byte: %f\n", (1.0 * ta.results[0]) / p.size());
-  ta.dump();
+  printf("Cycles per byte: %f\n", (1.0 * ta.results[0]) / volume);
+  if (verbose) {
+    cout << "Number of cycles                   = " << ta.results[0] << endl;
+    cout << "Number of cycles per byte          = " << ta.results[0] / volume << endl;
+    cout << "Number of cycles (ref)             = " << ta.results[5] << endl;
+    cout << "Number of cycles (ref) per byte    = " << ta.results[5] / volume << endl;
+    cout << "Number of instructions             = " << ta.results[1] << endl;
+    cout << "Number of instructions per byte    = " << ta.results[1] / volume << endl;
+    cout << "Number of instructions per cycle   = "
+         << double(ta.results[1]) / ta.results[0] << endl;
+    cout << "Number of branch misses            = " << ta.results[2] << endl;
+    cout << "Number of branch misses per byte   = " << ta.results[2] / volume << endl;
+    cout << "Number of cache references         = " << ta.results[3] << endl;
+    cout << "Number of cache references per b.  = " << ta.results[3] / volume << endl;
+    cout << "Number of cache misses             = " << ta.results[4] << endl;
+    cout << "Number of cache misses per byte    = " << ta.results[4] / volume << endl;
+    cout << "CPU freq (effective)               = "
+         << ta.results[0] / time_in_s / (1000 * 1000 * 1000) << endl;
+    cout << "CPU freq (base)                    = "
+         << ta.results[5] / time_in_s / (1000 * 1000 * 1000) << endl;
+  } else {
+    ta.dump();
+  }
 #endif
-  for (auto i = 0; i < res.n_threads; ++i) {
-    for (uint64_t j = 0; j < res.n_indexes[i]; ++j) {
-      auto idx = i + (j * res.n_threads);
-      printf("index[%lu] = %lu\n", idx, res.indexes[idx]);
+  if (dump) {
+    for (auto i = 0; i < res.n_threads; ++i) {
+      for (uint64_t j = 0; j < res.n_indexes[i]; ++j) {
+        auto idx = i + (j * res.n_threads);
+        printf("index[%lu] = %lu\n", idx, res.indexes[idx]);
+      }
     }
   }
   delete[] res.indexes;
