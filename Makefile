@@ -1,11 +1,11 @@
 CXXFLAGS := -O3 -g
-CXXFLAGS += -std=c++17
+CXXFLAGS += -std=c++17 -Iinclude -march=native
 LDFLAGS += -pthread
 
 simdcsv: src/main.o src/io_util.o
 	$(CXX) $(CXXSTD) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
-src/main.o: src/two_pass.h
+src/main.o:
 
 .PHONY: clean
 clean:

@@ -66,9 +66,6 @@ int main(int argc, char* argv[]) {
     res = parser.parse(p.data(), p.size(), n_threads);
 #ifdef __linux__
   }
-  {
-    TimingPhase p2(ta, 1);
-  }     // the scoping business is an instance of C++ extreme programming
 #endif  // __linux__
   clock_gettime(CLOCK_MONOTONIC, &finish);
 

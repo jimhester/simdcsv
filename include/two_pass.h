@@ -3,8 +3,10 @@
 #include <future>
 #include <limits>
 #include <vector>
+#include "simd.h"
 
 namespace simdcsv {
+
 constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
 struct index {
   uint8_t n_threads{0};
@@ -19,6 +21,34 @@ class two_pass {
     uint64_t first_even_nl{null_pos};
     uint64_t first_odd_nl{null_pos};
   };
+  static stats first_pass_simd(const uint8_t* buf, size_t start, size_t end) {
+    stats out;
+    size_t len = end - start;
+    size_t lenminus64 = len < 64 ? 0 : len - 64;
+    size_t idx = start;
+    uint32_t base = 0;
+    bool needs_even = out.first_even_nl == null_pos;
+    bool needs_odd = out.first_odd_nl == null_pos;
+    for (; idx < lenminus64; idx += 64) {
+      simd_input in = fill_input(buf + idx);
+
+      uint64_t quotes = cmp_mask_against_input(in, '"');
+      out.n_quotes += count_ones(quotes);
+      if (needs_even || needs_odd) {
+        uint64_t nl = cmp_mask_against_input(in, '\n');
+        if (needs_even) {
+          if ((out.n_quotes % 2) == 0) {
+            out.first_even_nl = idx + __bsfq(nl);
+          }
+        } else if (needs_odd) {
+          if ((out.n_quotes % 2) == 1) {
+            out.first_odd_nl = idx + __bsfq(nl);
+          }
+        }
+      }
+    }
+    return out;
+  }
   static stats first_pass_chunk(const uint8_t* buf, size_t start, size_t end) {
     stats out;
     uint64_t i = start;
@@ -68,7 +98,7 @@ class two_pass {
     std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
 
     for (int i = 0; i < n_threads; ++i) {
-      first_pass_fut[i] = std::async(std::launch::async, first_pass_chunk, buf,
+      first_pass_fut[i] = std::async(std::launch::async, first_pass_simd, buf,
                                      chunk_size * i, chunk_size * (i + 1));
     }
     for (int i = 0; i < n_threads; ++i) {
