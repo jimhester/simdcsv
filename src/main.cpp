@@ -54,7 +54,7 @@ int main(int argc, char* argv[]) {
   TimingAccumulator ta(2, evts);
 #endif  //__linux__
 
-  simdcsv::index res;
+  simdcsv::index res = parser.init(p.size(), n_threads);
   double volume = p.size();
 
   struct timespec start, finish;
@@ -63,7 +63,7 @@ int main(int argc, char* argv[]) {
   {
     TimingPhase p1(ta, 0);
 #endif  // __linux__
-    res = parser.parse(p.data(), p.size(), n_threads);
+    parser.parse(p.data(), res, p.size());
 #ifdef __linux__
   }
 #endif  // __linux__

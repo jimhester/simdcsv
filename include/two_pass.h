@@ -24,44 +24,63 @@ class two_pass {
   static stats first_pass_simd(const uint8_t* buf, size_t start, size_t end) {
     stats out;
     size_t len = end - start;
-    size_t lenminus64 = len < 64 ? 0 : len - 64;
-    size_t idx = start;
-    uint32_t base = 0;
+    size_t idx = 0;
     bool needs_even = out.first_even_nl == null_pos;
     bool needs_odd = out.first_odd_nl == null_pos;
-    for (; idx < lenminus64; idx += 64) {
-      simd_input in = fill_input(buf + idx);
+    buf += start;
+    for (; idx < len; idx += 64) {
+      __builtin_prefetch(buf + idx + 128);
 
-      uint64_t quotes = cmp_mask_against_input(in, '"');
-      out.n_quotes += count_ones(quotes);
+      simd_input in = fill_input(buf + idx);
+      uint64_t mask = ~0ULL;
+
+      if (len - idx < 64) {
+        mask = _blsmsk_u64(1ULL << (len - idx));
+      }
+
+      uint64_t quotes = cmp_mask_against_input(in, '"') & mask;
+
       if (needs_even || needs_odd) {
-        uint64_t nl = cmp_mask_against_input(in, '\n');
+        uint64_t nl = cmp_mask_against_input(in, '\n') & mask;
+        if (nl == 0) {
+          continue;
+        }
         if (needs_even) {
-          if ((out.n_quotes % 2) == 0) {
-            out.first_even_nl = idx + __bsfq(nl);
+          uint64_t quote_mask2 = find_quote_mask(in, quotes, ~0ULL) & mask;
+          uint64_t even_nl = quote_mask2 & nl;
+          if (even_nl > 0) {
+            out.first_even_nl = start + idx + trailing_zeroes(even_nl);
           }
-        } else if (needs_odd) {
-          if ((out.n_quotes % 2) == 1) {
-            out.first_odd_nl = idx + __bsfq(nl);
+          needs_even = false;
+        }
+        if (needs_odd) {
+          uint64_t quote_mask = find_quote_mask(in, quotes, 0ULL) & mask;
+          uint64_t odd_nl = quote_mask & nl & mask;
+          if (odd_nl > 0) {
+            out.first_odd_nl = start + idx + trailing_zeroes(odd_nl);
           }
+          needs_odd = false;
         }
       }
+
+      out.n_quotes += count_ones(quotes);
     }
     return out;
   }
   static stats first_pass_chunk(const uint8_t* buf, size_t start, size_t end) {
     stats out;
     uint64_t i = start;
-    /* TODO: use SIMD to make search faster */
+    bool needs_even = out.first_even_nl == null_pos;
+    bool needs_odd = out.first_odd_nl == null_pos;
     while (i < end) {
       if (buf[i] == '\n') {
-        bool needs_even = out.first_even_nl == null_pos;
-        bool needs_odd = out.first_odd_nl == null_pos;
         bool is_even = (out.n_quotes % 2) == 0;
         if (needs_even && is_even) {
           out.first_even_nl = i;
+          needs_even = false;
         } else if (needs_odd && !is_even) {
           out.first_odd_nl = i;
+          needs_odd = false;
         }
       } else if (buf[i] == '"') {
         ++out.n_quotes;
@@ -91,7 +110,8 @@ class two_pass {
     return n_indexes;
   }
 
-  index parse(const uint8_t* buf, size_t len, size_t n_threads) {
+  bool parse(const uint8_t* buf, index& out, size_t len) {
+    uint8_t n_threads = out.n_threads;
     size_t chunk_size = len / n_threads;
     std::vector<uint64_t> chunk_pos(n_threads + 1);
     std::vector<std::future<stats>> first_pass_fut(n_threads);
@@ -104,20 +124,20 @@ class two_pass {
     for (int i = 0; i < n_threads; ++i) {
     }
 
-    size_t n_quotes = first_pass_fut[0].get().n_quotes;
+    auto st = first_pass_fut[0].get();
+    size_t n_quotes = st.n_quotes;
+    printf("i: %i\teven: %llu\todd: %llu\tquotes: %llu\n", 0, st.first_even_nl,
+           st.first_odd_nl, st.n_quotes);
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
+      printf("i: %i\teven: %llu\todd: %llu\tquotes: %llu\n", i, st.first_even_nl,
+             st.first_odd_nl, st.n_quotes);
       chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
       n_quotes += st.n_quotes;
     }
     chunk_pos[n_threads] = len;
 
-    index out;
-    out.n_threads = n_threads;
-    out.n_indexes = new uint64_t[n_threads];
-
-    out.indexes = new uint64_t[len];
     for (int i = 0; i < n_threads; ++i) {
       second_pass_fut[i] = std::async(std::launch::async, second_pass_chunk, buf,
                                       chunk_pos[i], chunk_pos[i + 1], &out, i);
@@ -126,6 +146,15 @@ class two_pass {
     for (int i = 0; i < n_threads; ++i) {
       out.n_indexes[i] = second_pass_fut[i].get();
     }
+    return true;
+  }
+
+  index init(size_t len, size_t n_threads) {
+    index out;
+    out.n_threads = n_threads;
+    out.n_indexes = new uint64_t[n_threads];
+
+    out.indexes = new uint64_t[len];
     return out;
   }
 };

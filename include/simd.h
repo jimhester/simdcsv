@@ -38,6 +38,14 @@ really_inline uint64_t cmp_mask_against_input(simd_input in, uint8_t m) {
   return res_0 | (res_1 << 32);
 }
 
+really_inline uint64_t find_quote_mask(simd_input in, uint64_t quote_bits,
+                                       uint64_t prev_iter_inside_quote) {
+  uint64_t quote_mask = _mm_cvtsi128_si64(
+      _mm_clmulepi64_si128(_mm_set_epi64x(0ULL, quote_bits), _mm_set1_epi8(0xFF), 0));
+  quote_mask ^= prev_iter_inside_quote;
+  return quote_mask;
+}
+
 // flatten out values in 'bits' assuming that they are are to have values of idx
 // plus their position in the bitvector, and store these indexes at
 // base_ptr[base] incrementing base as we go
