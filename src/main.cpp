@@ -14,6 +14,7 @@ int main(int argc, char* argv[]) {
   int n_threads = 1;
   bool verbose = false;
   bool dump = false;
+  size_t iterations = 10;
 
   while ((c = getopt(argc, argv, "vdt:s")) != -1) {
     switch (c) {
@@ -25,6 +26,10 @@ int main(int argc, char* argv[]) {
         break;
       case 't':
         n_threads = atoi(optarg);
+        break;
+      case 'i':
+        iterations = atoi(optarg);
+        break;
     }
   }
   if (optind >= argc) {
@@ -55,25 +60,30 @@ int main(int argc, char* argv[]) {
 #endif  //__linux__
 
   simdcsv::index res = parser.init(p.size(), n_threads);
-  double volume = p.size();
 
-  struct timespec start, finish;
-  clock_gettime(CLOCK_MONOTONIC, &start);
+  double total = 0;  // naive accumulator
+  for (size_t i = 0; i < iterations; i++) {
+    struct timespec start, finish;
+    clock_gettime(CLOCK_MONOTONIC, &start);
 #ifdef __linux__
-  {
-    TimingPhase p1(ta, 0);
+    {
+      TimingPhase p1(ta, 0);
 #endif  // __linux__
-    parser.parse(p.data(), res, p.size());
+      parser.parse(p.data(), res, p.size());
 #ifdef __linux__
+    }
+#endif  // __linux__
+    clock_gettime(CLOCK_MONOTONIC, &finish);
+
+    double time_in_s = (finish.tv_sec - start.tv_sec) +
+                       ((finish.tv_nsec - start.tv_nsec) / 1000000000.0);
+
+    total += time_in_s;
   }
-#endif  // __linux__
-  clock_gettime(CLOCK_MONOTONIC, &finish);
+  double volume = p.size() * iterations;
 
-  double time_in_s =
-      (finish.tv_sec - start.tv_sec) + ((finish.tv_nsec - start.tv_nsec) / 1000000000.0);
-
-  printf("Total time in (s) = %f\n", time_in_s);
-  printf("GB/s: %f\n", volume / time_in_s / (1024 * 1024 * 1024));
+  printf("Total time in (s) = %f\n", total);
+  printf("GB/s: %f\n", volume / total / (1024 * 1024 * 1024));
 #ifdef __linux__
   printf("Cycles per byte: %f\n", (1.0 * ta.results[0]) / volume);
   if (verbose) {
@@ -92,9 +102,9 @@ int main(int argc, char* argv[]) {
     cout << "Number of cache misses             = " << ta.results[4] << endl;
     cout << "Number of cache misses per byte    = " << ta.results[4] / volume << endl;
     cout << "CPU freq (effective)               = "
-         << ta.results[0] / time_in_s / (1000 * 1000 * 1000) << endl;
+         << ta.results[0] / total / (1000 * 1000 * 1000) << endl;
     cout << "CPU freq (base)                    = "
-         << ta.results[5] / time_in_s / (1000 * 1000 * 1000) << endl;
+         << ta.results[5] / total / (1000 * 1000 * 1000) << endl;
   } else {
     ta.dump();
   }

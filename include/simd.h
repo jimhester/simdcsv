@@ -46,21 +46,31 @@ really_inline uint64_t find_quote_mask(simd_input in, uint64_t quote_bits,
   return quote_mask;
 }
 
+really_inline uint64_t find_quote_mask2(simd_input in, uint64_t quote_bits,
+                                        uint64_t& prev_iter_inside_quote) {
+  uint64_t quote_mask = _mm_cvtsi128_si64(
+      _mm_clmulepi64_si128(_mm_set_epi64x(0ULL, quote_bits), _mm_set1_epi8(0xFF), 0));
+  quote_mask ^= prev_iter_inside_quote;
+  prev_iter_inside_quote = static_cast<uint64_t>(static_cast<int64_t>(quote_mask) >> 63);
+  return quote_mask;
+}
+
 // flatten out values in 'bits' assuming that they are are to have values of idx
 // plus their position in the bitvector, and store these indexes at
 // base_ptr[base] incrementing base as we go
 // will potentially store extra values beyond end of valid bits, so base_ptr
 // needs to be large enough to handle this
-really_inline void write(uint64_t* base_ptr, uint64_t idx, uint64_t bits) {
+really_inline int write(uint64_t* base_ptr, uint64_t& base, uint64_t idx, int stride,
+                        uint64_t bits) {
   // In some instances, the next branch is expensive because it is mispredicted.
   // Unfortunately, in other cases,
   // it helps tremendously.
-  if (bits == 0) return;
+  if (bits == 0) return 0;
   int cnt = static_cast<int>(count_ones(bits));
 
   // Do the first 8 all together
   for (int i = 0; i < 8; i++) {
-    base_ptr[i] = idx + trailing_zeroes(bits);
+    base_ptr[(base + i) * stride] = idx + trailing_zeroes(bits);
     bits = clear_lowest_bit(bits);
   }
 
@@ -68,7 +78,7 @@ really_inline void write(uint64_t* base_ptr, uint64_t idx, uint64_t bits) {
   // and the branch is easily predicted).
   if (unlikely(cnt > 8)) {
     for (int i = 8; i < 16; i++) {
-      base_ptr[i] = idx + trailing_zeroes(bits);
+      base_ptr[(base + i) * stride] = idx + trailing_zeroes(bits);
       bits = clear_lowest_bit(bits);
     }
 
@@ -79,12 +89,14 @@ really_inline void write(uint64_t* base_ptr, uint64_t idx, uint64_t bits) {
     if (unlikely(cnt > 16)) {
       int i = 16;
       do {
-        base_ptr[i] = idx + trailing_zeroes(bits);
+        base_ptr[(base + i) * stride] = idx + trailing_zeroes(bits);
         bits = clear_lowest_bit(bits);
         i++;
       } while (i < cnt);
     }
   }
 
-  base_ptr += cnt;
+  base += cnt;
+
+  return cnt;
 }
