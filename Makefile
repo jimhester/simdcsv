@@ -1,12 +1,16 @@
-CXXFLAGS := -O3 -g
-CXXFLAGS += -std=c++17 -Iinclude -march=native
+CXXFLAGS ?= -O3
+override CXXFLAGS += -g -std=c++17 -Iinclude -march=native -MMD
 LDFLAGS += -pthread
 
-simdcsv: src/main.o src/io_util.o
-	$(CXX) $(CXXSTD) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
+SRCS := src/main.cpp src/io_util.cpp
 
-src/main.o:
+OBJS := $(patsubst %.cpp,%.o,$(SRCS))
+
+-include $(OBJS:.o=.d)
+
+simdcsv: $(OBJS)
+	$(CXX) $(CXXSTD) $(CXXFLAGS) $(LDFLAGS) -o $@ $^
 
 .PHONY: clean
 clean:
-	rm -f src/*.o simdcsv
+	rm -f $(OBJS) simdcsv
