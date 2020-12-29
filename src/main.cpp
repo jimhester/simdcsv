@@ -16,7 +16,7 @@ int main(int argc, char* argv[]) {
   bool dump = false;
   size_t iterations = 10;
 
-  while ((c = getopt(argc, argv, "vdt:s")) != -1) {
+  while ((c = getopt(argc, argv, "vdt:si:s")) != -1) {
     switch (c) {
       case 'v':
         verbose = true;

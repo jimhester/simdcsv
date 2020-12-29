@@ -68,6 +68,7 @@ class two_pass {
     }
     return out;
   }
+
   static stats first_pass_chunk(const uint8_t* buf, size_t start, size_t end) {
     stats out;
     uint64_t i = start;
@@ -89,6 +90,53 @@ class two_pass {
       ++i;
     }
     return out;
+  }
+
+  static stats first_pass_naive(const uint8_t* buf, size_t start, size_t end) {
+    stats out;
+    uint64_t i = start;
+    while (i < end) {
+      if (buf[i] == '\n') {
+        out.first_even_nl = i;
+        return out;
+      }
+    }
+    return out;
+  }
+
+  static bool is_other(uint8_t c) { return c != '"' && c != '\n' && c == ','; }
+
+  static bool is_ambiguious(const uint8_t* buf, size_t start) {
+    // 64kb
+    constexpr int SPECULATION_SIZE = 1 << 16;
+
+    if (start == 0) {
+      return false;
+    }
+
+    size_t end = start > SPECULATION_SIZE ? start - SPECULATION_SIZE : 0;
+    size_t i = start;
+
+    while (i >= end) {
+      if (buf[i] == '"') {
+        // q-o case
+        if (i + 1 < start && is_other(buf[i + 1])) {
+          return false;
+        }
+
+        // o-q case
+        else if (i > end && is_other(buf[i - 1])) {
+          return false;
+        }
+      }
+      --i;
+    }
+    return true;
+  }
+
+  static stats first_pass_speculate(const uint8_t* buf, size_t start, size_t end) {
+    printf("is_ambigious: %s\n", is_ambiguious(buf, start) ? "true" : "false");
+    return first_pass_naive(buf, start, end);
   }
 
   static uint64_t second_pass_simd(const uint8_t* buf, size_t start, size_t end,
@@ -123,20 +171,110 @@ class two_pass {
     return n_indexes;
   }
 
+  enum csv_state { RECORD_START, FIELD_START, UNQUOTED_FIELD, QUOTED_FIELD, QUOTED_END };
+
+  really_inline static csv_state quoted_state(csv_state in) {
+    switch (in) {
+      case RECORD_START:
+        return QUOTED_FIELD;
+      case FIELD_START:
+        return QUOTED_FIELD;
+      case UNQUOTED_FIELD:
+        throw;
+      case QUOTED_FIELD:
+        return QUOTED_END;
+      case QUOTED_END:
+        return QUOTED_FIELD;
+    }
+    throw;
+  }
+
+  really_inline static csv_state comma_state(csv_state in) {
+    switch (in) {
+      case RECORD_START:
+        return FIELD_START;
+      case FIELD_START:
+        return FIELD_START;
+      case UNQUOTED_FIELD:
+        return FIELD_START;
+        throw;
+      case QUOTED_FIELD:
+        return QUOTED_FIELD;
+      case QUOTED_END:
+        return FIELD_START;
+    }
+    throw;
+  }
+
+  really_inline static csv_state newline_state(csv_state in) {
+    switch (in) {
+      case RECORD_START:
+        return RECORD_START;
+      case FIELD_START:
+        return RECORD_START;
+      case UNQUOTED_FIELD:
+        return RECORD_START;
+        throw;
+      case QUOTED_FIELD:
+        return QUOTED_FIELD;
+      case QUOTED_END:
+        return RECORD_START;
+    }
+    throw;
+  }
+
+  really_inline static csv_state other_state(csv_state in) {
+    switch (in) {
+      case RECORD_START:
+        return UNQUOTED_FIELD;
+      case FIELD_START:
+        return UNQUOTED_FIELD;
+      case UNQUOTED_FIELD:
+        return UNQUOTED_FIELD;
+        throw;
+      case QUOTED_FIELD:
+        return QUOTED_FIELD;
+      case QUOTED_END:
+        throw;
+    }
+    throw;
+  }
+
+  really_inline static size_t add_position(index* out, size_t i, size_t pos) {
+    out->indexes[i] = pos;
+    return i + out->n_threads;
+  }
+
   static uint64_t second_pass_chunk(const uint8_t* buf, size_t start, size_t end,
                                     index* out, size_t thread_id) {
     bool is_quoted = false;
     uint64_t pos = start;
     size_t n_indexes = 0;
     size_t i = thread_id;
+    csv_state s = RECORD_START;
+
     while (pos < end) {
       uint8_t value = buf[pos];
-      if (!is_quoted && (value == ',' || value == '\n')) {
-        out->indexes[i] = pos;
-        i += out->n_threads;
-        ++n_indexes;
-      } else if (value == '"') {
-        is_quoted = !is_quoted;
+      switch (value) {
+        case '"':
+          s = quoted_state(s);
+          break;
+        case ',':
+          if (s != QUOTED_FIELD) {
+            i = add_position(out, i, pos);
+            ++n_indexes;
+          }
+          s = comma_state(s);
+          break;
+        case '\n':
+          if (s != QUOTED_FIELD) {
+            i = add_position(out, i, pos);
+            ++n_indexes;
+          }
+          s = newline_state(s);
+          break;
+        default:
+          s = other_state(s);
       }
       ++pos;
     }
@@ -155,28 +293,26 @@ class two_pass {
     std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
 
     for (int i = 0; i < n_threads; ++i) {
-      first_pass_fut[i] = std::async(std::launch::async, first_pass_simd, buf,
+      first_pass_fut[i] = std::async(std::launch::async, first_pass_speculate, buf,
                                      chunk_size * i, chunk_size * (i + 1));
-    }
-    for (int i = 0; i < n_threads; ++i) {
     }
 
     auto st = first_pass_fut[0].get();
     size_t n_quotes = st.n_quotes;
-    printf("i: %i\teven: %llu\todd: %llu\tquotes: %llu\n", 0, st.first_even_nl,
-           st.first_odd_nl, st.n_quotes);
+    // printf("i: %i\teven: %llu\todd: %llu\tquotes: %llu\n", 0, st.first_even_nl,
+    // st.first_odd_nl, st.n_quotes);
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-      printf("i: %i\teven: %llu\todd: %llu\tquotes: %llu\n", i, st.first_even_nl,
-             st.first_odd_nl, st.n_quotes);
+      // printf("i: %i\teven: %llu\todd: %llu\tquotes: %llu\n", i, st.first_even_nl,
+      // st.first_odd_nl, st.n_quotes);
       chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
       n_quotes += st.n_quotes;
     }
     chunk_pos[n_threads] = len;
 
     for (int i = 0; i < n_threads; ++i) {
-      second_pass_fut[i] = std::async(std::launch::async, second_pass_simd, buf,
+      second_pass_fut[i] = std::async(std::launch::async, second_pass_chunk, buf,
                                       chunk_pos[i], chunk_pos[i + 1], &out, i);
     }
 
@@ -196,6 +332,7 @@ class two_pass {
     return out;
   }
 };
+
 class parser {
  public:
   parser() noexcept {};
