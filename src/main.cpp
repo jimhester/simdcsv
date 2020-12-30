@@ -110,15 +110,15 @@ int main(int argc, char* argv[]) {
   }
 #endif
   if (dump) {
+    // res.write("out.idx");
+    // res.read("out.idx");
     for (auto i = 0; i < res.n_threads; ++i) {
       for (uint64_t j = 0; j < res.n_indexes[i]; ++j) {
         auto idx = i + (j * res.n_threads);
-        printf("index[%lu] = %lu\n", idx, res.indexes[idx]);
+        printf("index[%" PRIu64 "] = %" PRIu64 "\n", idx, res.indexes[idx]);
       }
     }
   }
-  delete[] res.indexes;
-  delete[] res.n_indexes;
   aligned_free((void*)p.data());
 
   return 0;

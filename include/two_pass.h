@@ -3,15 +3,64 @@
 #include <future>
 #include <limits>
 #include <vector>
+#include "inttypes.h"
 #include "simd.h"
 
 namespace simdcsv {
 
 constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
-struct index {
+class index {
+ public:
+  uint64_t columns{0};
   uint8_t n_threads{0};
-  uint64_t* n_indexes;
-  uint64_t* indexes;
+  uint64_t* n_indexes{nullptr};
+  uint64_t* indexes{nullptr};
+
+  void write(const std::string& filename) {
+    std::FILE* fp = std::fopen(filename.c_str(), "wb");
+    if (!((std::fwrite(&columns, sizeof(uint64_t), 1, fp) == 1) &&
+          (std::fwrite(&n_threads, sizeof(uint8_t), 1, fp) == 1) &&
+          (std::fwrite(n_indexes, sizeof(uint64_t), n_threads, fp) == n_threads))) {
+      throw std::runtime_error("error writing index");
+    }
+    size_t total_size = 0;
+    for (int i = 0; i < n_threads; ++i) {
+      total_size += n_indexes[i];
+    }
+    if (std::fwrite(indexes, sizeof(uint64_t), total_size, fp) != total_size) {
+      throw std::runtime_error("error writing index2");
+    }
+
+    std::fclose(fp);
+  }
+  void read(const std::string& filename) {
+    std::FILE* fp = std::fopen(filename.c_str(), "rb");
+    if (!((std::fread(&columns, sizeof(uint64_t), 1, fp) == 1) &&
+          (std::fread(&n_threads, sizeof(uint8_t), 1, fp) == 1) &&
+          (std::fread(n_indexes, sizeof(uint64_t), n_threads, fp) == n_threads))) {
+      throw std::runtime_error("error reading index");
+    }
+    size_t total_size = 0;
+    for (int i = 0; i < n_threads; ++i) {
+      total_size += n_indexes[i];
+    }
+    if (std::fread(indexes, sizeof(uint64_t), total_size, fp) != total_size) {
+      throw std::runtime_error("error reading index2");
+    }
+
+    std::fclose(fp);
+  }
+
+  ~index() {
+    if (indexes) {
+      delete[] indexes;
+    }
+    if (n_indexes) {
+      delete[] n_indexes;
+    }
+  }
+
+  void fill_double_array(index* idx, uint64_t column, double* out) {}
 };
 
 class two_pass {
@@ -104,39 +153,58 @@ class two_pass {
     return out;
   }
 
-  static bool is_other(uint8_t c) { return c != '"' && c != '\n' && c == ','; }
+  static bool is_other(uint8_t c) { return c != ',' && c != '\n' && c != '"'; }
 
-  static bool is_ambiguious(const uint8_t* buf, size_t start) {
+  enum quote_state { AMBIGUOUS, QUOTED, UNQUOTED };
+
+  static quote_state get_quotation_state(const uint8_t* buf, size_t start) {
     // 64kb
     constexpr int SPECULATION_SIZE = 1 << 16;
 
     if (start == 0) {
-      return false;
+      return UNQUOTED;
     }
 
     size_t end = start > SPECULATION_SIZE ? start - SPECULATION_SIZE : 0;
     size_t i = start;
+    size_t num_quotes = 0;
 
     while (i >= end) {
       if (buf[i] == '"') {
         // q-o case
         if (i + 1 < start && is_other(buf[i + 1])) {
-          return false;
+          return num_quotes % 2 == 0 ? QUOTED : UNQUOTED;
         }
 
         // o-q case
         else if (i > end && is_other(buf[i - 1])) {
-          return false;
+          return num_quotes % 2 == 0 ? UNQUOTED : QUOTED;
         }
+        ++num_quotes;
       }
       --i;
     }
-    return true;
+    return AMBIGUOUS;
   }
 
   static stats first_pass_speculate(const uint8_t* buf, size_t start, size_t end) {
-    printf("is_ambigious: %s\n", is_ambiguious(buf, start) ? "true" : "false");
-    return first_pass_naive(buf, start, end);
+    auto is_quoted = get_quotation_state(buf, start);
+    printf("start: %lu\tis_ambigious: %s\tstate: %s\n", start,
+           is_quoted == AMBIGUOUS ? "true" : "false",
+           is_quoted == QUOTED ? "quoted" : "unquoted");
+
+    for (size_t i = start; i < end; ++i) {
+      if (buf[i] == '\n') {
+        if (is_quoted == UNQUOTED || is_quoted == AMBIGUOUS) {
+          return {0, i, null_pos};
+        } else {
+          return {1, null_pos, i};
+        }
+      } else if (buf[i] == '"') {
+        is_quoted = is_quoted == UNQUOTED ? QUOTED : UNQUOTED;
+      }
+    }
+    return {0, null_pos, null_pos};
   }
 
   static uint64_t second_pass_simd(const uint8_t* buf, size_t start, size_t end,
@@ -180,13 +248,13 @@ class two_pass {
       case FIELD_START:
         return QUOTED_FIELD;
       case UNQUOTED_FIELD:
-        throw;
+        throw std::runtime_error("invalid 1");
       case QUOTED_FIELD:
         return QUOTED_END;
       case QUOTED_END:
         return QUOTED_FIELD;
     }
-    throw;
+    throw std::runtime_error("should never happen");
   }
 
   really_inline static csv_state comma_state(csv_state in) {
@@ -197,13 +265,13 @@ class two_pass {
         return FIELD_START;
       case UNQUOTED_FIELD:
         return FIELD_START;
-        throw;
+        throw std::runtime_error("invalid 2");
       case QUOTED_FIELD:
         return QUOTED_FIELD;
       case QUOTED_END:
         return FIELD_START;
     }
-    throw;
+    throw std::runtime_error("should never happen");
   }
 
   really_inline static csv_state newline_state(csv_state in) {
@@ -214,13 +282,13 @@ class two_pass {
         return RECORD_START;
       case UNQUOTED_FIELD:
         return RECORD_START;
-        throw;
+        throw std::runtime_error("invalid 3");
       case QUOTED_FIELD:
         return QUOTED_FIELD;
       case QUOTED_END:
         return RECORD_START;
     }
-    throw;
+    throw std::runtime_error("should never happen");
   }
 
   really_inline static csv_state other_state(csv_state in) {
@@ -231,13 +299,13 @@ class two_pass {
         return UNQUOTED_FIELD;
       case UNQUOTED_FIELD:
         return UNQUOTED_FIELD;
-        throw;
+        throw std::runtime_error("invalid 4");
       case QUOTED_FIELD:
         return QUOTED_FIELD;
       case QUOTED_END:
-        throw;
+        throw std::runtime_error("invalid 5");
     }
-    throw;
+    throw std::runtime_error("should never happen");
   }
 
   really_inline static size_t add_position(index* out, size_t i, size_t pos) {
@@ -281,7 +349,7 @@ class two_pass {
     return n_indexes;
   }
 
-  bool parse(const uint8_t* buf, index& out, size_t len) {
+  bool parse_speculate(const uint8_t* buf, index& out, size_t len) {
     uint8_t n_threads = out.n_threads;
     if (n_threads == 1) {
       out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
@@ -298,14 +366,54 @@ class two_pass {
     }
 
     auto st = first_pass_fut[0].get();
-    size_t n_quotes = st.n_quotes;
-    // printf("i: %i\teven: %llu\todd: %llu\tquotes: %llu\n", 0, st.first_even_nl,
-    // st.first_odd_nl, st.n_quotes);
+    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
+           st.first_even_nl, st.first_odd_nl, st.n_quotes);
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-      // printf("i: %i\teven: %llu\todd: %llu\tquotes: %llu\n", i, st.first_even_nl,
-      // st.first_odd_nl, st.n_quotes);
+      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
+             st.first_even_nl, st.first_odd_nl, st.n_quotes);
+      chunk_pos[i] = st.n_quotes == 0 ? st.first_even_nl : st.first_odd_nl;
+    }
+    chunk_pos[n_threads] = len;
+
+    for (int i = 0; i < n_threads; ++i) {
+      second_pass_fut[i] = std::async(std::launch::deferred, second_pass_chunk, buf,
+                                      chunk_pos[i], chunk_pos[i + 1], &out, i);
+    }
+
+    for (int i = 0; i < n_threads; ++i) {
+      out.n_indexes[i] = second_pass_fut[i].get();
+    }
+
+    return true;
+  }
+
+  bool parse_two_pass(const uint8_t* buf, index& out, size_t len) {
+    uint8_t n_threads = out.n_threads;
+    if (n_threads == 1) {
+      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
+      return true;
+    }
+    size_t chunk_size = len / n_threads;
+    std::vector<uint64_t> chunk_pos(n_threads + 1);
+    std::vector<std::future<stats>> first_pass_fut(n_threads);
+    std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
+
+    for (int i = 0; i < n_threads; ++i) {
+      first_pass_fut[i] = std::async(std::launch::async, first_pass_chunk, buf,
+                                     chunk_size * i, chunk_size * (i + 1));
+    }
+
+    auto st = first_pass_fut[0].get();
+    size_t n_quotes = st.n_quotes;
+    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
+           st.first_even_nl, st.first_odd_nl, st.n_quotes);
+    chunk_pos[0] = 0;
+    for (int i = 1; i < n_threads; ++i) {
+      auto st = first_pass_fut[i].get();
+      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
+             st.first_even_nl, st.first_odd_nl, st.n_quotes);
       chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
       n_quotes += st.n_quotes;
     }
@@ -321,6 +429,13 @@ class two_pass {
     }
 
     return true;
+  }
+
+  bool parse(const uint8_t* buf, index& out, size_t len) {
+    // return parse_speculate(buf, out, len);
+    auto index = parse_two_pass(buf, out, len);
+
+    return index;
   }
 
   index init(size_t len, size_t n_threads) {
