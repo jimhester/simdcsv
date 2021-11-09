@@ -112,13 +112,51 @@ int main(int argc, char* argv[]) {
   if (dump) {
     // res.write("out.idx");
     // res.read("out.idx");
-    for (auto i = 0; i < res.n_threads; ++i) {
-      for (uint64_t j = 0; j < res.n_indexes[i]; ++j) {
-        auto idx = i + (j * res.n_threads);
-        printf("index[%" PRIu64 "] = %" PRIu64 "\n", idx, res.indexes[idx]);
+    for (size_t iii = 0; iii < iterations; iii++) {
+      struct timespec start, finish;
+      clock_gettime(CLOCK_MONOTONIC, &start);
+      uint64_t total = 0;
+      for (auto i = 0; i < res.n_threads; ++i) {
+        for (uint64_t j = 0; j < res.n_indexes[i]; ++j) {
+          auto idx = i + (j * res.n_threads);
+          total += res.indexes[idx];
+          // printf("index[%" PRIu64 "] = %" PRIu64 "\n", idx, res.indexes[idx]);
+        }
       }
+      clock_gettime(CLOCK_MONOTONIC, &finish);
+      double time_in_s1 = (finish.tv_sec - start.tv_sec) +
+                          ((finish.tv_nsec - start.tv_nsec) / 1000000000.0);
+      uint64_t num_indexes = 0;
+      for (auto i = 0; i < res.n_threads; ++i) {
+        num_indexes += res.n_indexes[i];
+      }
+      clock_gettime(CLOCK_MONOTONIC, &start);
+      uint64_t* idx = new uint64_t[num_indexes];
+      uint64_t k = 0;
+      for (auto i = 0; i < res.n_threads; ++i) {
+        for (uint64_t j = 0; j < res.n_indexes[i]; ++j) {
+          auto ii = i + (j * res.n_threads);
+          idx[k++] = res.indexes[ii];
+        }
+      }
+      clock_gettime(CLOCK_MONOTONIC, &finish);
+      double time_in_s15 = (finish.tv_sec - start.tv_sec) +
+                           ((finish.tv_nsec - start.tv_nsec) / 1000000000.0);
+      uint64_t total2 = 0;
+      clock_gettime(CLOCK_MONOTONIC, &start);
+      for (auto i = 0; i < num_indexes; ++i) {
+        total2 += idx[i];
+      }
+      clock_gettime(CLOCK_MONOTONIC, &finish);
+      double time_in_s2 = (finish.tv_sec - start.tv_sec) +
+                          ((finish.tv_nsec - start.tv_nsec) / 1000000000.0);
+
+      printf("total: %" PRIu64 "\ttotal2: %" PRIu64
+             "\ntime: %f\ttime1.5: %f\ttime2: %f\n",
+             total, total2, time_in_s1, time_in_s15, time_in_s2);
     }
   }
+
   aligned_free((void*)p.data());
 
   return 0;

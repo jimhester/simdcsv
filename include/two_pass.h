@@ -378,7 +378,7 @@ class two_pass {
     chunk_pos[n_threads] = len;
 
     for (int i = 0; i < n_threads; ++i) {
-      second_pass_fut[i] = std::async(std::launch::deferred, second_pass_chunk, buf,
+      second_pass_fut[i] = std::async(std::launch::async, second_pass_simd, buf,
                                       chunk_pos[i], chunk_pos[i + 1], &out, i);
     }
 
@@ -432,10 +432,10 @@ class two_pass {
   }
 
   bool parse(const uint8_t* buf, index& out, size_t len) {
-    // return parse_speculate(buf, out, len);
-    auto index = parse_two_pass(buf, out, len);
+    return parse_speculate(buf, out, len);
+    // auto index = parse_two_pass(buf, out, len);
 
-    return index;
+    // return index;
   }
 
   index init(size_t len, size_t n_threads) {
