@@ -170,7 +170,8 @@ class two_pass {
     size_t i = start;
     size_t num_quotes = 0;
 
-    while (i >= end) {
+    // FIXED: Use i > end to avoid unsigned underflow when i reaches 0
+    while (i > end) {
       if (buf[i] == '"') {
         // q-o case
         if (i + 1 < start && is_other(buf[i + 1])) {
@@ -184,6 +185,10 @@ class two_pass {
         ++num_quotes;
       }
       --i;
+    }
+    // Check the last position (i == end)
+    if (buf[end] == '"') {
+      ++num_quotes;
     }
     return AMBIGUOUS;
   }
