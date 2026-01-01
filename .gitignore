@@ -18,6 +18,7 @@ cmake_install.cmake
 CTestTestfile.cmake
 Makefile
 *.cmake
+Testing/
 
 # Dependency files
 *.d
