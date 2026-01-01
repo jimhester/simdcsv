@@ -2,6 +2,7 @@
 #define SIMDCSV_JSONIOUTIL_H
 
 #include "common_defs.h"
+#include <cstdint>
 #include <exception>
 #include <fstream>
 #include <iostream>
