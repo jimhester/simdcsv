@@ -48,9 +48,17 @@ jobs:
       run: |
         ./build/error_handling_test
 
+    - name: Run CSV parsing tests (with debug output)
+      run: |
+        echo "Running csv_parsing_test directly to capture debug output..."
+        ./build/csv_parsing_test 2>&1 | tee csv_parsing_test.log || true
+        echo "Exit code: $?"
+        echo "=== Last 100 lines of output ==="
+        tail -100 csv_parsing_test.log || true
+
     - name: Run all tests with CTest
       run: |
-        cd build && ctest --output-on-failure --build-config ${{ matrix.build_type }}
+        cd build && ctest --output-on-failure --verbose --build-config ${{ matrix.build_type }}
 
   coverage:
     name: Code Coverage
