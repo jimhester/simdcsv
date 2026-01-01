@@ -18,6 +18,7 @@ endif()
 # Library target
 add_library(simdcsv_lib STATIC
     src/io_util.cpp
+    src/error.cpp
 )
 
 target_include_directories(simdcsv_lib PUBLIC
@@ -71,6 +72,29 @@ add_custom_command(TARGET simdcsv_test POST_BUILD
     ${CMAKE_CURRENT_BINARY_DIR}/test/data
 )
 
+# Error handling test executable
+add_executable(error_handling_test
+    test/error_handling_test.cpp
+)
+
+target_link_libraries(error_handling_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(error_handling_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for error handling tests
+add_custom_command(TARGET error_handling_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
 # Register tests with CTest
 include(GoogleTest)
 gtest_discover_tests(simdcsv_test)
+gtest_discover_tests(error_handling_test)
