@@ -52,6 +52,47 @@ jobs:
       run: |
         cd build && ctest --output-on-failure --build-config ${{ matrix.build_type }}
 
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential lcov
+
+    - name: Configure CMake with coverage
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+
+    - name: Build with coverage
+      run: |
+        cmake --build build
+
+    - name: Run tests
+      run: |
+        cd build && ctest --output-on-failure
+
+    - name: Generate coverage info
+      run: |
+        cd build
+        lcov --capture --directory . --output-file coverage.info --exclude '*/build/_deps/*' --ignore-errors mismatch,unused
+        lcov --list coverage.info
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      if: github.repository == 'jimhester/simdcsv'
+      continue-on-error: true
+      with:
+        files: ./build/coverage.info
+        fail_ci_if_error: false
+        verbose: true
+        token: ${{ secrets.CODECOV_TOKEN }}
+
   code-quality:
     name: Code Quality Checks
     runs-on: ubuntu-latest

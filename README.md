@@ -1,6 +1,7 @@
 # simdcsv
 
 ![CI](https://github.com/jimhester/simdcsv/workflows/CI/badge.svg)
+[![codecov](https://codecov.io/gh/jimhester/simdcsv/branch/main/graph/badge.svg)](https://codecov.io/gh/jimhester/simdcsv)
 
 High-performance CSV parser using SIMD instructions, designed for integration with [vroom](https://github.com/tidyverse/vroom).
 
