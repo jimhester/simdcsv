@@ -4,58 +4,325 @@
 
 This document outlines the roadmap for transforming simdcsv from an experimental research project (~1,000 LOC) into a production-ready, high-performance CSV parsing library. The plan addresses architecture support, testing, error handling, benchmarking, and incorporates insights from recent literature.
 
-**Current State**: Experimental AVX2-based CSV parser with multi-threading support
-**Target State**: Production-ready library supporting Intel, AMD, and ARM architectures with comprehensive testing and error handling
+**Current State**: Experimental AVX2-based CSV parser with multi-threading support and index-based output
+
+**Primary Goal**: Replace the multithreaded parser in [vroom](https://github.com/tidyverse/vroom), a fast CSV reader for R that uses lazy evaluation via Altrep
+
+**Target State**: Production-ready library supporting Intel, AMD, and ARM architectures with comprehensive testing, error handling, and seamless vroom integration
+
+**Key Alignment**: simdcsv's index-based approach is perfectly suited for vroom's architecture, which indexes file positions and lazily materializes values on-demand rather than eagerly parsing all data.
 
 ---
 
-## 1. Multi-Architecture SIMD Support
+## 1. vroom Integration & R Ecosystem
 
-### 1.1 Architecture Detection & Runtime Dispatch
+### 1.1 Understanding vroom's Architecture
 
-**Goal**: Support Intel, AMD, and ARM processors with optimal SIMD instruction selection
+**Goal**: Design simdcsv to serve as a drop-in replacement for vroom's current multithreaded parser
+
+#### Background: How vroom Works
+
+[vroom](https://vroom.r-lib.org/) is a high-performance CSV reader for R that achieves speed through:
+
+1. **Index-based parsing**: Records file positions of fields without materializing values
+2. **Altrep lazy evaluation**: Uses R's Alternative Representation framework (R 3.5+) to delay value parsing until accessed
+3. **Memory mapping**: Maps files into memory for zero-copy reads
+4. **Multithreading**: Parallelizes indexing and materialization of non-character columns
+
+**Perfect Alignment**: simdcsv already produces index-based output, making it an ideal backend for vroom's architecture.
 
 #### Tasks:
-- [ ] **CPU Feature Detection**
-  - Implement runtime CPU capability detection
-  - Support x86/x64: SSE2, SSE4.2, AVX2, AVX-512
-  - Support ARM: NEON, SVE (Scalable Vector Extension)
-  - Use CPUID on x86, AT_HWCAP on ARM
-  - Create `cpu_features.h` with detection utilities
+- [ ] **Study vroom's Current Parser** ([vroom issue #105](https://github.com/tidyverse/vroom/issues/105))
+  - Analyze current indexing implementation in vroom's C++ code
+  - Understand performance bottlenecks in parallel parsing
+  - Identify integration points for simdcsv
+  - Review memory mapping strategy
 
-- [ ] **SIMD Abstraction Layer**
-  - Create portable SIMD wrapper API (`simd_abstraction.h`)
-  - Abstract common operations: load, store, compare, movemask
-  - Implement for each architecture:
-    - `simd_x86_sse2.h` - Baseline x86 (128-bit)
-    - `simd_x86_avx2.h` - Current implementation (256-bit)
-    - `simd_x86_avx512.h` - Latest Intel/AMD (512-bit)
-    - `simd_arm_neon.h` - ARM 64-bit (128-bit)
-    - `simd_arm_sve.h` - ARM Scalable Vectors (128-2048 bit)
-  - Fallback scalar implementation for unsupported CPUs
+- [ ] **Design simdcsv-vroom Interface**
+  - Define C++ API that vroom can consume
+  - Index format compatibility (match vroom's internal representation)
+  - Thread coordination between simdcsv and vroom's Altrep vectors
+  - Error reporting mechanism compatible with R
 
-- [ ] **Runtime Function Dispatch**
-  - Implement function pointer selection at startup
-  - Select optimal SIMD path based on detected features
-  - Consider Intel's Multi-Versioning approach (`__attribute__((target(...)))`)
-  - Minimize dispatch overhead (one-time at initialization)
+- [ ] **CleverCSV-Style Dialect Detection**
+  - Implement improved delimiter detection (addresses [vroom #105](https://github.com/tidyverse/vroom/issues/105))
+  - Auto-detect quote characters and escape sequences
+  - Based on CleverCSV algorithm (see [arXiv:1811.11242](https://arxiv.org/pdf/1811.11242.pdf))
+  - Optimize to work with minimal data (e.g., first 10 records)
+  - Fallback to current heuristics if detection uncertain
 
-- [ ] **Build System Updates**
-  - Add architecture-specific compilation flags
-  - Support cross-compilation for ARM
-  - Create CMake build option for multi-architecture builds
-  - Add `-march=` options: `native`, `x86-64`, `armv8-a`, etc.
+- [ ] **Benchmark Against vroom**
+  - Compare simdcsv indexing speed vs vroom's current implementation
+  - Test on vroom's benchmark datasets
+  - Measure: indexing throughput, memory usage, thread scaling
+  - Target: 2-3x faster indexing than current vroom
 
-#### Success Criteria:
-- Single binary works optimally on Intel, AMD, and ARM
-- <5% performance overhead from dispatch mechanism
-- Graceful degradation on older CPUs
+### 1.2 cpp11 Integration
+
+**Goal**: Use [cpp11](https://github.com/r-lib/cpp11) for R bindings instead of Rcpp
+
+#### Background: Why cpp11
+
+cpp11 is a modern R/C++ interface library authored by Jim Hester (simdcsv author):
+- **Header-only**: No shared library dependencies, eliminates version mismatches
+- **Faster compilation**: Reduced memory and build time vs Rcpp
+- **Modern C++**: Leverages C++11 features
+- **Better safety**: Improved protection for R API interactions
+- **Vendoring**: Can bundle headers directly in R packages
+
+#### Tasks:
+- [ ] **cpp11 Wrapper Implementation**
+  - Create `src/cpp11.cpp` with `[[cpp11::register]]` functions
+  - Expose core parsing API to R
+  - Handle memory management between C++ and R
+  - Use `cpp11::strings`, `cpp11::integers` for zero-copy where possible
+
+- [ ] **Integration with vroom's Altrep**
+  - Design callbacks for Altrep materialization
+  - Support vroom's lazy character vectors (`VROOM_USE_ALTREP_CHR`)
+  - Optimize for best-case scenario (character data, lazy access)
+  - Handle worst-case scenario (numeric data, eager parsing)
+
+- [ ] **R Package Structure** (optional standalone package)
+  - Create `simdcsv` R package skeleton
+  - Add cpp11 to DESCRIPTION LinkingTo
+  - Provide `simdcsv::read_csv()` function for testing
+  - Compare performance vs `vroom::vroom()` and `data.table::fread()`
+
+### 1.3 vroom-Specific Features
+
+#### Tasks:
+- [ ] **Line Ending Handling**
+  - Support `\n`, `\r\n`, `\r` (Windows/Unix/old Mac)
+  - Mixed line endings in single file (rare but exists)
+  - Fast SIMD-based detection
+
+- [ ] **Delimiter Detection**
+  - Current vroom issue: suboptimal guessing results
+  - CleverCSV approach: analyze first N rows for delimiter patterns
+  - Score candidates: `,`, `\t`, `;`, `|`, ` ` (space)
+  - Detect quote character: `"`, `'`
+
+- [ ] **Column Type Inference**
+  - Collaborate with vroom's existing type detection
+  - Provide hints from parsed data (all numeric, all text, etc.)
+  - Support vroom's `col_types` specification
+
+- [ ] **Progress Reporting**
+  - Integrate with R's progress API
+  - Report indexing progress for large files
+  - Enable vroom's progress bars
 
 ---
 
-## 2. Comprehensive Test Suite
+## 2. Literature Review & Research Foundation
 
-### 2.1 Test Infrastructure
+**PRIORITY: This comes FIRST before implementation**
+
+### 2.1 Recent Research (2020-2026)
+
+**Goal**: Ground all design decisions in current research and validate assumptions before coding
+
+#### Tasks:
+- [ ] **Core Papers Review**
+  - **Chang et al., "Speculative Distributed CSV Data Parsing"** (SIGMOD 2019) - Already referenced
+    - Deep dive into speculative parsing trade-offs
+    - Understand when speculation fails
+    - Optimal speculation window size
+
+  - **Langdale & Lemire, "Parsing Gigabytes of JSON per Second"** (VLDB Journal 2019) - Already referenced
+    - SIMD techniques for structural indexing
+    - Two-stage parsing approach
+    - Bit manipulation tricks
+
+  - **CleverCSV** (van den Burgh & Nazabal, 2019) - [arXiv:1811.11242](https://arxiv.org/pdf/1811.11242.pdf)
+    - Dialect detection algorithm (for vroom #105)
+    - Pattern consistency scoring
+    - Minimal sample size requirements
+
+- [ ] **SIMD & Performance Papers**
+  - **Mison** (Li et al., 2017) - Speculative parsing for JSON
+    - Level-based speculation
+    - Applicable to CSV with quotes
+
+  - **Zebra** (Palkar et al., 2018) - Vectorized parsing
+    - LLVM-based JIT approaches
+    - Runtime code generation trade-offs
+
+  - **AVX-512 optimization papers** (2020-2024)
+    - Masked operations for conditional processing
+    - New instructions useful for CSV
+    - Performance pitfalls (frequency throttling)
+
+  - **ARM SVE/SVE2 papers** (2019-2024)
+    - Scalable vector length algorithms
+    - Predication vs masking
+    - Performance portability
+
+- [ ] **Parallel Parsing Research**
+  - **Parallel CSV parsing** (Ge et al., 2021)
+    - Improved load balancing
+    - Reducing synchronization overhead
+
+  - **High-performance text processing** (recent)
+    - Memory bandwidth optimization
+    - Cache-conscious algorithms
+
+- [ ] **Create Literature Summary**
+  - Document in `docs/literature_review.md`
+  - For each paper: technique, applicability, implementation priority
+  - Identify conflicting recommendations and resolve
+  - Cite papers in code comments where techniques are applied
+
+### 2.2 SIMD Abstraction Library Research
+
+**Goal**: Use existing, well-maintained SIMD libraries instead of custom per-architecture code
+
+#### Research Findings:
+
+Two leading candidates identified:
+
+1. **Google Highway** - [github.com/google/highway](https://github.com/google/highway)
+   - Performance-portable SIMD with runtime dispatch
+   - Supports SSE4, AVX2, AVX-512, NEON, SVE, WASM, PowerPC
+   - Used in: JPEG XL, NumPy (proposed in [NEP 54](https://numpy.org/neps/nep-0054-simd-cpp-highway.html))
+   - Dual-licensed: Apache 2 / BSD-3
+   - **Pros**: High-level API, well-tested, active development
+   - **Cons**: Learning curve, potential overhead from abstraction
+
+2. **SIMDe (SIMD Everywhere)** - [github.com/simd-everywhere/simde](https://github.com/simd-everywhere/simde)
+   - Header-only library for cross-platform SIMD
+   - Emulates specific instruction sets (e.g., AVX2 on ARM via NEON)
+   - Provides low-level intrinsics, closer to existing simdcsv code
+   - **Pros**: Drop-in replacement for intrinsics, minimal refactoring
+   - **Cons**: Emulation overhead on some platforms
+
+#### Tasks:
+- [ ] **Evaluate Highway for simdcsv**
+  - Prototype: port existing AVX2 code to Highway abstractions
+  - Measure: performance overhead, code complexity
+  - Test: automatic dispatch to best available SIMD level
+  - Decision criteria: <5% overhead acceptable
+
+- [ ] **Evaluate SIMDe for simdcsv**
+  - Test: compile existing AVX2 code with SIMDe on ARM
+  - Measure: emulation performance vs native NEON
+  - Check: compatibility with existing bit manipulation tricks
+
+- [ ] **Make Library Selection Decision**
+  - **Recommendation**: Start with **Highway** for long-term maintainability
+  - Fallback: SIMDe if Highway overhead too high
+  - Worst case: Keep custom code for AVX2, use library for ARM
+
+- [ ] **Integration Plan**
+  - Add selected library as dependency (git submodule or CMake FetchContent)
+  - Create abstraction wrapper if needed
+  - Maintain performance parity with current AVX2 code
+
+### 2.3 Known Limitations Analysis
+
+#### Tasks:
+- [ ] **Document Current Limitations**
+  - Speculative parsing failures
+  - Index-only output (already addressed by vroom integration)
+  - Memory overhead (full file load)
+  - Quote escaping variants
+  - Line ending detection
+
+- [ ] **Prioritize Based on vroom Needs**
+  - Which limitations affect vroom integration?
+  - Which can be deferred to post-launch?
+
+- [ ] **Create Pathological Test Cases**
+  - For each limitation, create worst-case input
+  - Measure performance degradation
+  - Document: "Known to perform poorly when..."
+
+---
+
+## 3. Multi-Architecture SIMD Support
+
+**STRATEGY CHANGE: Depth-first, not breadth-first**
+
+**Priority**: Get AVX2 (x86-64) perfect FIRST, then expand to ARM
+
+### 3.1 Phase 1: Optimize AVX2 Implementation (Current Architecture)
+
+**Goal**: Achieve best-in-class performance on x86-64 before porting to other architectures
+
+#### Rationale:
+- Most development/CI systems are x86-64
+- Faster iteration on single platform
+- Establish performance baseline before porting
+- Validate correctness thoroughly on one architecture
+- **Then** use SIMD abstraction library (Highway/SIMDe) to port optimized design
+
+#### Tasks:
+- [ ] **Profile Current AVX2 Implementation**
+  - Use perf, VTune, or similar profiler
+  - Identify hotspots: quote detection, field parsing, index storage
+  - Measure: cache misses, branch mispredictions, IPC
+
+- [ ] **Optimize AVX2 Code Paths**
+  - Apply findings from literature review (Section 2.1)
+  - Reduce branches using mask operations
+  - Optimize carryless multiply for quote tracking
+  - Experiment with different loop unrolling factors
+  - Target: >5 GB/s on modern x86-64 CPU
+
+- [ ] **Test Thoroughly on x86-64**
+  - Comprehensive test suite (see Section 4)
+  - Fuzz testing for edge cases
+  - Validate on Intel and AMD processors
+  - Test on various microarchitectures (Skylake, Zen 3, etc.)
+
+### 3.2 Phase 2: Add AVX-512 Support (x86-64 Only)
+
+**Goal**: Leverage 512-bit SIMD on newer Intel/AMD processors
+
+#### Tasks:
+- [ ] **AVX-512 Implementation**
+  - Port optimized AVX2 code to AVX-512
+  - Use mask registers for conditional processing
+  - Process 64-byte chunks with single instruction
+  - Beware: frequency throttling on some CPUs
+
+- [ ] **Runtime Dispatch Between AVX2 and AVX-512**
+  - Detect AVX-512 support at runtime
+  - Fallback to AVX2 if unavailable
+  - Consider: AVX-512 may be slower on some workloads (due to downclocking)
+
+### 3.3 Phase 3: Port to ARM via SIMD Library
+
+**Goal**: Use Highway or SIMDe to support ARM NEON/SVE
+
+**IMPORTANT**: Only start this phase after AVX2/AVX-512 is production-ready
+
+#### Tasks:
+- [ ] **Choose SIMD Abstraction Library** (based on Section 2.2 evaluation)
+  - If Highway: Port AVX2 code to Highway abstractions
+  - If SIMDe: Use SIMDe headers for ARM cross-compilation
+
+- [ ] **Implement ARM NEON Backend**
+  - 128-bit SIMD, process 16 bytes per iteration
+  - Adapt algorithms for narrower vectors
+  - Test on ARM64 hardware (Raspberry Pi, Apple Silicon, AWS Graviton)
+
+- [ ] **Optional: ARM SVE Support**
+  - Scalable vector length (128-2048 bits)
+  - Length-agnostic algorithms
+  - Only if target hardware available (e.g., Fujitsu A64FX, AWS Graviton 3)
+
+#### Success Criteria (for multi-architecture):
+- Single binary works on x86-64 (AVX2, AVX-512) and ARM64 (NEON)
+- <5% performance overhead from abstraction layer
+- Graceful degradation to scalar code if no SIMD available
+
+---
+
+## 4. Comprehensive Test Suite
+
+### 4.1 Test Infrastructure
 
 **Goal**: Achieve >95% code coverage with automated testing
 
@@ -94,7 +361,7 @@ This document outlines the roadmap for transforming simdcsv from an experimental
   - Target: >95% line coverage, >90% branch coverage
   - Identify and test uncovered paths
 
-### 2.2 Test Cases by Category
+### 4.2 Test Cases by Category
 
 #### Unit Tests
 - [ ] **SIMD Operations** (`test/unit/test_simd.cpp`)
@@ -138,7 +405,16 @@ This document outlines the roadmap for transforming simdcsv from an experimental
   - Verify: `parse(serialize(data)) == data`
   - Invariants: field count consistency, index ordering
 
-### 2.3 Correctness Validation
+### 4.3 Correctness Validation
+
+#### Additional Task for vroom Integration:
+- [ ] **vroom Compatibility Testing**
+  - Test index format matches vroom's expectations
+  - Verify integration with Altrep vectors
+  - Compare results with vroom's current parser
+  - Test on vroom's existing test suite
+
+### 4.4 Reference Implementation Comparison
 
 #### Tasks:
 - [ ] **Reference Implementation Comparison**
@@ -157,9 +433,9 @@ This document outlines the roadmap for transforming simdcsv from an experimental
 
 ---
 
-## 3. Malformed CSV Handling
+## 5. Malformed CSV Handling
 
-### 3.1 Error Detection Strategy
+### 5.1 Error Detection Strategy
 
 **Goal**: Graceful handling of invalid CSV with clear error reporting
 
@@ -201,7 +477,7 @@ This document outlines the roadmap for transforming simdcsv from an experimental
   - Quick scan for structural errors before full parse
   - Trade-off: 2x pass overhead vs early error detection
 
-### 3.2 Recovery Strategies
+### 5.2 Recovery Strategies
 
 #### Tasks:
 - [ ] **Unclosed Quote Handling**
@@ -234,7 +510,7 @@ This document outlines the roadmap for transforming simdcsv from an experimental
   };
   ```
 
-### 3.3 Fuzz Testing for Edge Cases
+### 5.3 Fuzz Testing for Edge Cases
 
 #### Tasks:
 - [ ] **Fuzzing Infrastructure**
@@ -253,7 +529,7 @@ This document outlines the roadmap for transforming simdcsv from an experimental
   - Timeout detection (hang prevention)
   - Corpus minimization (reduce failing inputs)
 
-### 3.4 Test Files for Malformed CSV
+### 5.4 Test Files for Malformed CSV
 
 #### Tasks:
 - [ ] **Create Test Fixtures** (`test/fixtures/malformed/`)
@@ -275,9 +551,9 @@ This document outlines the roadmap for transforming simdcsv from an experimental
 
 ---
 
-## 4. Enhanced Benchmark Suite
+## 6. Enhanced Benchmark Suite
 
-### 4.1 Benchmark Infrastructure Improvements
+### 6.1 Benchmark Infrastructure Improvements
 
 **Goal**: Comprehensive, reproducible performance measurement
 
@@ -295,14 +571,12 @@ This document outlines the roadmap for transforming simdcsv from an experimental
   - SIMD levels: scalar, SSE2, AVX2, AVX-512, NEON
 
 - [ ] **Comparison Benchmarks**
-  - Baseline: stdlib (no SIMD)
-  - Competition:
-    - simdjson CSV mode (if exists)
-    - Apache Arrow CSV reader
-    - Pandas read_csv() via Python
-    - csv-parser (Vince Bartle's library)
-    - fast-cpp-csv-parser
-  - Metric: GB/s throughput
+  - **Primary**: vroom (current R parser) - this is the key comparison!
+  - **R ecosystem**: data.table::fread(), readr::read_csv()
+  - **Other languages**:
+    - Python: pandas read_csv(), Apache Arrow CSV reader
+    - C++: csv-parser (Vince Bartle), fast-cpp-csv-parser
+  - Metric: GB/s throughput, indexing time
 
 - [ ] **Real-World Datasets**
   - NYC Taxi Trip Data (1.5GB, 19 columns)
@@ -311,7 +585,7 @@ This document outlines the roadmap for transforming simdcsv from an experimental
   - Genomics data (wide tables, many columns)
   - Log file formats (syslog CSV exports)
 
-### 4.2 Performance Metrics
+### 6.2 Performance Metrics
 
 #### Tasks:
 - [ ] **Throughput Metrics**
@@ -336,7 +610,7 @@ This document outlines the roadmap for transforming simdcsv from an experimental
   - Joules per GB parsed (RAPL counters on Linux)
   - Performance per watt
 
-### 4.3 Benchmark Reporting
+### 6.3 Benchmark Reporting
 
 #### Tasks:
 - [ ] **Automated Reports**
@@ -355,9 +629,9 @@ This document outlines the roadmap for transforming simdcsv from an experimental
 
 ---
 
-## 5. Literature Review & Novel Techniques
+## 7. API Design & Usability
 
-### 5.1 Recent Research (2020-2026)
+### 7.1 Public API Definition
 
 **Goal**: Incorporate state-of-the-art techniques and validate assumptions
 
@@ -462,7 +736,7 @@ This document outlines the roadmap for transforming simdcsv from an experimental
 
 ---
 
-## 6. API Design & Usability
+## 7. API Design & Usability (DUPLICATE - TO BE REMOVED)
 
 ### 6.1 Public API Definition
 
@@ -843,149 +1117,198 @@ This document outlines the roadmap for transforming simdcsv from an experimental
 
 ---
 
-## 12. Milestones & Prioritization
+## 12. Revised Milestones & Prioritization
 
-### Phase 1: Foundation (Months 1-2)
-**Priority: Critical**
+**PRIMARY GOAL**: vroom integration with 2-3x faster indexing than current implementation
 
-1. Multi-architecture SIMD support (Intel, AMD, ARM)
-   - CPU detection
-   - SIMD abstraction layer
-   - AVX2, AVX-512, NEON implementations
+**STRATEGY**: Literature review → AVX2 optimization → vroom integration → ARM support
 
-2. Test infrastructure
+### Phase 1: Research & Foundation (Months 1-2)
+**Priority: CRITICAL - Do this FIRST**
+
+1. **Literature Review** (Section 2)
+   - Review 8-10 key papers (Chang, Langdale/Lemire, CleverCSV, etc.)
+   - Evaluate Highway vs SIMDe for SIMD abstraction
+   - Document techniques in `docs/literature_review.md`
+   - Identify optimization priorities
+
+2. **vroom Architecture Study** (Section 1.1)
+   - Deep dive into vroom's current parser implementation
+   - Understand index format and Altrep integration
+   - Analyze vroom issue #105 (dialect detection)
+   - Identify integration points
+
+3. **Test Infrastructure** (Section 4.1)
    - Google Test setup
    - CI/CD pipeline (GitHub Actions)
-   - Test data generation
+   - Test data generation scripts
+   - Code coverage infrastructure
 
-3. CMake build system
-   - Replace Makefile
-   - Cross-platform support
+4. **CMake Build System** (Section 7)
+   - Replace Makefile with CMake
+   - Support Linux, macOS (initial platforms)
+   - Dependency management (Highway/SIMDe as git submodule)
 
-4. Basic malformed CSV handling
-   - Error detection
-   - Strict mode implementation
-
-**Deliverable**: Library compiles and runs on x86 and ARM with basic tests
+**Deliverable**: Research foundation documented, build system modern, tests running
 
 ---
 
-### Phase 2: Correctness & Robustness (Months 3-4)
-**Priority: High**
+### Phase 2: AVX2 Optimization & Correctness (Months 3-4)
+**Priority: HIGH - Perfect x86-64 before other architectures**
 
-1. Comprehensive test suite
-   - 100+ unit tests
-   - 50+ integration tests
+1. **Optimize AVX2 Implementation** (Section 3.1)
+   - Profile current code (perf, VTune)
+   - Apply literature review findings
+   - Branch reduction, prefetching, loop unrolling
+   - Target: >5 GB/s indexing throughput on modern x86-64
+
+2. **Comprehensive Testing** (Section 4)
+   - 100+ unit tests (SIMD operations, parsing, indexing)
+   - 50+ integration tests (well-formed and malformed CSV)
+   - Property-based testing with RapidCheck
    - >90% code coverage
 
-2. Malformed CSV handling completion
-   - All error types detected
-   - Lenient mode option
-   - Fuzz testing setup
+3. **Error Handling** (Section 5)
+   - Implement all error types (unclosed quotes, inconsistent columns, etc.)
+   - Strict and lenient modes
+   - Clear error messages with line/column positions
 
-3. Sanitizer builds
+4. **Sanitizer Builds**
    - ASan, UBSan, MSan, TSan clean
+   - Fuzz testing setup (AFL++)
+   - 1M+ executions without crash
 
-4. Public API design
-   - C++ API finalized
-   - C wrapper for bindings
-
-**Deliverable**: Production-quality correctness with comprehensive error handling
+**Deliverable**: Production-quality AVX2 implementation, thoroughly tested
 
 ---
 
-### Phase 3: Performance & Benchmarking (Months 5-6)
-**Priority: High**
+### Phase 3: vroom Integration (Months 5-6)
+**Priority: HIGH - Primary integration target**
 
-1. Enhanced benchmark suite
+1. **cpp11 Bindings** (Section 1.2)
+   - Implement C++ → R interface using cpp11
+   - Memory management between C++ and R
+   - Zero-copy optimization where possible
+
+2. **vroom-Compatible API** (Section 1.1)
+   - Index format matching vroom's expectations
+   - Altrep integration callbacks
+   - Thread coordination with vroom
+
+3. **vroom-Specific Features** (Section 1.3)
+   - CleverCSV-style dialect detection (addresses vroom #105)
+   - Line ending auto-detection (\n, \r\n, \r)
+   - Column type hints for vroom
+   - Progress reporting integration
+
+4. **Benchmark vs vroom** (Section 6.1)
+   - Test on vroom's benchmark datasets
+   - Compare: simdcsv vs current vroom vs data.table::fread()
+   - Target: 2-3x faster indexing than vroom
+   - Validate: memory usage, thread scaling
+
+**Deliverable**: simdcsv integrated with vroom, measurably faster
+
+---
+
+### Phase 4: AVX-512 & Enhanced Performance (Months 7-8)
+**Priority: MEDIUM - Optimize further on x86-64**
+
+1. **AVX-512 Implementation** (Section 3.2)
+   - Port AVX2 code to AVX-512
+   - Runtime dispatch based on CPU support
+   - Beware downclocking, benchmark carefully
+
+2. **Performance Optimization** (Section 8)
+   - Profiling-guided optimization
+   - Micro-benchmarks for hotspots
+   - Cache-conscious data structures
+   - NUMA awareness (multi-socket systems)
+
+3. **Enhanced Benchmarks** (Section 6)
    - Google Benchmark integration
-   - Competitor comparisons
-   - Real-world datasets
+   - Real-world datasets (NYC Taxi, genomics, financial)
+   - Energy efficiency metrics (RAPL)
+   - Public benchmark dashboard
 
-2. Performance optimization
-   - Profiling-guided optimizations
-   - Branch reduction
-   - Prefetching
-
-3. Literature review implementation
-   - Evaluate 5-10 recent papers
-   - Prototype top 3 techniques
-
-4. Benchmark documentation
-   - Public dashboard
-   - Performance claims validation
-
-**Deliverable**: Documented performance leadership with scientific backing
+**Deliverable**: Peak x86-64 performance, comprehensive benchmarks
 
 ---
 
-### Phase 4: Usability & Ecosystem (Months 7-8)
-**Priority: Medium**
+### Phase 5: ARM Support via SIMD Library (Months 9-10)
+**Priority: MEDIUM - Multi-architecture support**
 
-1. API enhancements
-   - Streaming parser
-   - Type detection
-   - Column selection
+1. **SIMD Library Integration** (Section 2.2 & 3.3)
+   - Choose Highway or SIMDe based on Phase 1 evaluation
+   - Port AVX2/AVX-512 code to library abstractions
+   - Maintain <5% performance overhead
 
-2. Documentation
+2. **ARM NEON Implementation**
+   - 128-bit SIMD for ARM64
+   - Test on: Apple Silicon, AWS Graviton, Raspberry Pi
+   - Adapt algorithms for narrower vectors
+
+3. **Multi-Architecture CI**
+   - GitHub Actions with ARM runners (or QEMU)
+   - Test on x86-64 (AVX2, AVX-512) and ARM64 (NEON)
+   - Cross-compilation support
+
+**Deliverable**: Single binary supporting x86-64 and ARM64
+
+---
+
+### Phase 6: Ecosystem & Distribution (Months 11-12)
+**Priority: LOW - Nice-to-have**
+
+1. **R Package** (optional standalone)
+   - Create simdcsv R package
+   - CRAN submission preparation
+   - Documentation and vignettes
+
+2. **Packaging & Distribution**
+   - Debian/Ubuntu .deb
+   - Homebrew formula (macOS)
+   - vcpkg port (cross-platform)
+
+3. **Documentation**
    - API docs (Doxygen)
-   - User guide
+   - User guide and tutorials
    - Developer guide
+   - Example programs
 
-3. Python bindings
-   - pybind11 wrapper
-   - Pandas integration
-   - PyPI package
-
-4. Example programs
-   - 5+ complete examples
-
-**Deliverable**: Developer-friendly library with excellent documentation
-
----
-
-### Phase 5: Distribution & Community (Months 9-10)
-**Priority: Medium**
-
-1. Packaging
-   - Debian, Homebrew, vcpkg
-   - GitHub releases
-
-2. Community setup
+4. **Community Setup**
    - Contributing guidelines
    - Issue templates
    - Code of conduct
 
-3. Integrations
-   - Additional language bindings
-   - Framework integrations
-
-4. Marketing
-   - Blog posts
-   - Conference talks (optional)
-   - Hacker News post
-
-**Deliverable**: Widely available, community-ready library
+**Deliverable**: Widely distributable, well-documented library
 
 ---
 
-### Phase 6: Advanced Features (Months 11-12)
-**Priority: Low (nice-to-have)
+### Optional Future Phases
 
-1. Apache Arrow output
-2. Advanced CSV features (custom delimiters, filtering)
-3. Additional SIMD architectures (RISC-V, older SSE variants)
-4. Performance monitoring (energy efficiency)
+**Phase 7: Advanced Features** (as needed)
+- Apache Arrow output format
+- Streaming parser (don't load full file)
+- Advanced CSV features (custom delimiters, column filtering)
+- ARM SVE support (scalable vectors)
+- Windows native support (MSVC)
 
-**Deliverable**: Feature-complete, industry-leading CSV parser
+**Phase 8: Additional Integrations**
+- Python bindings (pybind11) for pandas
+- Julia bindings (CxxWrap.jl)
+- Rust bindings (cxx crate)
+- DuckDB/Polars integration
 
 ---
 
 ## 13. Success Metrics
 
-### Performance Targets
-- [ ] **Throughput**: >5 GB/s on modern hardware (AVX-512 or ARM SVE)
-- [ ] **Competitive**: 2-5x faster than pandas, Apache Arrow on benchmarks
+### Performance Targets (vroom Integration)
+- [ ] **Primary**: 2-3x faster indexing than current vroom implementation
+- [ ] **Throughput**: >5 GB/s on modern x86-64 hardware (AVX2)
+- [ ] **AVX-512**: >8 GB/s on systems with AVX-512 support
+- [ ] **R Ecosystem**: Faster than data.table::fread() for indexing phase
 - [ ] **Scaling**: >80% parallel efficiency up to 16 threads
 - [ ] **Memory**: <10% overhead vs file size (excluding output)
 
@@ -1023,27 +1346,53 @@ This document outlines the roadmap for transforming simdcsv from an experimental
 ### Papers
 1. Chang et al., "Speculative Distributed CSV Data Parsing for Big Data Analytics", SIGMOD 2019
 2. Langdale & Lemire, "Parsing Gigabytes of JSON per Second", VLDB Journal 2019
-3. RFC 4180 - Common Format and MIME Type for CSV Files
+3. van den Burgh & Nazabal, "Wrangling Messy CSV Files by Detecting Row and Type Patterns", arXiv:1811.11242, 2019 (CleverCSV)
+4. RFC 4180 - Common Format and MIME Type for CSV Files
 
-### Related Projects
+### Related Projects (Integration Targets)
+- **vroom**: https://github.com/tidyverse/vroom - Primary integration target
+- **cpp11**: https://github.com/r-lib/cpp11 - R/C++ interface (by Jim Hester)
+- vroom issue #105 (dialect detection): https://github.com/tidyverse/vroom/issues/105
+
+### SIMD Libraries
+- **Google Highway**: https://github.com/google/highway - Performance-portable SIMD
+  - NumPy NEP 54: https://numpy.org/neps/nep-0054-simd-cpp-highway.html
+- **SIMDe**: https://github.com/simd-everywhere/simde - SIMD Everywhere (header-only)
+
+### Other CSV Parsers (for benchmarking)
 - simdjson: https://github.com/simdjson/simdjson
 - Apache Arrow CSV: https://arrow.apache.org/docs/cpp/csv.html
 - csv-parser: https://github.com/vincentlaucsb/csv-parser
 - fast-cpp-csv-parser: https://github.com/ben-strasser/fast-cpp-csv-parser
+- data.table (R): https://github.com/Rdatatable/data.table
 
 ### Tools
 - Google Test: https://github.com/google/googletest
 - Google Benchmark: https://github.com/google/benchmark
 - AFL++: https://github.com/AFLplusplus/AFLplusplus
-- pybind11: https://github.com/pybind/pybind11
+- RapidCheck: https://github.com/emil-e/rapidcheck (property-based testing)
 
 ---
 
 ## Conclusion
 
-This plan transforms simdcsv from a research prototype into a production-ready, high-performance CSV parsing library. The phased approach prioritizes correctness and robustness first, then performance, and finally ecosystem features. With an estimated 10-12 month timeline, the result will be a competitive, well-tested, and widely usable library suitable for both industry and research applications.
+This plan transforms simdcsv from a research prototype into a production-ready, high-performance CSV parser designed specifically for **vroom integration**. The revised approach prioritizes:
+
+1. **Research first**: Literature review and SIMD library evaluation before coding
+2. **Depth over breadth**: Perfect AVX2 on x86-64 before expanding to ARM
+3. **Primary goal**: 2-3x faster indexing for vroom via simdcsv backend
+4. **Modern tooling**: cpp11 for R bindings, Highway/SIMDe for portability
+
+**Key Advantages for vroom**:
+- simdcsv's index-based output perfectly matches vroom's Altrep architecture
+- SIMD acceleration dramatically speeds up the indexing phase
+- Multi-threaded design scales well for large files
+- CleverCSV dialect detection addresses vroom issue #105
+
+With an estimated **10-12 month timeline**, the result will be a production-ready parser that significantly accelerates vroom's CSV reading capabilities while maintaining correctness and robustness.
 
 **Next Steps**:
-1. Review and approve this plan
-2. Prioritize phases based on project goals
-3. Begin Phase 1: Foundation work
+1. **Phase 1 (Months 1-2)**: Literature review, vroom architecture study, test infrastructure
+2. Evaluate Highway vs SIMDe for SIMD abstraction
+3. Profile and optimize AVX2 implementation
+4. Begin vroom integration work
