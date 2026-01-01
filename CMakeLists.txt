@@ -10,16 +10,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(ENABLE_COVERAGE "Enable code coverage reporting" OFF)
 
 # Compiler flags
-# Only use -march=native on x86_64 platforms (AVX2 implementation)
-# ARM support (NEON/SVE) is planned for future releases
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64)|(X86)")
-    message(STATUS "x86_64 platform detected - enabling -march=native for AVX2")
-    add_compile_options(-march=native)
-else()
-    message(STATUS "Non-x86_64 platform detected (${CMAKE_SYSTEM_PROCESSOR}) - skipping SIMD optimizations")
-    message(STATUS "ARM SIMD support (NEON/SVE) is planned for future releases")
-endif()
-
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-O0 -g)
 else()
@@ -37,6 +27,19 @@ if(ENABLE_COVERAGE)
     endif()
 endif()
 
+# Dependencies
+include(FetchContent)
+
+# Google Highway for portable SIMD
+FetchContent_Declare(
+  highway
+  GIT_REPOSITORY https://github.com/google/highway.git
+  GIT_TAG 1.3.0
+)
+set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(highway)
+
 # Library target
 add_library(simdcsv_lib STATIC
     src/io_util.cpp
@@ -47,26 +50,24 @@ target_include_directories(simdcsv_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Main executable (only on x86_64 - requires AVX2)
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64)|(X86)")
-    add_executable(simdcsv
-        src/main.cpp
-    )
+target_link_libraries(simdcsv_lib PUBLIC
+    hwy
+)
 
-    target_link_libraries(simdcsv PRIVATE
-        simdcsv_lib
-        pthread
-    )
-else()
-    message(STATUS "Skipping simdcsv main executable on non-x86_64 platform")
-    message(STATUS "Test executables will still be built (no SIMD required)")
-endif()
+# Main executable (portable SIMD via Highway)
+add_executable(simdcsv
+    src/main.cpp
+)
+
+target_link_libraries(simdcsv PRIVATE
+    simdcsv_lib
+    pthread
+)
 
 # Testing
 enable_testing()
 
 # Download and configure Google Test
-include(FetchContent)
 FetchContent_Declare(
   googletest
   GIT_REPOSITORY https://github.com/google/googletest.git
@@ -126,31 +127,27 @@ include(GoogleTest)
 gtest_discover_tests(simdcsv_test)
 gtest_discover_tests(error_handling_test)
 
-# CSV parsing test executable (only on x86_64 - requires AVX2 SIMD)
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64)|(X86)")
-    add_executable(csv_parsing_test
-        test/csv_parsing_test.cpp
-    )
+# CSV parsing test executable (portable SIMD via Highway)
+add_executable(csv_parsing_test
+    test/csv_parsing_test.cpp
+)
 
-    target_link_libraries(csv_parsing_test PRIVATE
-        simdcsv_lib
-        GTest::gtest_main
-        pthread
-    )
+target_link_libraries(csv_parsing_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
 
-    target_include_directories(csv_parsing_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-    )
+target_include_directories(csv_parsing_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 
-    # Copy test data to build directory for parsing tests
-    add_custom_command(TARGET csv_parsing_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-        ${CMAKE_CURRENT_BINARY_DIR}/test/data
-    )
+# Copy test data to build directory for parsing tests
+add_custom_command(TARGET csv_parsing_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
 
-    # Register parsing tests with CTest
-    gtest_discover_tests(csv_parsing_test)
-else()
-    message(STATUS "Skipping csv_parsing_test on non-x86_64 platform (requires AVX2)")
-endif()
+# Register parsing tests with CTest
+gtest_discover_tests(csv_parsing_test)

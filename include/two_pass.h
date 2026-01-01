@@ -3,8 +3,9 @@
 #include <future>
 #include <limits>
 #include <vector>
+#include <cstring>  // for memcpy
 #include "inttypes.h"
-#include "simd.h"
+#include "simd_highway.h"
 
 namespace simdcsv {
 
@@ -85,7 +86,7 @@ class two_pass {
 
       /* TODO: look into removing branches if possible */
       if (len - idx < 64) {
-        mask = _blsmsk_u64(1ULL << (len - idx));
+        mask = blsmsk_u64(1ULL << (len - idx));
       }
 
       uint64_t quotes = cmp_mask_against_input(in, '"') & mask;
@@ -169,7 +170,8 @@ class two_pass {
     size_t i = start;
     size_t num_quotes = 0;
 
-    while (i >= end) {
+    // FIXED: Use i > end to avoid unsigned underflow when i reaches 0
+    while (i > end) {
       if (buf[i] == '"') {
         // q-o case
         if (i + 1 < start && is_other(buf[i + 1])) {
@@ -183,6 +185,10 @@ class two_pass {
         ++num_quotes;
       }
       --i;
+    }
+    // Check the last position (i == end)
+    if (buf[end] == '"') {
+      ++num_quotes;
     }
     return AMBIGUOUS;
   }
@@ -217,6 +223,7 @@ class two_pass {
     uint64_t prev_iter_inside_quote = 0ULL;  // either all zeros or all ones
     uint64_t base = 0;
     buf += start;
+
     for (; idx < len; idx += 64) {
       __builtin_prefetch(buf + idx + 128);
       simd_input in = fill_input(buf + idx);
@@ -224,7 +231,7 @@ class two_pass {
       uint64_t mask = ~0ULL;
 
       if (len - idx < 64) {
-        mask = _blsmsk_u64(1ULL << (len - idx));
+        mask = blsmsk_u64(1ULL << (len - idx));
       }
 
       uint64_t quotes = cmp_mask_against_input(in, '"') & mask;
