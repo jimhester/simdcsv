@@ -61,29 +61,21 @@ HWY_ATTR really_inline uint64_t cmp_mask_against_input(const simd_input& in, uin
   const auto match_value = hn::Set(d, m);
 
   uint64_t result = 0;
-  size_t processed = 0;
 
   // Process data in Highway vector-sized chunks
-  while (processed < 64) {
-    const size_t remaining = 64 - processed;
-    const size_t chunk_size = (remaining < N) ? remaining : N;
+  size_t i = 0;
+  for (; i + N <= 64; i += N) {
+    auto vec = hn::LoadU(d, in.data + i);
+    auto mask = hn::Eq(vec, match_value);
+    uint64_t bits = hn::BitsFromMask(d, mask);
+    result |= (bits << i);
+  }
 
-    if (chunk_size == N) {
-      // Full vector load and compare
-      auto vec = hn::LoadU(d, in.data + processed);
-      auto mask = hn::Eq(vec, match_value);
-      uint64_t bits = hn::BitsFromMask(d, mask);
-      result |= (bits << processed);
-    } else {
-      // Handle remaining bytes with scalar fallback
-      for (size_t i = 0; i < chunk_size; ++i) {
-        if (in.data[processed + i] == m) {
-          result |= (1ULL << (processed + i));
-        }
-      }
+  // Handle remaining bytes with scalar code
+  for (; i < 64; ++i) {
+    if (in.data[i] == m) {
+      result |= (1ULL << i);
     }
-
-    processed += N;
   }
 
   return result;
