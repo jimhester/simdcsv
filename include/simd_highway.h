@@ -52,7 +52,8 @@ really_inline simd_input fill_input(const uint8_t* ptr) {
 }
 
 // Compare mask against input using Highway SIMD
-HWY_ATTR really_inline uint64_t cmp_mask_against_input(simd_input in, uint8_t m) {
+// Pass by const reference to avoid ABI issues with 64-byte alignment on ARM
+HWY_ATTR really_inline uint64_t cmp_mask_against_input(const simd_input& in, uint8_t m) {
   const hn::ScalableTag<uint8_t> d;
   const size_t N = hn::Lanes(d);
 
@@ -89,7 +90,8 @@ HWY_ATTR really_inline uint64_t cmp_mask_against_input(simd_input in, uint8_t m)
 }
 
 // Find quote mask using XOR prefix computation
-really_inline uint64_t find_quote_mask(simd_input in, uint64_t quote_bits,
+// Pass by const reference to avoid ABI issues with 64-byte alignment on ARM
+really_inline uint64_t find_quote_mask(const simd_input& in, uint64_t quote_bits,
                                        uint64_t prev_iter_inside_quote) {
   uint64_t quote_mask = 0;
   uint64_t state = prev_iter_inside_quote;
@@ -104,7 +106,7 @@ really_inline uint64_t find_quote_mask(simd_input in, uint64_t quote_bits,
   return quote_mask;
 }
 
-really_inline uint64_t find_quote_mask2(simd_input in, uint64_t quote_bits,
+really_inline uint64_t find_quote_mask2(const simd_input& in, uint64_t quote_bits,
                                         uint64_t& prev_iter_inside_quote) {
   uint64_t quote_mask = 0;
   uint64_t state = prev_iter_inside_quote;
