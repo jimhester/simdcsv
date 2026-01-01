@@ -590,6 +590,591 @@ Tackles automatic dialect detection (delimiter, quote character, escape conventi
 
 ---
 
-**Document Status**: ✅ Phase 1 Complete
+---
+
+## 4. Mison - "A Fast JSON Parser for Data Analytics" (Li et al., VLDB 2017)
+
+### Paper Details
+- **Authors**: Yinan Li, Nikos R. Katsipoulakis, Badrish Chandramouli, Jonathan Goldstein, Donald Kossmann
+- **Published**: VLDB 2017, Proc. VLDB Endow. 10(10), 1118–1129
+- **Institution**: Microsoft Research
+- **Available**: [PDF](http://www.vldb.org/pvldb/vol10/p1118-li.pdf)
+
+### Summary
+
+Mison is a JSON parser optimized for data analytics that pushes down both projection and filter operators into the parser. It uses a **two-level speculative approach** to jump directly to queried fields without expensive tokenization.
+
+**Core Innovation**: Level-based speculation that predicts logical locations of queried fields based on previously seen patterns, combined with structural indices to map logical to physical locations.
+
+**Performance**: 3.6x faster than Jackson without speculation; 10.2x with speculation enabled.
+
+### Key Techniques
+
+#### 1. Level-Based Speculation
+- **Observation**: Analytics queries typically access only a few fields in nested JSON
+- **Approach**: Build a speculation index for field locations based on first N records
+- **Mechanism**: Track nesting level and field offsets within each level
+- **Benefit**: Skip parsing irrelevant fields entirely
+
+#### 2. Two-Level Architecture
+
+**Upper Level (Logical):**
+- Speculates about field positions based on schema regularity
+- Records: "Field X typically appears at level 2, offset 50 bytes from parent"
+- Learns from initial records to predict later ones
+
+**Lower Level (Physical):**
+- Builds structural indices on JSON data using SIMD (similar to simdjson)
+- Maps logical locations to physical byte positions
+- Validates speculation results
+
+#### 3. Structural Indexing (SIMD-based)
+- Uses SIMD to find structural characters: `{`, `}`, `[`, `]`, `:`, `,`
+- Creates bitmaps for each character type
+- **Difference from simdjson**: Mison predates simdjson (2017 vs 2019) and uses simpler structural indexing
+
+#### 4. Speculation Validation
+- When speculation succeeds: Direct jump to field location (fast path)
+- When speculation fails: Fallback to full parsing (slow path)
+- **Success rate**: Very high for regular data (analytics workloads)
+
+### Comparison to simdjson Approach
+
+| Aspect | Mison (2017) | simdjson (2019) |
+|--------|--------------|-----------------|
+| **Primary Goal** | Analytics (selective field access) | General-purpose JSON parsing |
+| **Speculation** | Level-based field location prediction | No speculation (always scans full structure) |
+| **SIMD Usage** | Basic structural indexing | Advanced bit manipulation, quote handling |
+| **Performance** | 10x for selective queries | 2-5x for full document parsing |
+| **Complexity** | Higher (speculation logic) | Lower (deterministic two-stage) |
+| **Robustness** | Requires regular schema | Works on any valid JSON |
+
+**Key Difference**: Mison optimizes for **sparse access** (few fields), simdjson optimizes for **dense access** (full document).
+
+### Applicability to simdcsv
+
+**Rating**: LOW-MEDIUM
+
+**Why Low-Medium**:
+- CSV parsing typically requires **full row parsing**, not selective field access
+- Speculation overhead may not pay off when all fields are needed
+- CSV's flat structure doesn't benefit from level-based speculation (no nesting)
+- **However**: If integrating with vroom's lazy evaluation, selective column parsing could benefit
+
+**Potential Applications**:
+1. **Selective Column Parsing**: If only parsing specific columns in wide CSV (e.g., columns 5, 10, 50 out of 100)
+2. **Schema Learning**: Build field offset predictions for regular CSV files
+3. **Skip Optimization**: Jump directly to target columns without scanning intervening fields
+
+**Limitations for CSV**:
+- CSV lacks the nesting hierarchy that Mison exploits
+- Most CSV use cases require all fields (data loading, transformation)
+- Speculation complexity may not justify performance gains
+
+### Implementation Priority: LOW
+
+**Rationale**:
+- **Not applicable to core CSV parsing** (requires full row scans)
+- **Potentially useful for column-selective parsing** (low priority feature)
+- vroom's Altrep already handles lazy column materialization differently
+- Effort better spent on core SIMD optimizations (simdjson approach)
+
+**Should we change our approach?**: **NO**
+- Mison's speculation is orthogonal to SIMD structural indexing
+- simdjson's deterministic approach is better fit for CSV
+- If we need selective parsing, implement as separate optimization pass
+
+### Limitations & Edge Cases
+1. **Irregular Data**: Speculation fails frequently on non-uniform JSON
+2. **Schema Changes**: Requires re-learning when structure changes
+3. **Memory Overhead**: Speculation indices consume memory
+4. **Fallback Cost**: Failed speculation incurs parsing overhead
+
+### References
+- [VLDB Paper](http://www.vldb.org/pvldb/vol10/p1118-li.pdf)
+- [Microsoft Research](https://www.microsoft.com/en-us/research/publication/mison-fast-json-parser-data-analytics/)
+- [ACM DL](https://dl.acm.org/doi/10.14778/3115404.3115416)
+
+---
+
+## 5. Sparser - "Filter Before You Parse" (Palkar et al., VLDB 2018)
+
+### Paper Details
+- **Authors**: Shoumik Palkar, Firas Abuzaid, Peter Bailis, Matei Zaharia
+- **Published**: VLDB 2018, Proc. VLDB Endow. 11(11)
+- **Institution**: Stanford DAWN Lab
+- **Available**: [PDF](https://www.vldb.org/pvldb/vol11/p1576-palkar.pdf) | [GitHub](https://github.com/stanford-futuredata/sparser)
+
+### Summary
+
+Sparser introduces a **filter-before-parse** paradigm for faster analytics on raw data. Instead of parsing entire files, it uses SIMD-accelerated **raw filters (RFs)** to identify relevant records before invoking expensive parsers.
+
+**Core Insight**: Most analytical queries access small fractions of data. Filtering raw bytes is 10-100x faster than parsing. Even with false positives, filter+parse is faster than parse-everything.
+
+**Performance**: 22x faster than Mison on JSON, 9x end-to-end speedup in Apache Spark.
+
+### Key Techniques
+
+#### 1. Raw Filters (RFs)
+- **Definition**: Fast, SIMD-based operators that search for byte sequences in raw data
+- **Property**: Never yield false negatives, occasionally false positives
+- **Implementation**: Substring search using SIMD parallelism
+
+**Example**: Query for records where `city = "Seattle"`
+- RF searches for byte sequence `"Seattle"` in raw file
+- Returns byte offsets of potential matches
+- Parser only invoked on filtered regions
+
+#### 2. SIMD Substring Search
+- **Technique**: Pack target byte sequence into SIMD vector register
+- **Process**: Slide window over input, compare multiple bytes in parallel
+- **Speed**: Process 16-64 bytes per instruction (SSE/AVX)
+
+**Implementation**:
+```c
+// Pseudocode for SIMD substring search
+needle_vec = _mm_set1_epi8(needle[0]);  // Broadcast first byte
+for (i = 0; i < data_len; i += 16) {
+    haystack = _mm_loadu_si128(data + i);
+    mask = _mm_cmpeq_epi8(needle_vec, haystack);
+    // Check full match on mask hits
+}
+```
+
+#### 3. Filter Cascades
+- **Observation**: Multiple filters can be chained (AND/OR logic)
+- **Optimization**: Order filters by selectivity (most selective first)
+- **Benefit**: Skip expensive filters when early filters eliminate data
+
+**Example**: `city = "Seattle" AND year > 2020`
+- RF1: Search for `"Seattle"` (high selectivity)
+- RF2: Search for `"202"` (low selectivity, only on RF1 results)
+- Parse only records passing both filters
+
+#### 4. Optimizer
+- **Challenge**: Many possible filter orderings (exponential space)
+- **Solution**: Cost-based optimizer estimates filter selectivity
+- **Result**: 10x performance difference between good/bad orderings
+
+### Comparison to simdjson/Mison
+
+| Aspect | Sparser | simdjson | Mison |
+|--------|---------|----------|-------|
+| **Approach** | Filter then parse | Always parse | Speculative parse |
+| **SIMD Use** | Substring search | Structural indexing | Basic structural indexing |
+| **Best For** | Selective queries (1% of data) | Full document parsing | Field projection |
+| **False Positives** | Tolerates (filtered later) | N/A (exact) | N/A (validates speculation) |
+| **Speedup vs baseline** | 22x (on selective queries) | 2-5x | 10x (on projections) |
+
+**Key Difference**: Sparser avoids parsing most data; simdjson/Mison parse everything (just faster).
+
+### Applicability to simdcsv
+
+**Rating**: LOW for core CSV parsing, MEDIUM-HIGH for query integration
+
+**Why Low for Core Parsing**:
+- CSV parsing typically requires scanning every field
+- Filter-before-parse benefits erode when most data is relevant
+- Extra filtering pass adds overhead for full-table scans
+
+**Why Medium-High for Query Integration**:
+- **If integrated with query engine** (e.g., DuckDB, vroom): High value
+- **Use case**: `SELECT * FROM csv WHERE state = 'CA'`
+  - RF searches for `"CA"` in raw CSV
+  - Only parse rows containing `"CA"`
+  - 10x+ speedup on selective queries
+
+**Hybrid Approach**:
+- **Full scan**: Use simdcsv's SIMD parser (no filtering)
+- **Selective query**: Apply Sparser-style RFs before parsing
+
+### Implementation Priority: LOW (for Phase 1-3), MEDIUM (for future query optimization)
+
+**Rationale**:
+- **Not applicable to vroom integration** (vroom parses all data for indexing)
+- **Valuable for future query pushdown** (if simdcsv exposes query API)
+- **Defer until after core SIMD parser is production-ready**
+
+**Should we change our approach?**: **NO for core parser, YES for future query layer**
+- Core simdcsv: Focus on fast full-file parsing (simdjson approach)
+- Future enhancement: Add optional RF layer for query integration
+- Implementation: Separate module, opt-in for query workloads
+
+### Limitations & Edge Cases
+1. **False Positives**: RF matches require validation (parsing overhead)
+2. **Low Selectivity**: When query matches >10% of data, filtering overhead dominates
+3. **Substring Ambiguity**: Searching for `"123"` matches `"1234"`, `"0123"`, etc.
+4. **Delimiter Awareness**: RFs don't respect CSV structure (may match across fields)
+
+### Novel Ideas for simdcsv
+1. **Structure-Aware RFs**: Combine Sparser's filtering with simdjson's structural indexing
+   - Use structural index to identify field boundaries
+   - Apply RFs only within target columns (not across delimiters)
+   - **Benefit**: Eliminate false positives from cross-field matches
+
+2. **Predicate Pushdown to Indexing**:
+   - During simdcsv's indexing pass, apply simple predicates
+   - Mark rows matching predicates in index metadata
+   - **Use case**: vroom could skip loading non-matching rows
+
+### References
+- [VLDB Paper](https://www.vldb.org/pvldb/vol11/p1576-palkar.pdf)
+- [Stanford DAWN](https://dawn.cs.stanford.edu/news/filter-you-parse-faster-analytics-raw-data-sparser)
+- [GitHub](https://github.com/stanford-futuredata/sparser)
+- [The Morning Paper Summary](https://blog.acolyer.org/2018/08/20/filter-before-you-parse-faster-analytics-on-raw-data-with-sparser/)
+
+---
+
+## 6. Recent Work (2020-2026): AVX-512, ARM SVE, and Modern SIMD CSV Parsers
+
+### 6.1 AVX-512 Optimizations for Text Parsing
+
+#### Research & Blog Posts (2020-2024)
+
+**Daniel Lemire's Work** (2018-2025):
+- **"AVX-512: when and how to use these new instructions"** (2018) - [Blog](https://lemire.me/blog/2018/09/07/avx-512-when-and-how-to-use-these-new-instructions/)
+- **"Parsing JSON faster with Intel AVX-512"** (2022) - [Blog](https://lemire.me/blog/2022/05/25/parsing-json-faster-with-intel-avx-512/)
+- **"Parsing integers quickly with AVX-512"** (2023) - [Blog](https://lemire.me/blog/2023/09/22/parsing-integers-quickly-with-avx-512/)
+
+**Key Findings**:
+
+#### 1. AVX-512 Performance Gains
+- simdjson 2.0 (2022): **25-40% faster** with AVX-512 vs AVX2
+- Integer parsing: **2x parallelism** (parse 2 numbers simultaneously)
+- Mask registers (k1-k8): Enable branchless conditional operations
+
+#### 2. AVX-512 Downclocking Pitfall ⚠️
+
+**Critical Issue**: AVX-512 causes CPU frequency throttling
+
+**Sources**:
+- [Ice Lake AVX-512 Downclocking](https://travisdowns.github.io/blog/2020/08/19/icl-avx512-freq.html) (Travis Downs, 2020)
+- [On the dangers of Intel's frequency scaling](https://blog.cloudflare.com/on-the-dangers-of-intels-frequency-scaling/) (Cloudflare, 2020)
+- [The dangers of AVX-512 throttling](https://lemire.me/blog/2018/08/15/the-dangers-of-avx-512-throttling-a-3-impact/) (Lemire, 2018)
+
+**Performance Impact**:
+- **Worst case**: CPU runs at **50% of base frequency** during AVX-512 execution
+- **License-based downclocking**: Different frequency limits for light/heavy 512-bit instructions
+- **Whole-application impact**: Slowdown persists after AVX-512 code finishes (frequency ramp-up delay)
+- **Multi-core**: Throttling affects all cores, not just the one executing AVX-512
+
+**Mitigation Strategies**:
+1. **Hybrid approach**: Use AVX-512 only for proven bottlenecks
+2. **Benchmark on target hardware**: Some CPUs (AMD Zen 4+) handle AVX-512 better
+3. **Runtime detection**: Fallback to AVX2 if AVX-512 slower on specific CPU
+4. **Avoid heavy instructions**: Prefer lighter 512-bit ops over FP-intensive ones
+
+**Recommendation for simdcsv**:
+- **Implement AVX-512 support**: But make it **opt-in, not default**
+- **Benchmark thoroughly**: Test on Intel Ice Lake, Sapphire Rapids, AMD Zen 4
+- **Runtime selection**: Use AVX-512 only if measured faster than AVX2 on specific hardware
+
+#### 3. AMD Zen 4 AVX-512 (2022+)
+- **Good news**: AMD Zen 4 (2022) implements AVX-512 **without severe downclocking**
+- **Performance**: Competitive with Intel, sometimes better (no frequency penalty)
+- **Caveat**: "Avoid compressing words to memory" - some ops still inefficient ([Lemire 2025](https://lemire.me/blog/2025/02/14/avx-512-gotcha-avoid-compressing-words-to-memory-with-amd-zen-4-processors/))
+
+### Summary: AVX-512 for CSV Parsing
+
+**Rating**: MEDIUM (worthwhile, but not critical)
+
+**Pros**:
+- 25-40% potential speedup (simdjson results)
+- Mask registers simplify branchless code
+- AMD Zen 4+ makes it more viable
+
+**Cons**:
+- Downclocking on older Intel CPUs (2018-2021)
+- Implementation complexity (more intrinsics)
+- AVX2 already provides excellent performance (>5 GB/s target achievable)
+
+**Should we change our approach?**: **NO, but add AVX-512 as optional optimization**
+- **Phase 2-3**: Perfect AVX2 implementation first
+- **Phase 4**: Add AVX-512 as runtime-selected optimization
+- **Testing**: Benchmark on multiple CPUs, use faster path dynamically
+
+**Implementation Priority**: MEDIUM (Phase 4+)
+
+---
+
+### 6.2 ARM SVE/SVE2 (2019-2024)
+
+#### Overview
+- **SVE**: Scalable Vector Extension (ARMv8-A, 2017)
+- **SVE2**: Enhanced version (ARMv9-A, 2021)
+- **Key Innovation**: Variable vector length (128-2048 bits, runtime-determined)
+
+**Sources**:
+- [ARM SVE2 Explained](https://www.techno-logs.com/2024/10/03/arm-sve2-explained/)
+- [Introduction to SVE2](https://developer.arm.com/-/media/Arm%20Developer%20Community/PDF/102340_0001_00_en_introduction-to-sve2.pdf)
+- [Critical Look at SVE2](https://gist.github.com/atlury/c9e02bfe7489b5d3b37986b066478154)
+
+#### Key Features
+
+**1. Predication-Centric Design**
+- **Predicate registers**: P0-P7 (govern which lanes are active)
+- **Merging vs Zeroing**: `/m` (preserve inactive) vs `/z` (zero inactive)
+- **Use case**: Loop control without padding/scalar cleanup
+
+**2. Length-Agnostic Algorithms**
+- Write code once, runs on 128-bit (NEON) to 2048-bit SVE
+- No hard-coded vector widths
+- **Benefit**: Forward compatibility (future CPUs with wider vectors)
+
+**3. Comparison to AVX-512
+
+| Feature | ARM SVE/SVE2 | x86 AVX-512 |
+|---------|--------------|-------------|
+| **Vector Width** | Variable (128-2048 bits) | Fixed 512 bits |
+| **Predication** | Mandatory (all instructions) | Optional |
+| **Comparison Result** | `svbool_t` predicate | Integer mask |
+| **Hardware** | Neoverse V1+, Apple M-series (limited), Graviton 3+ | Intel Ice Lake+, AMD Zen 4+ |
+| **Downclocking** | None reported | Severe on older Intel |
+
+#### Applicability to simdcsv
+
+**Rating**: MEDIUM-HIGH (for ARM support)
+
+**Why Medium-High**:
+- **ARM market growing**: AWS Graviton, Apple Silicon, cloud ARM instances
+- **No downclocking penalty**: Unlike AVX-512 on Intel
+- **Length-agnostic code**: Single implementation scales across ARM CPUs
+
+**Challenges**:
+- **Limited hardware availability**: SVE2 still rare (mostly server chips)
+- **NEON more common**: Most ARM devices use 128-bit NEON
+- **Porting effort**: Requires learning SVE intrinsics/assembly
+
+**Should we change our approach?**: **NO for Phase 1-3, YES for ARM support (Phase 5)**
+- **Phase 1-3**: Focus on x86 AVX2/AVX-512
+- **Phase 5**: Port to ARM using Highway or SIMDe
+  - **Highway**: Abstracts NEON/SVE, easier porting
+  - **Direct SVE**: Faster, but harder to maintain
+
+**Implementation Priority**: MEDIUM (Phase 5)
+
+**Specific Recommendation**:
+- Use **Google Highway** for ARM support (see Section 2.2 of production plan)
+- Highway abstracts NEON/SVE, providing portable code
+- If Highway overhead acceptable (<5%), no need for hand-coded SVE
+
+#### SVE for Text Processing
+- **String operations**: SVE2 includes string processing acceleration
+- **Example**: `strlen` with vector partitioning, speculative loads (`ldff1b`)
+- **Benefit**: CSV parsing could use SVE2's string acceleration
+
+**Research Gap**: No published papers on SVE-based CSV parsing found (2020-2024)
+
+---
+
+### 6.3 Production SIMD CSV Parsers (2020-2025)
+
+#### Sep (.NET/C#) - 21 GB/s CSV Parser
+
+**Project**: [nietras.com/sep](https://nietras.com/2025/05/09/sep-0-10-0/)
+
+**Performance**: **21 GB/s** on AMD Ryzen 9950X (AVX-512, April 2025)
+- ~3x improvement since initial release (June 2023)
+- AVX-512-to-256 parser circumvents .NET mask register inefficiencies
+
+**Key Techniques**:
+- **Quote matching**: Carryless multiply (PCLMULQDQ) for "quote mask" → "quoted regions mask"
+- **Branchless design**: SIMD asks "where are ALL commas/quotes in 64 bytes?" not "is this a comma?"
+- **Data parallelism**: Transforms control-flow problem into data-parallel problem
+
+**Insight**: Demonstrates simdjson-style techniques **translate directly to CSV** with excellent results
+
+**Applicability**: HIGH (validates our simdjson-based approach)
+
+---
+
+#### zsv - "World's Fastest CSV Parser"
+
+**Project**: [GitHub - liquidaty/zsv](https://github.com/liquidaty/zsv)
+
+**Claims**:
+- SIMD operations, efficient memory use
+- 25%+ faster than xsv, 2x+ faster than polars/duckdb on `select` operations
+- **Memory footprint**: 1.5 MB (vs 4 MB xsv, 76 MB duckdb, 475 MB polars)
+
+**Features**:
+- CLI + library (C)
+- WebAssembly compilation support
+- Extensible architecture
+
+**Applicability**: MEDIUM (competitor, validates SIMD CSV market)
+
+**Note**: Claims of "world's fastest" are marketing; Sep achieves 21 GB/s vs zsv's undisclosed performance
+
+---
+
+#### DuckDB CSV Parser 2.0 (2024)
+
+**Project**: [DuckDB CSV improvements 2024](https://duckdb.org/2024/10/16/driving-csv-performance-benchmarking-duckdb-with-the-nyc-taxi-dataset)
+
+**Key Improvements (2022-2024)**:
+
+1. **Unified Parser** (Feb 2024, v0.10.0):
+   - Merged single-threaded + parallel parsers
+   - Pre-computed selection vectors for row→column conversion
+   - Custom CSV sniffer (auto-detection)
+
+2. **SIMD via Compiler Auto-Vectorization**:
+   - **Implicit SIMD**: Write C++ for compiler to auto-generate SIMD
+   - **64-bit word operations**: Process 8 bytes at a time
+   - **Vectorized batches**: Process columns in cache-friendly batches
+
+3. **Performance Results**:
+   - CSV reader **only 2x slower than Parquet** (Feb 2024)
+   - **15% speedup** in parallel newline finding (Feb 2025, v1.2.0)
+   - Parallelism improvements (union_by_name, Sept 2024)
+
+**Comparison to simdcsv Approach**:
+
+| Aspect | DuckDB | simdcsv (planned) |
+|--------|--------|-------------------|
+| **SIMD** | Compiler auto-vectorization | Explicit SIMD intrinsics (AVX2/AVX-512) |
+| **Performance** | 2x slower than Parquet | Target: Match/exceed DuckDB |
+| **Portability** | High (compiler handles SIMD) | Medium (manual porting needed) |
+| **Optimization** | Easier to maintain | Higher performance ceiling |
+
+**Applicability**: HIGH (validates CSV parsing is critical, SIMD necessary for performance)
+
+**Should we change our approach?**: **NO**
+- DuckDB's auto-vectorization is conservative (compiler limitations)
+- Explicit SIMD (simdjson approach) can achieve higher performance
+- simdcsv's index-based output is better suited for vroom than DuckDB's columnar output
+
+---
+
+#### Apache Arrow CSV Reader (2020-2024)
+
+**Project**: [Arrow Python/C++ CSV](https://arrow.apache.org/docs/python/csv.html)
+
+**SIMD Features**:
+- Columnar reading (SIMD-friendly memory layout)
+- Multi-threaded parsing
+- SIMD level configuration (`ARROW_SIMD_LEVEL`)
+
+**Performance**:
+- **5x speedup** vs traditional row-based readers (2022 benchmark)
+- Recent optimizations (2025): BYTE_STREAM_SPLIT, fixed-length arrays 3x faster
+
+**Applicability**: MEDIUM
+- Arrow's columnar format differs from simdcsv's index-based output
+- SIMD techniques applicable, but different data model
+
+---
+
+### 6.4 Key Takeaways from Recent Work (2020-2026)
+
+#### ✅ Validation of simdjson Approach for CSV
+- **Sep (21 GB/s)**: Proves simdjson techniques work brilliantly for CSV
+- **DuckDB CSV 2.0**: Shows CSV parsing is critical for analytics databases
+- **Arrow**: Columnar + SIMD is industry standard
+
+**Conclusion**: **Our simdjson-based approach is validated by recent industry trends**
+
+#### ⚠️ AVX-512 Caution
+- **Downclocking is real**: Measure before deploying
+- **AMD Zen 4 better**: Less penalty than Intel Ice Lake
+- **Runtime selection essential**: Fall back to AVX2 if AVX-512 slower
+
+#### 🚀 ARM SVE/SVE2 Opportunity
+- **Growing market**: Graviton, Apple Silicon
+- **No downclocking**: Unlike AVX-512
+- **Use Highway**: Portable NEON/SVE support
+
+#### 📚 No Major Research Breakthroughs Since simdjson (2019)
+- **2020-2024 research**: Incremental improvements, not paradigm shifts
+- **simdjson remains state-of-the-art**: No better approach published
+- **Industry adoption**: Sep, DuckDB, Arrow all use similar techniques
+
+**Should we change our approach?**: **NO**
+- simdjson's two-stage SIMD parsing is still the best known technique
+- Recent work validates rather than contradicts our approach
+- Focus on **excellent implementation** of proven techniques, not novel algorithms
+
+---
+
+## 7. Updated Implementation Roadmap & Priorities
+
+### High Priority (Unchanged)
+
+1. **Langdale & Lemire Two-Stage SIMD** (Phase 2)
+   - ✅ Validated by Sep (21 GB/s), DuckDB, Arrow
+   - Expected 2-4x speedup for simdcsv
+   - **Status**: Confirmed as highest-priority optimization
+
+2. **CleverCSV Dialect Detection** (Phase 3)
+   - Essential for vroom integration
+   - Robust real-world CSV handling
+   - **Status**: Confirmed medium-high priority
+
+### Medium Priority (Updated)
+
+3. **AVX-512 Support** (Phase 4) - **Updated: Add runtime selection**
+   - 25-40% potential speedup (if no downclocking)
+   - **Mitigation**: Benchmark on target CPU, fall back to AVX2 if slower
+   - **Priority**: Medium (worthwhile, but not critical given AVX2 achieves >5 GB/s)
+
+4. **ARM NEON/SVE Support via Highway** (Phase 5)
+   - ✅ Validated: ARM market growing, no downclocking issues
+   - **Recommendation**: Use Highway for portability
+   - **Priority**: Medium (defer until AVX2 perfect)
+
+### Low Priority (Unchanged/Added)
+
+5. **Mison-Style Speculation** (Future)
+   - Not applicable to full CSV parsing
+   - **Possible use**: Selective column parsing (low-priority feature)
+   - **Status**: Defer indefinitely
+
+6. **Sparser-Style Raw Filters** (Future Query Layer)
+   - Not applicable to vroom (requires full indexing)
+   - **Possible use**: Future query pushdown API
+   - **Status**: Defer to post-1.0
+
+### New Insights from Recent Work
+
+7. **Compiler Auto-Vectorization** (DuckDB approach)
+   - **Trade-off**: Easier maintenance vs lower performance ceiling
+   - **Decision**: Stick with explicit SIMD for maximum performance
+   - **Rationale**: simdcsv targets high-performance niche (vroom integration)
+
+8. **Branchless Design** (Sep validation)
+   - ✅ Confirms: Bit manipulation > branching
+   - **Action**: Aggressively eliminate branches in Phase 2
+   - **Technique**: Use SIMD masks + arithmetic instead of `if` statements
+
+---
+
+## 8. Final Recommendations
+
+### Should We Change Our Approach?
+
+**NO** - Our simdjson-based approach remains optimal:
+
+1. **Validated by Industry**: Sep (21 GB/s), DuckDB, Arrow all use similar techniques
+2. **No Better Alternative**: Research 2020-2024 found no superior approach
+3. **Proven Performance**: 2-5x speedup achievable with proper implementation
+
+### Key Adjustments Based on Recent Research
+
+1. **AVX-512**: Add with runtime selection (don't assume it's always faster)
+2. **ARM**: Plan Highway-based port in Phase 5 (growing market)
+3. **Benchmarking**: Continuously compare vs Sep, DuckDB, zsv
+4. **Branchless**: Prioritize branch elimination (validated by Sep's success)
+
+### Updated Success Criteria
+
+- **AVX2**: Target **>5 GB/s** (conservative, Sep achieves 21 GB/s with AVX-512)
+- **AVX-512**: Target **>8 GB/s** (if no downclocking on target hardware)
+- **vs vroom**: **2-3x faster indexing** than current vroom (unchanged)
+- **vs DuckDB**: Competitive or faster than DuckDB CSV reader
+
+---
+
+**Document Status**: ✅ Phase 1 Complete + Recent Work Review (2020-2026)
 **Last Updated**: 2026-01-01
-**Next Review**: After SIMD library evaluation
+**Next Review**: After AVX2 implementation (Phase 2)
