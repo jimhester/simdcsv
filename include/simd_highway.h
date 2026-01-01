@@ -6,7 +6,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <cstdio>  // for fprintf debugging
 #include "common_defs.h"
 
 // Include Highway for portable SIMD
@@ -55,63 +54,22 @@ really_inline simd_input fill_input(const uint8_t* ptr) {
 // Compare mask against input using Highway SIMD
 // Pass by const reference to avoid ABI issues with 64-byte alignment on ARM
 HWY_ATTR really_inline uint64_t cmp_mask_against_input(const simd_input& in, uint8_t m) {
-  // ===== HIGHWAY_DEBUG_START =====
-  fprintf(stderr, "[HIGHWAY_DEBUG] cmp_mask_against_input ENTRY: m=%u\n", m);
-  // ===== HIGHWAY_DEBUG_END =====
-
   const hn::ScalableTag<uint8_t> d;
   const size_t N = hn::Lanes(d);
 
-  // ===== HIGHWAY_DEBUG_START =====
-  fprintf(stderr, "[HIGHWAY_DEBUG] ScalableTag created: N=%zu lanes\n", N);
-  // ===== HIGHWAY_DEBUG_END =====
-
   // Set comparison value in all lanes
   const auto match_value = hn::Set(d, m);
-
-  // ===== HIGHWAY_DEBUG_START =====
-  fprintf(stderr, "[HIGHWAY_DEBUG] Set() completed\n");
-  // ===== HIGHWAY_DEBUG_END =====
 
   uint64_t result = 0;
 
   // Process data in Highway vector-sized chunks
   size_t i = 0;
-  size_t iteration = 0;
   for (; i + N <= 64; i += N) {
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] SIMD iteration %zu: i=%zu, i+N=%zu\n", iteration, i, i+N);
-    // ===== HIGHWAY_DEBUG_END =====
-
     auto vec = hn::LoadU(d, in.data + i);
-
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] LoadU completed at i=%zu\n", i);
-    // ===== HIGHWAY_DEBUG_END =====
-
     auto mask = hn::Eq(vec, match_value);
-
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] Eq completed at i=%zu\n", i);
-    // ===== HIGHWAY_DEBUG_END =====
-
     uint64_t bits = hn::BitsFromMask(d, mask);
-
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] BitsFromMask completed: bits=0x%llx\n", (unsigned long long)bits);
-    // ===== HIGHWAY_DEBUG_END =====
-
     result |= (bits << i);
-
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] Bit shift completed: result=0x%llx\n", (unsigned long long)result);
-    iteration++;
-    // ===== HIGHWAY_DEBUG_END =====
   }
-
-  // ===== HIGHWAY_DEBUG_START =====
-  fprintf(stderr, "[HIGHWAY_DEBUG] SIMD loop done, i=%zu, starting scalar loop\n", i);
-  // ===== HIGHWAY_DEBUG_END =====
 
   // Handle remaining bytes with scalar code
   for (; i < 64; ++i) {
@@ -119,10 +77,6 @@ HWY_ATTR really_inline uint64_t cmp_mask_against_input(const simd_input& in, uin
       result |= (1ULL << i);
     }
   }
-
-  // ===== HIGHWAY_DEBUG_START =====
-  fprintf(stderr, "[HIGHWAY_DEBUG] cmp_mask_against_input EXIT: result=0x%llx\n", (unsigned long long)result);
-  // ===== HIGHWAY_DEBUG_END =====
 
   return result;
 }

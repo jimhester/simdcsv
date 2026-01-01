@@ -215,11 +215,6 @@ class two_pass {
 
   static uint64_t second_pass_simd(const uint8_t* buf, size_t start, size_t end,
                                    index* out, size_t thread_id) {
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] second_pass_simd ENTRY: thread_id=%zu, start=%zu, end=%zu\n",
-            thread_id, start, end);
-    // ===== HIGHWAY_DEBUG_END =====
-
     bool is_quoted = false;
     size_t len = end - start;
     uint64_t idx = 0;
@@ -228,10 +223,6 @@ class two_pass {
     uint64_t prev_iter_inside_quote = 0ULL;  // either all zeros or all ones
     uint64_t base = 0;
     buf += start;
-
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] second_pass_simd: entering main loop, len=%zu\n", len);
-    // ===== HIGHWAY_DEBUG_END =====
 
     for (; idx < len; idx += 64) {
       __builtin_prefetch(buf + idx + 128);
@@ -366,11 +357,6 @@ class two_pass {
   }
 
   bool parse_speculate(const uint8_t* buf, index& out, size_t len) {
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] parse_speculate ENTRY: n_threads=%u, len=%zu\n",
-            out.n_threads, len);
-    // ===== HIGHWAY_DEBUG_END =====
-
     uint8_t n_threads = out.n_threads;
     if (n_threads == 1) {
       out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
@@ -381,18 +367,10 @@ class two_pass {
     std::vector<std::future<stats>> first_pass_fut(n_threads);
     std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
 
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] parse_speculate: launching %u first_pass tasks\n", n_threads);
-    // ===== HIGHWAY_DEBUG_END =====
-
     for (int i = 0; i < n_threads; ++i) {
       first_pass_fut[i] = std::async(std::launch::async, first_pass_speculate, buf,
                                      chunk_size * i, chunk_size * (i + 1));
     }
-
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] parse_speculate: getting first_pass results\n");
-    // ===== HIGHWAY_DEBUG_END =====
 
     auto st = first_pass_fut[0].get();
     printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
@@ -406,33 +384,14 @@ class two_pass {
     }
     chunk_pos[n_threads] = len;
 
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] parse_speculate: launching %u second_pass tasks\n", n_threads);
-    // ===== HIGHWAY_DEBUG_END =====
-
     for (int i = 0; i < n_threads; ++i) {
-      // ===== HIGHWAY_DEBUG_START =====
-      fprintf(stderr, "[HIGHWAY_DEBUG] parse_speculate: launching second_pass task %d (chunk_pos[%d]=%zu, chunk_pos[%d]=%zu)\n",
-              i, i, chunk_pos[i], i+1, chunk_pos[i+1]);
-      // ===== HIGHWAY_DEBUG_END =====
       second_pass_fut[i] = std::async(std::launch::async, second_pass_simd, buf,
                                       chunk_pos[i], chunk_pos[i + 1], &out, i);
     }
 
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] parse_speculate: getting second_pass results\n");
-    // ===== HIGHWAY_DEBUG_END =====
-
     for (int i = 0; i < n_threads; ++i) {
-      // ===== HIGHWAY_DEBUG_START =====
-      fprintf(stderr, "[HIGHWAY_DEBUG] parse_speculate: getting result from task %d\n", i);
-      // ===== HIGHWAY_DEBUG_END =====
       out.n_indexes[i] = second_pass_fut[i].get();
     }
-
-    // ===== HIGHWAY_DEBUG_START =====
-    fprintf(stderr, "[HIGHWAY_DEBUG] parse_speculate EXIT: success\n");
-    // ===== HIGHWAY_DEBUG_END =====
 
     return true;
   }
