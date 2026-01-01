@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Code coverage option
+option(ENABLE_COVERAGE "Enable code coverage reporting" OFF)
+
 # Compiler flags
 # Only use -march=native on x86_64 platforms (AVX2 implementation)
 # ARM support (NEON/SVE) is planned for future releases
@@ -21,6 +24,17 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-O0 -g)
 else()
     add_compile_options(-O3)
+endif()
+
+# Code coverage flags
+if(ENABLE_COVERAGE)
+    message(STATUS "Code coverage enabled")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        add_compile_options(--coverage -fprofile-arcs -ftest-coverage)
+        add_link_options(--coverage)
+    else()
+        message(WARNING "Code coverage not supported for compiler: ${CMAKE_CXX_COMPILER_ID}")
+    endif()
 endif()
 
 # Library target
