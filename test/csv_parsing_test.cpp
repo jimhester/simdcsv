@@ -1,12 +1,11 @@
 #include <gtest/gtest.h>
 #include <string>
 
-#ifdef __AVX2__
 #include "two_pass.h"
 #include "io_util.h"
 
 // ============================================================================
-// PARSER INTEGRATION TESTS (x86_64 only - requires AVX2)
+// PARSER INTEGRATION TESTS (portable SIMD via Highway)
 // ============================================================================
 
 class CSVParserTest : public ::testing::Test {
@@ -197,18 +196,6 @@ TEST_F(CSVParserTest, MultiThreadedParsing) {
     // Note: Column detection not yet implemented in experimental parser
     // EXPECT_GT(idx.columns, 0) << "Should detect columns";
 }
-
-#else
-
-// ============================================================================
-// PLACEHOLDER TESTS (non-x86_64 platforms)
-// ============================================================================
-
-TEST(CSVParserTest, SIMD_NotAvailable) {
-    GTEST_SKIP() << "SIMD CSV parsing tests require AVX2 (x86_64 platform)";
-}
-
-#endif // __AVX2__
 
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);

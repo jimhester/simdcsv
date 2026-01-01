@@ -3,8 +3,9 @@
 #include <future>
 #include <limits>
 #include <vector>
+#include <cstring>  // for memcpy
 #include "inttypes.h"
-#include "simd.h"
+#include "simd_highway.h"
 
 namespace simdcsv {
 
@@ -85,7 +86,7 @@ class two_pass {
 
       /* TODO: look into removing branches if possible */
       if (len - idx < 64) {
-        mask = _blsmsk_u64(1ULL << (len - idx));
+        mask = blsmsk_u64(1ULL << (len - idx));
       }
 
       uint64_t quotes = cmp_mask_against_input(in, '"') & mask;
@@ -224,7 +225,7 @@ class two_pass {
       uint64_t mask = ~0ULL;
 
       if (len - idx < 64) {
-        mask = _blsmsk_u64(1ULL << (len - idx));
+        mask = blsmsk_u64(1ULL << (len - idx));
       }
 
       uint64_t quotes = cmp_mask_against_input(in, '"') & mask;
