@@ -1,0 +1,43 @@
+﻿2026-01-01T22:26:26.2481002Z ##[group]Run cmake -B build -DCMAKE_BUILD_TYPE=Debug
+2026-01-01T22:26:26.2481394Z [36;1mcmake -B build -DCMAKE_BUILD_TYPE=Debug[0m
+2026-01-01T22:26:26.2514092Z shell: /usr/bin/bash -e {0}
+2026-01-01T22:26:26.2514331Z ##[endgroup]
+2026-01-01T22:26:27.1688270Z -- The CXX compiler identification is GNU 13.3.0
+2026-01-01T22:26:27.1859602Z -- Detecting CXX compiler ABI info
+2026-01-01T22:26:27.2793410Z -- Detecting CXX compiler ABI info - done
+2026-01-01T22:26:27.2966091Z -- Check for working CXX compiler: /usr/bin/c++ - skipped
+2026-01-01T22:26:27.2973584Z -- Detecting CXX compile features
+2026-01-01T22:26:27.2982919Z -- Detecting CXX compile features - done
+2026-01-01T22:26:30.0628582Z CMake Deprecation Warning at build/_deps/highway-src/CMakeLists.txt:28 (cmake_policy):
+2026-01-01T22:26:30.0629448Z   The OLD behavior for policy CMP0111 will be removed from a future version
+2026-01-01T22:26:30.0629954Z   of CMake.
+2026-01-01T22:26:30.0630105Z 
+2026-01-01T22:26:30.0630392Z   The cmake-policies(7) manual explains that the OLD behaviors of all
+2026-01-01T22:26:30.0631197Z   policies are deprecated and that a policy should be set to OLD only under
+2026-01-01T22:26:30.0631937Z   specific short-term circumstances.  Projects should be ported to the NEW
+2026-01-01T22:26:30.0632576Z   behavior and not rely on setting a policy to OLD.
+2026-01-01T22:26:30.0632810Z 
+2026-01-01T22:26:30.0632815Z 
+2026-01-01T22:26:30.7084552Z -- The C compiler identification is GNU 13.3.0
+2026-01-01T22:26:30.7332132Z -- Detecting C compiler ABI info
+2026-01-01T22:26:30.8162680Z -- Detecting C compiler ABI info - done
+2026-01-01T22:26:30.8330305Z -- Check for working C compiler: /usr/bin/cc - skipped
+2026-01-01T22:26:30.8334467Z -- Detecting C compile features
+2026-01-01T22:26:30.8339522Z -- Detecting C compile features - done
+2026-01-01T22:26:30.8438703Z -- Performing Test ATOMICS_LOCK_FREE_INSTRUCTIONS
+2026-01-01T22:26:31.0599077Z -- Performing Test ATOMICS_LOCK_FREE_INSTRUCTIONS - Success
+2026-01-01T22:26:31.2017389Z -- Performing Test HWY_EMSCRIPTEN
+2026-01-01T22:26:31.2418794Z -- Performing Test HWY_EMSCRIPTEN - Failed
+2026-01-01T22:26:31.2420321Z -- Performing Test HWY_RISCV
+2026-01-01T22:26:31.2673047Z -- Performing Test HWY_RISCV - Failed
+2026-01-01T22:26:31.2794387Z -- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+2026-01-01T22:26:31.4056518Z -- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+2026-01-01T22:26:31.4066402Z -- Found Threads: TRUE
+2026-01-01T22:26:31.4076040Z -- Looking for sys/auxv.h
+2026-01-01T22:26:31.4675614Z -- Looking for sys/auxv.h - found
+2026-01-01T22:26:31.4676257Z -- Looking for asm/hwcap.h
+2026-01-01T22:26:31.4965515Z -- Looking for asm/hwcap.h - not found
+2026-01-01T22:26:34.0427131Z -- Found Python3: /usr/bin/python3.12 (found version "3.12.3") found components: Interpreter
+2026-01-01T22:26:34.0630557Z -- Configuring done (7.8s)
+2026-01-01T22:26:34.1129660Z -- Generating done (0.0s)
+2026-01-01T22:26:34.1133530Z -- Build files have been written to: /home/runner/work/simdcsv/simdcsv/build

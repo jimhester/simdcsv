@@ -1,0 +1,197 @@
+﻿2026-01-01T22:31:00.2910939Z ##[group]Run cd build && ctest --output-on-failure
+2026-01-01T22:31:00.2911338Z [36;1mcd build && ctest --output-on-failure[0m
+2026-01-01T22:31:00.2942784Z shell: /usr/bin/bash -e {0}
+2026-01-01T22:31:00.2943021Z ##[endgroup]
+2026-01-01T22:31:00.8148798Z Test project /home/runner/work/simdcsv/simdcsv/build
+2026-01-01T22:31:00.8955084Z       Start  1: CSVFileTest.SimpleCSVExists
+2026-01-01T22:31:00.9277202Z  1/94 Test  #1: CSVFileTest.SimpleCSVExists ..............................   Passed    0.00 sec
+2026-01-01T22:31:00.9279593Z       Start  2: CSVFileTest.SimpleCSVStructure
+2026-01-01T22:31:00.9312871Z  2/94 Test  #2: CSVFileTest.SimpleCSVStructure ...........................   Passed    0.00 sec
+2026-01-01T22:31:00.9314336Z       Start  3: CSVFileTest.SimpleCSVFieldCount
+2026-01-01T22:31:00.9347047Z  3/94 Test  #3: CSVFileTest.SimpleCSVFieldCount ..........................   Passed    0.00 sec
+2026-01-01T22:31:00.9348446Z       Start  4: CSVFileTest.SimpleNoHeaderExists
+2026-01-01T22:31:00.9384195Z  4/94 Test  #4: CSVFileTest.SimpleNoHeaderExists .........................   Passed    0.00 sec
+2026-01-01T22:31:00.9385625Z       Start  5: CSVFileTest.SingleColumnExists
+2026-01-01T22:31:00.9421132Z  5/94 Test  #5: CSVFileTest.SingleColumnExists ...........................   Passed    0.00 sec
+2026-01-01T22:31:00.9422563Z       Start  6: CSVFileTest.WideColumnsExists
+2026-01-01T22:31:00.9456142Z  6/94 Test  #6: CSVFileTest.WideColumnsExists ............................   Passed    0.00 sec
+2026-01-01T22:31:00.9457805Z       Start  7: CSVFileTest.ManyRowsExists
+2026-01-01T22:31:00.9491361Z  7/94 Test  #7: CSVFileTest.ManyRowsExists ...............................   Passed    0.00 sec
+2026-01-01T22:31:00.9492758Z       Start  8: CSVFileTest.QuotedFieldsExists
+2026-01-01T22:31:00.9525787Z  8/94 Test  #8: CSVFileTest.QuotedFieldsExists ...........................   Passed    0.00 sec
+2026-01-01T22:31:00.9527510Z       Start  9: CSVFileTest.QuotedFieldsContainsQuotes
+2026-01-01T22:31:00.9561147Z  9/94 Test  #9: CSVFileTest.QuotedFieldsContainsQuotes ...................   Passed    0.00 sec
+2026-01-01T22:31:00.9562542Z       Start 10: CSVFileTest.EscapedQuotesExists
+2026-01-01T22:31:00.9595643Z 10/94 Test #10: CSVFileTest.EscapedQuotesExists ..........................   Passed    0.00 sec
+2026-01-01T22:31:00.9597348Z       Start 11: CSVFileTest.EscapedQuotesContainsDoubledQuotes
+2026-01-01T22:31:00.9630721Z 11/94 Test #11: CSVFileTest.EscapedQuotesContainsDoubledQuotes ...........   Passed    0.00 sec
+2026-01-01T22:31:00.9632074Z       Start 12: CSVFileTest.MixedQuotedExists
+2026-01-01T22:31:00.9664750Z 12/94 Test #12: CSVFileTest.MixedQuotedExists ............................   Passed    0.00 sec
+2026-01-01T22:31:00.9666199Z       Start 13: CSVFileTest.EmbeddedSeparatorsExists
+2026-01-01T22:31:00.9699265Z 13/94 Test #13: CSVFileTest.EmbeddedSeparatorsExists .....................   Passed    0.00 sec
+2026-01-01T22:31:00.9700583Z       Start 14: CSVFileTest.NewlinesInQuotesExists
+2026-01-01T22:31:00.9740374Z 14/94 Test #14: CSVFileTest.NewlinesInQuotesExists .......................   Passed    0.00 sec
+2026-01-01T22:31:00.9741910Z       Start 15: CSVFileTest.NewlinesInQuotesContainsEmbeddedNewlines
+2026-01-01T22:31:00.9777653Z 15/94 Test #15: CSVFileTest.NewlinesInQuotesContainsEmbeddedNewlines .....   Passed    0.00 sec
+2026-01-01T22:31:00.9779004Z       Start 16: CSVFileTest.SemicolonSeparatorExists
+2026-01-01T22:31:00.9812679Z 16/94 Test #16: CSVFileTest.SemicolonSeparatorExists .....................   Passed    0.00 sec
+2026-01-01T22:31:00.9814141Z       Start 17: CSVFileTest.SemicolonSeparatorHasSemicolons
+2026-01-01T22:31:00.9847340Z 17/94 Test #17: CSVFileTest.SemicolonSeparatorHasSemicolons ..............   Passed    0.00 sec
+2026-01-01T22:31:00.9848830Z       Start 18: CSVFileTest.TabSeparatorExists
+2026-01-01T22:31:00.9881807Z 18/94 Test #18: CSVFileTest.TabSeparatorExists ...........................   Passed    0.00 sec
+2026-01-01T22:31:00.9883147Z       Start 19: CSVFileTest.TabSeparatorHasTabs
+2026-01-01T22:31:00.9916291Z 19/94 Test #19: CSVFileTest.TabSeparatorHasTabs ..........................   Passed    0.00 sec
+2026-01-01T22:31:00.9917864Z       Start 20: CSVFileTest.PipeSeparatorExists
+2026-01-01T22:31:00.9951277Z 20/94 Test #20: CSVFileTest.PipeSeparatorExists ..........................   Passed    0.00 sec
+2026-01-01T22:31:00.9952646Z       Start 21: CSVFileTest.PipeSeparatorHasPipes
+2026-01-01T22:31:00.9986205Z 21/94 Test #21: CSVFileTest.PipeSeparatorHasPipes ........................   Passed    0.00 sec
+2026-01-01T22:31:00.9987745Z       Start 22: CSVFileTest.EmptyFieldsExists
+2026-01-01T22:31:01.0022389Z 22/94 Test #22: CSVFileTest.EmptyFieldsExists ............................   Passed    0.00 sec
+2026-01-01T22:31:01.0023801Z       Start 23: CSVFileTest.EmptyFieldsContainsConsecutiveCommas
+2026-01-01T22:31:01.0058463Z 23/94 Test #23: CSVFileTest.EmptyFieldsContainsConsecutiveCommas .........   Passed    0.00 sec
+2026-01-01T22:31:01.0059588Z       Start 24: CSVFileTest.SingleCellExists
+2026-01-01T22:31:01.0092850Z 24/94 Test #24: CSVFileTest.SingleCellExists .............................   Passed    0.00 sec
+2026-01-01T22:31:01.0094102Z       Start 25: CSVFileTest.SingleRowHeaderOnlyExists
+2026-01-01T22:31:01.0128808Z 25/94 Test #25: CSVFileTest.SingleRowHeaderOnlyExists ....................   Passed    0.00 sec
+2026-01-01T22:31:01.0130038Z       Start 26: CSVFileTest.EmptyFileExists
+2026-01-01T22:31:01.0163272Z 26/94 Test #26: CSVFileTest.EmptyFileExists ..............................   Passed    0.00 sec
+2026-01-01T22:31:01.0164448Z       Start 27: CSVFileTest.EmptyFileIsEmpty
+2026-01-01T22:31:01.0198740Z 27/94 Test #27: CSVFileTest.EmptyFileIsEmpty .............................   Passed    0.00 sec
+2026-01-01T22:31:01.0200203Z       Start 28: CSVFileTest.WhitespaceFieldsExists
+2026-01-01T22:31:01.0234369Z 28/94 Test #28: CSVFileTest.WhitespaceFieldsExists .......................   Passed    0.00 sec
+2026-01-01T22:31:01.0235936Z       Start 29: CSVFileTest.CRLFLineEndingsExists
+2026-01-01T22:31:01.0269503Z 29/94 Test #29: CSVFileTest.CRLFLineEndingsExists ........................   Passed    0.00 sec
+2026-01-01T22:31:01.0271075Z       Start 30: CSVFileTest.CRLFLineEndingsHasCRLF
+2026-01-01T22:31:01.0305428Z 30/94 Test #30: CSVFileTest.CRLFLineEndingsHasCRLF .......................   Passed    0.00 sec
+2026-01-01T22:31:01.0307030Z       Start 31: CSVFileTest.LFLineEndingsExists
+2026-01-01T22:31:01.0340186Z 31/94 Test #31: CSVFileTest.LFLineEndingsExists ..........................   Passed    0.00 sec
+2026-01-01T22:31:01.0341795Z       Start 32: CSVFileTest.CRLineEndingsExists
+2026-01-01T22:31:01.0375760Z 32/94 Test #32: CSVFileTest.CRLineEndingsExists ..........................   Passed    0.00 sec
+2026-01-01T22:31:01.0377311Z       Start 33: CSVFileTest.CRLineEndingsHasCR
+2026-01-01T22:31:01.0411570Z 33/94 Test #33: CSVFileTest.CRLineEndingsHasCR ...........................   Passed    0.00 sec
+2026-01-01T22:31:01.0413204Z       Start 34: CSVFileTest.NoFinalNewlineExists
+2026-01-01T22:31:01.0447134Z 34/94 Test #34: CSVFileTest.NoFinalNewlineExists .........................   Passed    0.00 sec
+2026-01-01T22:31:01.0448798Z       Start 35: CSVFileTest.NoFinalNewlineEndsWithoutNewline
+2026-01-01T22:31:01.0483080Z 35/94 Test #35: CSVFileTest.NoFinalNewlineEndsWithoutNewline .............   Passed    0.00 sec
+2026-01-01T22:31:01.0484361Z       Start 36: CSVFileTest.FinancialDataExists
+2026-01-01T22:31:01.0518992Z 36/94 Test #36: CSVFileTest.FinancialDataExists ..........................   Passed    0.00 sec
+2026-01-01T22:31:01.0520280Z       Start 37: CSVFileTest.FinancialDataHasExpectedColumns
+2026-01-01T22:31:01.0555031Z 37/94 Test #37: CSVFileTest.FinancialDataHasExpectedColumns ..............   Passed    0.00 sec
+2026-01-01T22:31:01.0556303Z       Start 38: CSVFileTest.ContactsDataExists
+2026-01-01T22:31:01.0591867Z 38/94 Test #38: CSVFileTest.ContactsDataExists ...........................   Passed    0.00 sec
+2026-01-01T22:31:01.0593120Z       Start 39: CSVFileTest.UnicodeDataExists
+2026-01-01T22:31:01.0627636Z 39/94 Test #39: CSVFileTest.UnicodeDataExists ............................   Passed    0.00 sec
+2026-01-01T22:31:01.0629045Z       Start 40: CSVFileTest.UnicodeDataContainsUTF8
+2026-01-01T22:31:01.0663135Z 40/94 Test #40: CSVFileTest.UnicodeDataContainsUTF8 ......................   Passed    0.00 sec
+2026-01-01T22:31:01.0664734Z       Start 41: CSVFileTest.ProductCatalogExists
+2026-01-01T22:31:01.0699486Z 41/94 Test #41: CSVFileTest.ProductCatalogExists .........................   Passed    0.00 sec
+2026-01-01T22:31:01.0700820Z       Start 42: CSVFileTest.AllTestFilesPresent
+2026-01-01T22:31:01.0745136Z 42/94 Test #42: CSVFileTest.AllTestFilesPresent ..........................   Passed    0.00 sec
+2026-01-01T22:31:01.0746949Z       Start 43: ErrorHandlingTest.ErrorCodeToString
+2026-01-01T22:31:01.0783150Z 43/94 Test #43: ErrorHandlingTest.ErrorCodeToString ......................   Passed    0.00 sec
+2026-01-01T22:31:01.0784574Z       Start 44: ErrorHandlingTest.ErrorSeverityToString
+2026-01-01T22:31:01.0819611Z 44/94 Test #44: ErrorHandlingTest.ErrorSeverityToString ..................   Passed    0.00 sec
+2026-01-01T22:31:01.0820865Z       Start 45: ParseErrorTest.Construction
+2026-01-01T22:31:01.0854761Z 45/94 Test #45: ParseErrorTest.Construction ..............................   Passed    0.00 sec
+2026-01-01T22:31:01.0856055Z       Start 46: ParseErrorTest.ToString
+2026-01-01T22:31:01.0890469Z 46/94 Test #46: ParseErrorTest.ToString ..................................   Passed    0.00 sec
+2026-01-01T22:31:01.0891798Z       Start 47: ErrorCollectorTest.DefaultMode
+2026-01-01T22:31:01.0925091Z 47/94 Test #47: ErrorCollectorTest.DefaultMode ...........................   Passed    0.00 sec
+2026-01-01T22:31:01.0926379Z       Start 48: ErrorCollectorTest.AddError
+2026-01-01T22:31:01.0960273Z 48/94 Test #48: ErrorCollectorTest.AddError ..............................   Passed    0.00 sec
+2026-01-01T22:31:01.0961577Z       Start 49: ErrorCollectorTest.AddErrorConvenience
+2026-01-01T22:31:01.0996031Z 49/94 Test #49: ErrorCollectorTest.AddErrorConvenience ...................   Passed    0.00 sec
+2026-01-01T22:31:01.0997568Z       Start 50: ErrorCollectorTest.StrictModeStopsOnFirstError
+2026-01-01T22:31:01.1031857Z 50/94 Test #50: ErrorCollectorTest.StrictModeStopsOnFirstError ...........   Passed    0.00 sec
+2026-01-01T22:31:01.1033260Z       Start 51: ErrorCollectorTest.PermissiveModeAllowsNonFatalErrors
+2026-01-01T22:31:01.1067750Z 51/94 Test #51: ErrorCollectorTest.PermissiveModeAllowsNonFatalErrors ....   Passed    0.00 sec
+2026-01-01T22:31:01.1069188Z       Start 52: ErrorCollectorTest.FatalErrorStopsEvenInPermissiveMode
+2026-01-01T22:31:01.1103545Z 52/94 Test #52: ErrorCollectorTest.FatalErrorStopsEvenInPermissiveMode ...   Passed    0.00 sec
+2026-01-01T22:31:01.1104923Z       Start 53: ErrorCollectorTest.WarningsDontStopParsing
+2026-01-01T22:31:01.1139843Z 53/94 Test #53: ErrorCollectorTest.WarningsDontStopParsing ...............   Passed    0.00 sec
+2026-01-01T22:31:01.1141084Z       Start 54: ErrorCollectorTest.MultipleErrors
+2026-01-01T22:31:01.1175794Z 54/94 Test #54: ErrorCollectorTest.MultipleErrors ........................   Passed    0.00 sec
+2026-01-01T22:31:01.1177438Z       Start 55: ErrorCollectorTest.Clear
+2026-01-01T22:31:01.1211863Z 55/94 Test #55: ErrorCollectorTest.Clear .................................   Passed    0.00 sec
+2026-01-01T22:31:01.1213241Z       Start 56: ErrorCollectorTest.Summary
+2026-01-01T22:31:01.1248065Z 56/94 Test #56: ErrorCollectorTest.Summary ...............................   Passed    0.00 sec
+2026-01-01T22:31:01.1249863Z       Start 57: ErrorCollectorTest.SummaryWithFatal
+2026-01-01T22:31:01.1283560Z 57/94 Test #57: ErrorCollectorTest.SummaryWithFatal ......................   Passed    0.00 sec
+2026-01-01T22:31:01.1285085Z       Start 58: ErrorCollectorTest.EmptySummary
+2026-01-01T22:31:01.1318547Z 58/94 Test #58: ErrorCollectorTest.EmptySummary ..........................   Passed    0.00 sec
+2026-01-01T22:31:01.1320120Z       Start 59: ParseExceptionTest.SingleError
+2026-01-01T22:31:01.1353780Z 59/94 Test #59: ParseExceptionTest.SingleError ...........................   Passed    0.00 sec
+2026-01-01T22:31:01.1355335Z       Start 60: ParseExceptionTest.MultipleErrors
+2026-01-01T22:31:01.1389064Z 60/94 Test #60: ParseExceptionTest.MultipleErrors ........................   Passed    0.00 sec
+2026-01-01T22:31:01.1390597Z       Start 61: MalformedCSVTest.UnclosedQuoteExists
+2026-01-01T22:31:01.1424967Z 61/94 Test #61: MalformedCSVTest.UnclosedQuoteExists .....................   Passed    0.00 sec
+2026-01-01T22:31:01.1426571Z       Start 62: MalformedCSVTest.UnclosedQuoteEOFExists
+2026-01-01T22:31:01.1462064Z 62/94 Test #62: MalformedCSVTest.UnclosedQuoteEOFExists ..................   Passed    0.00 sec
+2026-01-01T22:31:01.1463691Z       Start 63: MalformedCSVTest.QuoteInUnquotedFieldExists
+2026-01-01T22:31:01.1498237Z 63/94 Test #63: MalformedCSVTest.QuoteInUnquotedFieldExists ..............   Passed    0.00 sec
+2026-01-01T22:31:01.1499766Z       Start 64: MalformedCSVTest.InconsistentColumnsExists
+2026-01-01T22:31:01.1534145Z 64/94 Test #64: MalformedCSVTest.InconsistentColumnsExists ...............   Passed    0.00 sec
+2026-01-01T22:31:01.1535759Z       Start 65: MalformedCSVTest.InconsistentColumnsAllRowsExists
+2026-01-01T22:31:01.1570151Z 65/94 Test #65: MalformedCSVTest.InconsistentColumnsAllRowsExists ........   Passed    0.00 sec
+2026-01-01T22:31:01.1571802Z       Start 66: MalformedCSVTest.InvalidQuoteEscapeExists
+2026-01-01T22:31:01.1607116Z 66/94 Test #66: MalformedCSVTest.InvalidQuoteEscapeExists ................   Passed    0.00 sec
+2026-01-01T22:31:01.1608690Z       Start 67: MalformedCSVTest.EmptyHeaderExists
+2026-01-01T22:31:01.1643312Z 67/94 Test #67: MalformedCSVTest.EmptyHeaderExists .......................   Passed    0.00 sec
+2026-01-01T22:31:01.1644972Z       Start 68: MalformedCSVTest.DuplicateColumnNamesExists
+2026-01-01T22:31:01.1680846Z 68/94 Test #68: MalformedCSVTest.DuplicateColumnNamesExists ..............   Passed    0.00 sec
+2026-01-01T22:31:01.1682740Z       Start 69: MalformedCSVTest.TrailingQuoteExists
+2026-01-01T22:31:01.1719064Z 69/94 Test #69: MalformedCSVTest.TrailingQuoteExists .....................   Passed    0.00 sec
+2026-01-01T22:31:01.1720392Z       Start 70: MalformedCSVTest.QuoteNotAtStartExists
+2026-01-01T22:31:01.1774688Z 70/94 Test #70: MalformedCSVTest.QuoteNotAtStartExists ...................   Passed    0.01 sec
+2026-01-01T22:31:01.1776138Z       Start 71: MalformedCSVTest.MultipleErrorsExists
+2026-01-01T22:31:01.1813394Z 71/94 Test #71: MalformedCSVTest.MultipleErrorsExists ....................   Passed    0.00 sec
+2026-01-01T22:31:01.1814694Z       Start 72: MalformedCSVTest.MixedLineEndingsExists
+2026-01-01T22:31:01.1851433Z 72/94 Test #72: MalformedCSVTest.MixedLineEndingsExists ..................   Passed    0.00 sec
+2026-01-01T22:31:01.1852968Z       Start 73: MalformedCSVTest.NullByteExists
+2026-01-01T22:31:01.1888854Z 73/94 Test #73: MalformedCSVTest.NullByteExists ..........................   Passed    0.00 sec
+2026-01-01T22:31:01.1890324Z       Start 74: MalformedCSVTest.TripleQuoteExists
+2026-01-01T22:31:01.1925958Z 74/94 Test #74: MalformedCSVTest.TripleQuoteExists .......................   Passed    0.00 sec
+2026-01-01T22:31:01.1927624Z       Start 75: MalformedCSVTest.UnescapedQuoteInQuotedExists
+2026-01-01T22:31:01.1962552Z 75/94 Test #75: MalformedCSVTest.UnescapedQuoteInQuotedExists ............   Passed    0.00 sec
+2026-01-01T22:31:01.1964000Z       Start 76: MalformedCSVTest.QuoteAfterDataExists
+2026-01-01T22:31:01.2000232Z 76/94 Test #76: MalformedCSVTest.QuoteAfterDataExists ....................   Passed    0.00 sec
+2026-01-01T22:31:01.2001627Z       Start 77: MalformedCSVTest.AllMalformedFilesPresent
+2026-01-01T22:31:01.2037107Z 77/94 Test #77: MalformedCSVTest.AllMalformedFilesPresent ................   Passed    0.00 sec
+2026-01-01T22:31:01.2038619Z       Start 78: ErrorModeTest.StrictModeDefinition
+2026-01-01T22:31:01.2073649Z 78/94 Test #78: ErrorModeTest.StrictModeDefinition .......................   Passed    0.00 sec
+2026-01-01T22:31:01.2075045Z       Start 79: ErrorModeTest.PermissiveModeDefinition
+2026-01-01T22:31:01.2110734Z 79/94 Test #79: ErrorModeTest.PermissiveModeDefinition ...................   Passed    0.00 sec
+2026-01-01T22:31:01.2112155Z       Start 80: ErrorModeTest.BestEffortModeDefinition
+2026-01-01T22:31:01.2147414Z 80/94 Test #80: ErrorModeTest.BestEffortModeDefinition ...................   Passed    0.00 sec
+2026-01-01T22:31:01.2148876Z       Start 81: IOUtilTest.GetCorpusFileNotFound
+2026-01-01T22:31:01.2184913Z 81/94 Test #81: IOUtilTest.GetCorpusFileNotFound .........................   Passed    0.00 sec
+2026-01-01T22:31:01.2186290Z       Start 82: IOUtilTest.GetCorpusInvalidPath
+2026-01-01T22:31:01.2221878Z 82/94 Test #82: IOUtilTest.GetCorpusInvalidPath ..........................   Passed    0.00 sec
+2026-01-01T22:31:01.2223251Z       Start 83: CSVParserTest.ParseSimpleCSV
+2026-01-01T22:31:01.2257498Z 83/94 Test #83: CSVParserTest.ParseSimpleCSV .............................   Passed    0.00 sec
+2026-01-01T22:31:01.2259521Z       Start 84: CSVParserTest.ParseSimpleCSVColumnCount
+2026-01-01T22:31:01.2293481Z 84/94 Test #84: CSVParserTest.ParseSimpleCSVColumnCount ..................   Passed    0.00 sec
+2026-01-01T22:31:01.2295141Z       Start 85: CSVParserTest.ParseWideColumnsCSV
+2026-01-01T22:31:01.2330778Z 85/94 Test #85: CSVParserTest.ParseWideColumnsCSV ........................   Passed    0.00 sec
+2026-01-01T22:31:01.2332341Z       Start 86: CSVParserTest.ParseSingleColumnCSV
+2026-01-01T22:31:01.2365971Z 86/94 Test #86: CSVParserTest.ParseSingleColumnCSV .......................   Passed    0.00 sec
+2026-01-01T22:31:01.2367908Z       Start 87: CSVParserTest.ParseQuotedFieldsCSV
+2026-01-01T22:31:01.2402398Z 87/94 Test #87: CSVParserTest.ParseQuotedFieldsCSV .......................   Passed    0.00 sec
+2026-01-01T22:31:01.2404071Z       Start 88: CSVParserTest.ParseEscapedQuotesCSV
+2026-01-01T22:31:01.2439412Z 88/94 Test #88: CSVParserTest.ParseEscapedQuotesCSV ......................   Passed    0.00 sec
+2026-01-01T22:31:01.2441044Z       Start 89: CSVParserTest.ParseNewlinesInQuotesCSV
+2026-01-01T22:31:01.2475298Z 89/94 Test #89: CSVParserTest.ParseNewlinesInQuotesCSV ...................   Passed    0.00 sec
+2026-01-01T22:31:01.2477023Z       Start 90: CSVParserTest.ParseFinancialDataCSV
+2026-01-01T22:31:01.2512620Z 90/94 Test #90: CSVParserTest.ParseFinancialDataCSV ......................   Passed    0.00 sec
+2026-01-01T22:31:01.2514448Z       Start 91: CSVParserTest.ParseUnicodeCSV
+2026-01-01T22:31:01.2550875Z 91/94 Test #91: CSVParserTest.ParseUnicodeCSV ............................   Passed    0.00 sec
+2026-01-01T22:31:01.2552812Z       Start 92: CSVParserTest.ParseEmptyFieldsCSV
+2026-01-01T22:31:01.2586907Z 92/94 Test #92: CSVParserTest.ParseEmptyFieldsCSV ........................   Passed    0.00 sec
+2026-01-01T22:31:01.2588541Z       Start 93: CSVParserTest.IndexStructureValid
+2026-01-01T22:31:01.2622266Z 93/94 Test #93: CSVParserTest.IndexStructureValid ........................   Passed    0.00 sec
+2026-01-01T22:31:01.2623879Z       Start 94: CSVParserTest.MultiThreadedParsing
+2026-01-01T22:31:01.2667156Z 94/94 Test #94: CSVParserTest.MultiThreadedParsing .......................   Passed    0.00 sec
+2026-01-01T22:31:01.2671052Z 
+2026-01-01T22:31:01.2671252Z 100% tests passed, 0 tests failed out of 94
+2026-01-01T22:31:01.2671495Z 
+2026-01-01T22:31:01.2671590Z Total Test time (real) =   0.45 sec

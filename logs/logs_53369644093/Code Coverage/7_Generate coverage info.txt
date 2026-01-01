@@ -1,0 +1,108 @@
+﻿2026-01-01T22:31:01.2894947Z ##[group]Run cd build
+2026-01-01T22:31:01.2895215Z [36;1mcd build[0m
+2026-01-01T22:31:01.2895727Z [36;1mlcov --capture --directory . --output-file coverage.info --exclude '*/build/_deps/*' --exclude '*/test/*' --ignore-errors mismatch,unused[0m
+2026-01-01T22:31:01.2896276Z [36;1mlcov --list coverage.info[0m
+2026-01-01T22:31:01.2928047Z shell: /usr/bin/bash -e {0}
+2026-01-01T22:31:01.2928286Z ##[endgroup]
+2026-01-01T22:31:01.7343318Z Capturing coverage data from .
+2026-01-01T22:31:01.7344354Z geninfo cmd: '/usr/bin/geninfo . --output-filename coverage.info --ignore-errors mismatch --ignore-errors unused --exclude */build/_deps/* --exclude */test/* --memory 0'
+2026-01-01T22:31:01.9540750Z Found gcov version: 13.3.0
+2026-01-01T22:31:01.9563815Z Using intermediate gcov format
+2026-01-01T22:31:01.9564318Z Writing temporary data to /tmp/geninfo_datik1b
+2026-01-01T22:31:01.9564741Z Scanning . for .gcda files ...
+2026-01-01T22:31:01.9638601Z Found 9 data files in .
+2026-01-01T22:31:01.9639284Z Processing ./CMakeFiles/error_handling_test.dir/test/error_handling_test.cpp.gcda
+2026-01-01T22:31:02.0570511Z geninfo: WARNING: /usr/include/c++/13/bits/new_allocator.h:88: unexecuted block on non-branch line with non-zero hit count.  Use "geninfo --rc geninfo_unexecuted_blocks=1 to set count to zero.
+2026-01-01T22:31:02.0637340Z Processing ./CMakeFiles/csv_parsing_test.dir/test/csv_parsing_test.cpp.gcda
+2026-01-01T22:31:02.1316593Z geninfo: WARNING: /usr/include/c++/13/bits/allocator.h:178: unexecuted block on non-branch line with non-zero hit count.  Use "geninfo --rc geninfo_unexecuted_blocks=1 to set count to zero.
+2026-01-01T22:31:02.1318579Z 	(use "geninfo --ignore-errors gcov,gcov ..." to suppress this warning)
+2026-01-01T22:31:02.1449980Z Processing ./CMakeFiles/simdcsv_test.dir/test/csv_parser_test.cpp.gcda
+2026-01-01T22:31:02.1860487Z geninfo: WARNING: /usr/include/c++/13/bits/stl_iterator_base_funcs.h:106: unexecuted block on non-branch line with non-zero hit count.  Use "geninfo --rc geninfo_unexecuted_blocks=1 to set count to zero.
+2026-01-01T22:31:02.1861419Z 	(use "geninfo --ignore-errors gcov,gcov ..." to suppress this warning)
+2026-01-01T22:31:02.1914384Z Processing ./CMakeFiles/simdcsv_lib.dir/src/error.cpp.gcda
+2026-01-01T22:31:02.2023115Z geninfo: WARNING: /usr/include/c++/13/bits/new_allocator.h:88: unexecuted block on non-branch line with non-zero hit count.  Use "geninfo --rc geninfo_unexecuted_blocks=1 to set count to zero.
+2026-01-01T22:31:02.2023983Z 	(use "geninfo --ignore-errors gcov,gcov ..." to suppress this warning)
+2026-01-01T22:31:02.2045036Z Processing ./CMakeFiles/simdcsv_lib.dir/src/io_util.cpp.gcda
+2026-01-01T22:31:02.2140802Z Processing ./_deps/highway-build/CMakeFiles/hwy_list_targets.dir/hwy/tests/list_targets.cc.gcda
+2026-01-01T22:31:02.2236396Z Processing ./_deps/highway-build/CMakeFiles/hwy.dir/hwy/targets.cc.gcda
+2026-01-01T22:31:02.2346171Z Processing ./_deps/highway-build/CMakeFiles/hwy.dir/hwy/abort.cc.gcda
+2026-01-01T22:31:02.2457850Z Processing ./_deps/googletest-build/googletest/CMakeFiles/gtest.dir/src/gtest-all.cc.gcda
+2026-01-01T22:31:02.4624017Z geninfo: WARNING: /usr/include/c++/13/bits/new_allocator.h:88: unexecuted block on non-branch line with non-zero hit count.  Use "geninfo --rc geninfo_unexecuted_blocks=1 to set count to zero.
+2026-01-01T22:31:02.4625091Z 	(use "geninfo --ignore-errors gcov,gcov ..." to suppress this warning)
+2026-01-01T22:31:02.6941476Z Excluded data for 34 files due to include/exclude options
+2026-01-01T22:31:02.6942035Z Finished .info-file creation
+2026-01-01T22:31:02.9462210Z                                                |Lines      |Functions|Branches  
+2026-01-01T22:31:02.9463003Z Filename                                       |Rate    Num|Rate  Num|Rate   Num
+2026-01-01T22:31:02.9463726Z ================================================================================
+2026-01-01T22:31:02.9464535Z /home/runner/work/simd...imdcsv/include/error.h|44.1%    34| 0.0%  15|    -    0
+2026-01-01T22:31:02.9465343Z /home/runner/work/simd...csv/include/mem_util.h|66.7%     3| 0.0%   1|    -    0
+2026-01-01T22:31:02.9467330Z /home/runner/work/simd...include/simd_highway.h| 1.8%    57| 0.0%   1|    -    0
+2026-01-01T22:31:02.9468200Z /home/runner/work/simd...csv/include/two_pass.h| 9.3%    86| 0.0%   8|    -    0
+2026-01-01T22:31:02.9468995Z /home/runner/work/simdcsv/simdcsv/src/error.cpp| 7.8%    64| 0.0%   5|    -    0
+2026-01-01T22:31:02.9469791Z /home/runner/work/simd...imdcsv/src/io_util.cpp|11.8%    17| 0.0%   2|    -    0
+2026-01-01T22:31:02.9470545Z /usr/include/c++/13/atomic                     | 400%     1| 0.0%   1|    -    0
+2026-01-01T22:31:02.9471268Z /usr/include/c++/13/bits/alloc_traits.h        | 0.0%    14|    -   0|    -    0
+2026-01-01T22:31:02.9472015Z /usr/include/c++/13/bits/allocated_ptr.h       | 177%    13| 0.0%  10|    -    0
+2026-01-01T22:31:02.9472752Z /usr/include/c++/13/bits/allocator.h           | 0.0%     4|    -   0|    -    0
+2026-01-01T22:31:02.9473485Z /usr/include/c++/13/bits/atomic_base.h         |25.0%    20| 0.0%   4|    -    0
+2026-01-01T22:31:02.9474147Z /usr/include/c++/13/bits/atomic_futex.h        |33.3%     9| 0.0%   1|    -    0
+2026-01-01T22:31:02.9474717Z /usr/include/c++/13/bits/basic_string.h        |77.1%    35| 0.0%  11|    -    0
+2026-01-01T22:31:02.9475258Z /usr/include/c++/13/bits/basic_string.tcc      | 100%    12| 0.0%   6|    -    0
+2026-01-01T22:31:02.9475791Z /usr/include/c++/13/bits/char_traits.h         | 186%     7| 0.0%   2|    -    0
+2026-01-01T22:31:02.9476316Z /usr/include/c++/13/bits/chrono.h              |80.0%    25| 0.0%  20|    -    0
+2026-01-01T22:31:02.9477214Z /usr/include/c++/13/bits/cpp_type_traits.h     | 400%     2| 0.0%   3|    -    0
+2026-01-01T22:31:02.9477759Z /usr/include/c++/13/bits/exception_ptr.h       | 112%     8| 0.0%   3|    -    0
+2026-01-01T22:31:02.9478289Z /usr/include/c++/13/bits/fs_dir.h              | 100%     1| 0.0%   1|    -    0
+2026-01-01T22:31:02.9478787Z /usr/include/c++/13/bits/fs_ops.h              |50.0%     6| 0.0%   3|    -    0
+2026-01-01T22:31:02.9479284Z /usr/include/c++/13/bits/fs_path.h             |55.6%     9| 0.0%   5|    -    0
+2026-01-01T22:31:02.9479826Z /usr/include/c++/13/bits/functional_hash.h     |50.0%     2| 0.0%   1|    -    0
+2026-01-01T22:31:02.9480383Z /usr/include/c++/13/bits/hashtable.h           |27.0%   141| 0.0%  34|    -    0
+2026-01-01T22:31:02.9480930Z /usr/include/c++/13/bits/hashtable_policy.h    |51.0%   102| 0.0%  46|    -    0
+2026-01-01T22:31:02.9481471Z /usr/include/c++/13/bits/invoke.h              | 178%     9| 0.0%  16|    -    0
+2026-01-01T22:31:02.9481991Z /usr/include/c++/13/bits/ios_base.h            |    -     0|    -   0|    -    0
+2026-01-01T22:31:02.9482513Z /usr/include/c++/13/bits/list.tcc              |    -     0|    -   0|    -    0
+2026-01-01T22:31:02.9483025Z /usr/include/c++/13/bits/move.h                |1715%    13| 0.0% 131|    -    0
+2026-01-01T22:31:02.9483556Z /usr/include/c++/13/bits/new_allocator.h       | 733%    12| 0.0%  49|    -    0
+2026-01-01T22:31:02.9484125Z /usr/include/c++/13/bits/predefined_ops.h      | 111%    28| 0.0%  21|    -    0
+2026-01-01T22:31:02.9484685Z /usr/include/c++/13/bits/ptr_traits.h          | 200%     4| 0.0%   6|    -    0
+2026-01-01T22:31:02.9485128Z /usr/include/c++/13/bits/shared_ptr.h          | 125%    12| 0.0%   9|    -    0
+2026-01-01T22:31:02.9485598Z /usr/include/c++/13/bits/shared_ptr_base.h     |85.0%   100| 0.0%  46|    -    0
+2026-01-01T22:31:02.9486053Z /usr/include/c++/13/bits/std_function.h        |70.0%    50| 0.0%  28|    -    0
+2026-01-01T22:31:02.9486473Z /usr/include/c++/13/bits/std_thread.h          |86.7%    30| 0.0%  25|    -    0
+2026-01-01T22:31:02.9487063Z /usr/include/c++/13/bits/stl_algo.h            |36.9%   111| 0.0%  29|    -    0
+2026-01-01T22:31:02.9487485Z /usr/include/c++/13/bits/stl_algobase.h        | 126%    90| 0.0%  45|    -    0
+2026-01-01T22:31:02.9487905Z /usr/include/c++/13/bits/stl_construct.h       | 479%    14| 0.0%  44|    -    0
+2026-01-01T22:31:02.9488328Z /usr/include/c++/13/bits/stl_function.h        | 600%     2| 0.0%   1|    -    0
+2026-01-01T22:31:02.9488897Z /usr/include/c++/13/bits/stl_iterator.h        | 302%    64| 0.0% 126|    -    0
+2026-01-01T22:31:02.9489321Z /usr/include/c++/13/bi..._iterator_base_funcs.h|20.0%    10| 0.0%   1|    -    0
+2026-01-01T22:31:02.9489738Z /usr/include/c++/13/bi..._iterator_base_types.h| 0.0%     1|    -   0|    -    0
+2026-01-01T22:31:02.9490149Z /usr/include/c++/13/bits/stl_list.h            |    -     0|    -   0|    -    0
+2026-01-01T22:31:02.9490560Z /usr/include/c++/13/bits/stl_map.h             | 333%     6| 0.0%   4|    -    0
+2026-01-01T22:31:02.9490967Z /usr/include/c++/13/bits/stl_pair.h            | 500%    10| 0.0%  31|    -    0
+2026-01-01T22:31:02.9491365Z /usr/include/c++/13/bits/stl_set.h             | 350%     2| 0.0%   2|    -    0
+2026-01-01T22:31:02.9491774Z /usr/include/c++/13/bits/stl_tempbuf.h         |28.1%    32| 0.0%   9|    -    0
+2026-01-01T22:31:02.9492184Z /usr/include/c++/13/bits/stl_tree.h            | 468%    34| 0.0%  19|    -    0
+2026-01-01T22:31:02.9492603Z /usr/include/c++/13/bits/stl_uninitialized.h   | 166%    47| 0.0%  43|    -    0
+2026-01-01T22:31:02.9493028Z /usr/include/c++/13/bits/stl_vector.h          | 258%   166| 0.0% 268|    -    0
+2026-01-01T22:31:02.9493452Z /usr/include/c++/13/bits/unique_ptr.h          | 272%    64| 0.0% 110|    -    0
+2026-01-01T22:31:02.9493878Z /usr/include/c++/13/bits/unordered_set.h       |62.5%     8| 0.0%   5|    -    0
+2026-01-01T22:31:02.9494309Z /usr/include/c++/13/bits/vector.tcc            |49.0%    49| 0.0%  12|    -    0
+2026-01-01T22:31:02.9494828Z /usr/include/c++/13/cmath                      |    -     0|    -   0|    -    0
+2026-01-01T22:31:02.9495237Z /usr/include/c++/13/ext/aligned_buffer.h       | 425%     8| 0.0%  12|    -    0
+2026-01-01T22:31:02.9495672Z /usr/include/c++/13/ext/alloc_traits.h         | 0.0%     2|    -   0|    -    0
+2026-01-01T22:31:02.9496097Z /usr/include/c++/13/ext/atomicity.h            | 0.0%     7|    -   0|    -    0
+2026-01-01T22:31:02.9496503Z /usr/include/c++/13/future                     |82.6%    92| 0.0%  60|    -    0
+2026-01-01T22:31:02.9497090Z /usr/include/c++/13/initializer_list           | 300%     3| 0.0%   6|    -    0
+2026-01-01T22:31:02.9497501Z /usr/include/c++/13/iomanip                    | 150%     2| 0.0%   1|    -    0
+2026-01-01T22:31:02.9497892Z /usr/include/c++/13/limits                     |    -     0|    -   0|    -    0
+2026-01-01T22:31:02.9498276Z /usr/include/c++/13/mutex                      |66.7%    15| 0.0%  10|    -    0
+2026-01-01T22:31:02.9498656Z /usr/include/c++/13/new                        | 100%     2| 0.0%   1|    -    0
+2026-01-01T22:31:02.9499051Z /usr/include/c++/13/string_view                | 114%     7| 0.0%   3|    -    0
+2026-01-01T22:31:02.9499460Z /usr/include/c++/13/system_error               |    -     0|    -   0|    -    0
+2026-01-01T22:31:02.9499853Z /usr/include/c++/13/tuple                      | 798%    46| 0.0% 256|    -    0
+2026-01-01T22:31:02.9500247Z /usr/include/c++/13/typeinfo                   |    -     0|    -   0|    -    0
+2026-01-01T22:31:02.9500663Z /usr/include/x86_64-li...++/13/bits/c++config.h|50.0%     2| 0.0%   1|    -    0
+2026-01-01T22:31:02.9501101Z /usr/include/x86_64-li...13/bits/gthr-default.h|40.0%     5| 0.0%   2|    -    0
+2026-01-01T22:31:02.9501527Z /usr/lib/gcc/x86_64-li...13/include/emmintrin.h| 0.0%     7|    -   0|    -    0
+2026-01-01T22:31:02.9501859Z ================================================================================
+2026-01-01T22:31:02.9502126Z                                          Total:| 149%  1838| 0.0%  1k|    -    0

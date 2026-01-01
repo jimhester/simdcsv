@@ -1,0 +1,88 @@
+﻿2026-01-01T22:26:34.1231698Z ##[group]Run cmake --build build --config Debug
+2026-01-01T22:26:34.1232060Z [36;1mcmake --build build --config Debug[0m
+2026-01-01T22:26:34.1265332Z shell: /usr/bin/bash -e {0}
+2026-01-01T22:26:34.1265564Z ##[endgroup]
+2026-01-01T22:26:34.1481451Z [  1%] Building CXX object _deps/highway-build/CMakeFiles/hwy.dir/hwy/abort.cc.o
+2026-01-01T22:26:34.7635705Z [  3%] Building CXX object _deps/highway-build/CMakeFiles/hwy.dir/hwy/aligned_allocator.cc.o
+2026-01-01T22:26:35.1788301Z [  4%] Building CXX object _deps/highway-build/CMakeFiles/hwy.dir/hwy/nanobenchmark.cc.o
+2026-01-01T22:26:36.0233699Z [  6%] Building CXX object _deps/highway-build/CMakeFiles/hwy.dir/hwy/per_target.cc.o
+2026-01-01T22:26:40.9792865Z [  8%] Building CXX object _deps/highway-build/CMakeFiles/hwy.dir/hwy/perf_counters.cc.o
+2026-01-01T22:26:41.5478760Z [  9%] Building CXX object _deps/highway-build/CMakeFiles/hwy.dir/hwy/print.cc.o
+2026-01-01T22:26:41.8302190Z [ 11%] Building CXX object _deps/highway-build/CMakeFiles/hwy.dir/hwy/profiler.cc.o
+2026-01-01T22:26:41.8480591Z [ 13%] Building CXX object _deps/highway-build/CMakeFiles/hwy.dir/hwy/targets.cc.o
+2026-01-01T22:26:42.3421208Z [ 14%] Building CXX object _deps/highway-build/CMakeFiles/hwy.dir/hwy/timer.cc.o
+2026-01-01T22:26:42.7895431Z [ 16%] Linking CXX static library libhwy.a
+2026-01-01T22:26:46.7813582Z [ 16%] Built target hwy
+2026-01-01T22:26:46.7880505Z [ 18%] Building CXX object CMakeFiles/simdcsv_lib.dir/src/io_util.cpp.o
+2026-01-01T22:26:47.0557412Z [ 19%] Building CXX object CMakeFiles/simdcsv_lib.dir/src/error.cpp.o
+2026-01-01T22:26:47.3304849Z [ 21%] Linking CXX static library libsimdcsv_lib.a
+2026-01-01T22:26:47.4125577Z [ 21%] Built target simdcsv_lib
+2026-01-01T22:26:47.4191855Z [ 22%] Building CXX object CMakeFiles/simdcsv.dir/src/main.cpp.o
+2026-01-01T22:26:48.7396233Z [ 24%] Linking CXX executable simdcsv
+2026-01-01T22:26:48.8004040Z [ 24%] Built target simdcsv
+2026-01-01T22:26:48.8071355Z [ 26%] Building CXX object _deps/googletest-build/googletest/CMakeFiles/gtest.dir/src/gtest-all.cc.o
+2026-01-01T22:26:52.5554370Z [ 27%] Linking CXX static library ../../../lib/libgtest.a
+2026-01-01T22:26:52.6736718Z [ 27%] Built target gtest
+2026-01-01T22:26:52.6803556Z [ 29%] Building CXX object _deps/googletest-build/googletest/CMakeFiles/gtest_main.dir/src/gtest_main.cc.o
+2026-01-01T22:26:53.4151405Z [ 31%] Linking CXX static library ../../../lib/libgtest_main.a
+2026-01-01T22:26:53.4941647Z [ 31%] Built target gtest_main
+2026-01-01T22:26:53.5007005Z [ 32%] Building CXX object CMakeFiles/simdcsv_test.dir/test/csv_parser_test.cpp.o
+2026-01-01T22:26:54.8911473Z [ 34%] Linking CXX executable simdcsv_test
+2026-01-01T22:26:55.0226706Z [ 34%] Built target simdcsv_test
+2026-01-01T22:26:55.0292926Z [ 36%] Building CXX object CMakeFiles/error_handling_test.dir/test/error_handling_test.cpp.o
+2026-01-01T22:26:56.5354358Z [ 37%] Linking CXX executable error_handling_test
+2026-01-01T22:26:56.6641395Z [ 37%] Built target error_handling_test
+2026-01-01T22:26:56.6709527Z [ 39%] Building CXX object CMakeFiles/csv_parsing_test.dir/test/csv_parsing_test.cpp.o
+2026-01-01T22:26:58.4632604Z [ 40%] Linking CXX executable csv_parsing_test
+2026-01-01T22:26:58.5910703Z [ 40%] Built target csv_parsing_test
+2026-01-01T22:26:58.5988451Z [ 42%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_128a.cc.o
+2026-01-01T22:27:06.7481220Z [ 44%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_128d.cc.o
+2026-01-01T22:27:14.8681119Z [ 45%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_f16a.cc.o
+2026-01-01T22:27:21.0665400Z [ 47%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_f16d.cc.o
+2026-01-01T22:27:27.1451117Z [ 49%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_f32a.cc.o
+2026-01-01T22:27:35.6476664Z [ 50%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_f32d.cc.o
+2026-01-01T22:27:44.2569616Z [ 52%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_f64a.cc.o
+2026-01-01T22:27:52.4334496Z [ 54%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_f64d.cc.o
+2026-01-01T22:28:00.7210509Z [ 55%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_i16a.cc.o
+2026-01-01T22:28:09.9811618Z [ 57%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_i16d.cc.o
+2026-01-01T22:28:19.0791764Z [ 59%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_i32a.cc.o
+2026-01-01T22:28:27.5658824Z [ 60%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_i32d.cc.o
+2026-01-01T22:28:36.0646432Z [ 62%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_i64a.cc.o
+2026-01-01T22:28:44.1541152Z [ 63%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_i64d.cc.o
+2026-01-01T22:28:52.2628945Z [ 65%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_kv128a.cc.o
+2026-01-01T22:29:00.2515482Z [ 67%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_kv128d.cc.o
+2026-01-01T22:29:08.1983358Z [ 68%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_kv64a.cc.o
+2026-01-01T22:29:16.3292012Z [ 70%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_kv64d.cc.o
+2026-01-01T22:29:24.4811503Z [ 72%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_u16a.cc.o
+2026-01-01T22:29:33.4648702Z [ 73%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_u16d.cc.o
+2026-01-01T22:29:42.4658797Z [ 75%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_u32a.cc.o
+2026-01-01T22:29:50.9633090Z [ 77%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_u32d.cc.o
+2026-01-01T22:29:59.4450999Z [ 78%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_u64a.cc.o
+2026-01-01T22:30:07.5517393Z [ 80%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort_u64d.cc.o
+2026-01-01T22:30:15.6665833Z [ 81%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/image/image.cc.o
+2026-01-01T22:30:16.0188505Z [ 83%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/sort/vqsort.cc.o
+2026-01-01T22:30:16.5854609Z [ 85%] Building CXX object _deps/highway-build/CMakeFiles/hwy_contrib.dir/hwy/contrib/thread_pool/topology.cc.o
+2026-01-01T22:30:17.1989077Z [ 86%] Linking CXX static library libhwy_contrib.a
+2026-01-01T22:30:17.8865182Z [ 86%] Built target hwy_contrib
+2026-01-01T22:30:17.8932374Z [ 88%] Building CXX object _deps/highway-build/CMakeFiles/hwy_test.dir/hwy/tests/test_util.cc.o
+2026-01-01T22:30:18.2338488Z [ 90%] Linking CXX static library libhwy_test.a
+2026-01-01T22:30:18.3134164Z [ 90%] Built target hwy_test
+2026-01-01T22:30:18.3201027Z [ 91%] Building CXX object _deps/highway-build/CMakeFiles/hwy_list_targets.dir/hwy/tests/list_targets.cc.o
+2026-01-01T22:30:18.8106536Z [ 93%] Linking CXX executable hwy_list_targets
+2026-01-01T22:30:18.8608358Z Compiler: GCC 1303
+2026-01-01T22:30:18.8608912Z Config: emu128:0 scalar:0 static:0 all_attain:0 is_test:0
+2026-01-01T22:30:18.8609426Z Have: constexpr_lanes:0 runtime_dispatch:1 auxv:1 f16 type:1/ops1 bf16 type:1/ops1
+2026-01-01T22:30:18.8610318Z Compiled HWY_TARGETS:   AVX10_2 AVX3_SPR AVX3_ZEN4 AVX3_DL AVX3 AVX2 SSE4 SSSE3 SSE2
+2026-01-01T22:30:18.8611190Z HWY_ATTAINABLE_TARGETS: AVX10_2 AVX3_SPR AVX3_ZEN4 AVX3_DL AVX3 AVX2 SSE4 SSSE3 SSE2 SCALAR
+2026-01-01T22:30:18.8611867Z HWY_BASELINE_TARGETS:   SSE2 SCALAR
+2026-01-01T22:30:18.8612255Z HWY_STATIC_TARGET:      SSE2
+2026-01-01T22:30:18.8612906Z HWY_BROKEN_TARGETS:     LASX LSX
+2026-01-01T22:30:18.8613266Z HWY_DISABLED_TARGETS:  
+2026-01-01T22:30:18.8613678Z Current CPU supports:   AVX2 SSE4 SSSE3 SSE2 EMU128 SCALAR
+2026-01-01T22:30:18.8632789Z [ 93%] Built target hwy_list_targets
+2026-01-01T22:30:18.8699993Z [ 95%] Building CXX object _deps/googletest-build/googlemock/CMakeFiles/gmock.dir/src/gmock-all.cc.o
+2026-01-01T22:30:20.6099536Z [ 96%] Linking CXX static library ../../../lib/libgmock.a
+2026-01-01T22:30:20.7046276Z [ 96%] Built target gmock
+2026-01-01T22:30:20.7112455Z [ 98%] Building CXX object _deps/googletest-build/googlemock/CMakeFiles/gmock_main.dir/src/gmock_main.cc.o
+2026-01-01T22:30:21.6695255Z [100%] Linking CXX static library ../../../lib/libgmock_main.a
+2026-01-01T22:30:21.7500204Z [100%] Built target gmock_main

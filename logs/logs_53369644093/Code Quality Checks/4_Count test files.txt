@@ -1,0 +1,15 @@
+﻿2026-01-01T22:26:12.1083491Z ##[group]Run echo "Well-formed CSV test files:"
+2026-01-01T22:26:12.1084119Z [36;1mecho "Well-formed CSV test files:"[0m
+2026-01-01T22:26:12.1084813Z [36;1mfind test/data -name "*.csv" ! -path "*/malformed/*" | wc -l[0m
+2026-01-01T22:26:12.1085492Z [36;1mecho "Malformed CSV test files:"[0m
+2026-01-01T22:26:12.1086064Z [36;1mfind test/data/malformed -name "*.csv" | wc -l[0m
+2026-01-01T22:26:12.1086675Z [36;1mecho "Total test files:"[0m
+2026-01-01T22:26:12.1087164Z [36;1mfind test/data -name "*.csv" | wc -l[0m
+2026-01-01T22:26:12.1117019Z shell: /usr/bin/bash -e {0}
+2026-01-01T22:26:12.1117484Z ##[endgroup]
+2026-01-01T22:26:12.1167314Z Well-formed CSV test files:
+2026-01-01T22:26:12.1186912Z 26
+2026-01-01T22:26:12.1189184Z Malformed CSV test files:
+2026-01-01T22:26:12.1201243Z 16
+2026-01-01T22:26:12.1203133Z Total test files:
+2026-01-01T22:26:12.1216620Z 42

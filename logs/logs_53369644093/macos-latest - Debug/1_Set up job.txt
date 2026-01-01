@@ -1,0 +1,43 @@
+﻿2026-01-01T22:26:09.5230460Z Current runner version: '2.330.0'
+2026-01-01T22:26:09.5245030Z ##[group]Runner Image Provisioner
+2026-01-01T22:26:09.5245480Z Hosted Compute Agent
+2026-01-01T22:26:09.5245800Z Version: 20251211.462
+2026-01-01T22:26:09.5246160Z Commit: 6cbad8c2bb55d58165063d031ccabf57e2d2db61
+2026-01-01T22:26:09.5246570Z Build Date: 2025-12-11T16:28:49Z
+2026-01-01T22:26:09.5246950Z Worker ID: {c194df89-7335-46e0-aad9-0b80ef6dbe09}
+2026-01-01T22:26:09.5247430Z ##[endgroup]
+2026-01-01T22:26:09.5247750Z ##[group]Operating System
+2026-01-01T22:26:09.5248250Z macOS
+2026-01-01T22:26:09.5248540Z 15.7.2
+2026-01-01T22:26:09.5248820Z 24G325
+2026-01-01T22:26:09.5249150Z ##[endgroup]
+2026-01-01T22:26:09.5249470Z ##[group]Runner Image
+2026-01-01T22:26:09.5249910Z Image: macos-15-arm64
+2026-01-01T22:26:09.5250310Z Version: 20251215.0075.1
+2026-01-01T22:26:09.5251000Z Included Software: https://github.com/actions/runner-images/blob/macos-15-arm64/20251215.0075/images/macos/macos-15-arm64-Readme.md
+2026-01-01T22:26:09.5251960Z Image Release: https://github.com/actions/runner-images/releases/tag/macos-15-arm64%2F20251215.0075
+2026-01-01T22:26:09.5252790Z ##[endgroup]
+2026-01-01T22:26:09.5254510Z ##[group]GITHUB_TOKEN Permissions
+2026-01-01T22:26:09.5255640Z Actions: write
+2026-01-01T22:26:09.5256100Z ArtifactMetadata: write
+2026-01-01T22:26:09.5256450Z Attestations: write
+2026-01-01T22:26:09.5256780Z Checks: write
+2026-01-01T22:26:09.5257190Z Contents: write
+2026-01-01T22:26:09.5257560Z Deployments: write
+2026-01-01T22:26:09.5258000Z Discussions: write
+2026-01-01T22:26:09.5258420Z Issues: write
+2026-01-01T22:26:09.5258830Z Metadata: read
+2026-01-01T22:26:09.5259190Z Models: read
+2026-01-01T22:26:09.5259550Z Packages: write
+2026-01-01T22:26:09.5259980Z Pages: write
+2026-01-01T22:26:09.5260380Z PullRequests: write
+2026-01-01T22:26:09.5260960Z RepositoryProjects: write
+2026-01-01T22:26:09.5261490Z SecurityEvents: write
+2026-01-01T22:26:09.5261960Z Statuses: write
+2026-01-01T22:26:09.5262410Z ##[endgroup]
+2026-01-01T22:26:09.5264020Z Secret source: Actions
+2026-01-01T22:26:09.5264500Z Prepare workflow directory
+2026-01-01T22:26:09.5529940Z Prepare all required actions
+2026-01-01T22:26:09.5559800Z Getting action download info
+2026-01-01T22:26:09.8533900Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-01-01T22:26:10.1238610Z Complete job name: macos-latest - Debug

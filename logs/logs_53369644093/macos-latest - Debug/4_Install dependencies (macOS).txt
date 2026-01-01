@@ -1,0 +1,10 @@
+﻿2026-01-01T22:26:11.8296510Z ##[group]Run brew install cmake
+2026-01-01T22:26:11.8296950Z [36;1mbrew install cmake[0m
+2026-01-01T22:26:11.8339020Z shell: /bin/bash -e {0}
+2026-01-01T22:26:11.8339410Z ##[endgroup]
+2026-01-01T22:26:14.4664640Z ✔︎ JSON API formula_tap_migrations.jws.json
+2026-01-01T22:26:14.4665270Z ✔︎ JSON API cask_tap_migrations.jws.json
+2026-01-01T22:26:15.4815750Z ##[warning]cmake 4.2.1 is already installed and up-to-date.
+To reinstall 4.2.1, run:
+  brew reinstall cmake
+

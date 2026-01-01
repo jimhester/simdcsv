@@ -1,0 +1,11 @@
+﻿2026-01-01T22:26:12.1255341Z ##[group]Run # Check that malformed test files exist
+2026-01-01T22:26:12.1256023Z [36;1m# Check that malformed test files exist[0m
+2026-01-01T22:26:12.1256753Z [36;1mMALFORMED_COUNT=$(find test/data/malformed -name "*.csv" | wc -l)[0m
+2026-01-01T22:26:12.1257473Z [36;1mif [ "$MALFORMED_COUNT" -lt 16 ]; then[0m
+2026-01-01T22:26:12.1258230Z [36;1m  echo "Error: Expected at least 16 malformed test files, found $MALFORMED_COUNT"[0m
+2026-01-01T22:26:12.1258963Z [36;1m  exit 1[0m
+2026-01-01T22:26:12.1259326Z [36;1mfi[0m
+2026-01-01T22:26:12.1259806Z [36;1mecho "✓ Found $MALFORMED_COUNT malformed test files"[0m
+2026-01-01T22:26:12.1289445Z shell: /usr/bin/bash -e {0}
+2026-01-01T22:26:12.1289911Z ##[endgroup]
+2026-01-01T22:26:12.1356252Z ✓ Found 16 malformed test files

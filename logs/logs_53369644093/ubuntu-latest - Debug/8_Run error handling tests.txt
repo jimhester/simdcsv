@@ -1,0 +1,110 @@
+﻿2026-01-01T22:30:21.7722336Z ##[group]Run ./build/error_handling_test
+2026-01-01T22:30:21.7722641Z [36;1m./build/error_handling_test[0m
+2026-01-01T22:30:21.7750957Z shell: /usr/bin/bash -e {0}
+2026-01-01T22:30:21.7751183Z ##[endgroup]
+2026-01-01T22:30:21.7810322Z [==========] Running 40 tests from 7 test suites.
+2026-01-01T22:30:21.7810845Z [----------] Global test environment set-up.
+2026-01-01T22:30:21.7811299Z [----------] 2 tests from ErrorHandlingTest
+2026-01-01T22:30:21.7811787Z [ RUN      ] ErrorHandlingTest.ErrorCodeToString
+2026-01-01T22:30:21.7812344Z [       OK ] ErrorHandlingTest.ErrorCodeToString (0 ms)
+2026-01-01T22:30:21.7812911Z [ RUN      ] ErrorHandlingTest.ErrorSeverityToString
+2026-01-01T22:30:21.7813485Z [       OK ] ErrorHandlingTest.ErrorSeverityToString (0 ms)
+2026-01-01T22:30:21.7814052Z [----------] 2 tests from ErrorHandlingTest (0 ms total)
+2026-01-01T22:30:21.7814397Z 
+2026-01-01T22:30:21.7814560Z [----------] 2 tests from ParseErrorTest
+2026-01-01T22:30:21.7815009Z [ RUN      ] ParseErrorTest.Construction
+2026-01-01T22:30:21.7815541Z [       OK ] ParseErrorTest.Construction (0 ms)
+2026-01-01T22:30:21.7816008Z [ RUN      ] ParseErrorTest.ToString
+2026-01-01T22:30:21.7816434Z [       OK ] ParseErrorTest.ToString (0 ms)
+2026-01-01T22:30:21.7817768Z [----------] 2 tests from ParseErrorTest (0 ms total)
+2026-01-01T22:30:21.7818112Z 
+2026-01-01T22:30:21.7818276Z [----------] 12 tests from ErrorCollectorTest
+2026-01-01T22:30:21.7818731Z [ RUN      ] ErrorCollectorTest.DefaultMode
+2026-01-01T22:30:21.7819208Z [       OK ] ErrorCollectorTest.DefaultMode (0 ms)
+2026-01-01T22:30:21.7819918Z [ RUN      ] ErrorCollectorTest.AddError
+2026-01-01T22:30:21.7820222Z [       OK ] ErrorCollectorTest.AddError (0 ms)
+2026-01-01T22:30:21.7820524Z [ RUN      ] ErrorCollectorTest.AddErrorConvenience
+2026-01-01T22:30:21.7820847Z [       OK ] ErrorCollectorTest.AddErrorConvenience (0 ms)
+2026-01-01T22:30:21.7821199Z [ RUN      ] ErrorCollectorTest.StrictModeStopsOnFirstError
+2026-01-01T22:30:21.7821575Z [       OK ] ErrorCollectorTest.StrictModeStopsOnFirstError (0 ms)
+2026-01-01T22:30:21.7822430Z [ RUN      ] ErrorCollectorTest.PermissiveModeAllowsNonFatalErrors
+2026-01-01T22:30:21.7823169Z [       OK ] ErrorCollectorTest.PermissiveModeAllowsNonFatalErrors (0 ms)
+2026-01-01T22:30:21.7823716Z [ RUN      ] ErrorCollectorTest.FatalErrorStopsEvenInPermissiveMode
+2026-01-01T22:30:21.7824178Z [       OK ] ErrorCollectorTest.FatalErrorStopsEvenInPermissiveMode (0 ms)
+2026-01-01T22:30:21.7824575Z [ RUN      ] ErrorCollectorTest.WarningsDontStopParsing
+2026-01-01T22:30:21.7824920Z [       OK ] ErrorCollectorTest.WarningsDontStopParsing (0 ms)
+2026-01-01T22:30:21.7825244Z [ RUN      ] ErrorCollectorTest.MultipleErrors
+2026-01-01T22:30:21.7825542Z [       OK ] ErrorCollectorTest.MultipleErrors (0 ms)
+2026-01-01T22:30:21.7825819Z [ RUN      ] ErrorCollectorTest.Clear
+2026-01-01T22:30:21.7826077Z [       OK ] ErrorCollectorTest.Clear (0 ms)
+2026-01-01T22:30:21.7826328Z [ RUN      ] ErrorCollectorTest.Summary
+2026-01-01T22:30:21.7826588Z [       OK ] ErrorCollectorTest.Summary (0 ms)
+2026-01-01T22:30:21.7827118Z [ RUN      ] ErrorCollectorTest.SummaryWithFatal
+2026-01-01T22:30:21.7827433Z [       OK ] ErrorCollectorTest.SummaryWithFatal (0 ms)
+2026-01-01T22:30:21.7827726Z [ RUN      ] ErrorCollectorTest.EmptySummary
+2026-01-01T22:30:21.7827998Z [       OK ] ErrorCollectorTest.EmptySummary (0 ms)
+2026-01-01T22:30:21.7828298Z [----------] 12 tests from ErrorCollectorTest (0 ms total)
+2026-01-01T22:30:21.7828491Z 
+2026-01-01T22:30:21.7828589Z [----------] 2 tests from ParseExceptionTest
+2026-01-01T22:30:21.7828867Z [ RUN      ] ParseExceptionTest.SingleError
+2026-01-01T22:30:21.7829143Z [       OK ] ParseExceptionTest.SingleError (0 ms)
+2026-01-01T22:30:21.7829433Z [ RUN      ] ParseExceptionTest.MultipleErrors
+2026-01-01T22:30:21.7829720Z [       OK ] ParseExceptionTest.MultipleErrors (0 ms)
+2026-01-01T22:30:21.7830025Z [----------] 2 tests from ParseExceptionTest (0 ms total)
+2026-01-01T22:30:21.7830215Z 
+2026-01-01T22:30:21.7830309Z [----------] 17 tests from MalformedCSVTest
+2026-01-01T22:30:21.7830813Z [ RUN      ] MalformedCSVTest.UnclosedQuoteExists
+2026-01-01T22:30:21.7831130Z [       OK ] MalformedCSVTest.UnclosedQuoteExists (0 ms)
+2026-01-01T22:30:21.7831449Z [ RUN      ] MalformedCSVTest.UnclosedQuoteEOFExists
+2026-01-01T22:30:21.7831786Z [       OK ] MalformedCSVTest.UnclosedQuoteEOFExists (0 ms)
+2026-01-01T22:30:21.7832119Z [ RUN      ] MalformedCSVTest.QuoteInUnquotedFieldExists
+2026-01-01T22:30:21.7832458Z [       OK ] MalformedCSVTest.QuoteInUnquotedFieldExists (0 ms)
+2026-01-01T22:30:21.7832805Z [ RUN      ] MalformedCSVTest.InconsistentColumnsExists
+2026-01-01T22:30:21.7833131Z [       OK ] MalformedCSVTest.InconsistentColumnsExists (0 ms)
+2026-01-01T22:30:21.7833487Z [ RUN      ] MalformedCSVTest.InconsistentColumnsAllRowsExists
+2026-01-01T22:30:21.7833864Z [       OK ] MalformedCSVTest.InconsistentColumnsAllRowsExists (0 ms)
+2026-01-01T22:30:21.7834233Z [ RUN      ] MalformedCSVTest.InvalidQuoteEscapeExists
+2026-01-01T22:30:21.7834560Z [       OK ] MalformedCSVTest.InvalidQuoteEscapeExists (0 ms)
+2026-01-01T22:30:21.7834887Z [ RUN      ] MalformedCSVTest.EmptyHeaderExists
+2026-01-01T22:30:21.7835183Z [       OK ] MalformedCSVTest.EmptyHeaderExists (0 ms)
+2026-01-01T22:30:21.7835492Z [ RUN      ] MalformedCSVTest.DuplicateColumnNamesExists
+2026-01-01T22:30:21.7835831Z [       OK ] MalformedCSVTest.DuplicateColumnNamesExists (0 ms)
+2026-01-01T22:30:21.7836150Z [ RUN      ] MalformedCSVTest.TrailingQuoteExists
+2026-01-01T22:30:21.7836451Z [       OK ] MalformedCSVTest.TrailingQuoteExists (0 ms)
+2026-01-01T22:30:21.7837044Z [ RUN      ] MalformedCSVTest.QuoteNotAtStartExists
+2026-01-01T22:30:21.7837368Z [       OK ] MalformedCSVTest.QuoteNotAtStartExists (0 ms)
+2026-01-01T22:30:21.7837673Z [ RUN      ] MalformedCSVTest.MultipleErrorsExists
+2026-01-01T22:30:21.7837978Z [       OK ] MalformedCSVTest.MultipleErrorsExists (0 ms)
+2026-01-01T22:30:21.7838291Z [ RUN      ] MalformedCSVTest.MixedLineEndingsExists
+2026-01-01T22:30:21.7838600Z [       OK ] MalformedCSVTest.MixedLineEndingsExists (0 ms)
+2026-01-01T22:30:21.7838907Z [ RUN      ] MalformedCSVTest.NullByteExists
+2026-01-01T22:30:21.7839181Z [       OK ] MalformedCSVTest.NullByteExists (0 ms)
+2026-01-01T22:30:21.7839471Z [ RUN      ] MalformedCSVTest.TripleQuoteExists
+2026-01-01T22:30:21.7839767Z [       OK ] MalformedCSVTest.TripleQuoteExists (0 ms)
+2026-01-01T22:30:21.7840089Z [ RUN      ] MalformedCSVTest.UnescapedQuoteInQuotedExists
+2026-01-01T22:30:21.7840446Z [       OK ] MalformedCSVTest.UnescapedQuoteInQuotedExists (0 ms)
+2026-01-01T22:30:21.7840785Z [ RUN      ] MalformedCSVTest.QuoteAfterDataExists
+2026-01-01T22:30:21.7841092Z [       OK ] MalformedCSVTest.QuoteAfterDataExists (0 ms)
+2026-01-01T22:30:21.7841408Z [ RUN      ] MalformedCSVTest.AllMalformedFilesPresent
+2026-01-01T22:30:21.7841736Z [       OK ] MalformedCSVTest.AllMalformedFilesPresent (0 ms)
+2026-01-01T22:30:21.7842059Z [----------] 17 tests from MalformedCSVTest (0 ms total)
+2026-01-01T22:30:21.7842248Z 
+2026-01-01T22:30:21.7842336Z [----------] 3 tests from ErrorModeTest
+2026-01-01T22:30:21.7842599Z [ RUN      ] ErrorModeTest.StrictModeDefinition
+2026-01-01T22:30:21.7842886Z [       OK ] ErrorModeTest.StrictModeDefinition (0 ms)
+2026-01-01T22:30:21.7843185Z [ RUN      ] ErrorModeTest.PermissiveModeDefinition
+2026-01-01T22:30:21.7843494Z [       OK ] ErrorModeTest.PermissiveModeDefinition (0 ms)
+2026-01-01T22:30:21.7843803Z [ RUN      ] ErrorModeTest.BestEffortModeDefinition
+2026-01-01T22:30:21.7844104Z [       OK ] ErrorModeTest.BestEffortModeDefinition (0 ms)
+2026-01-01T22:30:21.7844412Z [----------] 3 tests from ErrorModeTest (0 ms total)
+2026-01-01T22:30:21.7844589Z 
+2026-01-01T22:30:21.7844673Z [----------] 2 tests from IOUtilTest
+2026-01-01T22:30:21.7844934Z [ RUN      ] IOUtilTest.GetCorpusFileNotFound
+2026-01-01T22:30:21.7845230Z [       OK ] IOUtilTest.GetCorpusFileNotFound (0 ms)
+2026-01-01T22:30:21.7845514Z [ RUN      ] IOUtilTest.GetCorpusInvalidPath
+2026-01-01T22:30:21.7845785Z [       OK ] IOUtilTest.GetCorpusInvalidPath (0 ms)
+2026-01-01T22:30:21.7846194Z [----------] 2 tests from IOUtilTest (0 ms total)
+2026-01-01T22:30:21.7846368Z 
+2026-01-01T22:30:21.7846466Z [----------] Global test environment tear-down
+2026-01-01T22:30:21.7846880Z [==========] 40 tests from 7 test suites ran. (0 ms total)
+2026-01-01T22:30:21.7847156Z [  PASSED  ] 40 tests.

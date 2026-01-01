@@ -1,0 +1,96 @@
+﻿2026-01-01T22:32:59.4406436Z ##[group]Run ./build/simdcsv_test
+2026-01-01T22:32:59.4406740Z [36;1m./build/simdcsv_test[0m
+2026-01-01T22:32:59.4438726Z shell: /usr/bin/bash -e {0}
+2026-01-01T22:32:59.4438958Z ##[endgroup]
+2026-01-01T22:32:59.4500514Z [==========] Running 42 tests from 1 test suite.
+2026-01-01T22:32:59.4501061Z [----------] Global test environment set-up.
+2026-01-01T22:32:59.4501684Z [----------] 42 tests from CSVFileTest
+2026-01-01T22:32:59.4502048Z [ RUN      ] CSVFileTest.SimpleCSVExists
+2026-01-01T22:32:59.4502457Z [       OK ] CSVFileTest.SimpleCSVExists (0 ms)
+2026-01-01T22:32:59.4502945Z [ RUN      ] CSVFileTest.SimpleCSVStructure
+2026-01-01T22:32:59.4503418Z [       OK ] CSVFileTest.SimpleCSVStructure (0 ms)
+2026-01-01T22:32:59.4503923Z [ RUN      ] CSVFileTest.SimpleCSVFieldCount
+2026-01-01T22:32:59.4504425Z [       OK ] CSVFileTest.SimpleCSVFieldCount (0 ms)
+2026-01-01T22:32:59.4505230Z [ RUN      ] CSVFileTest.SimpleNoHeaderExists
+2026-01-01T22:32:59.4505723Z [       OK ] CSVFileTest.SimpleNoHeaderExists (0 ms)
+2026-01-01T22:32:59.4506287Z [ RUN      ] CSVFileTest.SingleColumnExists
+2026-01-01T22:32:59.4506777Z [       OK ] CSVFileTest.SingleColumnExists (0 ms)
+2026-01-01T22:32:59.4507284Z [ RUN      ] CSVFileTest.WideColumnsExists
+2026-01-01T22:32:59.4507738Z [       OK ] CSVFileTest.WideColumnsExists (0 ms)
+2026-01-01T22:32:59.4508191Z [ RUN      ] CSVFileTest.ManyRowsExists
+2026-01-01T22:32:59.4508617Z [       OK ] CSVFileTest.ManyRowsExists (0 ms)
+2026-01-01T22:32:59.4509071Z [ RUN      ] CSVFileTest.QuotedFieldsExists
+2026-01-01T22:32:59.4509530Z [       OK ] CSVFileTest.QuotedFieldsExists (0 ms)
+2026-01-01T22:32:59.4510019Z [ RUN      ] CSVFileTest.QuotedFieldsContainsQuotes
+2026-01-01T22:32:59.4510726Z [       OK ] CSVFileTest.QuotedFieldsContainsQuotes (0 ms)
+2026-01-01T22:32:59.4511452Z [ RUN      ] CSVFileTest.EscapedQuotesExists
+2026-01-01T22:32:59.4511796Z [       OK ] CSVFileTest.EscapedQuotesExists (0 ms)
+2026-01-01T22:32:59.4512134Z [ RUN      ] CSVFileTest.EscapedQuotesContainsDoubledQuotes
+2026-01-01T22:32:59.4512550Z [       OK ] CSVFileTest.EscapedQuotesContainsDoubledQuotes (0 ms)
+2026-01-01T22:32:59.4512908Z [ RUN      ] CSVFileTest.MixedQuotedExists
+2026-01-01T22:32:59.4513192Z [       OK ] CSVFileTest.MixedQuotedExists (0 ms)
+2026-01-01T22:32:59.4513498Z [ RUN      ] CSVFileTest.EmbeddedSeparatorsExists
+2026-01-01T22:32:59.4513815Z [       OK ] CSVFileTest.EmbeddedSeparatorsExists (0 ms)
+2026-01-01T22:32:59.4514135Z [ RUN      ] CSVFileTest.NewlinesInQuotesExists
+2026-01-01T22:32:59.4514440Z [       OK ] CSVFileTest.NewlinesInQuotesExists (0 ms)
+2026-01-01T22:32:59.4514790Z [ RUN      ] CSVFileTest.NewlinesInQuotesContainsEmbeddedNewlines
+2026-01-01T22:32:59.4515205Z [       OK ] CSVFileTest.NewlinesInQuotesContainsEmbeddedNewlines (0 ms)
+2026-01-01T22:32:59.4515585Z [ RUN      ] CSVFileTest.SemicolonSeparatorExists
+2026-01-01T22:32:59.4515896Z [       OK ] CSVFileTest.SemicolonSeparatorExists (0 ms)
+2026-01-01T22:32:59.4516207Z [ RUN      ] CSVFileTest.SemicolonSeparatorHasSemicolons
+2026-01-01T22:32:59.4516554Z [       OK ] CSVFileTest.SemicolonSeparatorHasSemicolons (0 ms)
+2026-01-01T22:32:59.4516871Z [ RUN      ] CSVFileTest.TabSeparatorExists
+2026-01-01T22:32:59.4517150Z [       OK ] CSVFileTest.TabSeparatorExists (0 ms)
+2026-01-01T22:32:59.4517426Z [ RUN      ] CSVFileTest.TabSeparatorHasTabs
+2026-01-01T22:32:59.4517707Z [       OK ] CSVFileTest.TabSeparatorHasTabs (0 ms)
+2026-01-01T22:32:59.4517992Z [ RUN      ] CSVFileTest.PipeSeparatorExists
+2026-01-01T22:32:59.4518269Z [       OK ] CSVFileTest.PipeSeparatorExists (0 ms)
+2026-01-01T22:32:59.4518561Z [ RUN      ] CSVFileTest.PipeSeparatorHasPipes
+2026-01-01T22:32:59.4518854Z [       OK ] CSVFileTest.PipeSeparatorHasPipes (0 ms)
+2026-01-01T22:32:59.4519141Z [ RUN      ] CSVFileTest.EmptyFieldsExists
+2026-01-01T22:32:59.4519404Z [       OK ] CSVFileTest.EmptyFieldsExists (0 ms)
+2026-01-01T22:32:59.4519732Z [ RUN      ] CSVFileTest.EmptyFieldsContainsConsecutiveCommas
+2026-01-01T22:32:59.4520108Z [       OK ] CSVFileTest.EmptyFieldsContainsConsecutiveCommas (0 ms)
+2026-01-01T22:32:59.4520659Z [ RUN      ] CSVFileTest.SingleCellExists
+2026-01-01T22:32:59.4520926Z [       OK ] CSVFileTest.SingleCellExists (0 ms)
+2026-01-01T22:32:59.4521421Z [ RUN      ] CSVFileTest.SingleRowHeaderOnlyExists
+2026-01-01T22:32:59.4521758Z [       OK ] CSVFileTest.SingleRowHeaderOnlyExists (0 ms)
+2026-01-01T22:32:59.4522053Z [ RUN      ] CSVFileTest.EmptyFileExists
+2026-01-01T22:32:59.4522322Z [       OK ] CSVFileTest.EmptyFileExists (0 ms)
+2026-01-01T22:32:59.4522590Z [ RUN      ] CSVFileTest.EmptyFileIsEmpty
+2026-01-01T22:32:59.4522859Z [       OK ] CSVFileTest.EmptyFileIsEmpty (0 ms)
+2026-01-01T22:32:59.4523139Z [ RUN      ] CSVFileTest.WhitespaceFieldsExists
+2026-01-01T22:32:59.4523434Z [       OK ] CSVFileTest.WhitespaceFieldsExists (0 ms)
+2026-01-01T22:32:59.4523745Z [ RUN      ] CSVFileTest.CRLFLineEndingsExists
+2026-01-01T22:32:59.4524235Z [       OK ] CSVFileTest.CRLFLineEndingsExists (0 ms)
+2026-01-01T22:32:59.4524525Z [ RUN      ] CSVFileTest.CRLFLineEndingsHasCRLF
+2026-01-01T22:32:59.4524817Z [       OK ] CSVFileTest.CRLFLineEndingsHasCRLF (0 ms)
+2026-01-01T22:32:59.4525097Z [ RUN      ] CSVFileTest.LFLineEndingsExists
+2026-01-01T22:32:59.4525374Z [       OK ] CSVFileTest.LFLineEndingsExists (0 ms)
+2026-01-01T22:32:59.4525647Z [ RUN      ] CSVFileTest.CRLineEndingsExists
+2026-01-01T22:32:59.4525922Z [       OK ] CSVFileTest.CRLineEndingsExists (0 ms)
+2026-01-01T22:32:59.4526191Z [ RUN      ] CSVFileTest.CRLineEndingsHasCR
+2026-01-01T22:32:59.4526463Z [       OK ] CSVFileTest.CRLineEndingsHasCR (0 ms)
+2026-01-01T22:32:59.4526740Z [ RUN      ] CSVFileTest.NoFinalNewlineExists
+2026-01-01T22:32:59.4527024Z [       OK ] CSVFileTest.NoFinalNewlineExists (0 ms)
+2026-01-01T22:32:59.4527340Z [ RUN      ] CSVFileTest.NoFinalNewlineEndsWithoutNewline
+2026-01-01T22:32:59.4527690Z [       OK ] CSVFileTest.NoFinalNewlineEndsWithoutNewline (0 ms)
+2026-01-01T22:32:59.4528013Z [ RUN      ] CSVFileTest.FinancialDataExists
+2026-01-01T22:32:59.4528290Z [       OK ] CSVFileTest.FinancialDataExists (0 ms)
+2026-01-01T22:32:59.4528601Z [ RUN      ] CSVFileTest.FinancialDataHasExpectedColumns
+2026-01-01T22:32:59.4528940Z [       OK ] CSVFileTest.FinancialDataHasExpectedColumns (0 ms)
+2026-01-01T22:32:59.4529260Z [ RUN      ] CSVFileTest.ContactsDataExists
+2026-01-01T22:32:59.4529526Z [       OK ] CSVFileTest.ContactsDataExists (0 ms)
+2026-01-01T22:32:59.4529800Z [ RUN      ] CSVFileTest.UnicodeDataExists
+2026-01-01T22:32:59.4530071Z [       OK ] CSVFileTest.UnicodeDataExists (0 ms)
+2026-01-01T22:32:59.4530350Z [ RUN      ] CSVFileTest.UnicodeDataContainsUTF8
+2026-01-01T22:32:59.4530649Z [       OK ] CSVFileTest.UnicodeDataContainsUTF8 (0 ms)
+2026-01-01T22:32:59.4530938Z [ RUN      ] CSVFileTest.ProductCatalogExists
+2026-01-01T22:32:59.4531520Z [       OK ] CSVFileTest.ProductCatalogExists (0 ms)
+2026-01-01T22:32:59.4531812Z [ RUN      ] CSVFileTest.AllTestFilesPresent
+2026-01-01T22:32:59.4532086Z [       OK ] CSVFileTest.AllTestFilesPresent (0 ms)
+2026-01-01T22:32:59.4532361Z [----------] 42 tests from CSVFileTest (0 ms total)
+2026-01-01T22:32:59.4532551Z 
+2026-01-01T22:32:59.4532653Z [----------] Global test environment tear-down
+2026-01-01T22:32:59.4532933Z [==========] 42 tests from 1 test suite ran. (0 ms total)
+2026-01-01T22:32:59.4533190Z [  PASSED  ] 42 tests.
