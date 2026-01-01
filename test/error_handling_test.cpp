@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "error.h"
+#include "io_util.h"
 #include <fstream>
 #include <filesystem>
 
@@ -11,16 +12,35 @@ using namespace simdcsv;
 // ============================================================================
 
 TEST(ErrorHandlingTest, ErrorCodeToString) {
+    // Test all error codes for complete coverage
     EXPECT_STREQ(error_code_to_string(ErrorCode::NONE), "NONE");
     EXPECT_STREQ(error_code_to_string(ErrorCode::UNCLOSED_QUOTE), "UNCLOSED_QUOTE");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::INVALID_QUOTE_ESCAPE), "INVALID_QUOTE_ESCAPE");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::QUOTE_IN_UNQUOTED_FIELD), "QUOTE_IN_UNQUOTED_FIELD");
     EXPECT_STREQ(error_code_to_string(ErrorCode::INCONSISTENT_FIELD_COUNT), "INCONSISTENT_FIELD_COUNT");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::FIELD_TOO_LARGE), "FIELD_TOO_LARGE");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::MIXED_LINE_ENDINGS), "MIXED_LINE_ENDINGS");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::INVALID_LINE_ENDING), "INVALID_LINE_ENDING");
     EXPECT_STREQ(error_code_to_string(ErrorCode::INVALID_UTF8), "INVALID_UTF8");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::NULL_BYTE), "NULL_BYTE");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::EMPTY_HEADER), "EMPTY_HEADER");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::DUPLICATE_COLUMN_NAMES), "DUPLICATE_COLUMN_NAMES");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::AMBIGUOUS_SEPARATOR), "AMBIGUOUS_SEPARATOR");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::FILE_TOO_LARGE), "FILE_TOO_LARGE");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::IO_ERROR), "IO_ERROR");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::INTERNAL_ERROR), "INTERNAL_ERROR");
+
+    // Test default case with an invalid error code
+    EXPECT_STREQ(error_code_to_string(static_cast<ErrorCode>(9999)), "UNKNOWN");
 }
 
 TEST(ErrorHandlingTest, ErrorSeverityToString) {
     EXPECT_STREQ(error_severity_to_string(ErrorSeverity::WARNING), "WARNING");
     EXPECT_STREQ(error_severity_to_string(ErrorSeverity::ERROR), "ERROR");
     EXPECT_STREQ(error_severity_to_string(ErrorSeverity::FATAL), "FATAL");
+
+    // Test default case with an invalid severity
+    EXPECT_STREQ(error_severity_to_string(static_cast<ErrorSeverity>(9999)), "UNKNOWN");
 }
 
 // ============================================================================
@@ -189,6 +209,24 @@ TEST(ErrorCollectorTest, Summary) {
     EXPECT_NE(summary.find("Errors: 1"), std::string::npos);
     EXPECT_NE(summary.find("Warning message"), std::string::npos);
     EXPECT_NE(summary.find("Error message"), std::string::npos);
+}
+
+TEST(ErrorCollectorTest, SummaryWithFatal) {
+    ErrorCollector collector(ErrorMode::PERMISSIVE);
+
+    collector.add_error(ErrorCode::MIXED_LINE_ENDINGS, ErrorSeverity::WARNING,
+                        1, 1, 10, "Warning message");
+    collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR,
+                        2, 1, 20, "Error message");
+    collector.add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL,
+                        3, 1, 30, "Fatal message");
+
+    std::string summary = collector.summary();
+
+    EXPECT_NE(summary.find("Total errors: 3"), std::string::npos);
+    EXPECT_NE(summary.find("Warnings: 1"), std::string::npos);
+    EXPECT_NE(summary.find("Errors: 1"), std::string::npos);
+    EXPECT_NE(summary.find("Fatal: 1"), std::string::npos);
 }
 
 TEST(ErrorCollectorTest, EmptySummary) {
@@ -498,6 +536,24 @@ TEST(ErrorModeTest, BestEffortModeDefinition) {
     // Best effort mode should try to parse regardless of errors
     ErrorCollector collector(ErrorMode::BEST_EFFORT);
     EXPECT_EQ(collector.mode(), ErrorMode::BEST_EFFORT);
+}
+
+// ============================================================================
+// I/O UTILITY ERROR PATH TESTS
+// ============================================================================
+
+TEST(IOUtilTest, GetCorpusFileNotFound) {
+    // Test file open failure path
+    EXPECT_THROW({
+        get_corpus("/nonexistent/file/path/that/does/not/exist.csv", 32);
+    }, std::runtime_error);
+}
+
+TEST(IOUtilTest, GetCorpusInvalidPath) {
+    // Test another file open failure path with invalid path
+    EXPECT_THROW({
+        get_corpus("", 32);
+    }, std::runtime_error);
 }
 
 int main(int argc, char **argv) {
