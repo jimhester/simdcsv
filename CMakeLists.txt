@@ -125,3 +125,32 @@ add_custom_command(TARGET error_handling_test POST_BUILD
 include(GoogleTest)
 gtest_discover_tests(simdcsv_test)
 gtest_discover_tests(error_handling_test)
+
+# CSV parsing test executable (only on x86_64 - requires AVX2 SIMD)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64)|(X86)")
+    add_executable(csv_parsing_test
+        test/csv_parsing_test.cpp
+    )
+
+    target_link_libraries(csv_parsing_test PRIVATE
+        simdcsv_lib
+        GTest::gtest_main
+        pthread
+    )
+
+    target_include_directories(csv_parsing_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+
+    # Copy test data to build directory for parsing tests
+    add_custom_command(TARGET csv_parsing_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+        ${CMAKE_CURRENT_BINARY_DIR}/test/data
+    )
+
+    # Register parsing tests with CTest
+    gtest_discover_tests(csv_parsing_test)
+else()
+    message(STATUS "Skipping csv_parsing_test on non-x86_64 platform (requires AVX2)")
+endif()
