@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, 'claude/**' ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }} - ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Release, Debug]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies (Ubuntu)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+
+    - name: Install dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install cmake
+
+    - name: Configure CMake
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+    - name: Build
+      run: |
+        cmake --build build --config ${{ matrix.build_type }}
+
+    - name: Run well-formed CSV tests
+      run: |
+        ./build/simdcsv_test
+
+    - name: Run error handling tests
+      run: |
+        ./build/error_handling_test
+
+    - name: Run all tests with CTest
+      run: |
+        cd build && ctest --output-on-failure --build-config ${{ matrix.build_type }}
+
+  code-quality:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check file structure
+      run: |
+        echo "Checking required files..."
+        test -f CMakeLists.txt || exit 1
+        test -f include/error.h || exit 1
+        test -f src/error.cpp || exit 1
+        test -d test/data || exit 1
+        echo "✓ All required files present"
+
+    - name: Count test files
+      run: |
+        echo "Well-formed CSV test files:"
+        find test/data -name "*.csv" ! -path "*/malformed/*" | wc -l
+        echo "Malformed CSV test files:"
+        find test/data/malformed -name "*.csv" | wc -l
+        echo "Total test files:"
+        find test/data -name "*.csv" | wc -l
+
+    - name: Verify test file integrity
+      run: |
+        # Check that malformed test files exist
+        MALFORMED_COUNT=$(find test/data/malformed -name "*.csv" | wc -l)
+        if [ "$MALFORMED_COUNT" -lt 16 ]; then
+          echo "Error: Expected at least 16 malformed test files, found $MALFORMED_COUNT"
+          exit 1
+        fi
+        echo "✓ Found $MALFORMED_COUNT malformed test files"

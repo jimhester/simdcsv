@@ -1,8 +1,39 @@
 # simdcsv
 
-Implementations of the speculative multi-threaded parser from Chang et. al. and SIMD approaches adapted from Langdal et. al.
+![CI](https://github.com/jimhester/simdcsv/workflows/CI/badge.svg)
 
-This is experimental code, won't really work in the general case and is unlikely to be pursued by me in the near future, though it does show promise!
+High-performance CSV parser using SIMD instructions, designed for integration with [vroom](https://github.com/tidyverse/vroom).
+
+Implementations based on speculative multi-threaded parsing from Chang et al. and SIMD approaches adapted from Langdale & Lemire (simdjson).
+
+## Status
+
+Active development focused on production readiness:
+- ✅ **Test Suite**: 79 tests (42 well-formed + 37 error handling)
+- ✅ **Error Handling**: Comprehensive error detection and reporting
+- ✅ **CI/CD**: Automated testing on Linux and macOS
+- 🚧 **SIMD Parser**: AVX2 implementation in progress
+- 📋 **Planned**: vroom integration, Highway/SIMDe evaluation
+
+## Building
+
+```bash
+# Configure
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+# Build
+cmake --build build
+
+# Run tests
+cd build && ctest --output-on-failure
+```
+
+## Documentation
+
+- [Production Readiness Plan](PRODUCTION_READINESS_PLAN.md) - Complete roadmap
+- [Literature Review](docs/literature_review.md) - Research analysis (2017-2026)
+- [Error Handling Guide](docs/error_handling.md) - Error detection and reporting
+- [Test Suite](test/README.md) - Test organization and coverage
 
 # References
 

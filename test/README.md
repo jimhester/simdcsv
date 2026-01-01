@@ -6,7 +6,8 @@ This directory contains the test suite for simdcsv, including test data files an
 
 ```
 test/
-├── csv_parser_test.cpp          # Main test harness
+├── csv_parser_test.cpp          # Well-formed CSV test harness
+├── error_handling_test.cpp      # Error handling test harness
 ├── data/                         # Test CSV files
 │   ├── basic/                    # Basic well-formed CSVs
 │   │   ├── simple.csv            # 3x4 simple CSV
@@ -35,11 +36,20 @@ test/
 │   │   ├── lf.csv                # Unix (\\n)
 │   │   ├── cr.csv                # Old Mac (\\r)
 │   │   └── no_final_newline.csv  # Missing final newline
-│   └── real_world/               # Real-world data patterns
-│       ├── financial.csv         # Stock market data
-│       ├── contacts.csv          # Contact information
-│       ├── unicode.csv           # International characters
-│       └── product_catalog.csv   # E-commerce data
+│   ├── real_world/               # Real-world data patterns
+│   │   ├── financial.csv         # Stock market data
+│   │   ├── contacts.csv          # Contact information
+│   │   ├── unicode.csv           # International characters
+│   │   └── product_catalog.csv   # E-commerce data
+│   └── malformed/                # Malformed CSV error tests
+│       ├── unclosed_quote.csv    # Quote not closed before newline
+│       ├── unclosed_quote_eof.csv # Quote not closed at EOF
+│       ├── quote_in_unquoted_field.csv # Invalid quote placement
+│       ├── inconsistent_columns.csv    # Varying field counts
+│       ├── invalid_quote_escape.csv    # Bad quote escaping
+│       ├── duplicate_column_names.csv  # Duplicate headers
+│       ├── mixed_line_endings.csv      # Inconsistent line endings
+│       └── ... (16 total)        # See docs/error_handling.md
 └── README.md                     # This file
 ```
 
@@ -88,6 +98,21 @@ Representative real-world CSV patterns:
 - **unicode.csv**: International characters (UTF-8)
 - **product_catalog.csv**: E-commerce product data with complex fields
 
+### 7. Malformed CSVs (`malformed/`)
+Error detection and handling tests (16 files):
+- **unclosed_quote.csv**: Quote not closed before newline
+- **unclosed_quote_eof.csv**: Quote not closed at end of file
+- **quote_in_unquoted_field.csv**: Quote in middle of unquoted field
+- **inconsistent_columns.csv**: Rows with different field counts
+- **invalid_quote_escape.csv**: Malformed quote escape sequences
+- **empty_header.csv**: Missing or empty header row
+- **duplicate_column_names.csv**: Duplicate column names
+- **trailing_quote.csv**: Quote after unquoted field data
+- **multiple_errors.csv**: Multiple error types in one file
+- **mixed_line_endings.csv**: Inconsistent CRLF/LF/CR
+- **null_byte.csv**: Contains null byte character
+- And 5 more... (see `docs/error_handling.md` for complete list)
+
 ## Building and Running Tests
 
 ### Using CMake (Recommended)
@@ -102,8 +127,9 @@ cmake --build build
 # Run all tests
 cd build && ctest --output-on-failure
 
-# Or run test executable directly
-./build/simdcsv_test
+# Or run test executables directly
+./build/simdcsv_test          # Well-formed CSV tests (42 tests)
+./build/error_handling_test   # Error handling tests (37 tests)
 ```
 
 ### Debug Build
@@ -116,18 +142,24 @@ cmake --build build
 
 ## Test Organization
 
-The current test suite (`csv_parser_test.cpp`) validates:
+The test suite consists of two main test harnesses:
 
-1. **File existence**: All test files are present
-2. **Basic structure**: Line counts, field counts
-3. **Content validation**: Expected characters (quotes, separators, etc.)
-4. **Special cases**: Empty files, UTF-8 content, line endings
+### 1. Well-Formed CSV Tests (`csv_parser_test.cpp` - 42 tests)
+Validates correctly formatted CSV files:
+- File existence and structure
+- Line counts, field counts
+- Content validation (quotes, separators, etc.)
+- Special cases (empty files, UTF-8, line endings)
 
-These are **infrastructure tests** that validate the test data itself. Future tests will add:
-- Actual CSV parsing correctness
-- SIMD implementation validation
-- Performance benchmarks
-- Round-trip testing (write then read)
+### 2. Error Handling Tests (`error_handling_test.cpp` - 37 tests)
+Validates error detection and reporting:
+- Error code and severity handling
+- ParseError structure and formatting
+- ErrorCollector functionality (strict/permissive/best-effort modes)
+- ParseException throwing and catching
+- Malformed CSV file detection (16 error scenarios)
+
+**Note**: These are currently **infrastructure tests** that validate the error handling framework itself. Future work will integrate actual CSV parsing with error detection.
 
 ## Test Inspirations
 
