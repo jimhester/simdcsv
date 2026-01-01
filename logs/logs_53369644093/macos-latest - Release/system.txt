@@ -1,5 +1,0 @@
-2026-01-01T22:26:07.9480000Z Job is about to start running on the hosted runner: GitHub Actions 1000000175
-2026-01-01T22:26:07.9480000Z Job is waiting for a hosted runner to come online.
-2026-01-01T22:26:07.9470000Z Requested labels: macos-latest
-2026-01-01T22:26:07.9470000Z Job defined at: jimhester/simdcsv/.github/workflows/ci.yml@refs/pull/6/merge
-2026-01-01T22:26:07.9470000Z Waiting for a runner to pick up this job...
