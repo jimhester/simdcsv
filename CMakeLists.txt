@@ -200,6 +200,7 @@ add_executable(simdcsv_benchmark
     benchmark/performance_metrics.cpp
     benchmark/simd_benchmarks.cpp
     benchmark/energy_benchmarks.cpp
+    benchmark/error_handling_benchmarks.cpp
 )
 
 target_link_libraries(simdcsv_benchmark PRIVATE
