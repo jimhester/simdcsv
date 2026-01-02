@@ -366,6 +366,8 @@ class two_pass {
     // If chunk size is too small, small chunks may not contain any newlines,
     // causing first_pass_speculate to return null_pos. Fall back to single-threaded.
     if (chunk_size < 64) {
+      // CRITICAL: Must update n_threads to 1 for correct stride in write()
+      out.n_threads = 1;
       out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
       return true;
     }
@@ -393,6 +395,8 @@ class two_pass {
     // Safety check: if any chunk_pos is null_pos, fall back to single-threaded
     for (int i = 1; i < n_threads; ++i) {
       if (chunk_pos[i] == null_pos) {
+        // CRITICAL: Must update n_threads to 1 for correct stride in write()
+        out.n_threads = 1;
         out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
         return true;
       }
@@ -420,6 +424,8 @@ class two_pass {
     // If chunk size is too small, small chunks may not contain any newlines,
     // causing first_pass_chunk to return null_pos. Fall back to single-threaded.
     if (chunk_size < 64) {
+      // CRITICAL: Must update n_threads to 1 for correct stride in write()
+      out.n_threads = 1;
       out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
       return true;
     }
@@ -449,6 +455,8 @@ class two_pass {
     // Safety check: if any chunk_pos is null_pos, fall back to single-threaded
     for (int i = 1; i < n_threads; ++i) {
       if (chunk_pos[i] == null_pos) {
+        // CRITICAL: Must update n_threads to 1 for correct stride in write()
+        out.n_threads = 1;
         out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
         return true;
       }
