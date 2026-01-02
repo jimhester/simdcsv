@@ -5,6 +5,7 @@
 
 #include <unistd.h>
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -18,6 +19,13 @@
 #include "two_pass.h"
 
 using namespace std;
+
+// Constants
+constexpr int MAX_THREADS = 256;
+constexpr int MIN_THREADS = 1;
+constexpr size_t MAX_COLUMN_WIDTH = 40;
+constexpr size_t DEFAULT_NUM_ROWS = 10;
+constexpr const char* VERSION = "0.1.0";
 
 /**
  * CSV Iterator - Helper class to iterate over parsed CSV data
@@ -38,6 +46,9 @@ class CsvIterator {
 
     size_t start = (i == 0) ? 0 : merged_indexes_[i - 1] + 1;
     size_t end = merged_indexes_[i];
+
+    // Bounds check: ensure start <= end
+    if (start > end) return "";
 
     // Handle quoted fields
     std::string field;
@@ -117,12 +128,16 @@ class CsvIterator {
   std::vector<uint64_t> merged_indexes_;
 };
 
+void printVersion() {
+  cout << "simdcsv-cli version " << VERSION << '\n';
+}
+
 void printUsage(const char* prog) {
   cerr << "simdcsv - High-performance CSV processing tool\n\n";
   cerr << "Usage: " << prog << " <command> [options] <csvfile>\n\n";
   cerr << "Commands:\n";
   cerr << "  count         Count the number of rows\n";
-  cerr << "  head          Display the first N rows (default: 10)\n";
+  cerr << "  head          Display the first N rows (default: " << DEFAULT_NUM_ROWS << ")\n";
   cerr << "  select        Select specific columns by name or index\n";
   cerr << "  info          Display information about the CSV file\n";
   cerr << "  pretty        Pretty-print the CSV with aligned columns\n";
@@ -130,8 +145,9 @@ void printUsage(const char* prog) {
   cerr << "  -n <num>      Number of rows (for head/pretty)\n";
   cerr << "  -c <cols>     Comma-separated column names or indices (for select)\n";
   cerr << "  -H            No header row in input\n";
-  cerr << "  -t <threads>  Number of threads (default: 1)\n";
+  cerr << "  -t <threads>  Number of threads (default: 1, max: " << MAX_THREADS << ")\n";
   cerr << "  -h            Show this help message\n";
+  cerr << "  -v            Show version information\n";
   cerr << "\nExamples:\n";
   cerr << "  " << prog << " count data.csv\n";
   cerr << "  " << prog << " head -n 5 data.csv\n";
@@ -358,7 +374,7 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
 
   // Limit width to reasonable size
   for (auto& w : widths) {
-    w = min(w, (size_t)40);
+    w = min(w, MAX_COLUMN_WIDTH);
   }
 
   // Print separator line
@@ -377,9 +393,11 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
     cout << '|';
     for (size_t i = 0; i < num_cols; ++i) {
       string val = (i < row.size()) ? row[i] : "";
-      // Truncate if too long
-      if (val.size() > widths[i]) {
+      // Truncate if too long (note: may split multi-byte UTF-8 sequences)
+      if (val.size() > widths[i] && widths[i] >= 3) {
         val = val.substr(0, widths[i] - 3) + "...";
+      } else if (val.size() > widths[i]) {
+        val = val.substr(0, widths[i]);
       }
       cout << ' ' << left << setw(widths[i]) << val << " |";
     }
@@ -402,9 +420,13 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // Check for help
+  // Check for help or version
   if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
     printUsage(argv[0]);
+    return 0;
+  }
+  if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
+    printVersion();
     return 0;
   }
 
@@ -415,27 +437,45 @@ int main(int argc, char* argv[]) {
   optind = 2;
 
   int n_threads = 1;
-  size_t num_rows = 10;
+  size_t num_rows = DEFAULT_NUM_ROWS;
   bool has_header = true;
   string columns;
 
   int c;
-  while ((c = getopt(argc, argv, "n:c:Ht:h")) != -1) {
+  while ((c = getopt(argc, argv, "n:c:Ht:hv")) != -1) {
     switch (c) {
-      case 'n':
-        num_rows = atol(optarg);
+      case 'n': {
+        char* endptr;
+        long val = strtol(optarg, &endptr, 10);
+        if (*endptr != '\0' || val < 0) {
+          cerr << "Error: Invalid row count '" << optarg << "'\n";
+          return 1;
+        }
+        num_rows = static_cast<size_t>(val);
         break;
+      }
       case 'c':
         columns = optarg;
         break;
       case 'H':
         has_header = false;
         break;
-      case 't':
-        n_threads = atoi(optarg);
+      case 't': {
+        char* endptr;
+        long val = strtol(optarg, &endptr, 10);
+        if (*endptr != '\0' || val < MIN_THREADS || val > MAX_THREADS) {
+          cerr << "Error: Thread count must be between " << MIN_THREADS
+               << " and " << MAX_THREADS << "\n";
+          return 1;
+        }
+        n_threads = static_cast<int>(val);
         break;
+      }
       case 'h':
         printUsage(argv[0]);
+        return 0;
+      case 'v':
+        printVersion();
         return 0;
       default:
         printUsage(argv[0]);
