@@ -331,11 +331,15 @@ class two_pass {
   }
 
   // Helper to get context around an error position
+  // Returns a string representation of the buffer content near the given position
   static std::string get_context(const uint8_t* buf, size_t len, size_t pos, size_t context_size = 20) {
+    // Handle empty buffer case
+    if (len == 0 || buf == nullptr) return "";
+
     // Bounds check
-    size_t safe_pos = pos < len ? pos : (len > 0 ? len - 1 : 0);
+    size_t safe_pos = pos < len ? pos : len - 1;
     size_t ctx_start = safe_pos > context_size ? safe_pos - context_size : 0;
-    size_t ctx_end = safe_pos + context_size < len ? safe_pos + context_size : len;
+    size_t ctx_end = std::min(safe_pos + context_size, len);
 
     std::string ctx;
     // Reserve space to avoid reallocations (worst case: every char becomes 2 chars like \n)
@@ -620,8 +624,15 @@ class two_pass {
 
   // Multi-threaded parsing with error collection using thread-local collectors
   // Each thread collects errors locally, then they are merged and sorted by offset
+  //
+  // THREAD SAFETY: ErrorCollector must not be accessed by other threads during parsing.
+  // After parsing completes, errors are merged from thread-local collectors and sorted
+  // by byte offset for consistent ordering.
   bool parse_two_pass_with_errors(const uint8_t* buf, index& out, size_t len,
                                   ErrorCollector& errors) {
+    // Handle empty input
+    if (len == 0) return true;
+
     // Check structural issues first (single-threaded, fast)
     check_empty_header(buf, len, errors);
     if (errors.should_stop()) return false;

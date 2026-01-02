@@ -10,36 +10,37 @@
 namespace simdcsv {
 
 // CSV Error Types
+// Note: Some error codes are reserved for future implementation (marked [RESERVED])
 enum class ErrorCode {
     NONE = 0,
 
-    // Quote-related errors
+    // Quote-related errors (all implemented)
     UNCLOSED_QUOTE,              // Quoted field not closed before EOF
     INVALID_QUOTE_ESCAPE,        // Invalid quote escape sequence
     QUOTE_IN_UNQUOTED_FIELD,     // Quote appears in middle of unquoted field
 
     // Field structure errors
     INCONSISTENT_FIELD_COUNT,    // Row has different number of fields than header
-    FIELD_TOO_LARGE,             // Field exceeds maximum size limit
+    FIELD_TOO_LARGE,             // [RESERVED] Field exceeds maximum size limit
 
     // Line ending errors
     MIXED_LINE_ENDINGS,          // File uses inconsistent line endings (warning)
-    INVALID_LINE_ENDING,         // Invalid line ending sequence
+    INVALID_LINE_ENDING,         // [RESERVED] Invalid line ending sequence
 
     // Character encoding errors
-    INVALID_UTF8,                // Invalid UTF-8 sequence
+    INVALID_UTF8,                // [RESERVED] Invalid UTF-8 sequence
     NULL_BYTE,                   // Unexpected null byte in data
 
-    // Structure errors
+    // Structure errors (all implemented)
     EMPTY_HEADER,                // Header row is empty
     DUPLICATE_COLUMN_NAMES,      // Header contains duplicate column names
 
     // Separator errors
-    AMBIGUOUS_SEPARATOR,         // Cannot determine separator reliably
+    AMBIGUOUS_SEPARATOR,         // [RESERVED] Cannot determine separator reliably
 
     // General errors
-    FILE_TOO_LARGE,              // File exceeds maximum size
-    IO_ERROR,                    // File I/O error
+    FILE_TOO_LARGE,              // [RESERVED] File exceeds maximum size
+    IO_ERROR,                    // [RESERVED] File I/O error
     INTERNAL_ERROR               // Internal parser error
 };
 
@@ -81,18 +82,26 @@ enum class ErrorMode {
 };
 
 // Error collector - accumulates errors during parsing
+// SECURITY: Maximum error limit prevents OOM from malicious inputs with many errors
 class ErrorCollector {
 public:
-    explicit ErrorCollector(ErrorMode mode = ErrorMode::STRICT)
-        : mode_(mode), has_fatal_(false) {}
+    static constexpr size_t DEFAULT_MAX_ERRORS = 10000;
 
-    // Add an error
+    explicit ErrorCollector(ErrorMode mode = ErrorMode::STRICT,
+                           size_t max_errors = DEFAULT_MAX_ERRORS)
+        : mode_(mode), max_errors_(max_errors), has_fatal_(false) {}
+
+    // Add an error (respects max_errors_ limit to prevent OOM)
     void add_error(const ParseError& error) {
+        if (errors_.size() >= max_errors_) return;
         errors_.push_back(error);
         if (error.severity == ErrorSeverity::FATAL) {
             has_fatal_ = true;
         }
     }
+
+    // Check if error limit has been reached
+    bool at_error_limit() const { return errors_.size() >= max_errors_; }
 
     // Convenience methods
     void add_error(ErrorCode code, ErrorSeverity severity, size_t line,
@@ -158,6 +167,7 @@ public:
 
 private:
     ErrorMode mode_;
+    size_t max_errors_;
     std::vector<ParseError> errors_;
     bool has_fatal_;
 };
