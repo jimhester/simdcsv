@@ -140,9 +140,13 @@ public:
     void merge_from(const ErrorCollector& other) {
         if (other.errors_.empty()) return;
 
-        errors_.reserve(errors_.size() + other.errors_.size());
-        for (const auto& err : other.errors_) {
-            errors_.push_back(err);
+        // Respect max_errors_ limit when merging
+        size_t available = max_errors_ > errors_.size() ? max_errors_ - errors_.size() : 0;
+        size_t to_copy = std::min(available, other.errors_.size());
+
+        errors_.reserve(errors_.size() + to_copy);
+        for (size_t i = 0; i < to_copy; ++i) {
+            errors_.push_back(other.errors_[i]);
         }
         if (other.has_fatal_) {
             has_fatal_ = true;
