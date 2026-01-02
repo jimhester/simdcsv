@@ -508,6 +508,8 @@ class two_pass {
 
   bool parse_speculate(const uint8_t* buf, index& out, size_t len) {
     uint8_t n_threads = out.n_threads;
+    // Validate n_threads: treat 0 as single-threaded to avoid division by zero
+    if (n_threads == 0) n_threads = 1;
     if (n_threads == 1) {
       out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
       return true;
@@ -552,6 +554,8 @@ class two_pass {
 
   bool parse_two_pass(const uint8_t* buf, index& out, size_t len) {
     uint8_t n_threads = out.n_threads;
+    // Validate n_threads: treat 0 as single-threaded to avoid division by zero
+    if (n_threads == 0) n_threads = 1;
     if (n_threads == 1) {
       out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
       return true;
@@ -644,6 +648,9 @@ class two_pass {
     if (errors.should_stop()) return false;
 
     uint8_t n_threads = out.n_threads;
+
+    // Validate n_threads: treat 0 as single-threaded to avoid division by zero
+    if (n_threads == 0) n_threads = 1;
 
     // For single-threaded, use the simpler path
     if (n_threads == 1) {
