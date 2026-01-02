@@ -187,6 +187,9 @@ target_include_directories(simdcsv_benchmark PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# Define benchmark mode to suppress debug output during benchmarking
+target_compile_definitions(simdcsv_benchmark PRIVATE SIMDCSV_BENCHMARK_MODE)
+
 # Copy test data to build directory for benchmarks
 add_custom_command(TARGET simdcsv_benchmark POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
