@@ -20,6 +20,38 @@ class index {
   uint64_t* n_indexes{nullptr};
   uint64_t* indexes{nullptr};
 
+  // Default constructor
+  index() = default;
+
+  // Move constructor
+  index(index&& other) noexcept
+      : columns(other.columns),
+        n_threads(other.n_threads),
+        n_indexes(other.n_indexes),
+        indexes(other.indexes) {
+    other.n_indexes = nullptr;
+    other.indexes = nullptr;
+  }
+
+  // Move assignment
+  index& operator=(index&& other) noexcept {
+    if (this != &other) {
+      delete[] indexes;
+      delete[] n_indexes;
+      columns = other.columns;
+      n_threads = other.n_threads;
+      n_indexes = other.n_indexes;
+      indexes = other.indexes;
+      other.n_indexes = nullptr;
+      other.indexes = nullptr;
+    }
+    return *this;
+  }
+
+  // Delete copy operations to prevent accidental copies
+  index(const index&) = delete;
+  index& operator=(const index&) = delete;
+
   void write(const std::string& filename) {
     std::FILE* fp = std::fopen(filename.c_str(), "wb");
     if (!((std::fwrite(&columns, sizeof(uint64_t), 1, fp) == 1) &&
