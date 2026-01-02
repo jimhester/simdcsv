@@ -32,10 +32,14 @@
 //
 // DuckDB I/O Overhead:
 //   The DuckDB benchmark writes CSV data to a temp file before parsing because
-//   DuckDB's simple API doesn't support direct in-memory CSV parsing. This adds
-//   file I/O overhead that other parsers don't have, making DuckDB appear slower
+//   DuckDB's C++ API doesn't support reading CSV from memory buffers. While we
+//   use an in-memory database (nullptr/":memory:"), the read_csv_auto() function
+//   still requires a file path. Only DuckDB's Python client supports in-memory
+//   CSV parsing via fsspec. This file I/O overhead makes DuckDB appear slower
 //   than its actual parsing performance. For pure parsing speed comparisons,
 //   focus on simdcsv vs zsv vs Arrow results.
+//
+//   See: https://github.com/duckdb/duckdb/discussions/8985
 //
 // =============================================================================
 
@@ -317,11 +321,10 @@ static size_t parse_zsv(const uint8_t* data, size_t len) {
 // DuckDB Parser
 // ============================================================================
 //
-// NOTE: DuckDB benchmarks include file I/O overhead because DuckDB's simple API
-// doesn't support direct in-memory CSV parsing. The data is written to a temp
-// file and then read by DuckDB. This makes DuckDB appear slower than its actual
-// parsing performance. For fair parsing speed comparisons, focus on simdcsv vs
-// zsv vs Arrow results.
+// NOTE: DuckDB benchmarks include file I/O overhead. While we use an in-memory
+// database (nullptr), DuckDB's C++ read_csv_auto() requires a file path - only
+// the Python client supports reading CSV from memory buffers. This I/O overhead
+// makes DuckDB appear slower than its actual parsing performance.
 
 #ifdef HAVE_DUCKDB
 
