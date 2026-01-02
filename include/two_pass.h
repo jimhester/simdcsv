@@ -330,9 +330,13 @@ class two_pass {
     return i + out->n_threads;
   }
 
+  // Default context size for error messages (characters before/after error position)
+  static constexpr size_t DEFAULT_ERROR_CONTEXT_SIZE = 20;
+
   // Helper to get context around an error position
   // Returns a string representation of the buffer content near the given position
-  static std::string get_context(const uint8_t* buf, size_t len, size_t pos, size_t context_size = 20) {
+  static std::string get_context(const uint8_t* buf, size_t len, size_t pos,
+                                 size_t context_size = DEFAULT_ERROR_CONTEXT_SIZE) {
     // Handle empty buffer case
     if (len == 0 || buf == nullptr) return "";
 
