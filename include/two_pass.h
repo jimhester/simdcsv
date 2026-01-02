@@ -599,6 +599,232 @@ class two_pass {
     // return index;
   }
 
+  // ==========================================================================
+  // COMBINED APPROACH: SIMD PARSING WITH ERROR DETECTION (APPROACH 3)
+  // ==========================================================================
+  //
+  // This approach maximizes SIMD usage while still detecting errors:
+  // 1. Uses SIMD for character detection (quotes, commas, newlines, NULL bytes)
+  // 2. Uses thread-local error collectors for parallel error collection
+  // 3. Processes errors only at SIMD-detected positions (not byte-by-byte)
+  // 4. Supports full multi-threaded parsing with speculative quote handling
+  //
+  // Benefits:
+  // - Maximum SIMD utilization for character detection
+  // - Multi-threaded parsing maintained
+  // - Errors detected during parsing, not as separate pass
+  // - Lower overhead than byte-by-byte error checking
+
+  // SIMD-based second pass with error collection
+  // Uses SIMD for character detection, collects errors at detected positions
+  static uint64_t second_pass_simd_with_errors(const uint8_t* buf, size_t start, size_t end,
+                                                index* out, size_t thread_id,
+                                                ErrorCollector* errors,
+                                                size_t total_len) {
+    size_t len = end - start;
+    uint64_t idx = 0;
+    size_t n_indexes = 0;
+    size_t i = thread_id;
+    uint64_t prev_iter_inside_quote = 0ULL;
+    uint64_t base = 0;
+    const uint8_t* chunk_buf = buf + start;
+
+    // Track state for error detection
+    csv_state current_state = RECORD_START;
+    size_t last_field_start = start;
+
+    for (; idx < len; idx += 64) {
+      __builtin_prefetch(chunk_buf + idx + 128);
+
+      // Calculate valid bytes in this chunk
+      size_t chunk_bytes = (len - idx < 64) ? (len - idx) : 64;
+      uint64_t mask = (chunk_bytes == 64) ? ~0ULL : ((1ULL << chunk_bytes) - 1);
+
+      // Load data safely - use padded buffer for partial reads
+      simd_input in;
+      if (chunk_bytes < 64) {
+        // Zero-initialize for partial reads to avoid false NULL detection
+        memset(in.data, 0xFF, 64);  // Use 0xFF as safe filler
+        memcpy(in.data, chunk_buf + idx, chunk_bytes);
+      } else {
+        in = fill_input(chunk_buf + idx);
+      }
+
+      // SIMD character detection - mask ensures we only look at valid bytes
+      uint64_t quotes = cmp_mask_against_input(in, '"') & mask;
+      uint64_t quote_mask = find_quote_mask2(in, quotes, prev_iter_inside_quote);
+      uint64_t sep = cmp_mask_against_input(in, ',') & mask;
+      uint64_t nl = cmp_mask_against_input(in, '\n') & mask;
+      uint64_t nulls = cmp_mask_against_input(in, '\0') & mask;
+
+      // Detect NULL bytes using SIMD
+      if (errors && nulls != 0) {
+        uint64_t null_bits = nulls;
+        while (null_bits != 0) {
+          uint64_t pos = trailing_zeroes(null_bits);
+          size_t abs_pos = start + idx + pos;
+          size_t line, col;
+          get_line_column(buf, total_len, abs_pos, line, col);
+          errors->add_error(ErrorCode::NULL_BYTE, ErrorSeverity::WARNING,
+                           line, col, abs_pos, "NULL byte in data",
+                           get_context(buf, total_len, abs_pos, 20));
+          null_bits = null_bits & (null_bits - 1);
+        }
+      }
+
+      // Detect quote errors using SIMD-detected positions
+      if (errors && quotes != 0) {
+        uint64_t quote_bits = quotes;
+        uint64_t check_mask = quote_mask;
+        while (quote_bits != 0) {
+          uint64_t pos = trailing_zeroes(quote_bits);
+          size_t abs_pos = start + idx + pos;
+          bool inside_quoted = (check_mask >> pos) & 1;
+
+          // Quote in unquoted field check
+          if (!inside_quoted && current_state == UNQUOTED_FIELD) {
+            size_t line, col;
+            get_line_column(buf, total_len, abs_pos, line, col);
+            errors->add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::ERROR,
+                             line, col, abs_pos, "Quote in unquoted field",
+                             get_context(buf, total_len, abs_pos, 20));
+          }
+
+          quote_bits = quote_bits & (quote_bits - 1);
+        }
+      }
+
+      // Write field separators (original SIMD logic)
+      uint64_t field_sep = (nl | sep) & ~quote_mask;
+      n_indexes += write(out->indexes + thread_id, base, start + idx, out->n_threads, field_sep);
+
+      // Update state based on field boundaries
+      if (field_sep != 0) {
+        current_state = FIELD_START;
+      } else if (quotes == 0 && (sep | nl) == 0) {
+        // No special chars in this block, we're in a field
+        if (current_state == FIELD_START || current_state == RECORD_START) {
+          current_state = UNQUOTED_FIELD;
+        }
+      }
+    }
+
+    // Check for unclosed quote at end
+    if (errors && prev_iter_inside_quote != 0 && end == total_len) {
+      size_t line, col;
+      get_line_column(buf, total_len, end > 0 ? end - 1 : 0, line, col);
+      errors->add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL,
+                       line, col, end, "Unclosed quote at end of file",
+                       get_context(buf, total_len, end > 20 ? end - 20 : 0, 20));
+    }
+
+    return n_indexes;
+  }
+
+  // Result from multi-threaded parsing with error collection
+  struct chunk_error_result {
+    uint64_t n_indexes;
+    ErrorCollector errors;
+
+    chunk_error_result() : n_indexes(0), errors(ErrorMode::PERMISSIVE) {}
+  };
+
+  // Static wrapper for thread-safe SIMD parsing with error collection
+  static chunk_error_result second_pass_simd_chunk_with_errors(
+      const uint8_t* buf, size_t start, size_t end,
+      index* out, size_t thread_id, size_t total_len, ErrorMode mode) {
+    chunk_error_result result;
+    result.errors.set_mode(mode);
+    result.n_indexes = second_pass_simd_with_errors(buf, start, end, out, thread_id,
+                                                     &result.errors, total_len);
+    return result;
+  }
+
+  // Combined approach: Full multi-threaded SIMD parsing with error detection
+  // This maximizes SIMD usage while collecting errors in parallel
+  bool parse_combined_with_errors(const uint8_t* buf, index& out, size_t len,
+                                   ErrorCollector& errors) {
+    // Quick structural checks (single-threaded, fast)
+    check_empty_header(buf, len, errors);
+    if (errors.should_stop()) return false;
+
+    check_duplicate_columns(buf, len, errors);
+    if (errors.should_stop()) return false;
+
+    check_line_endings(buf, len, errors);
+    if (errors.should_stop()) return false;
+
+    uint8_t n_threads = out.n_threads;
+
+    // For single-threaded, use simpler path
+    if (n_threads == 1) {
+      out.n_indexes[0] = second_pass_simd_with_errors(buf, 0, len, &out, 0, &errors, len);
+      check_field_counts(buf, len, errors);
+      return !errors.has_fatal_errors();
+    }
+
+    // Multi-threaded: use speculative parsing with SIMD error detection
+    size_t chunk_size = len / n_threads;
+    std::vector<uint64_t> chunk_pos(n_threads + 1);
+    std::vector<std::future<stats>> first_pass_fut(n_threads);
+    std::vector<std::future<chunk_error_result>> second_pass_fut(n_threads);
+
+    // First pass: find chunk boundaries using SIMD
+    for (int i = 0; i < n_threads; ++i) {
+      first_pass_fut[i] = std::async(std::launch::async, first_pass_chunk, buf,
+                                     chunk_size * i, chunk_size * (i + 1));
+    }
+
+    auto st = first_pass_fut[0].get();
+    size_t n_quotes = st.n_quotes;
+#ifndef SIMDCSV_BENCHMARK_MODE
+    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
+           st.first_even_nl, st.first_odd_nl, st.n_quotes);
+#endif
+    chunk_pos[0] = 0;
+    for (int i = 1; i < n_threads; ++i) {
+      auto st = first_pass_fut[i].get();
+#ifndef SIMDCSV_BENCHMARK_MODE
+      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
+             st.first_even_nl, st.first_odd_nl, st.n_quotes);
+#endif
+      chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
+      n_quotes += st.n_quotes;
+    }
+    chunk_pos[n_threads] = len;
+
+    // Second pass: SIMD parsing with thread-local error collectors
+    ErrorMode mode = errors.mode();
+    for (int i = 0; i < n_threads; ++i) {
+      second_pass_fut[i] = std::async(std::launch::async,
+          second_pass_simd_chunk_with_errors, buf,
+          chunk_pos[i], chunk_pos[i + 1], &out, i, len, mode);
+    }
+
+    // Collect results and merge errors
+    std::vector<ParseError> all_errors;
+    for (int i = 0; i < n_threads; ++i) {
+      auto result = second_pass_fut[i].get();
+      out.n_indexes[i] = result.n_indexes;
+
+      // Collect errors from this thread
+      for (const auto& err : result.errors.errors()) {
+        all_errors.push_back(err);
+      }
+    }
+
+    // Sort errors by byte offset and add to main collector
+    sort_errors_by_offset(all_errors);
+    for (const auto& err : all_errors) {
+      errors.add_error(err);
+    }
+
+    // Check field counts (single-threaded, requires full file scan)
+    check_field_counts(buf, len, errors);
+
+    return !errors.has_fatal_errors();
+  }
+
   // Parse with error collection - single-threaded for reliable error reporting
   bool parse_with_errors(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors) {
     // Single-threaded parsing for accurate error position tracking

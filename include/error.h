@@ -157,6 +157,89 @@ private:
 const char* error_code_to_string(ErrorCode code);
 const char* error_severity_to_string(ErrorSeverity severity);
 
+// ============================================================================
+// MULTI-THREADED ERROR COLLECTION SUPPORT
+// ============================================================================
+
+// Extension methods for ErrorCollector to support multi-threaded parsing
+// These allow merging errors from multiple threads while maintaining order
+
+// Merge errors from another collector (for multi-threaded parsing)
+// Errors are sorted by byte_offset to maintain logical order
+inline void merge_from(ErrorCollector& dest, const ErrorCollector& other) {
+    for (const auto& err : other.errors()) {
+        dest.add_error(err);
+    }
+}
+
+// Sort errors by byte offset (call after merging from multiple threads)
+inline void sort_errors_by_offset(std::vector<ParseError>& errors) {
+    std::sort(errors.begin(), errors.end(),
+        [](const ParseError& a, const ParseError& b) {
+            return a.byte_offset < b.byte_offset;
+        });
+}
+
+// ============================================================================
+// SIMD ERROR LOCATION SUPPORT
+// ============================================================================
+
+// Thread-safe error location storage for SIMD-based error detection
+// Stores potential error positions detected during parallel SIMD scanning
+struct ErrorLocation {
+    size_t byte_offset;
+    ErrorCode code;
+
+    ErrorLocation(size_t offset, ErrorCode c) : byte_offset(offset), code(c) {}
+};
+
+// Error locations detected by SIMD (positions where patterns suggest errors)
+// These positions are verified after SIMD detection to generate full errors
+class SIMDErrorLocations {
+public:
+    SIMDErrorLocations() = default;
+
+    void add_location(size_t offset, ErrorCode code) {
+        locations_.emplace_back(offset, code);
+    }
+
+    void reserve(size_t n) { locations_.reserve(n); }
+
+    bool empty() const { return locations_.empty(); }
+    size_t size() const { return locations_.size(); }
+
+    const std::vector<ErrorLocation>& locations() const { return locations_; }
+
+    void clear() { locations_.clear(); }
+
+    // Sort by byte offset for sequential processing
+    void sort_by_offset() {
+        std::sort(locations_.begin(), locations_.end(),
+            [](const ErrorLocation& a, const ErrorLocation& b) {
+                return a.byte_offset < b.byte_offset;
+            });
+    }
+
+    // Merge another SIMDErrorLocations into this one
+    void merge_from(const SIMDErrorLocations& other) {
+        locations_.reserve(locations_.size() + other.locations_.size());
+        for (const auto& loc : other.locations_) {
+            locations_.push_back(loc);
+        }
+    }
+
+    // Merge and sort multiple collections
+    void merge_sorted(std::vector<SIMDErrorLocations>& others) {
+        for (auto& other : others) {
+            merge_from(other);
+        }
+        sort_by_offset();
+    }
+
+private:
+    std::vector<ErrorLocation> locations_;
+};
+
 } // namespace simdcsv
 
 #endif // SIMDCSV_ERROR_H

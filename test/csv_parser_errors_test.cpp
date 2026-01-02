@@ -325,6 +325,105 @@ TEST_F(CSVParserErrorTest, ValidCSVNoErrors) {
 }
 
 // ============================================================================
+// COMBINED SIMD APPROACH TESTS (APPROACH 3)
+// ============================================================================
+
+// Helper to parse with combined SIMD+error detection approach
+bool parseWithCombinedApproach(const std::string& content, ErrorCollector& errors, int n_threads = 1) {
+    two_pass parser;
+    auto idx = parser.init(content.size(), n_threads);
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(content.data());
+    return parser.parse_combined_with_errors(buf, idx, content.size(), errors);
+}
+
+TEST_F(CSVParserErrorTest, CombinedApproachValidCSV) {
+    std::string content = "A,B,C\n1,2,3\n4,5,6\n7,8,9\n";
+
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parseWithCombinedApproach(content, errors);
+
+    if (errors.has_errors()) {
+        std::cout << "Unexpected errors found:" << std::endl;
+        printErrors(errors);
+    }
+
+    EXPECT_FALSE(errors.has_errors())
+        << "Combined approach should not report errors for valid CSV";
+}
+
+TEST_F(CSVParserErrorTest, CombinedApproachDetectsNullBytes) {
+    std::string content = "A,B,C\n1,2,3\n4,";
+    content += '\0';
+    content += ",6\n";
+
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parseWithCombinedApproach(content, errors);
+
+    EXPECT_TRUE(hasErrorCode(errors, ErrorCode::NULL_BYTE))
+        << "Combined approach should detect NULL bytes using SIMD";
+}
+
+TEST_F(CSVParserErrorTest, CombinedApproachDetectsFieldCountErrors) {
+    std::string content = "A,B,C\n1,2,3\n1,2\n4,5,6\n";
+
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parseWithCombinedApproach(content, errors);
+
+    EXPECT_TRUE(hasErrorCode(errors, ErrorCode::INCONSISTENT_FIELD_COUNT))
+        << "Combined approach should detect field count errors";
+}
+
+TEST_F(CSVParserErrorTest, CombinedApproachMultiThreaded) {
+    // Generate large CSV for multi-threaded testing
+    std::string content = "A,B,C\n";
+    for (int i = 0; i < 1000; ++i) {
+        content += "1,2,3\n";
+    }
+    content += "1,2\n";  // Error
+    for (int i = 0; i < 1000; ++i) {
+        content += "4,5,6\n";
+    }
+
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parseWithCombinedApproach(content, errors, 4);  // 4 threads
+
+    EXPECT_TRUE(hasErrorCode(errors, ErrorCode::INCONSISTENT_FIELD_COUNT))
+        << "Multi-threaded combined approach should detect errors";
+}
+
+TEST_F(CSVParserErrorTest, CombinedApproachDetectsNullByteFromFile) {
+    std::string content = readFile(getTestDataPath("null_byte.csv"));
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parseWithCombinedApproach(content, errors);
+
+    EXPECT_TRUE(hasErrorCode(errors, ErrorCode::NULL_BYTE))
+        << "Combined approach should detect NULL byte from file";
+}
+
+TEST_F(CSVParserErrorTest, CombinedVsScalarConsistency) {
+    // Ensure combined and scalar approaches detect same errors
+    std::string content = "A,B,C\n1,2,3\n4,";
+    content += '\0';
+    content += ",6\n7,8\n";
+
+    ErrorCollector errors1(ErrorMode::PERMISSIVE);
+    parseWithErrors(content, errors1);
+
+    ErrorCollector errors2(ErrorMode::PERMISSIVE);
+    parseWithCombinedApproach(content, errors2);
+
+    // Both should detect NULL byte
+    EXPECT_EQ(hasErrorCode(errors1, ErrorCode::NULL_BYTE),
+              hasErrorCode(errors2, ErrorCode::NULL_BYTE))
+        << "Both approaches should detect NULL bytes";
+
+    // Both should detect field count error
+    EXPECT_EQ(hasErrorCode(errors1, ErrorCode::INCONSISTENT_FIELD_COUNT),
+              hasErrorCode(errors2, ErrorCode::INCONSISTENT_FIELD_COUNT))
+        << "Both approaches should detect field count errors";
+}
+
+// ============================================================================
 // COMPREHENSIVE MALFORMED FILE TEST
 // ============================================================================
 
