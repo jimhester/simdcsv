@@ -542,6 +542,55 @@ TEST_F(CSVParserErrorTest, AllMalformedFilesGenerateErrors) {
     EXPECT_EQ(failures, 0) << failures << " malformed files did not generate expected errors";
 }
 
+// ============================================================================
+// ERROR MODE TESTS
+// ============================================================================
+
+TEST_F(CSVParserErrorTest, BestEffortModeIgnoresErrors) {
+    // CSV with multiple errors
+    std::string content = "a,b,c\n1,2\n3,4,5,6\n";  // inconsistent field counts
+
+    ErrorCollector errors(ErrorMode::BEST_EFFORT);
+    bool success = parseWithErrors(content, errors);
+
+    // BEST_EFFORT should succeed despite errors
+    EXPECT_TRUE(success) << "BEST_EFFORT mode should return success";
+
+    // Errors should still be collected
+    EXPECT_TRUE(errors.has_errors()) << "Errors should still be collected in BEST_EFFORT mode";
+
+    // should_stop should return false even with errors
+    EXPECT_FALSE(errors.should_stop()) << "should_stop() should be false in BEST_EFFORT mode";
+}
+
+// ============================================================================
+// ERROR LIMIT TESTS
+// ============================================================================
+
+TEST_F(CSVParserErrorTest, ErrorLimitPreventsOOM) {
+    // Create a CSV that would generate many errors
+    std::ostringstream oss;
+    oss << "a,b,c\n";
+    for (int i = 0; i < 100; ++i) {
+        oss << "1,2\n";  // Each row is missing a field
+    }
+    std::string content = oss.str();
+
+    // Use a small error limit
+    ErrorCollector errors(ErrorMode::PERMISSIVE, 10);
+    parseWithErrors(content, errors);
+
+    // Should not exceed the limit
+    EXPECT_LE(errors.error_count(), 10u) << "Error count should respect max_errors limit";
+    EXPECT_TRUE(errors.at_error_limit()) << "Should be at error limit";
+}
+
+TEST_F(CSVParserErrorTest, DefaultErrorLimitIs10000) {
+    ErrorCollector errors;
+    // Verify default max errors
+    EXPECT_EQ(ErrorCollector::DEFAULT_MAX_ERRORS, 10000u);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

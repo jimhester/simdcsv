@@ -724,6 +724,16 @@ class two_pass {
     }
     chunk_pos[n_threads] = len;
 
+    // Safety check: if any chunk_pos is null_pos, fall back to single-threaded
+    for (int i = 1; i < n_threads; ++i) {
+      if (chunk_pos[i] == null_pos) {
+        out.n_threads = 1;
+        out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len);
+        check_field_counts(buf, len, errors);
+        return !errors.has_fatal_errors();
+      }
+    }
+
     // Second pass: parse with thread-local error collectors
     ErrorMode mode = errors.mode();
     for (int i = 0; i < n_threads; ++i) {
