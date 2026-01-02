@@ -15,9 +15,11 @@
 
 #ifdef HAVE_ZSV
 // zsv uses C99 restrict keyword which is not valid in C++
-// Define it to nothing for C++ compilation
+// Define it to nothing for C++ compilation if not already defined
 #ifdef __cplusplus
+#ifndef restrict
 #define restrict
+#endif
 #endif
 extern "C" {
 #include <zsv.h>
@@ -26,6 +28,8 @@ extern "C" {
 
 #ifdef HAVE_DUCKDB
 #include <duckdb.hpp>
+#include <atomic>
+#include <unistd.h>
 #endif
 
 #ifdef HAVE_ARROW
@@ -173,9 +177,8 @@ struct ZsvParseContext {
     const uint8_t* base_ptr;  // Base pointer to calculate offsets
     size_t row_count = 0;
     size_t cell_count = 0;
-    // Pre-allocated index array to store cell positions - similar to simdcsv's index
-    uint64_t* cell_positions;
-    size_t index_capacity;
+    // Index vector to store cell positions - similar to simdcsv's index
+    std::vector<uint64_t>* index_storage;
 };
 
 // Row handler that builds an index of all cell positions (like simdcsv)
@@ -189,13 +192,19 @@ static void zsv_row_handler_with_index(void* ctx) {
     size_t write_pos = context->cell_count;
     context->cell_count += cell_count;
 
-    // Write to pre-allocated index array (like simdcsv does)
-    for (size_t i = 0; i < cell_count && write_pos < context->index_capacity; i++, write_pos++) {
+    // Ensure capacity (should rarely need to grow due to pre-allocation)
+    if (write_pos + cell_count > context->index_storage->size()) {
+        context->index_storage->resize((write_pos + cell_count) * 2);
+    }
+
+    // Write to index array (like simdcsv does)
+    uint64_t* positions = context->index_storage->data();
+    for (size_t i = 0; i < cell_count; i++, write_pos++) {
         struct zsv_cell cell = zsv_get_cell(context->parser, i);
         // Calculate byte offset from start of data - this is what simdcsv stores
         uint64_t offset = static_cast<uint64_t>(cell.str - context->base_ptr);
         // Write to index array - this is the key work that simdcsv does
-        context->cell_positions[write_pos] = offset;
+        positions[write_pos] = offset;
     }
 }
 
@@ -221,16 +230,14 @@ static size_t parse_zsv(const uint8_t* data, size_t len) {
     ZsvParseContext ctx;
     ctx.parser = nullptr;
     ctx.base_ptr = data;
+    ctx.index_storage = &zsv_index_storage;
     ZsvMemoryStream mem_stream = {data, len, 0};
 
     // Pre-allocate index array - estimate ~1 cell per 8 bytes (similar to simdcsv)
-    // Use worst-case allocation like simdcsv does
-    size_t estimated_cells = len / 2;  // Worst case: single char cells
+    size_t estimated_cells = len / 8;
     if (zsv_index_storage.size() < estimated_cells) {
         zsv_index_storage.resize(estimated_cells);
     }
-    ctx.cell_positions = zsv_index_storage.data();
-    ctx.index_capacity = zsv_index_storage.size();
 
     // Configure zsv parser options
     struct zsv_opts opts;
@@ -259,7 +266,7 @@ static size_t parse_zsv(const uint8_t* data, size_t len) {
     zsv_delete(parser);
 
     // Prevent optimizer from eliminating the index array
-    benchmark::DoNotOptimize(ctx.cell_positions);
+    benchmark::DoNotOptimize(zsv_index_storage.data());
     benchmark::ClobberMemory();
 
     // Return cell count as work indicator (similar to simdcsv field count)
@@ -274,6 +281,9 @@ static size_t parse_zsv(const uint8_t* data, size_t len) {
 
 #ifdef HAVE_DUCKDB
 
+// Atomic counter for unique temp file names
+static std::atomic<uint64_t> duckdb_temp_file_counter{0};
+
 static size_t parse_duckdb(const uint8_t* data, size_t len) {
     // Create in-memory database
     duckdb::DuckDB db(nullptr);
@@ -284,7 +294,9 @@ static size_t parse_duckdb(const uint8_t* data, size_t len) {
 
     // Use DuckDB's read_csv_auto with a string literal
     // We need to write to a temp file since DuckDB doesn't have a direct memory API for CSV
-    std::string temp_path = "/tmp/simdcsv_duckdb_bench_" + std::to_string(reinterpret_cast<uintptr_t>(data)) + ".csv";
+    // Use PID + counter for unique temp file names across processes and threads
+    uint64_t counter = duckdb_temp_file_counter.fetch_add(1, std::memory_order_relaxed);
+    std::string temp_path = "/tmp/simdcsv_duckdb_bench_" + std::to_string(getpid()) + "_" + std::to_string(counter) + ".csv";
     {
         std::ofstream out(temp_path, std::ios::binary);
         out.write(reinterpret_cast<const char*>(data), len);
@@ -298,38 +310,6 @@ static size_t parse_duckdb(const uint8_t* data, size_t len) {
         }
 
         auto count = result->GetValue(0, 0).GetValue<int64_t>();
-        std::remove(temp_path.c_str());
-        return static_cast<size_t>(count);
-    } catch (...) {
-        std::remove(temp_path.c_str());
-        return 0;
-    }
-}
-
-// Memory-based DuckDB parsing (faster, but requires string copy)
-static size_t parse_duckdb_memory(const uint8_t* data, size_t len) {
-    duckdb::DuckDB db(nullptr);
-    duckdb::Connection conn(db);
-
-    // Create a string from the data
-    std::string csv_data(reinterpret_cast<const char*>(data), len);
-
-    // Register the CSV data as a replacement scan
-    conn.Query("CREATE TABLE csv_data AS SELECT * FROM read_csv_auto('/dev/stdin', filename=false) LIMIT 0");
-
-    // Use a temporary file approach since direct memory CSV reading is complex in DuckDB
-    std::string temp_path = "/tmp/simdcsv_duckdb_" + std::to_string(std::hash<std::string>{}(csv_data.substr(0, 100))) + ".csv";
-    {
-        std::ofstream out(temp_path, std::ios::binary);
-        out << csv_data;
-    }
-
-    try {
-        auto result = conn.Query("SELECT COUNT(*) FROM read_csv_auto('" + temp_path + "', header=true)");
-        int64_t count = 0;
-        if (!result->HasError() && result->RowCount() > 0) {
-            count = result->GetValue(0, 0).GetValue<int64_t>();
-        }
         std::remove(temp_path.c_str());
         return static_cast<size_t>(count);
     } catch (...) {
@@ -386,37 +366,6 @@ static size_t parse_arrow(const uint8_t* data, size_t len) {
     }
 
     return total_rows;
-}
-
-// Table-based Arrow parsing (loads entire CSV into memory)
-static size_t parse_arrow_table(const uint8_t* data, size_t len) {
-    auto buffer = std::make_shared<arrow::Buffer>(data, static_cast<int64_t>(len));
-    auto buffer_reader = std::make_shared<arrow::io::BufferReader>(buffer);
-
-    auto read_options = arrow::csv::ReadOptions::Defaults();
-    auto parse_options = arrow::csv::ParseOptions::Defaults();
-    auto convert_options = arrow::csv::ConvertOptions::Defaults();
-
-    auto maybe_reader = arrow::csv::TableReader::Make(
-        arrow::io::default_io_context(),
-        buffer_reader,
-        read_options,
-        parse_options,
-        convert_options
-    );
-
-    if (!maybe_reader.ok()) {
-        return 0;
-    }
-
-    auto reader = *maybe_reader;
-    auto maybe_table = reader->Read();
-
-    if (!maybe_table.ok()) {
-        return 0;
-    }
-
-    return (*maybe_table)->num_rows();
 }
 
 #endif // HAVE_ARROW
