@@ -262,6 +262,31 @@ add_custom_command(TARGET csv_parsing_test POST_BUILD
 # Register parsing tests with CTest
 gtest_discover_tests(csv_parsing_test)
 
+# CSV parser error detection test executable
+add_executable(csv_parser_errors_test
+    test/csv_parser_errors_test.cpp
+)
+
+target_link_libraries(csv_parser_errors_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(csv_parser_errors_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for parser error tests
+add_custom_command(TARGET csv_parser_errors_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register parser error tests with CTest
+gtest_discover_tests(csv_parser_errors_test)
+
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
     benchmark/benchmark_main.cpp
