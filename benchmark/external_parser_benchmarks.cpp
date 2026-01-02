@@ -1,5 +1,43 @@
 // External CSV Parser Benchmarks
 // Compares simdcsv against best-in-class CSV parsers: DuckDB, zsv, and Apache Arrow
+//
+// =============================================================================
+// HOW TO ENABLE AND RUN EXTERNAL PARSER BENCHMARKS
+// =============================================================================
+//
+// These benchmarks are optional and require enabling at CMake configure time:
+//
+//   # Enable zsv only (fast to build, recommended for quick comparisons)
+//   cmake -B build -DENABLE_ZSV_BENCHMARK=ON
+//
+//   # Enable DuckDB (slow to build ~15min, but comprehensive)
+//   cmake -B build -DENABLE_DUCKDB_BENCHMARK=ON
+//
+//   # Enable Apache Arrow (requires system installation)
+//   # macOS: brew install apache-arrow
+//   # Ubuntu: apt install libarrow-dev
+//   cmake -B build -DENABLE_ARROW_BENCHMARK=ON
+//
+//   # Enable all parsers
+//   cmake -B build -DENABLE_ZSV_BENCHMARK=ON -DENABLE_DUCKDB_BENCHMARK=ON -DENABLE_ARROW_BENCHMARK=ON
+//
+// Build and run:
+//   cmake --build build
+//   ./build/simdcsv_benchmark --benchmark_filter="BM_external"
+//   ./build/simdcsv_benchmark --benchmark_filter="BM_fair_comparison"
+//
+// =============================================================================
+// KNOWN LIMITATIONS
+// =============================================================================
+//
+// DuckDB I/O Overhead:
+//   The DuckDB benchmark writes CSV data to a temp file before parsing because
+//   DuckDB's simple API doesn't support direct in-memory CSV parsing. This adds
+//   file I/O overhead that other parsers don't have, making DuckDB appear slower
+//   than its actual parsing performance. For pure parsing speed comparisons,
+//   focus on simdcsv vs zsv vs Arrow results.
+//
+// =============================================================================
 
 #include <benchmark/benchmark.h>
 #include "common_defs.h"
@@ -278,6 +316,12 @@ static size_t parse_zsv(const uint8_t* data, size_t len) {
 // ============================================================================
 // DuckDB Parser
 // ============================================================================
+//
+// NOTE: DuckDB benchmarks include file I/O overhead because DuckDB's simple API
+// doesn't support direct in-memory CSV parsing. The data is written to a temp
+// file and then read by DuckDB. This makes DuckDB appear slower than its actual
+// parsing performance. For fair parsing speed comparisons, focus on simdcsv vs
+// zsv vs Arrow results.
 
 #ifdef HAVE_DUCKDB
 
@@ -289,11 +333,8 @@ static size_t parse_duckdb(const uint8_t* data, size_t len) {
     duckdb::DuckDB db(nullptr);
     duckdb::Connection conn(db);
 
-    // Convert data to string
-    std::string csv_string(reinterpret_cast<const char*>(data), len);
-
-    // Use DuckDB's read_csv_auto with a string literal
-    // We need to write to a temp file since DuckDB doesn't have a direct memory API for CSV
+    // NOTE: File I/O overhead - DuckDB requires temp file for CSV parsing
+    // This adds write+read latency that other parsers don't have
     // Use PID + counter for unique temp file names across processes and threads
     uint64_t counter = duckdb_temp_file_counter.fetch_add(1, std::memory_order_relaxed);
     std::string temp_path = "/tmp/simdcsv_duckdb_bench_" + std::to_string(getpid()) + "_" + std::to_string(counter) + ".csv";
@@ -589,29 +630,29 @@ static std::string GetParserName(int parser_id) {
 // Benchmark Registration
 // ============================================================================
 
-// File size ranges: 1KB, 10KB, 100KB, 1MB, 10MB, 100MB
-#define FILE_SIZE_RANGE Range(1024, 100 * 1024 * 1024)->RangeMultiplier(10)
+// Benchmark data sizes: 1KB, 10KB, 100KB, 1MB, 10MB, 100MB (powers of 10)
+#define BENCHMARK_CSV_SIZES_1KB_TO_100MB Range(1024, 100 * 1024 * 1024)->RangeMultiplier(10)
 
 // Register simdcsv benchmarks (always available)
 BENCHMARK(BM_simdcsv_generated)
-    ->FILE_SIZE_RANGE
+    ->BENCHMARK_CSV_SIZES_1KB_TO_100MB
     ->Unit(benchmark::kMillisecond)
     ->Name("BM_external/simdcsv/generated");
 
 BENCHMARK(BM_simdcsv_quoted)
-    ->FILE_SIZE_RANGE
+    ->BENCHMARK_CSV_SIZES_1KB_TO_100MB
     ->Unit(benchmark::kMillisecond)
     ->Name("BM_external/simdcsv/quoted");
 
 // Register zsv benchmarks
 #ifdef HAVE_ZSV
 BENCHMARK(BM_zsv_generated)
-    ->FILE_SIZE_RANGE
+    ->BENCHMARK_CSV_SIZES_1KB_TO_100MB
     ->Unit(benchmark::kMillisecond)
     ->Name("BM_external/zsv/generated");
 
 BENCHMARK(BM_zsv_quoted)
-    ->FILE_SIZE_RANGE
+    ->BENCHMARK_CSV_SIZES_1KB_TO_100MB
     ->Unit(benchmark::kMillisecond)
     ->Name("BM_external/zsv/quoted");
 #endif
@@ -619,7 +660,7 @@ BENCHMARK(BM_zsv_quoted)
 // Register DuckDB benchmarks
 #ifdef HAVE_DUCKDB
 BENCHMARK(BM_duckdb_generated)
-    ->FILE_SIZE_RANGE
+    ->BENCHMARK_CSV_SIZES_1KB_TO_100MB
     ->Unit(benchmark::kMillisecond)
     ->Name("BM_external/duckdb/generated");
 #endif
@@ -627,12 +668,12 @@ BENCHMARK(BM_duckdb_generated)
 // Register Arrow benchmarks
 #ifdef HAVE_ARROW
 BENCHMARK(BM_arrow_generated)
-    ->FILE_SIZE_RANGE
+    ->BENCHMARK_CSV_SIZES_1KB_TO_100MB
     ->Unit(benchmark::kMillisecond)
     ->Name("BM_external/arrow/generated");
 
 BENCHMARK(BM_arrow_quoted)
-    ->FILE_SIZE_RANGE
+    ->BENCHMARK_CSV_SIZES_1KB_TO_100MB
     ->Unit(benchmark::kMillisecond)
     ->Name("BM_external/arrow/quoted");
 #endif
