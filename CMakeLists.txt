@@ -57,7 +57,6 @@ FetchContent_MakeAvailable(benchmark)
 add_library(simdcsv_lib STATIC
     src/io_util.cpp
     src/error.cpp
-    src/csv_parser.cpp
 )
 
 target_include_directories(simdcsv_lib PUBLIC
