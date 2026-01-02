@@ -599,10 +599,123 @@ class two_pass {
     // return index;
   }
 
+  // Result from multi-threaded parsing with error collection
+  struct chunk_result {
+    uint64_t n_indexes;
+    ErrorCollector errors;
+
+    chunk_result() : n_indexes(0), errors(ErrorMode::PERMISSIVE) {}
+  };
+
+  // Static wrapper for thread-safe parsing with error collection
+  static chunk_result second_pass_chunk_with_errors(
+      const uint8_t* buf, size_t start, size_t end,
+      index* out, size_t thread_id, size_t total_len, ErrorMode mode) {
+    chunk_result result;
+    result.errors.set_mode(mode);
+    result.n_indexes = second_pass_chunk(buf, start, end, out, thread_id,
+                                         &result.errors, total_len);
+    return result;
+  }
+
+  // Multi-threaded parsing with error collection using thread-local collectors
+  // Each thread collects errors locally, then they are merged and sorted by offset
+  bool parse_two_pass_with_errors(const uint8_t* buf, index& out, size_t len,
+                                  ErrorCollector& errors) {
+    // Check structural issues first (single-threaded, fast)
+    check_empty_header(buf, len, errors);
+    if (errors.should_stop()) return false;
+
+    check_duplicate_columns(buf, len, errors);
+    if (errors.should_stop()) return false;
+
+    check_line_endings(buf, len, errors);
+    if (errors.should_stop()) return false;
+
+    uint8_t n_threads = out.n_threads;
+
+    // For single-threaded, use the simpler path
+    if (n_threads == 1) {
+      out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len);
+      check_field_counts(buf, len, errors);
+      return !errors.has_fatal_errors();
+    }
+
+    size_t chunk_size = len / n_threads;
+    std::vector<uint64_t> chunk_pos(n_threads + 1);
+    std::vector<std::future<stats>> first_pass_fut(n_threads);
+    std::vector<std::future<chunk_result>> second_pass_fut(n_threads);
+
+    // First pass: find chunk boundaries
+    for (int i = 0; i < n_threads; ++i) {
+      first_pass_fut[i] = std::async(std::launch::async, first_pass_chunk, buf,
+                                     chunk_size * i, chunk_size * (i + 1));
+    }
+
+    auto st = first_pass_fut[0].get();
+    size_t n_quotes = st.n_quotes;
+#ifndef SIMDCSV_BENCHMARK_MODE
+    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
+           st.first_even_nl, st.first_odd_nl, st.n_quotes);
+#endif
+    chunk_pos[0] = 0;
+    for (int i = 1; i < n_threads; ++i) {
+      auto st = first_pass_fut[i].get();
+#ifndef SIMDCSV_BENCHMARK_MODE
+      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
+             st.first_even_nl, st.first_odd_nl, st.n_quotes);
+#endif
+      chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
+      n_quotes += st.n_quotes;
+    }
+    chunk_pos[n_threads] = len;
+
+    // Second pass: parse with thread-local error collectors
+    ErrorMode mode = errors.mode();
+    for (int i = 0; i < n_threads; ++i) {
+      second_pass_fut[i] = std::async(std::launch::async,
+          second_pass_chunk_with_errors, buf,
+          chunk_pos[i], chunk_pos[i + 1], &out, i, len, mode);
+    }
+
+    // Collect results and merge errors
+    std::vector<ErrorCollector> thread_errors;
+    thread_errors.reserve(n_threads);
+
+    for (int i = 0; i < n_threads; ++i) {
+      auto result = second_pass_fut[i].get();
+      out.n_indexes[i] = result.n_indexes;
+      thread_errors.push_back(std::move(result.errors));
+    }
+
+    // Merge all thread-local errors, sorted by byte offset
+    errors.merge_sorted(thread_errors);
+
+    // Check field counts after parsing (single-threaded, scans file linearly)
+    check_field_counts(buf, len, errors);
+
+    return !errors.has_fatal_errors();
+  }
+
   // Parse with error collection - single-threaded for reliable error reporting
+  // Use this when you need precise error ordering or for small files
   bool parse_with_errors(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors) {
+    // Check structural issues first
+    check_empty_header(buf, len, errors);
+    if (errors.should_stop()) return false;
+
+    check_duplicate_columns(buf, len, errors);
+    if (errors.should_stop()) return false;
+
+    check_line_endings(buf, len, errors);
+    if (errors.should_stop()) return false;
+
     // Single-threaded parsing for accurate error position tracking
     out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len);
+
+    // Check field counts after parsing
+    check_field_counts(buf, len, errors);
+
     return !errors.has_fatal_errors();
   }
 

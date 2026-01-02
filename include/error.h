@@ -1,6 +1,7 @@
 #ifndef SIMDCSV_ERROR_H
 #define SIMDCSV_ERROR_H
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -124,6 +125,36 @@ public:
 
     ErrorMode mode() const { return mode_; }
     void set_mode(ErrorMode mode) { mode_ = mode; }
+
+    // Merge errors from another collector (for multi-threaded parsing)
+    // Errors are sorted by byte_offset to maintain logical order
+    void merge_from(const ErrorCollector& other) {
+        if (other.errors_.empty()) return;
+
+        errors_.reserve(errors_.size() + other.errors_.size());
+        for (const auto& err : other.errors_) {
+            errors_.push_back(err);
+        }
+        if (other.has_fatal_) {
+            has_fatal_ = true;
+        }
+    }
+
+    // Sort errors by byte offset (call after merging from multiple threads)
+    void sort_by_offset() {
+        std::sort(errors_.begin(), errors_.end(),
+            [](const ParseError& a, const ParseError& b) {
+                return a.byte_offset < b.byte_offset;
+            });
+    }
+
+    // Merge multiple collectors into this one, sorted by offset
+    void merge_sorted(std::vector<ErrorCollector>& collectors) {
+        for (auto& collector : collectors) {
+            merge_from(collector);
+        }
+        sort_by_offset();
+    }
 
 private:
     ErrorMode mode_;

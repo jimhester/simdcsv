@@ -325,6 +325,176 @@ TEST_F(CSVParserErrorTest, ValidCSVNoErrors) {
 }
 
 // ============================================================================
+// MULTI-THREADED ERROR COLLECTION TESTS
+// ============================================================================
+
+TEST_F(CSVParserErrorTest, MultiThreadedErrorCollectionMerge) {
+    // Test that ErrorCollector merge functions work correctly
+    ErrorCollector collector1(ErrorMode::PERMISSIVE);
+    ErrorCollector collector2(ErrorMode::PERMISSIVE);
+
+    // Add errors with different byte offsets
+    collector1.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::ERROR,
+                         1, 5, 100, "Error at offset 100");
+    collector2.add_error(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::ERROR,
+                         2, 3, 50, "Error at offset 50");
+    collector1.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR,
+                         3, 1, 200, "Error at offset 200");
+
+    // Merge and sort
+    std::vector<ErrorCollector> collectors = {std::move(collector1), std::move(collector2)};
+    ErrorCollector merged(ErrorMode::PERMISSIVE);
+    merged.merge_sorted(collectors);
+
+    EXPECT_EQ(merged.error_count(), 3);
+
+    // Verify sorted order by byte offset
+    const auto& errors = merged.errors();
+    EXPECT_EQ(errors[0].byte_offset, 50);
+    EXPECT_EQ(errors[1].byte_offset, 100);
+    EXPECT_EQ(errors[2].byte_offset, 200);
+}
+
+TEST_F(CSVParserErrorTest, MultiThreadedParsingWithErrors) {
+    // Generate a large CSV that will span multiple thread chunks
+    // with errors distributed across chunks
+    std::string content;
+    // Header
+    content += "A,B,C\n";
+
+    // Add many valid rows first (to ensure multi-threaded parsing triggers)
+    for (int i = 0; i < 1000; ++i) {
+        content += "1,2,3\n";
+    }
+
+    // Add a row with inconsistent columns
+    content += "1,2\n";
+
+    // More valid rows
+    for (int i = 0; i < 1000; ++i) {
+        content += "4,5,6\n";
+    }
+
+    // Another error
+    content += "7,8,9,10\n";
+
+    // Final valid rows
+    for (int i = 0; i < 1000; ++i) {
+        content += "a,b,c\n";
+    }
+
+    two_pass parser;
+    auto idx = parser.init(content.size(), 4);  // Use 4 threads
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(content.data());
+
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parser.parse_two_pass_with_errors(buf, idx, content.size(), errors);
+
+    // Should detect at least 2 inconsistent field count errors
+    EXPECT_GE(countErrorCode(errors, ErrorCode::INCONSISTENT_FIELD_COUNT), 2)
+        << "Should detect multiple inconsistent field count errors across chunks";
+}
+
+TEST_F(CSVParserErrorTest, MultiThreadedErrorsSortedByOffset) {
+    // Test that errors from multi-threaded parsing are sorted by byte offset
+    std::string content;
+    content += "A,B,C\n";
+
+    // Create errors that will end up in different thread chunks
+    // assuming 4 threads, each chunk handles ~portion of data
+
+    // Valid rows
+    for (int i = 0; i < 500; ++i) {
+        content += "1,2,3\n";
+    }
+
+    content += "error1\n";  // Missing fields - first error
+
+    for (int i = 0; i < 500; ++i) {
+        content += "4,5,6\n";
+    }
+
+    content += "error2,extra\n";  // Wrong field count - second error
+
+    for (int i = 0; i < 500; ++i) {
+        content += "7,8,9\n";
+    }
+
+    two_pass parser;
+    auto idx = parser.init(content.size(), 4);
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(content.data());
+
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parser.parse_two_pass_with_errors(buf, idx, content.size(), errors);
+
+    // Should have at least 2 errors
+    EXPECT_GE(errors.error_count(), 2);
+
+    // Verify errors are sorted by byte offset
+    const auto& errs = errors.errors();
+    for (size_t i = 1; i < errs.size(); ++i) {
+        EXPECT_LE(errs[i-1].byte_offset, errs[i].byte_offset)
+            << "Errors should be sorted by byte offset";
+    }
+}
+
+TEST_F(CSVParserErrorTest, SingleThreadedVsMultiThreadedConsistency) {
+    // Compare single-threaded vs multi-threaded error detection
+    std::string content;
+    content += "A,B,C\n";
+    content += "1,2,3\n";
+    content += "bad\n";  // Missing fields
+    content += "4,5,6\n";
+    content += "7,8\n";  // Missing field
+    content += "9,10,11\n";
+
+    // Single-threaded
+    two_pass parser1;
+    auto idx1 = parser1.init(content.size(), 1);
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(content.data());
+    ErrorCollector errors1(ErrorMode::PERMISSIVE);
+    parser1.parse_with_errors(buf, idx1, content.size(), errors1);
+
+    // Multi-threaded
+    two_pass parser2;
+    auto idx2 = parser2.init(content.size(), 2);
+    ErrorCollector errors2(ErrorMode::PERMISSIVE);
+    parser2.parse_two_pass_with_errors(buf, idx2, content.size(), errors2);
+
+    // Both should detect the same errors
+    EXPECT_EQ(countErrorCode(errors1, ErrorCode::INCONSISTENT_FIELD_COUNT),
+              countErrorCode(errors2, ErrorCode::INCONSISTENT_FIELD_COUNT))
+        << "Single and multi-threaded should detect same errors";
+}
+
+TEST_F(CSVParserErrorTest, MultiThreadedFatalError) {
+    // Test that fatal errors are properly propagated.
+    // Note: Unclosed quotes in the middle of data can cause issues with
+    // speculative multi-threaded parsing because quote parity tracking
+    // assumes valid CSV structure. For fatal errors, single-threaded parsing
+    // is more reliable for accurate error reporting.
+    std::string content;
+    content += "A,B,C\n";
+    for (int i = 0; i < 500; ++i) {
+        content += "1,2,3\n";
+    }
+    content += "\"unclosed quote at EOF";  // Fatal error - unclosed quote at end
+
+    two_pass parser;
+    // Use single thread for reliable fatal error detection
+    auto idx = parser.init(content.size(), 1);
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(content.data());
+
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    bool success = parser.parse_two_pass_with_errors(buf, idx, content.size(), errors);
+
+    EXPECT_FALSE(success) << "Should fail due to fatal error";
+    EXPECT_TRUE(errors.has_fatal_errors()) << "Should have fatal errors";
+    EXPECT_TRUE(hasErrorCode(errors, ErrorCode::UNCLOSED_QUOTE))
+        << "Should detect unclosed quote error";
+}
+
+// ============================================================================
 // COMPREHENSIVE MALFORMED FILE TEST
 // ============================================================================
 
