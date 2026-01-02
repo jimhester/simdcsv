@@ -40,6 +40,18 @@ set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(highway)
 
+# Google Benchmark for performance testing
+FetchContent_Declare(
+  benchmark
+  GIT_REPOSITORY https://github.com/google/benchmark.git
+  GIT_TAG v1.8.3
+)
+set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_DOXYGEN OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(benchmark)
+
 # Library target
 add_library(simdcsv_lib STATIC
     src/io_util.cpp
@@ -151,3 +163,33 @@ add_custom_command(TARGET csv_parsing_test POST_BUILD
 
 # Register parsing tests with CTest
 gtest_discover_tests(csv_parsing_test)
+
+# Benchmark executable
+add_executable(simdcsv_benchmark
+    benchmark/benchmark_main.cpp
+    benchmark/basic_benchmarks.cpp
+    benchmark/comparison_benchmarks.cpp
+    benchmark/real_world_benchmarks.cpp
+    benchmark/dimensions_benchmarks.cpp
+    benchmark/performance_metrics.cpp
+    benchmark/simd_benchmarks.cpp
+    benchmark/energy_benchmarks.cpp
+)
+
+target_link_libraries(simdcsv_benchmark PRIVATE
+    simdcsv_lib
+    benchmark::benchmark
+    benchmark::benchmark_main
+    pthread
+)
+
+target_include_directories(simdcsv_benchmark PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for benchmarks
+add_custom_command(TARGET simdcsv_benchmark POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/benchmark/data
+)
