@@ -113,7 +113,6 @@ static void BM_FileSizes(benchmark::State& state) {
     state.counters["Rows"] = static_cast<double>(estimated_rows);
     state.counters["Cols"] = static_cast<double>(cols);
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -153,7 +152,6 @@ static void BM_ColumnCounts(benchmark::State& state) {
     state.counters["Columns"] = static_cast<double>(num_cols);
     state.counters["Rows"] = static_cast<double>(num_rows);
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -204,7 +202,6 @@ static void BM_DataTypes(benchmark::State& state) {
     state.counters["FileSize"] = static_cast<double>(data.size());
     state.counters["DataType"] = static_cast<double>(data_type);
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -248,7 +245,6 @@ static void BM_ThreadScaling(benchmark::State& state) {
       // for accurate efficiency calculation
     }
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -287,7 +283,6 @@ static void BM_RowScaling(benchmark::State& state) {
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["BytesPerRecord"] = static_cast<double>(data.size()) / num_rows;
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -329,7 +324,6 @@ static void BM_RowColumnMatrix(benchmark::State& state) {
     state.counters["TotalFields"] = static_cast<double>(num_rows * num_cols);
     state.counters["BytesPerField"] = static_cast<double>(data.size()) / (num_rows * num_cols);
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }

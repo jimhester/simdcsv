@@ -133,7 +133,6 @@ static void BM_SIMD_vs_Scalar(benchmark::State& state) {
     state.counters["FileSize"] = static_cast<double>(data.size());
     state.counters["Threads"] = static_cast<double>(n_threads);
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }

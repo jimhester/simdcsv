@@ -242,7 +242,6 @@ static void BM_financial_data(benchmark::State& state) {
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["FileSize"] = static_cast<double>(data.size());
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -276,7 +275,6 @@ static void BM_nyc_taxi_data(benchmark::State& state) {
     state.counters["FileSize"] = static_cast<double>(data.size());
     state.counters["Columns"] = 19.0; // NYC taxi has 19 columns
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -308,7 +306,6 @@ static void BM_genomics_data(benchmark::State& state) {
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["FileSize"] = static_cast<double>(data.size());
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -340,7 +337,6 @@ static void BM_log_data(benchmark::State& state) {
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["FileSize"] = static_cast<double>(data.size());
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -374,7 +370,6 @@ static void BM_wide_table(benchmark::State& state) {
     state.counters["Cols"] = static_cast<double>(num_cols);
     state.counters["FileSize"] = static_cast<double>(data.size());
     
-    aligned_free((void*)data.data());
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
