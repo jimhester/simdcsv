@@ -27,19 +27,14 @@
 //   ./build/simdcsv_benchmark --benchmark_filter="BM_fair_comparison"
 //
 // =============================================================================
-// KNOWN LIMITATIONS
+// IMPLEMENTATION NOTES
 // =============================================================================
 //
-// DuckDB I/O Overhead:
-//   The DuckDB benchmark writes CSV data to a temp file before parsing because
-//   DuckDB's C++ API doesn't support reading CSV from memory buffers. While we
-//   use an in-memory database (nullptr/":memory:"), the read_csv_auto() function
-//   still requires a file path. Only DuckDB's Python client supports in-memory
-//   CSV parsing via fsspec. This file I/O overhead makes DuckDB appear slower
-//   than its actual parsing performance. For pure parsing speed comparisons,
-//   focus on simdcsv vs zsv vs Arrow results.
-//
-//   See: https://github.com/duckdb/duckdb/discussions/8985
+// DuckDB In-Memory Parsing:
+//   We use a custom MemoryFileSystem registered with DuckDB to serve CSV data
+//   directly from memory buffers via memory:// URLs. This avoids file I/O and
+//   provides a fair comparison with other parsers. The MemoryFileSystem is
+//   registered per-thread to avoid contention.
 //
 // =============================================================================
 
@@ -70,8 +65,120 @@ extern "C" {
 
 #ifdef HAVE_DUCKDB
 #include <duckdb.hpp>
+#include <duckdb/common/file_system.hpp>
 #include <atomic>
-#include <unistd.h>
+#include <mutex>
+
+// ============================================================================
+// In-Memory FileSystem for DuckDB
+// ============================================================================
+// Custom FileSystem that serves CSV data from memory buffers, avoiding file I/O.
+
+class MemoryFileHandle : public duckdb::FileHandle {
+public:
+    MemoryFileHandle(duckdb::FileSystem &fs, duckdb::string path,
+                     const uint8_t* data, size_t len)
+        : FileHandle(fs, std::move(path)),
+          data_(data), len_(len), pos_(0) {}
+
+    void Close() override {}
+
+    const uint8_t* data_;
+    size_t len_;
+    size_t pos_;
+};
+
+class MemoryFileSystem : public duckdb::FileSystem {
+public:
+    static constexpr const char* PROTOCOL = "memory://";
+
+    // Register a memory buffer with a name
+    void RegisterBuffer(const std::string& name, const uint8_t* data, size_t len) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        buffers_[PROTOCOL + name] = {data, len};
+    }
+
+    void ClearBuffers() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        buffers_.clear();
+    }
+
+    // FileSystem interface
+    std::string GetName() const override { return "MemoryFileSystem"; }
+
+    bool CanHandleFile(const std::string &path) override {
+        return path.rfind(PROTOCOL, 0) == 0;  // starts with memory://
+    }
+
+    duckdb::unique_ptr<duckdb::FileHandle> OpenFile(const duckdb::string &path,
+                                                     duckdb::FileOpenFlags flags,
+                                                     duckdb::optional_ptr<duckdb::FileOpener>) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = buffers_.find(path);
+        if (it == buffers_.end()) {
+            throw duckdb::IOException("Memory buffer not found: " + path);
+        }
+        return duckdb::make_uniq<MemoryFileHandle>(*this, path, it->second.data, it->second.len);
+    }
+
+    int64_t Read(duckdb::FileHandle &handle, void *buffer, int64_t nr_bytes) override {
+        auto &mem_handle = handle.Cast<MemoryFileHandle>();
+        int64_t bytes_available = static_cast<int64_t>(mem_handle.len_ - mem_handle.pos_);
+        int64_t bytes_to_read = std::min(nr_bytes, bytes_available);
+        if (bytes_to_read > 0) {
+            memcpy(buffer, mem_handle.data_ + mem_handle.pos_, bytes_to_read);
+            mem_handle.pos_ += bytes_to_read;
+        }
+        return bytes_to_read;
+    }
+
+    int64_t GetFileSize(duckdb::FileHandle &handle) override {
+        auto &mem_handle = handle.Cast<MemoryFileHandle>();
+        return static_cast<int64_t>(mem_handle.len_);
+    }
+
+    void Seek(duckdb::FileHandle &handle, duckdb::idx_t location) override {
+        auto &mem_handle = handle.Cast<MemoryFileHandle>();
+        mem_handle.pos_ = std::min(location, static_cast<duckdb::idx_t>(mem_handle.len_));
+    }
+
+    void Reset(duckdb::FileHandle &handle) override {
+        auto &mem_handle = handle.Cast<MemoryFileHandle>();
+        mem_handle.pos_ = 0;
+    }
+
+    duckdb::idx_t SeekPosition(duckdb::FileHandle &handle) override {
+        auto &mem_handle = handle.Cast<MemoryFileHandle>();
+        return mem_handle.pos_;
+    }
+
+    bool CanSeek() override { return true; }
+    bool OnDiskFile(duckdb::FileHandle &) override { return false; }
+    bool IsPipe(const std::string &, duckdb::optional_ptr<duckdb::FileOpener>) override { return false; }
+
+    // Required but unused for read-only access
+    int64_t Write(duckdb::FileHandle &, void *, int64_t) override {
+        throw duckdb::IOException("MemoryFileSystem is read-only");
+    }
+    void FileSync(duckdb::FileHandle &) override {}
+    void Truncate(duckdb::FileHandle &, int64_t) override {}
+    time_t GetLastModifiedTime(duckdb::FileHandle &) override {
+        return 0;
+    }
+    bool FileExists(const std::string &filename, duckdb::optional_ptr<duckdb::FileOpener>) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return buffers_.find(filename) != buffers_.end();
+    }
+
+private:
+    struct BufferInfo {
+        const uint8_t* data;
+        size_t len;
+    };
+    std::mutex mutex_;
+    std::map<std::string, BufferInfo> buffers_;
+};
+
 #endif
 
 #ifdef HAVE_ARROW
@@ -321,43 +428,35 @@ static size_t parse_zsv(const uint8_t* data, size_t len) {
 // DuckDB Parser
 // ============================================================================
 //
-// NOTE: DuckDB benchmarks include file I/O overhead. While we use an in-memory
-// database (nullptr), DuckDB's C++ read_csv_auto() requires a file path - only
-// the Python client supports reading CSV from memory buffers. This I/O overhead
-// makes DuckDB appear slower than its actual parsing performance.
+// Uses a custom in-memory FileSystem to avoid file I/O overhead. The CSV data
+// is registered with a MemoryFileSystem and accessed via memory:// URLs.
 
 #ifdef HAVE_DUCKDB
 
-// Atomic counter for unique temp file names
-static std::atomic<uint64_t> duckdb_temp_file_counter{0};
-
 static size_t parse_duckdb(const uint8_t* data, size_t len) {
-    // Create in-memory database
+    // Create fresh DuckDB instance each time to avoid any caching effects
+    // This ensures fair comparison with other parsers that don't cache
     duckdb::DuckDB db(nullptr);
+
+    // Create and register memory filesystem
+    auto mem_fs = duckdb::make_uniq<MemoryFileSystem>();
+    auto* mem_fs_ptr = mem_fs.get();
+    db.GetFileSystem().RegisterSubSystem(std::move(mem_fs));
+
+    // Register the buffer
+    mem_fs_ptr->RegisterBuffer("data.csv", data, len);
+
     duckdb::Connection conn(db);
 
-    // NOTE: File I/O overhead - DuckDB requires temp file for CSV parsing
-    // This adds write+read latency that other parsers don't have
-    // Use PID + counter for unique temp file names across processes and threads
-    uint64_t counter = duckdb_temp_file_counter.fetch_add(1, std::memory_order_relaxed);
-    std::string temp_path = "/tmp/simdcsv_duckdb_bench_" + std::to_string(getpid()) + "_" + std::to_string(counter) + ".csv";
-    {
-        std::ofstream out(temp_path, std::ios::binary);
-        out.write(reinterpret_cast<const char*>(data), len);
-    }
-
     try {
-        auto result = conn.Query("SELECT COUNT(*) FROM read_csv_auto('" + temp_path + "')");
+        auto result = conn.Query("SELECT COUNT(*) FROM read_csv_auto('memory://data.csv')");
         if (result->HasError()) {
-            std::remove(temp_path.c_str());
             return 0;
         }
 
         auto count = result->GetValue(0, 0).GetValue<int64_t>();
-        std::remove(temp_path.c_str());
         return static_cast<size_t>(count);
     } catch (...) {
-        std::remove(temp_path.c_str());
         return 0;
     }
 }
