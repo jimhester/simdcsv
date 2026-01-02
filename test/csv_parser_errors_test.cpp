@@ -325,6 +325,150 @@ TEST_F(CSVParserErrorTest, ValidCSVNoErrors) {
 }
 
 // ============================================================================
+// SIMD-BASED ERROR DETECTION TESTS (APPROACH 2)
+// ============================================================================
+
+// Helper to parse with SIMD error detection
+bool parseWithSIMDErrors(const std::string& content, ErrorCollector& errors) {
+    two_pass parser;
+    auto idx = parser.init(content.size(), 1);
+    const uint8_t* buf = reinterpret_cast<const uint8_t*>(content.data());
+    return parser.parse_with_simd_errors(buf, idx, content.size(), errors);
+}
+
+TEST_F(CSVParserErrorTest, SIMDErrorLocationsBasic) {
+    // Test SIMDErrorLocations class
+    SIMDErrorLocations locations;
+
+    locations.add_location(100, ErrorCode::NULL_BYTE);
+    locations.add_location(50, ErrorCode::QUOTE_IN_UNQUOTED_FIELD);
+    locations.add_location(200, ErrorCode::NULL_BYTE);
+
+    EXPECT_EQ(locations.size(), 3);
+
+    locations.sort_by_offset();
+
+    const auto& locs = locations.locations();
+    EXPECT_EQ(locs[0].byte_offset, 50);
+    EXPECT_EQ(locs[1].byte_offset, 100);
+    EXPECT_EQ(locs[2].byte_offset, 200);
+}
+
+TEST_F(CSVParserErrorTest, SIMDErrorLocationsMerge) {
+    SIMDErrorLocations loc1;
+    SIMDErrorLocations loc2;
+
+    loc1.add_location(100, ErrorCode::NULL_BYTE);
+    loc2.add_location(50, ErrorCode::NULL_BYTE);
+    loc1.add_location(200, ErrorCode::NULL_BYTE);
+
+    std::vector<SIMDErrorLocations> others = {loc1, loc2};
+    SIMDErrorLocations merged;
+    merged.merge_sorted(others);
+
+    EXPECT_EQ(merged.size(), 3);
+
+    // Should be sorted
+    const auto& locs = merged.locations();
+    EXPECT_EQ(locs[0].byte_offset, 50);
+    EXPECT_EQ(locs[1].byte_offset, 100);
+    EXPECT_EQ(locs[2].byte_offset, 200);
+}
+
+TEST_F(CSVParserErrorTest, SIMDDetectsNullBytes) {
+    std::string content = "A,B,C\n1,2,3\n4,";
+    content += '\0';  // NULL byte
+    content += ",6\n";
+
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parseWithSIMDErrors(content, errors);
+
+    EXPECT_TRUE(hasErrorCode(errors, ErrorCode::NULL_BYTE))
+        << "SIMD should detect NULL byte";
+}
+
+TEST_F(CSVParserErrorTest, SIMDDetectsMultipleNullBytes) {
+    std::string content = "A,B,C\n";
+
+    // Add rows with NULL bytes at various positions
+    for (int i = 0; i < 100; ++i) {
+        content += "1,2,3\n";
+    }
+    content += "1,";
+    content += '\0';  // First NULL byte
+    content += ",3\n";
+
+    for (int i = 0; i < 100; ++i) {
+        content += "4,5,6\n";
+    }
+    content += "7,8,";
+    content += '\0';  // Second NULL byte
+    content += "\n";
+
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parseWithSIMDErrors(content, errors);
+
+    size_t null_count = countErrorCode(errors, ErrorCode::NULL_BYTE);
+    EXPECT_GE(null_count, 2) << "SIMD should detect multiple NULL bytes";
+}
+
+TEST_F(CSVParserErrorTest, SIMDNoErrorsOnValidCSV) {
+    std::string content = "A,B,C\n1,2,3\n4,5,6\n7,8,9\n";
+
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parseWithSIMDErrors(content, errors);
+
+    // No NULL bytes, no quote errors
+    EXPECT_FALSE(hasErrorCode(errors, ErrorCode::NULL_BYTE));
+}
+
+TEST_F(CSVParserErrorTest, SIMDDetectsNullByteFile) {
+    std::string content = readFile(getTestDataPath("null_byte.csv"));
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parseWithSIMDErrors(content, errors);
+
+    EXPECT_TRUE(hasErrorCode(errors, ErrorCode::NULL_BYTE))
+        << "SIMD should detect NULL byte from file";
+}
+
+TEST_F(CSVParserErrorTest, SIMDDetectsFieldCountErrors) {
+    std::string content = "A,B,C\n1,2,3\n1,2\n4,5,6\n";
+
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parseWithSIMDErrors(content, errors);
+
+    EXPECT_TRUE(hasErrorCode(errors, ErrorCode::INCONSISTENT_FIELD_COUNT))
+        << "SIMD approach should still detect field count errors";
+}
+
+TEST_F(CSVParserErrorTest, SIMDDetectsDuplicateColumns) {
+    std::string content = readFile(getTestDataPath("duplicate_column_names.csv"));
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    parseWithSIMDErrors(content, errors);
+
+    EXPECT_TRUE(hasErrorCode(errors, ErrorCode::DUPLICATE_COLUMN_NAMES))
+        << "SIMD approach should still detect duplicate columns";
+}
+
+TEST_F(CSVParserErrorTest, SIMDVsRegularConsistency) {
+    // Compare SIMD and regular error detection for NULL bytes
+    std::string content = "A,B,C\n1,2,3\n4,";
+    content += '\0';
+    content += ",6\n7,8,9\n";
+
+    ErrorCollector errors1(ErrorMode::PERMISSIVE);
+    parseWithErrors(content, errors1);
+
+    ErrorCollector errors2(ErrorMode::PERMISSIVE);
+    parseWithSIMDErrors(content, errors2);
+
+    // Both should detect NULL byte
+    EXPECT_EQ(hasErrorCode(errors1, ErrorCode::NULL_BYTE),
+              hasErrorCode(errors2, ErrorCode::NULL_BYTE))
+        << "SIMD and regular parsing should detect same NULL byte errors";
+}
+
+// ============================================================================
 // COMPREHENSIVE MALFORMED FILE TEST
 // ============================================================================
 
