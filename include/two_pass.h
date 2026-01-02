@@ -515,6 +515,14 @@ class two_pass {
       return true;
     }
     size_t chunk_size = len / n_threads;
+    // If chunk size is too small, small chunks may not contain any newlines,
+    // causing first_pass_speculate to return null_pos. Fall back to single-threaded.
+    if (chunk_size < 64) {
+      // CRITICAL: Must update n_threads to 1 for correct stride in write()
+      out.n_threads = 1;
+      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
+      return true;
+    }
     std::vector<uint64_t> chunk_pos(n_threads + 1);
     std::vector<std::future<stats>> first_pass_fut(n_threads);
     std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
@@ -540,6 +548,16 @@ class two_pass {
     }
     chunk_pos[n_threads] = len;
 
+    // Safety check: if any chunk_pos is null_pos, fall back to single-threaded
+    for (int i = 1; i < n_threads; ++i) {
+      if (chunk_pos[i] == null_pos) {
+        // CRITICAL: Must update n_threads to 1 for correct stride in write()
+        out.n_threads = 1;
+        out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
+        return true;
+      }
+    }
+
     for (int i = 0; i < n_threads; ++i) {
       second_pass_fut[i] = std::async(std::launch::async, second_pass_simd, buf,
                                       chunk_pos[i], chunk_pos[i + 1], &out, i);
@@ -561,6 +579,14 @@ class two_pass {
       return true;
     }
     size_t chunk_size = len / n_threads;
+    // If chunk size is too small, small chunks may not contain any newlines,
+    // causing first_pass_chunk to return null_pos. Fall back to single-threaded.
+    if (chunk_size < 64) {
+      // CRITICAL: Must update n_threads to 1 for correct stride in write()
+      out.n_threads = 1;
+      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
+      return true;
+    }
     std::vector<uint64_t> chunk_pos(n_threads + 1);
     std::vector<std::future<stats>> first_pass_fut(n_threads);
     std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
@@ -587,6 +613,16 @@ class two_pass {
       n_quotes += st.n_quotes;
     }
     chunk_pos[n_threads] = len;
+
+    // Safety check: if any chunk_pos is null_pos, fall back to single-threaded
+    for (int i = 1; i < n_threads; ++i) {
+      if (chunk_pos[i] == null_pos) {
+        // CRITICAL: Must update n_threads to 1 for correct stride in write()
+        out.n_threads = 1;
+        out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
+        return true;
+      }
+    }
 
     for (int i = 0; i < n_threads; ++i) {
       second_pass_fut[i] = std::async(std::launch::async, second_pass_chunk_throwing, buf,
