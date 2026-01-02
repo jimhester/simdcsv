@@ -308,7 +308,7 @@ class two_pass {
     return {in, ErrorCode::INTERNAL_ERROR};
   }
 
-  really_inline static state_result other_state(csv_state in, uint8_t c) {
+  really_inline static state_result other_state(csv_state in) {
     switch (in) {
       case RECORD_START:
         return {UNQUOTED_FIELD, ErrorCode::NONE};
@@ -332,9 +332,15 @@ class two_pass {
 
   // Helper to get context around an error position
   static std::string get_context(const uint8_t* buf, size_t len, size_t pos, size_t context_size = 20) {
-    size_t ctx_start = pos > context_size ? pos - context_size : 0;
-    size_t ctx_end = pos + context_size < len ? pos + context_size : len;
+    // Bounds check
+    size_t safe_pos = pos < len ? pos : (len > 0 ? len - 1 : 0);
+    size_t ctx_start = safe_pos > context_size ? safe_pos - context_size : 0;
+    size_t ctx_end = safe_pos + context_size < len ? safe_pos + context_size : len;
+
     std::string ctx;
+    // Reserve space to avoid reallocations (worst case: every char becomes 2 chars like \n)
+    ctx.reserve((ctx_end - ctx_start) * 2);
+
     for (size_t i = ctx_start; i < ctx_end; ++i) {
       char c = static_cast<char>(buf[i]);
       if (c == '\n') ctx += "\\n";
@@ -347,10 +353,13 @@ class two_pass {
   }
 
   // Helper to calculate line and column from byte offset
-  static void get_line_column(const uint8_t* buf, size_t offset, size_t& line, size_t& column) {
+  // SECURITY: buf_len parameter ensures we never read past buffer bounds
+  static void get_line_column(const uint8_t* buf, size_t buf_len, size_t offset, size_t& line, size_t& column) {
     line = 1;
     column = 1;
-    for (size_t i = 0; i < offset; ++i) {
+    // Ensure we don't read past buffer bounds
+    size_t safe_offset = offset < buf_len ? offset : buf_len;
+    for (size_t i = 0; i < safe_offset; ++i) {
       if (buf[i] == '\n') {
         ++line;
         column = 1;
@@ -373,13 +382,16 @@ class two_pass {
     while (pos < end) {
       uint8_t value = buf[pos];
 
+      // Use effective buffer length for bounds checking
+      size_t buf_len = total_len > 0 ? total_len : end;
+
       // Check for null bytes
       if (value == '\0' && errors) {
         size_t line, col;
-        get_line_column(buf, pos, line, col);
+        get_line_column(buf, buf_len, pos, line, col);
         errors->add_error(ErrorCode::NULL_BYTE, ErrorSeverity::ERROR,
                           line, col, pos, "Null byte in data",
-                          get_context(buf, total_len > 0 ? total_len : end, pos));
+                          get_context(buf, buf_len, pos));
         if (errors->should_stop()) return n_indexes;
         ++pos;
         continue;
@@ -391,10 +403,10 @@ class two_pass {
           result = quoted_state(s);
           if (result.error != ErrorCode::NONE && errors) {
             size_t line, col;
-            get_line_column(buf, pos, line, col);
+            get_line_column(buf, buf_len, pos, line, col);
             errors->add_error(result.error, ErrorSeverity::ERROR,
                               line, col, pos, "Quote character in unquoted field",
-                              get_context(buf, total_len > 0 ? total_len : end, pos));
+                              get_context(buf, buf_len, pos));
             if (errors->should_stop()) return n_indexes;
           }
           s = result.state;
@@ -416,13 +428,13 @@ class two_pass {
           s = result.state;
           break;
         default:
-          result = other_state(s, value);
+          result = other_state(s);
           if (result.error != ErrorCode::NONE && errors) {
             size_t line, col;
-            get_line_column(buf, pos, line, col);
+            get_line_column(buf, buf_len, pos, line, col);
             errors->add_error(result.error, ErrorSeverity::ERROR,
                               line, col, pos, "Invalid character after closing quote",
-                              get_context(buf, total_len > 0 ? total_len : end, pos));
+                              get_context(buf, buf_len, pos));
             if (errors->should_stop()) return n_indexes;
           }
           s = result.state;
@@ -430,13 +442,16 @@ class two_pass {
       ++pos;
     }
 
+    // Use effective buffer length for bounds checking
+    size_t buf_len = total_len > 0 ? total_len : end;
+
     // Check for unclosed quote at end of chunk
-    if (s == QUOTED_FIELD && errors && end == (total_len > 0 ? total_len : end)) {
+    if (s == QUOTED_FIELD && errors && end == buf_len) {
       size_t line, col;
-      get_line_column(buf, pos > 0 ? pos - 1 : 0, line, col);
+      get_line_column(buf, buf_len, pos > 0 ? pos - 1 : 0, line, col);
       errors->add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL,
                         line, col, pos, "Unclosed quote at end of file",
-                        get_context(buf, total_len > 0 ? total_len : end, pos > 20 ? pos - 20 : 0));
+                        get_context(buf, buf_len, pos > 20 ? pos - 20 : 0));
     }
 
     return n_indexes;
@@ -476,7 +491,7 @@ class two_pass {
           s = newline_state(s).state;
           break;
         default:
-          result = other_state(s, value);
+          result = other_state(s);
           if (result.error != ErrorCode::NONE) {
             throw std::runtime_error("Invalid character after closing quote");
           }
