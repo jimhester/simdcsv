@@ -175,17 +175,17 @@ target_link_libraries(simdcsv PRIVATE
 )
 
 # CLI utility (user-friendly CSV tool)
-add_executable(simdcsv-cli
+add_executable(scsv
     src/cli.cpp
 )
 
-target_link_libraries(simdcsv-cli PRIVATE
+target_link_libraries(scsv PRIVATE
     simdcsv_lib
     pthread
 )
 
 # Suppress debug output for CLI
-target_compile_definitions(simdcsv-cli PRIVATE SIMDCSV_BENCHMARK_MODE)
+target_compile_definitions(scsv PRIVATE SIMDCSV_BENCHMARK_MODE)
 
 # Testing
 enable_testing()

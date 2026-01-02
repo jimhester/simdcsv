@@ -1,6 +1,11 @@
 /**
- * simdcsv CLI - Command-line utility for CSV processing
+ * scsv - Command-line utility for CSV processing using simdcsv
  * Inspired by zsv (https://github.com/liquidaty/zsv)
+ *
+ * Note: The pretty command truncates long fields for display. This truncation
+ * operates on bytes, not Unicode code points, so multi-byte UTF-8 sequences
+ * may be split, resulting in invalid UTF-8 in the output. This is a display
+ * limitation only; the underlying data is not modified.
  */
 
 #include <unistd.h>
@@ -129,11 +134,11 @@ class CsvIterator {
 };
 
 void printVersion() {
-  cout << "simdcsv-cli version " << VERSION << '\n';
+  cout << "scsv version " << VERSION << '\n';
 }
 
 void printUsage(const char* prog) {
-  cerr << "simdcsv - High-performance CSV processing tool\n\n";
+  cerr << "scsv - High-performance CSV processing tool\n\n";
   cerr << "Usage: " << prog << " <command> [options] <csvfile>\n\n";
   cerr << "Commands:\n";
   cerr << "  count         Count the number of rows\n";
@@ -260,18 +265,28 @@ int cmdSelect(const char* filename, int n_threads, const string& columns,
 
   // Resolve column names to indices if has_header
   const auto& header = rows[0];
+  size_t num_cols = header.size();
   for (const auto& spec : col_specs) {
     // Try as numeric index first
     bool is_numeric = !spec.empty() && all_of(spec.begin(), spec.end(), ::isdigit);
     if (is_numeric) {
-      col_indices.push_back(stoul(spec));
+      size_t col_idx = stoul(spec);
+      if (col_idx >= num_cols) {
+        cerr << "Error: Column index " << col_idx << " is out of range (file has "
+             << num_cols << " columns, indices 0-" << (num_cols - 1) << ")" << endl;
+        aligned_free((void*)data.data());
+        return 1;
+      }
+      col_indices.push_back(col_idx);
     } else if (has_header) {
       // Find by name
       auto it = find(header.begin(), header.end(), spec);
       if (it != header.end()) {
         col_indices.push_back(distance(header.begin(), it));
       } else {
-        cerr << "Warning: Column '" << spec << "' not found" << endl;
+        cerr << "Error: Column '" << spec << "' not found in header" << endl;
+        aligned_free((void*)data.data());
+        return 1;
       }
     } else {
       cerr << "Error: Cannot use column names without header (-H flag used)" << endl;
@@ -286,6 +301,7 @@ int cmdSelect(const char* filename, int n_threads, const string& columns,
     for (size_t col : col_indices) {
       if (!first) cout << ",";
       first = false;
+      // Column bounds already validated above, but handle rows with fewer columns
       if (col < row.size()) {
         const string& field = row[col];
         bool needs_quote = field.find(',') != string::npos ||
@@ -302,6 +318,7 @@ int cmdSelect(const char* filename, int n_threads, const string& columns,
           cout << field;
         }
       }
+      // Empty field for rows with fewer columns (ragged CSV)
     }
     cout << '\n';
   }
