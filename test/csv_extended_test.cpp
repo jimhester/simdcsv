@@ -380,6 +380,26 @@ TEST_F(CSVExtendedTest, QuotedHashParsing) {
     aligned_free((void*)data.data());
 }
 
+TEST_F(CSVExtendedTest, SemicolonCommentsFileExists) {
+    std::string path = getTestDataPath("comments", "semicolon_comments.csv");
+    ASSERT_TRUE(fileExists(path)) << "semicolon_comments.csv should exist";
+}
+
+TEST_F(CSVExtendedTest, SemicolonCommentsParsing) {
+    std::string path = getTestDataPath("comments", "semicolon_comments.csv");
+    auto data = get_corpus(path, SIMDCSV_PADDING);
+
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(data.size(), 1);
+
+    // Parser currently doesn't skip comments, but should parse without crashing
+    // Semicolon comments are common in some European CSV formats
+    bool success = parser.parse(data.data(), idx, data.size());
+    EXPECT_TRUE(success) << "Parser should handle files with semicolon comment lines";
+
+    aligned_free((void*)data.data());
+}
+
 // ============================================================================
 // RAGGED CSV TESTS (variable column counts)
 // ============================================================================
@@ -453,9 +473,9 @@ TEST_F(CSVExtendedTest, BadEscapeFileExists) {
 TEST_F(CSVExtendedTest, BadEscapeParsing) {
     // Note: RFC 4180 specifies quote doubling ("") for escaping quotes.
     // Some non-standard CSV producers use backslash escapes (\") instead.
-    // This test verifies the parser handles such non-compliant input
-    // gracefully (without crashing), even if it doesn't interpret the
-    // escapes correctly. The parser treats backslashes as literal characters.
+    // TODO: Backslash escape support is planned as an optional parser feature.
+    // Currently, the parser treats backslashes as literal characters.
+    // This test verifies the parser handles such input gracefully without crashing.
     std::string path = getTestDataPath("fuzz", "bad_escape.csv");
     auto data = get_corpus(path, SIMDCSV_PADDING);
 
@@ -482,9 +502,10 @@ TEST_F(CSVExtendedTest, InvalidUTF8Parsing) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    // Parser should not crash on invalid UTF-8
+    // Parser should not crash on invalid UTF-8 sequences (0xFE, 0xFF, truncated multibyte)
+    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(data.data(), idx, data.size());
-    (void)success;  // Just ensure no crash
+    (void)success;
 
     aligned_free((void*)data.data());
 }
@@ -501,7 +522,8 @@ TEST_F(CSVExtendedTest, ScatteredNullsParsing) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    // Parser should handle null bytes without crashing
+    // Parser should handle embedded null bytes (0x00) without crashing
+    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(data.data(), idx, data.size());
     (void)success;
 
@@ -520,7 +542,8 @@ TEST_F(CSVExtendedTest, DeepQuotesParsing) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    // Parser should handle many consecutive quotes
+    // Parser should handle many consecutive quotes without stack overflow
+    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(data.data(), idx, data.size());
     (void)success;
 
@@ -540,6 +563,7 @@ TEST_F(CSVExtendedTest, QuoteDelimiterAltParsing) {
     simdcsv::index idx = parser.init(data.size(), 1);
 
     // Parser should handle alternating quotes and delimiters
+    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(data.data(), idx, data.size());
     (void)success;
 
@@ -559,6 +583,7 @@ TEST_F(CSVExtendedTest, JustQuotesParsing) {
     simdcsv::index idx = parser.init(data.size(), 1);
 
     // Parser should handle file with only quotes
+    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(data.data(), idx, data.size());
     (void)success;
 
@@ -578,6 +603,7 @@ TEST_F(CSVExtendedTest, QuoteEOFParsing) {
     simdcsv::index idx = parser.init(data.size(), 1);
 
     // Parser should handle unclosed quote at EOF
+    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(data.data(), idx, data.size());
     (void)success;
 
@@ -596,7 +622,8 @@ TEST_F(CSVExtendedTest, MixedCRParsing) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    // Parser should handle mixed CR and CRLF
+    // Parser should handle mixed CR and CRLF line endings
+    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(data.data(), idx, data.size());
     (void)success;
 
@@ -615,7 +642,28 @@ TEST_F(CSVExtendedTest, AFLBinaryParsing) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    // Parser should not crash on binary garbage
+    // Parser should not crash on binary garbage (AFL-discovered test case)
+    // Success is undefined; verifying no crash/hang
+    bool success = parser.parse(data.data(), idx, data.size());
+    (void)success;
+
+    aligned_free((void*)data.data());
+}
+
+TEST_F(CSVExtendedTest, AFL10FileExists) {
+    std::string path = getTestDataPath("fuzz", "afl_10.csv");
+    ASSERT_TRUE(fileExists(path)) << "afl_10.csv should exist";
+}
+
+TEST_F(CSVExtendedTest, AFL10Parsing) {
+    std::string path = getTestDataPath("fuzz", "afl_10.csv");
+    auto data = get_corpus(path, SIMDCSV_PADDING);
+
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(data.size(), 1);
+
+    // AFL-discovered edge case test file
+    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(data.data(), idx, data.size());
     (void)success;
 
@@ -647,6 +695,7 @@ TEST_F(CSVExtendedTest, AllExtendedTestFilesPresent) {
     // Comments
     EXPECT_TRUE(fileExists(getTestDataPath("comments", "hash_comments.csv")));
     EXPECT_TRUE(fileExists(getTestDataPath("comments", "quoted_hash.csv")));
+    EXPECT_TRUE(fileExists(getTestDataPath("comments", "semicolon_comments.csv")));
 
     // Ragged
     EXPECT_TRUE(fileExists(getTestDataPath("ragged", "fewer_columns.csv")));
@@ -663,4 +712,5 @@ TEST_F(CSVExtendedTest, AllExtendedTestFilesPresent) {
     EXPECT_TRUE(fileExists(getTestDataPath("fuzz", "quote_eof.csv")));
     EXPECT_TRUE(fileExists(getTestDataPath("fuzz", "mixed_cr.csv")));
     EXPECT_TRUE(fileExists(getTestDataPath("fuzz", "afl_binary.csv")));
+    EXPECT_TRUE(fileExists(getTestDataPath("fuzz", "afl_10.csv")));
 }
