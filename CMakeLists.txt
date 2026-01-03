@@ -156,6 +156,7 @@ endif()
 add_library(simdcsv_lib STATIC
     src/io_util.cpp
     src/error.cpp
+    src/dialect.cpp
 )
 
 target_include_directories(simdcsv_lib PUBLIC
@@ -326,6 +327,31 @@ add_custom_command(TARGET csv_extended_test POST_BUILD
 
 # Register extended tests with CTest
 gtest_discover_tests(csv_extended_test)
+
+# Dialect detection test executable
+add_executable(dialect_detection_test
+    test/dialect_detection_test.cpp
+)
+
+target_link_libraries(dialect_detection_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(dialect_detection_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for dialect tests
+add_custom_command(TARGET dialect_detection_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register dialect detection tests with CTest
+gtest_discover_tests(dialect_detection_test)
 
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES

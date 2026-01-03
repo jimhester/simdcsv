@@ -33,6 +33,7 @@
 #include "inttypes.h"
 #include "simd_highway.h"
 #include "error.h"
+#include "dialect.h"
 
 namespace simdcsv {
 
@@ -909,6 +910,107 @@ class two_pass {
     // auto index = parse_two_pass(buf, out, len);
 
     // return index;
+  }
+
+  /**
+   * @brief Parse a CSV buffer with automatic dialect detection.
+   *
+   * This method first detects the CSV dialect (delimiter, quote character, etc.)
+   * and then parses the file. It combines dialect detection with parsing in a
+   * single convenient call.
+   *
+   * The detection uses a CleverCSV-inspired algorithm that analyzes pattern
+   * consistency and cell type inference to identify the most likely dialect.
+   *
+   * @param buf Pointer to the CSV data buffer. Must remain valid during parsing.
+   *            Should have at least 32 bytes of padding beyond len for SIMD safety.
+   * @param out The index structure to populate. Must be initialized via init().
+   * @param len Length of the CSV data in bytes (excluding any padding).
+   * @param errors ErrorCollector to accumulate parsing errors.
+   * @param detected Optional pointer to receive the detected dialect result.
+   *                 If nullptr, detection result is not returned.
+   *
+   * @return true if parsing completed successfully, false otherwise.
+   *
+   * @note Currently, the parser only supports standard CSV format (comma delimiter,
+   *       double-quote character). If a different dialect is detected, the method
+   *       will still parse using comma/quote but will set a warning in the detection
+   *       result. Full dialect-aware parsing is planned for a future release.
+   *
+   * @example
+   * @code
+   * simdcsv::two_pass parser;
+   * simdcsv::index idx = parser.init(length, 4);
+   * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+   * simdcsv::DetectionResult detected;
+   *
+   * bool success = parser.parse_auto(buffer, idx, length, errors, &detected);
+   *
+   * if (detected.success()) {
+   *     std::cout << "Detected: " << detected.dialect.to_string() << "\n";
+   *     std::cout << "Columns: " << detected.detected_columns << "\n";
+   * }
+   * @endcode
+   *
+   * @see Dialect For dialect configuration options.
+   * @see DialectDetector For standalone dialect detection.
+   * @see parse() For parsing without auto-detection.
+   */
+  bool parse_auto(const uint8_t* buf, index& out, size_t len,
+                  ErrorCollector& errors, DetectionResult* detected = nullptr) {
+    // Perform dialect detection
+    DialectDetector detector;
+    DetectionResult result = detector.detect(buf, len);
+
+    // Store detection result if requested
+    if (detected != nullptr) {
+      *detected = result;
+    }
+
+    // Check if detected dialect differs from supported format
+    if (result.success()) {
+      Dialect csv = Dialect::csv();
+      if (result.dialect.delimiter != csv.delimiter ||
+          result.dialect.quote_char != csv.quote_char) {
+        // Add warning that we're parsing with default dialect
+        std::string msg = "Detected dialect (" + result.dialect.to_string() +
+                          ") differs from parser default. Parsing with comma/quote.";
+        errors.add_error(ErrorCode::AMBIGUOUS_SEPARATOR, ErrorSeverity::WARNING,
+                         1, 1, 0, msg, "");
+      }
+    }
+
+    // Parse with standard comma/quote format
+    // (Full dialect-aware parsing is planned for future release)
+    return parse_two_pass_with_errors(buf, out, len, errors);
+  }
+
+  /**
+   * @brief Detect the dialect of a CSV buffer without parsing.
+   *
+   * This is a convenience method that performs only dialect detection without
+   * full parsing. Use this when you need to determine the file format before
+   * deciding how to process it.
+   *
+   * @param buf Pointer to the CSV data buffer.
+   * @param len Length of the data in bytes.
+   * @param options Optional detection options (sample size, candidate delimiters, etc.).
+   *
+   * @return DetectionResult containing the detected dialect and confidence.
+   *
+   * @example
+   * @code
+   * auto result = simdcsv::two_pass::detect_dialect(buffer, length);
+   * if (result.success()) {
+   *     std::cout << "Delimiter: " << result.dialect.delimiter << "\n";
+   *     std::cout << "Confidence: " << result.confidence << "\n";
+   * }
+   * @endcode
+   */
+  static DetectionResult detect_dialect(const uint8_t* buf, size_t len,
+                                         const DetectionOptions& options = DetectionOptions()) {
+    DialectDetector detector(options);
+    return detector.detect(buf, len);
   }
 
   // Result from multi-threaded parsing with error collection
