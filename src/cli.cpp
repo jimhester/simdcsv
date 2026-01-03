@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -179,15 +180,138 @@ bool parseFile(const char* filename, int n_threads,
   return true;
 }
 
+// Direct row counter using SIMD - avoids building full index
+// This is much faster for the count command since we don't need field positions
+size_t countRowsDirect(const uint8_t* buf, size_t len) {
+  size_t row_count = 0;
+  bool in_quote = false;
+
+  // Process data looking for newlines outside quotes
+  for (size_t i = 0; i < len; ++i) {
+    if (buf[i] == '"') {
+      in_quote = !in_quote;
+    } else if (buf[i] == '\n' && !in_quote) {
+      ++row_count;
+    }
+  }
+
+  return row_count;
+}
+
+// Determine if position is inside or outside a quoted field
+// Uses speculative approach similar to zsv - look back up to 64KB
+enum QuoteState { OUTSIDE_QUOTE, INSIDE_QUOTE, AMBIGUOUS };
+
+static QuoteState getQuoteState(const uint8_t* buf, size_t pos) {
+  constexpr size_t LOOKBACK_LIMIT = 64 * 1024;  // 64KB lookback
+
+  if (pos == 0) return OUTSIDE_QUOTE;
+
+  size_t end = pos > LOOKBACK_LIMIT ? pos - LOOKBACK_LIMIT : 0;
+  size_t quote_count = 0;
+
+  // Scan backwards looking for quote patterns
+  for (size_t i = pos; i > end; --i) {
+    uint8_t c = buf[i - 1];
+    if (c == '"') {
+      // Check for o-q pattern (other char followed by quote)
+      if (i >= 2) {
+        uint8_t prev = buf[i - 2];
+        if (prev != '"' && prev != ',' && prev != '\n' && prev != '\r') {
+          return (quote_count % 2 == 0) ? OUTSIDE_QUOTE : INSIDE_QUOTE;
+        }
+      }
+      // Check for q-o pattern (quote followed by other char)
+      if (i < pos) {
+        uint8_t next = buf[i];
+        if (next != '"' && next != ',' && next != '\n' && next != '\r') {
+          return (quote_count % 2 == 0) ? INSIDE_QUOTE : OUTSIDE_QUOTE;
+        }
+      }
+      quote_count++;
+    }
+  }
+
+  return AMBIGUOUS;
+}
+
+// Find a valid row boundary near target position
+static size_t findRowBoundary(const uint8_t* buf, size_t len, size_t target) {
+  constexpr size_t MAX_SEARCH = 8192;
+
+  // First, try to determine if we're inside a quote using speculation
+  QuoteState state = getQuoteState(buf, target);
+
+  size_t limit = std::min(target + MAX_SEARCH, len);
+  bool in_quote = (state == INSIDE_QUOTE);
+
+  for (size_t pos = target; pos < limit; ++pos) {
+    if (buf[pos] == '"') {
+      in_quote = !in_quote;
+    } else if (buf[pos] == '\n' && !in_quote) {
+      return pos + 1;  // Return position after newline
+    }
+  }
+
+  return target;  // Fallback
+}
+
+// Parallel direct row counter
+size_t countRowsDirectParallel(const uint8_t* buf, size_t len, int n_threads) {
+  if (n_threads <= 1 || len < 1024 * 1024) {
+    return countRowsDirect(buf, len);
+  }
+
+  size_t chunk_size = len / n_threads;
+  std::vector<size_t> chunk_starts(n_threads + 1);
+
+  chunk_starts[0] = 0;
+  chunk_starts[n_threads] = len;
+
+  // Find chunk boundaries in parallel - each boundary is independent
+  std::vector<std::future<size_t>> boundary_futures;
+  for (int i = 1; i < n_threads; ++i) {
+    size_t target = chunk_size * i;
+    boundary_futures.push_back(std::async(std::launch::async, [buf, len, target]() {
+      return findRowBoundary(buf, len, target);
+    }));
+  }
+
+  for (int i = 1; i < n_threads; ++i) {
+    chunk_starts[i] = boundary_futures[i - 1].get();
+  }
+
+  // Count rows in each chunk in parallel
+  std::vector<std::future<size_t>> count_futures;
+  for (int i = 0; i < n_threads; ++i) {
+    size_t start = chunk_starts[i];
+    size_t end = chunk_starts[i + 1];
+    count_futures.push_back(std::async(std::launch::async, [buf, start, end]() {
+      return countRowsDirect(buf + start, end - start);
+    }));
+  }
+
+  size_t total = 0;
+  for (auto& f : count_futures) {
+    total += f.get();
+  }
+
+  return total;
+}
+
 // Command: count
 int cmdCount(const char* filename, int n_threads, bool has_header) {
   std::basic_string_view<uint8_t> data;
-  simdcsv::index idx;
 
-  if (!parseFile(filename, n_threads, data, idx)) return 1;
+  try {
+    data = get_corpus(filename, SIMDCSV_PADDING);
+  } catch (const std::exception& e) {
+    cerr << "Error: Could not load file '" << filename << "'" << endl;
+    return 1;
+  }
 
-  CsvIterator iter(data.data(), idx);
-  size_t rows = iter.countRows();
+  // Use direct row counting - much faster than building full index
+  size_t rows = countRowsDirectParallel(data.data(), data.size(), n_threads);
 
   // Subtract header if present
   if (has_header && rows > 0) {
