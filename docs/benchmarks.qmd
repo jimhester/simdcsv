@@ -1,0 +1,180 @@
+---
+title: "Benchmarks"
+---
+
+## Overview
+
+simdcsv includes a comprehensive benchmark suite for measuring parsing performance across different dimensions: file sizes, column counts, thread scaling, and data types.
+
+## Performance Summary
+
+Based on benchmarks run on Apple Silicon (M-series, 14 cores):
+
+| Benchmark | Throughput | Notes |
+|-----------|------------|-------|
+| Simple CSV (1 thread) | ~734 MB/s | Small file baseline |
+| Many Rows (1 thread) | ~1.37 GB/s | Row-heavy workload |
+| Wide Columns (1 thread) | ~1.69 GB/s | Column-heavy workload |
+| 100KB file | ~1.84 GB/s | L2/L3 cache fits |
+| 1MB file | ~19.2 GB/s | Multi-threaded |
+
+## File Size Scaling
+
+Performance varies with file size due to cache hierarchy effects:
+
+| File Size | Throughput | Cache Level |
+|-----------|------------|-------------|
+| 1 KB | ~19 MB/s | L1 cache |
+| 10 KB | ~192 MB/s | L1/L2 cache |
+| 100 KB | ~1.84 GB/s | L2/L3 cache |
+| 1 MB | ~19.2 GB/s | L3/memory + threading |
+
+Larger files benefit significantly from multi-threaded parsing as data exceeds cache sizes.
+
+## Thread Scaling
+
+The parser uses speculative multi-threaded parsing. For small files, single-threaded parsing is often faster due to thread overhead:
+
+| Threads | Simple CSV | Many Rows | Wide Columns |
+|---------|------------|-----------|--------------|
+| 1 | 734 MB/s | 1.37 GB/s | 1.69 GB/s |
+| 2 | 734 MB/s | 6.6 MB/s* | 8.5 MB/s* |
+| 4 | 733 MB/s | 1.38 GB/s | 1.68 GB/s |
+| 8 | 735 MB/s | 1.37 GB/s | 1.70 GB/s |
+| 16 | 733 MB/s | 1.37 GB/s | 1.69 GB/s |
+
+*Note: 2-thread results show overhead for small files where thread coordination exceeds benefits.
+
+## Running Benchmarks
+
+### Build and Run
+
+```bash
+# Build with Release optimizations
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+
+# Run all benchmarks
+./build/simdcsv_benchmark
+
+# Run specific benchmark categories
+./build/simdcsv_benchmark --benchmark_filter="BM_Parse.*"
+./build/simdcsv_benchmark --benchmark_filter="BM_FileSizes.*"
+```
+
+### Output Formats
+
+```bash
+# Console output (default)
+./build/simdcsv_benchmark
+
+# JSON output for analysis
+./build/simdcsv_benchmark --benchmark_format=json --benchmark_out=results.json
+
+# CSV output
+./build/simdcsv_benchmark --benchmark_format=csv --benchmark_out=results.csv
+```
+
+### Automated Benchmarking
+
+Use the benchmark script for comprehensive testing:
+
+```bash
+./benchmark/run_benchmarks.sh ./build/simdcsv_benchmark
+```
+
+This runs all benchmark categories and generates reports in `benchmark_results/`.
+
+## Benchmark Categories
+
+### Basic Benchmarks
+
+Tests fundamental parsing operations:
+
+- File parsing with different thread counts
+- Quoted field handling
+- Different separator types (comma, tab, semicolon, pipe)
+
+### Dimension Benchmarks
+
+Tests scaling across dimensions:
+
+- **File Sizes**: 1KB to 100MB
+- **Column Counts**: 2 to 500 columns
+- **Row Counts**: 100 to 1M rows
+- **Data Types**: integers, floats, strings, mixed
+
+### Real-World Benchmarks
+
+Tests with realistic data patterns:
+
+- NYC Taxi data (19 columns)
+- Financial time-series data
+- Server log files
+- Wide tables (100+ columns)
+
+### SIMD Benchmarks
+
+Tests SIMD effectiveness:
+
+- SIMD vs scalar comparison
+- Quote detection with varying densities
+- Memory access patterns
+
+## Performance Targets
+
+Based on the production roadmap:
+
+| Metric | Target | Status |
+|--------|--------|--------|
+| Peak throughput (AVX2) | >5 GB/s | In progress |
+| Peak throughput (AVX-512) | >8 GB/s | Planned |
+| Thread scaling efficiency | >80% at 16 threads | Testing |
+| Memory overhead | <10% over file size | Achieved |
+
+## Comparison with Other Parsers
+
+The benchmark suite includes comparison benchmarks against:
+
+- Naive (non-SIMD) parser implementation
+- Raw memory bandwidth baseline
+
+To run comparison benchmarks:
+
+```bash
+./build/simdcsv_benchmark --benchmark_filter="BM_Compare.*"
+```
+
+## CI Integration
+
+Benchmarks can be integrated into CI pipelines:
+
+```bash
+# Run with regression detection
+./benchmark/run_benchmarks.sh ./build/simdcsv_benchmark results/ baseline.json 10.0
+
+# Exit code indicates regression if threshold exceeded
+if [ $? -ne 0 ]; then
+    echo "Performance regression detected!"
+    exit 1
+fi
+```
+
+## Platform Notes
+
+### x86-64 (Linux)
+
+- Full AVX2/AVX-512 support
+- RAPL energy measurements available
+- Best for comprehensive benchmarking
+
+### ARM64 (macOS Apple Silicon)
+
+- NEON vectorization
+- Excellent single-core performance
+- Energy measurements via estimates
+
+### ARM64 (Linux)
+
+- NEON vectorization
+- Performance counters available
