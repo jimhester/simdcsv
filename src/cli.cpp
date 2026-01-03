@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "common_defs.h"
+#include "dialect.h"
 #include "io_util.h"
 #include "mem_util.h"
 #include "simd_highway.h"
@@ -158,6 +159,9 @@ void printUsage(const char* prog) {
   cerr << "  -c <cols>     Comma-separated column names or indices (for select)\n";
   cerr << "  -H            No header row in input\n";
   cerr << "  -t <threads>  Number of threads (default: 1, max: " << MAX_THREADS << ")\n";
+  cerr << "  -d <delim>    Field delimiter: comma (default), tab, semicolon, pipe, or character\n";
+  cerr << "  -q <char>     Quote character (default: \")\n";
+  cerr << "  -a            Auto-detect dialect\n";
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
   cerr << "\nExamples:\n";
@@ -167,12 +171,17 @@ void printUsage(const char* prog) {
   cerr << "  " << prog << " select -c 0,2,4 data.csv\n";
   cerr << "  " << prog << " info data.csv\n";
   cerr << "  " << prog << " pretty -n 20 data.csv\n";
+  cerr << "  " << prog << " count -d tab data.tsv\n";
+  cerr << "  " << prog << " head -d semicolon european.csv\n";
+  cerr << "  " << prog << " info -a unknown_format.csv\n";
 }
 
 // Parse a file - returns true on success
 // Caller is responsible for freeing data with aligned_free()
 bool parseFile(const char* filename, int n_threads,
-               std::basic_string_view<uint8_t>& data, simdcsv::index& idx) {
+               std::basic_string_view<uint8_t>& data, simdcsv::index& idx,
+               const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+               bool auto_detect = false) {
   try {
     data = get_corpus(filename, SIMDCSV_PADDING);
   } catch (const std::exception& e) {
@@ -182,8 +191,41 @@ bool parseFile(const char* filename, int n_threads,
 
   simdcsv::two_pass parser;
   idx = parser.init(data.size(), n_threads);
-  parser.parse(data.data(), idx, data.size());
+
+  if (auto_detect) {
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    simdcsv::DetectionResult detected;
+    parser.parse_auto(data.data(), idx, data.size(), errors, &detected);
+    if (detected.success()) {
+      cerr << "Auto-detected: " << detected.dialect.to_string() << endl;
+    }
+  } else {
+    parser.parse(data.data(), idx, data.size(), dialect);
+  }
   return true;
+}
+
+// Helper function to parse delimiter string
+simdcsv::Dialect parseDialect(const std::string& delimiter_str, char quote_char) {
+  simdcsv::Dialect dialect;
+  dialect.quote_char = quote_char;
+
+  if (delimiter_str == "comma" || delimiter_str == ",") {
+    dialect.delimiter = ',';
+  } else if (delimiter_str == "tab" || delimiter_str == "\\t") {
+    dialect.delimiter = '\t';
+  } else if (delimiter_str == "semicolon" || delimiter_str == ";") {
+    dialect.delimiter = ';';
+  } else if (delimiter_str == "pipe" || delimiter_str == "|") {
+    dialect.delimiter = '|';
+  } else if (delimiter_str.length() == 1) {
+    dialect.delimiter = delimiter_str[0];
+  } else {
+    cerr << "Warning: Unknown delimiter '" << delimiter_str << "', using comma\n";
+    dialect.delimiter = ',';
+  }
+
+  return dialect;
 }
 
 /// ============================================================================
@@ -369,7 +411,9 @@ size_t countRowsDirectParallel(const uint8_t* buf, size_t len, int n_threads) {
 }
 
 // Command: count
-int cmdCount(const char* filename, int n_threads, bool has_header) {
+int cmdCount(const char* filename, int n_threads, bool has_header,
+             const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+             bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
 
   try {
@@ -380,6 +424,8 @@ int cmdCount(const char* filename, int n_threads, bool has_header) {
   }
 
   // Use optimized direct row counting - much faster than building full index
+  // Note: For non-standard dialects, this still uses standard quote char
+  // TODO: Make countRowsDirectParallel dialect-aware
   size_t rows = countRowsDirectParallel(data.data(), data.size(), n_threads);
 
   // Subtract header if present
@@ -394,11 +440,13 @@ int cmdCount(const char* filename, int n_threads, bool has_header) {
 }
 
 // Command: head
-int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_header) {
+int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_header,
+            const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+            bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
   simdcsv::index idx;
 
-  if (!parseFile(filename, n_threads, data, idx)) return 1;
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
 
   CsvIterator iter(data.data(), idx);
   // Get num_rows + 1 if we have header to show header plus num_rows data rows
@@ -406,18 +454,19 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
 
   for (const auto& row : rows) {
     for (size_t i = 0; i < row.size(); ++i) {
-      if (i > 0) cout << ",";
+      if (i > 0) cout << dialect.delimiter;
       // Re-quote if field contains special characters
       bool needs_quote =
-          row[i].find(',') != string::npos || row[i].find('"') != string::npos ||
+          row[i].find(dialect.delimiter) != string::npos ||
+          row[i].find(dialect.quote_char) != string::npos ||
           row[i].find('\n') != string::npos;
       if (needs_quote) {
-        cout << '"';
+        cout << dialect.quote_char;
         for (char c : row[i]) {
-          if (c == '"') cout << '"';
+          if (c == dialect.quote_char) cout << dialect.quote_char;
           cout << c;
         }
-        cout << '"';
+        cout << dialect.quote_char;
       } else {
         cout << row[i];
       }
@@ -431,11 +480,12 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
 
 // Command: select
 int cmdSelect(const char* filename, int n_threads, const string& columns,
-              bool has_header) {
+              bool has_header, const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+              bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
   simdcsv::index idx;
 
-  if (!parseFile(filename, n_threads, data, idx)) return 1;
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
 
   CsvIterator iter(data.data(), idx);
   auto rows = iter.getRows();
@@ -492,21 +542,21 @@ int cmdSelect(const char* filename, int n_threads, const string& columns,
   for (const auto& row : rows) {
     bool first = true;
     for (size_t col : col_indices) {
-      if (!first) cout << ",";
+      if (!first) cout << dialect.delimiter;
       first = false;
       // Column bounds already validated above, but handle rows with fewer columns
       if (col < row.size()) {
         const string& field = row[col];
-        bool needs_quote = field.find(',') != string::npos ||
-                           field.find('"') != string::npos ||
+        bool needs_quote = field.find(dialect.delimiter) != string::npos ||
+                           field.find(dialect.quote_char) != string::npos ||
                            field.find('\n') != string::npos;
         if (needs_quote) {
-          cout << '"';
+          cout << dialect.quote_char;
           for (char c : field) {
-            if (c == '"') cout << '"';
+            if (c == dialect.quote_char) cout << dialect.quote_char;
             cout << c;
           }
-          cout << '"';
+          cout << dialect.quote_char;
         } else {
           cout << field;
         }
@@ -521,17 +571,20 @@ int cmdSelect(const char* filename, int n_threads, const string& columns,
 }
 
 // Command: info
-int cmdInfo(const char* filename, int n_threads, bool has_header) {
+int cmdInfo(const char* filename, int n_threads, bool has_header,
+            const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+            bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
   simdcsv::index idx;
 
-  if (!parseFile(filename, n_threads, data, idx)) return 1;
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
 
   CsvIterator iter(data.data(), idx);
   auto rows = iter.getRows();
 
   cout << "File: " << filename << '\n';
   cout << "Size: " << data.size() << " bytes\n";
+  cout << "Dialect: " << dialect.to_string() << '\n';
 
   size_t num_rows = rows.size();
   size_t num_cols = rows.empty() ? 0 : rows[0].size();
@@ -555,11 +608,13 @@ int cmdInfo(const char* filename, int n_threads, bool has_header) {
 }
 
 // Command: pretty
-int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_header) {
+int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_header,
+              const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+              bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
   simdcsv::index idx;
 
-  if (!parseFile(filename, n_threads, data, idx)) return 1;
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
 
   CsvIterator iter(data.data(), idx);
   auto rows = iter.getRows(has_header ? num_rows + 1 : num_rows);
@@ -649,10 +704,13 @@ int main(int argc, char* argv[]) {
   int n_threads = 1;
   size_t num_rows = DEFAULT_NUM_ROWS;
   bool has_header = true;
+  bool auto_detect = false;
   string columns;
+  string delimiter_str = "comma";
+  char quote_char = '"';
 
   int c;
-  while ((c = getopt(argc, argv, "n:c:Ht:hv")) != -1) {
+  while ((c = getopt(argc, argv, "n:c:Ht:d:q:ahv")) != -1) {
     switch (c) {
       case 'n': {
         char* endptr;
@@ -681,6 +739,20 @@ int main(int argc, char* argv[]) {
         n_threads = static_cast<int>(val);
         break;
       }
+      case 'd':
+        delimiter_str = optarg;
+        break;
+      case 'q':
+        if (strlen(optarg) == 1) {
+          quote_char = optarg[0];
+        } else {
+          cerr << "Error: Quote character must be a single character\n";
+          return 1;
+        }
+        break;
+      case 'a':
+        auto_detect = true;
+        break;
       case 'h':
         printUsage(argv[0]);
         return 0;
@@ -700,22 +772,23 @@ int main(int argc, char* argv[]) {
   }
 
   const char* filename = argv[optind];
+  simdcsv::Dialect dialect = parseDialect(delimiter_str, quote_char);
 
   // Dispatch to command handlers
   if (command == "count") {
-    return cmdCount(filename, n_threads, has_header);
+    return cmdCount(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "head") {
-    return cmdHead(filename, n_threads, num_rows, has_header);
+    return cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect);
   } else if (command == "select") {
     if (columns.empty()) {
       cerr << "Error: -c option required for select command\n";
       return 1;
     }
-    return cmdSelect(filename, n_threads, columns, has_header);
+    return cmdSelect(filename, n_threads, columns, has_header, dialect, auto_detect);
   } else if (command == "info") {
-    return cmdInfo(filename, n_threads, has_header);
+    return cmdInfo(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "pretty") {
-    return cmdPretty(filename, n_threads, num_rows, has_header);
+    return cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect);
   } else {
     cerr << "Error: Unknown command '" << command << "'\n";
     printUsage(argv[0]);

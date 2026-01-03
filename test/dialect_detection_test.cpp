@@ -392,17 +392,15 @@ TEST_F(DialectDetectionTest, ParseAutoWithSemicolonCSV) {
     EXPECT_TRUE(detected.success()) << "Detection should succeed";
     EXPECT_EQ(detected.dialect.delimiter, ';') << "Should detect semicolon";
 
-    // Note: Parser will use comma/quote (warning should be generated)
-    // Check that we got a warning about dialect mismatch
-    bool found_dialect_warning = false;
-    for (const auto& err : errors.errors()) {
-        if (err.code == simdcsv::ErrorCode::AMBIGUOUS_SEPARATOR &&
-            err.severity == simdcsv::ErrorSeverity::WARNING) {
-            found_dialect_warning = true;
-            break;
-        }
+    // Parser now uses detected dialect - verify it parsed correctly
+    // by checking the number of fields found (should match detected_columns)
+    size_t total_fields = 0;
+    for (int t = 0; t < idx.n_threads; ++t) {
+        total_fields += idx.n_indexes[t];
     }
-    EXPECT_TRUE(found_dialect_warning) << "Should warn about dialect mismatch";
+    // Should have found field separators with the semicolon delimiter
+    EXPECT_GT(total_fields, 0) << "Should find field separators with detected dialect";
+    EXPECT_EQ(detected.detected_columns, 3) << "Should detect 3 columns";
 }
 
 TEST_F(DialectDetectionTest, DetectDialectStatic) {
@@ -431,4 +429,119 @@ TEST_F(DialectDetectionTest, DetectDialectWithOptions) {
 
     EXPECT_TRUE(result.success());
     EXPECT_EQ(result.dialect.delimiter, '#');
+}
+
+// ============================================================================
+// Dialect-Aware Parsing Tests
+// ============================================================================
+
+TEST_F(DialectDetectionTest, ParseWithTSVDialect) {
+    std::string path = getTestDataPath("separators", "tab.csv");
+    auto data = get_corpus(path, SIMDCSV_PADDING);
+
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(data.size(), 1);
+    simdcsv::Dialect tsv = simdcsv::Dialect::tsv();
+
+    bool success = parser.parse(data.data(), idx, data.size(), tsv);
+
+    EXPECT_TRUE(success) << "Should parse TSV successfully";
+    EXPECT_GT(idx.n_indexes[0], 0) << "Should find tab separators";
+}
+
+TEST_F(DialectDetectionTest, ParseWithSemicolonDialect) {
+    std::string path = getTestDataPath("separators", "semicolon.csv");
+    auto data = get_corpus(path, SIMDCSV_PADDING);
+
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(data.size(), 1);
+    simdcsv::Dialect semicolon = simdcsv::Dialect::semicolon();
+
+    bool success = parser.parse(data.data(), idx, data.size(), semicolon);
+
+    EXPECT_TRUE(success) << "Should parse semicolon-separated successfully";
+    EXPECT_GT(idx.n_indexes[0], 0) << "Should find semicolon separators";
+}
+
+TEST_F(DialectDetectionTest, ParseWithPipeDialect) {
+    std::string path = getTestDataPath("separators", "pipe.csv");
+    auto data = get_corpus(path, SIMDCSV_PADDING);
+
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(data.size(), 1);
+    simdcsv::Dialect pipe = simdcsv::Dialect::pipe();
+
+    bool success = parser.parse(data.data(), idx, data.size(), pipe);
+
+    EXPECT_TRUE(success) << "Should parse pipe-separated successfully";
+    EXPECT_GT(idx.n_indexes[0], 0) << "Should find pipe separators";
+}
+
+TEST_F(DialectDetectionTest, ParseWithErrorsDialect) {
+    // Test parse_with_errors with semicolon dialect
+    const std::string csv_data = "name;age;city\nAlice;30;Paris\nBob;25;London\n";
+
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(csv_data.size(), 1);
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    simdcsv::Dialect semicolon = simdcsv::Dialect::semicolon();
+
+    bool success = parser.parse_with_errors(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        idx, csv_data.size(), errors, semicolon);
+
+    EXPECT_TRUE(success) << "Should parse successfully";
+    EXPECT_EQ(errors.error_count(), 0) << "Should have no errors";
+}
+
+TEST_F(DialectDetectionTest, ParseValidateDialect) {
+    // Test parse_validate with tab dialect
+    const std::string tsv_data = "name\tage\tcity\nAlice\t30\tParis\nBob\t25\tLondon\n";
+
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(tsv_data.size(), 1);
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    simdcsv::Dialect tsv = simdcsv::Dialect::tsv();
+
+    bool success = parser.parse_validate(
+        reinterpret_cast<const uint8_t*>(tsv_data.data()),
+        idx, tsv_data.size(), errors, tsv);
+
+    EXPECT_TRUE(success) << "Validation should pass";
+    EXPECT_EQ(errors.error_count(), 0) << "Should have no validation errors";
+}
+
+TEST_F(DialectDetectionTest, ParseWithSingleQuote) {
+    // Test parsing with single-quote as quote character
+    const std::string csv_data = "name,description\nAlice,'Hello, World'\nBob,'Test \"quote\"'\n";
+
+    simdcsv::Dialect single_quote;
+    single_quote.delimiter = ',';
+    single_quote.quote_char = '\'';
+
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(csv_data.size(), 1);
+
+    bool success = parser.parse(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        idx, csv_data.size(), single_quote);
+
+    EXPECT_TRUE(success) << "Should parse successfully with single-quote";
+}
+
+TEST_F(DialectDetectionTest, ParseTwoPassWithErrorsDialect) {
+    // Test parse_two_pass_with_errors with semicolon dialect
+    const std::string csv_data = "name;age;city\nAlice;30;Paris\nBob;25;London\nCharlie;35;Berlin\n";
+
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(csv_data.size(), 2);  // 2 threads
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    simdcsv::Dialect semicolon = simdcsv::Dialect::semicolon();
+
+    bool success = parser.parse_two_pass_with_errors(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        idx, csv_data.size(), errors, semicolon);
+
+    EXPECT_TRUE(success) << "Should parse successfully with multi-threading";
+    EXPECT_EQ(errors.error_count(), 0) << "Should have no errors";
 }
