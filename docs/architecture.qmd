@@ -1,0 +1,119 @@
+---
+title: "Architecture"
+---
+
+## Overview
+
+simdcsv implements a speculative multi-threaded two-pass algorithm for high-performance CSV parsing. The design is based on research from Chang et al. (SIGMOD 2019) combined with SIMD techniques from Langdale & Lemire's simdjson.
+
+## Two-Pass Algorithm
+
+### First Pass: Line Boundary Detection
+
+The first pass scans the file to find safe chunk boundaries for parallel processing. The key challenge is handling quoted fields that may contain newline characters.
+
+```
+File: "name","description"\n"Alice","Hello\nWorld"\n"Bob","Hi"
+                          ↑                       ↑
+                     Safe boundary          Safe boundary
+```
+
+The algorithm tracks **quote parity** - whether we're inside or outside a quoted field:
+
+- **Even quote count**: We're outside quotes; newlines are record boundaries
+- **Odd quote count**: We're inside quotes; newlines are part of field data
+
+For each chunk, we find:
+
+- `first_even_nl`: First newline at an even quote count (safe split point)
+- `first_odd_nl`: First newline at an odd quote count (backup split point)
+
+### Speculative Parsing
+
+Rather than processing chunks sequentially, simdcsv uses **speculative parsing**:
+
+1. Divide file into N chunks (one per thread)
+2. For each chunk boundary, look backwards to determine quotation state
+3. If quotation state is ambiguous, speculatively assume unquoted
+4. Verify speculation after parsing; fall back to single-threaded if needed
+
+This approach allows parallel processing while handling edge cases correctly.
+
+### Second Pass: Field Indexing
+
+The second pass builds an index of all field boundaries using a SIMD-accelerated state machine:
+
+```
+States: RECORD_START → FIELD_START → UNQUOTED_FIELD
+                   ↓              ↓
+              QUOTED_FIELD → QUOTED_END
+```
+
+The state machine processes 64 bytes at a time using SIMD operations to find:
+
+- Commas (`,`) - field separators
+- Newlines (`\n`) - record separators
+- Quotes (`"`) - field quoting
+
+## SIMD Implementation
+
+simdcsv uses [Google Highway](https://github.com/google/highway) for portable SIMD operations across different architectures:
+
+| Architecture | SIMD Support |
+|--------------|--------------|
+| x86-64 | SSE4.2, AVX2 |
+| ARM | NEON |
+| Fallback | Scalar operations |
+
+Key SIMD operations:
+
+- **`fill_input`**: Load 64 bytes into SIMD registers
+- **`cmp_mask_against_input`**: Compare all bytes against a character, producing a 64-bit mask
+- **`find_quote_mask`**: Compute quote parity mask using carry-less multiplication
+
+## Key Components
+
+| File | Purpose |
+|------|---------|
+| `include/two_pass.h` | Core two-pass parsing algorithm with multi-threading |
+| `include/simd_highway.h` | Portable SIMD operations using Google Highway |
+| `include/error.h` | Error codes, severity levels, ErrorCollector class |
+| `include/io_util.h` | File loading with SIMD-aligned padding (32+ bytes) |
+| `include/mem_util.h` | Aligned memory allocation for SIMD |
+
+## Memory Layout
+
+The parser produces an index structure with field boundary positions:
+
+```cpp
+class index {
+    uint64_t columns;      // Number of columns
+    uint8_t n_threads;     // Thread count used
+    uint64_t* n_indexes;   // Index count per thread
+    uint64_t* indexes;     // Interleaved field positions
+};
+```
+
+Indexes are stored interleaved by thread for cache efficiency during parallel construction:
+
+```
+Thread 0: pos[0], pos[4], pos[8], ...
+Thread 1: pos[1], pos[5], pos[9], ...
+Thread 2: pos[2], pos[6], pos[10], ...
+Thread 3: pos[3], pos[7], pos[11], ...
+```
+
+## Thread Safety
+
+- **First pass**: Each thread operates on independent chunk ranges
+- **Second pass**: Threads write to interleaved positions in the shared index array
+- **Error collection**: Thread-local error collectors are merged after parsing
+
+The design avoids locks by ensuring threads never write to the same memory locations.
+
+## Performance Considerations
+
+1. **Prefetching**: `__builtin_prefetch` hints for upcoming data
+2. **Branch reduction**: SIMD masks avoid per-byte branching
+3. **Memory alignment**: 64-byte aligned buffers for optimal SIMD loads
+4. **Chunk sizing**: Minimum 64-byte chunks to ensure newlines are found

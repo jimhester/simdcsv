@@ -33,3 +33,8 @@ Testing/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Documentation build output
+docs/_site/
+docs/api/
+docs/.quarto/

@@ -1,0 +1,52 @@
+---
+title: "simdcsv"
+subtitle: "High-performance CSV parser using SIMD instructions"
+---
+
+[![CI](https://github.com/jimhester/simdcsv/workflows/CI/badge.svg)](https://github.com/jimhester/simdcsv/actions)
+[![codecov](https://codecov.io/gh/jimhester/simdcsv/branch/main/graph/badge.svg)](https://codecov.io/gh/jimhester/simdcsv)
+
+## Overview
+
+simdcsv is a high-performance CSV parser library using portable SIMD instructions via [Google Highway](https://github.com/google/highway), designed for future integration with R's [vroom](https://github.com/tidyverse/vroom) package.
+
+The parser uses a speculative multi-threaded two-pass algorithm based on research by Chang et al. (SIGMOD 2019) and SIMD techniques from Langdale & Lemire (simdjson).
+
+## Features
+
+- **SIMD-accelerated parsing** using Google Highway for portable vectorization
+- **Multi-threaded** speculative parsing for large files
+- **Comprehensive error handling** with three modes: strict, permissive, and best-effort
+- **Cross-platform** support for Linux and macOS (x86-64 and ARM)
+
+## Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/jimhester/simdcsv.git
+cd simdcsv
+
+# Configure and build
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+
+# Run tests
+cd build && ctest --output-on-failure
+```
+
+See the [Getting Started](getting-started.qmd) guide for more details.
+
+## Architecture
+
+The parser implements a two-pass algorithm:
+
+1. **First Pass**: Scans for line boundaries while tracking quote parity to find safe chunk split points
+2. **Second Pass**: SIMD-based field indexing using a state machine, processing 64 bytes at a time
+
+Learn more in the [Architecture](architecture.qmd) documentation.
+
+## References
+
+- Ge, Chang and Li, Yinan and Eilebrecht, Eric and Chandramouli, Badrish and Kossmann, Donald. [Speculative Distributed CSV Data Parsing for Big Data Analytics](https://www.microsoft.com/en-us/research/uploads/prod/2019/04/chunker-sigmod19.pdf). SIGMOD 2019.
+
+- Geoff Langdale, Daniel Lemire. [Parsing Gigabytes of JSON per Second](https://arxiv.org/abs/1902.08318). VLDB Journal 28 (6), 2019.

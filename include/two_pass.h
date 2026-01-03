@@ -1,3 +1,27 @@
+/**
+ * @file two_pass.h
+ * @brief High-performance CSV parser using a speculative two-pass algorithm.
+ *
+ * This header provides the core parsing functionality of the simdcsv library.
+ * The parser uses a speculative multi-threaded two-pass algorithm based on
+ * research by Chang et al. (SIGMOD 2019) combined with SIMD techniques from
+ * Langdale & Lemire (simdjson).
+ *
+ * The algorithm works as follows:
+ * 1. **First Pass**: Scans for line boundaries while tracking quote parity.
+ *    Finds safe split points where the file can be divided for parallel processing.
+ *
+ * 2. **Speculative Chunking**: The file is divided into chunks based on quote
+ *    parity analysis. Multiple threads can speculatively parse chunks.
+ *
+ * 3. **Second Pass**: SIMD-based field indexing using a state machine. Processes
+ *    64 bytes at a time using Google Highway portable SIMD intrinsics.
+ *
+ * @see index for the result structure containing field positions
+ * @see two_pass for the main parser class
+ * @see ErrorCollector for error handling during parsing
+ */
+
 #include <unistd.h>  // for getopt
 #include <cstdint>
 #include <future>
@@ -12,18 +36,64 @@
 
 namespace simdcsv {
 
+/// Sentinel value indicating an invalid or unset position.
 constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
+
+/**
+ * @brief Result structure containing parsed CSV field positions.
+ *
+ * The index class stores the byte offsets of field separators (commas and newlines)
+ * found during CSV parsing. These positions enable efficient random access to
+ * individual fields without re-parsing the entire file.
+ *
+ * When using multi-threaded parsing, field positions are interleaved across threads.
+ * For example, with 4 threads: thread 0 stores positions at indices 0, 4, 8, ...;
+ * thread 1 stores at indices 1, 5, 9, ...; and so on.
+ *
+ * @note This class is move-only. Copy operations are deleted to prevent accidental
+ *       expensive copies of large index arrays.
+ *
+ * @warning The caller must ensure the index remains valid while accessing the
+ *          underlying buffer data. The index stores byte offsets, not the data itself.
+ *
+ * @example
+ * @code
+ * // Create parser and initialize index
+ * simdcsv::two_pass parser;
+ * simdcsv::index idx = parser.init(buffer_length, num_threads);
+ *
+ * // Parse the CSV data
+ * parser.parse(buffer, idx, buffer_length);
+ *
+ * // Access field positions
+ * // For single-threaded: positions are at idx.indexes[0], idx.indexes[1], ...
+ * // For multi-threaded: use stride of idx.n_threads
+ * @endcode
+ */
 class index {
  public:
+  /// Number of columns detected in the CSV (set after parsing header).
   uint64_t columns{0};
+
+  /// Number of threads used for parsing. Determines the interleave stride.
   uint8_t n_threads{0};
+
+  /// Array of size n_threads containing the count of indexes found by each thread.
   uint64_t* n_indexes{nullptr};
+
+  /// Array of field separator positions (byte offsets). Interleaved by thread.
   uint64_t* indexes{nullptr};
 
-  // Default constructor
+  /// Default constructor. Creates an empty, uninitialized index.
   index() = default;
 
-  // Move constructor
+  /**
+   * @brief Move constructor.
+   *
+   * Transfers ownership of index arrays from another index object.
+   *
+   * @param other The index to move from. Will be left in a valid but empty state.
+   */
   index(index&& other) noexcept
       : columns(other.columns),
         n_threads(other.n_threads),
@@ -33,7 +103,14 @@ class index {
     other.indexes = nullptr;
   }
 
-  // Move assignment
+  /**
+   * @brief Move assignment operator.
+   *
+   * Releases current resources and takes ownership from another index.
+   *
+   * @param other The index to move from. Will be left in a valid but empty state.
+   * @return Reference to this index.
+   */
   index& operator=(index&& other) noexcept {
     if (this != &other) {
       delete[] indexes;
@@ -52,6 +129,15 @@ class index {
   index(const index&) = delete;
   index& operator=(const index&) = delete;
 
+  /**
+   * @brief Serialize the index to a binary file.
+   *
+   * Writes the index structure to disk for later retrieval, avoiding the need
+   * to re-parse large CSV files.
+   *
+   * @param filename Path to the output file.
+   * @throws std::runtime_error If writing fails.
+   */
   void write(const std::string& filename) {
     std::FILE* fp = std::fopen(filename.c_str(), "wb");
     if (!((std::fwrite(&columns, sizeof(uint64_t), 1, fp) == 1) &&
@@ -69,6 +155,17 @@ class index {
 
     std::fclose(fp);
   }
+
+  /**
+   * @brief Deserialize the index from a binary file.
+   *
+   * Reads a previously saved index structure from disk.
+   *
+   * @param filename Path to the input file.
+   * @throws std::runtime_error If reading fails.
+   *
+   * @warning The n_indexes and indexes arrays must be pre-allocated before calling.
+   */
   void read(const std::string& filename) {
     std::FILE* fp = std::fopen(filename.c_str(), "rb");
     if (!((std::fread(&columns, sizeof(uint64_t), 1, fp) == 1) &&
@@ -87,6 +184,9 @@ class index {
     std::fclose(fp);
   }
 
+  /**
+   * @brief Destructor. Releases allocated index arrays.
+   */
   ~index() {
     if (indexes) {
       delete[] indexes;
@@ -99,11 +199,79 @@ class index {
   void fill_double_array(index* idx, uint64_t column, double* out) {}
 };
 
+/**
+ * @brief High-performance CSV parser using a speculative two-pass algorithm.
+ *
+ * The two_pass class implements a multi-threaded CSV parsing algorithm that
+ * achieves high performance through SIMD operations and speculative parallel
+ * processing. The algorithm is based on research by Chang et al. (SIGMOD 2019)
+ * combined with SIMD techniques from Langdale & Lemire (simdjson).
+ *
+ * The parsing algorithm works in two phases:
+ *
+ * 1. **First Pass**: Scans the file to find safe split points where the file
+ *    can be divided for parallel processing. Tracks quote parity to ensure
+ *    chunks don't split in the middle of quoted fields.
+ *
+ * 2. **Second Pass**: Each thread parses its assigned chunk using a state
+ *    machine to identify field boundaries. Results are stored in an interleaved
+ *    format in the index structure.
+ *
+ * @note Thread Safety: The parser itself is stateless and thread-safe.
+ *       However, each index object should only be accessed by one thread
+ *       during parsing. Multiple parsers can run concurrently with separate
+ *       index objects.
+ *
+ * @example
+ * @code
+ * #include "two_pass.h"
+ * #include "io_util.h"
+ *
+ * // Load CSV file with SIMD-aligned padding
+ * auto [buffer, length] = simdcsv::load_file("data.csv");
+ *
+ * // Create parser and initialize index
+ * simdcsv::two_pass parser;
+ * simdcsv::index idx = parser.init(length, 4);  // 4 threads
+ *
+ * // Parse without error collection (throws on error)
+ * parser.parse(buffer, idx, length);
+ *
+ * // Or parse with error collection
+ * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+ * bool success = parser.parse_with_errors(buffer, idx, length, errors);
+ *
+ * if (!success || errors.error_count() > 0) {
+ *     for (const auto& err : errors.get_errors()) {
+ *         std::cerr << "Line " << err.line << ": " << err.message << "\n";
+ *     }
+ * }
+ * @endcode
+ *
+ * @see index For the result structure containing field positions
+ * @see ErrorCollector For error handling during parsing
+ */
 class two_pass {
  public:
+  /**
+   * @brief Statistics from the first pass of parsing.
+   *
+   * The stats structure contains information gathered during the first pass
+   * that is used to determine safe chunk boundaries for multi-threaded parsing.
+   *
+   * @note These statistics are primarily for internal use by the parser's
+   *       multi-threading logic.
+   */
   struct stats {
+    /// Total number of quote characters found in the chunk.
     uint64_t n_quotes{0};
+
+    /// Position of first newline at even quote count (safe split point if unquoted).
+    /// Set to null_pos if no such newline exists.
     uint64_t first_even_nl{null_pos};
+
+    /// Position of first newline at odd quote count (safe split point if quoted).
+    /// Set to null_pos if no such newline exists.
     uint64_t first_odd_nl{null_pos};
   };
   static stats first_pass_simd(const uint8_t* buf, size_t start, size_t end) {
@@ -283,7 +451,30 @@ class two_pass {
     return n_indexes;
   }
 
-  enum csv_state { RECORD_START, FIELD_START, UNQUOTED_FIELD, QUOTED_FIELD, QUOTED_END };
+  /**
+   * @brief Parser state machine states for CSV field parsing.
+   *
+   * The CSV parser uses a finite state machine to track its position within
+   * the CSV structure. Each character transition updates the state based on
+   * whether it's a quote, comma, newline, or other character.
+   *
+   * State transitions:
+   * - RECORD_START + '"' -> QUOTED_FIELD
+   * - RECORD_START + ',' -> FIELD_START
+   * - RECORD_START + '\n' -> RECORD_START
+   * - RECORD_START + other -> UNQUOTED_FIELD
+   * - QUOTED_FIELD + '"' -> QUOTED_END (potential close or escape)
+   * - QUOTED_END + '"' -> QUOTED_FIELD (escaped quote)
+   * - QUOTED_END + ',' -> FIELD_START (field ended)
+   * - QUOTED_END + '\n' -> RECORD_START (record ended)
+   */
+  enum csv_state {
+    RECORD_START,    ///< At the beginning of a new record (row).
+    FIELD_START,     ///< At the beginning of a new field (after comma).
+    UNQUOTED_FIELD,  ///< Inside an unquoted field.
+    QUOTED_FIELD,    ///< Inside a quoted field.
+    QUOTED_END       ///< Just saw a quote inside a quoted field (might be closing or escape).
+  };
 
   // Error result from state transitions
   struct state_result {
@@ -672,6 +863,47 @@ class two_pass {
     return true;
   }
 
+  /**
+   * @brief Parse a CSV buffer and build the field index.
+   *
+   * This is the primary parsing method for fast CSV parsing without detailed
+   * error collection. It uses the speculative multi-threaded algorithm for
+   * optimal performance on large files.
+   *
+   * The method populates the index structure with byte offsets of all field
+   * separators (commas and newlines) found in the CSV data.
+   *
+   * @param buf Pointer to the CSV data buffer. Must remain valid during parsing.
+   *            Should have at least 32 bytes of padding beyond len for SIMD safety.
+   * @param out The index structure to populate. Must be initialized via init().
+   * @param len Length of the CSV data in bytes (excluding any padding).
+   *
+   * @return true if parsing completed successfully, false otherwise.
+   *
+   * @throws std::runtime_error On parsing errors (e.g., malformed quotes).
+   *
+   * @note For error-tolerant parsing with detailed error information, use
+   *       parse_with_errors() or parse_two_pass_with_errors() instead.
+   *
+   * @note The buffer should be loaded using io_util.h functions which ensure
+   *       proper SIMD-aligned padding.
+   *
+   * @example
+   * @code
+   * simdcsv::two_pass parser;
+   * simdcsv::index idx = parser.init(length, 4);
+   *
+   * try {
+   *     parser.parse(buffer, idx, length);
+   *     // Access field positions via idx.indexes
+   * } catch (const std::runtime_error& e) {
+   *     std::cerr << "Parse error: " << e.what() << "\n";
+   * }
+   * @endcode
+   *
+   * @see parse_with_errors() For single-threaded parsing with error collection.
+   * @see parse_two_pass_with_errors() For multi-threaded parsing with error collection.
+   */
   bool parse(const uint8_t* buf, index& out, size_t len) {
     return parse_speculate(buf, out, len);
     // auto index = parse_two_pass(buf, out, len);
@@ -698,12 +930,61 @@ class two_pass {
     return result;
   }
 
-  // Multi-threaded parsing with error collection using thread-local collectors
-  // Each thread collects errors locally, then they are merged and sorted by offset
-  //
-  // THREAD SAFETY: ErrorCollector must not be accessed by other threads during parsing.
-  // After parsing completes, errors are merged from thread-local collectors and sorted
-  // by byte offset for consistent ordering.
+  /**
+   * @brief Parse a CSV buffer with error collection using multi-threading.
+   *
+   * This method combines the performance of multi-threaded parsing with
+   * comprehensive error collection. Each thread maintains its own local
+   * error collector, and errors are merged and sorted by byte offset after
+   * parsing completes.
+   *
+   * The method performs the same checks as parse_with_errors():
+   * - Empty header detection
+   * - Duplicate column name detection
+   * - Mixed line ending warnings
+   * - Quote errors (unclosed quotes, quotes in unquoted fields)
+   * - Inconsistent field counts across rows
+   * - Null byte detection
+   *
+   * @param buf Pointer to the CSV data buffer. Must remain valid during parsing.
+   * @param out The index structure to populate. Must be initialized via init()
+   *            with the desired number of threads.
+   * @param len Length of the CSV data in bytes.
+   * @param errors ErrorCollector to accumulate parsing errors. Thread-local
+   *               errors are merged into this collector after parsing.
+   *
+   * @return true if parsing completed without fatal errors, false if fatal
+   *         errors occurred.
+   *
+   * @note Thread Safety: The provided ErrorCollector must not be accessed by
+   *       other threads during parsing. After this method returns, all errors
+   *       have been merged and sorted by byte offset.
+   *
+   * @note This method automatically falls back to single-threaded parsing for
+   *       small files or when chunk boundaries cannot be safely determined.
+   *
+   * @warning Error ordering: Due to parallel execution, errors may not be
+   *          discovered in file order during parsing. However, the final
+   *          error list is sorted by byte offset for consistent output.
+   *
+   * @example
+   * @code
+   * simdcsv::two_pass parser;
+   * size_t num_threads = std::thread::hardware_concurrency();
+   * simdcsv::index idx = parser.init(length, num_threads);
+   * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+   *
+   * bool success = parser.parse_two_pass_with_errors(buffer, idx, length, errors);
+   *
+   * // Errors are sorted by byte offset for consistent reporting
+   * for (const auto& err : errors.get_errors()) {
+   *     std::cout << "Offset " << err.byte_offset << ": " << err.message << "\n";
+   * }
+   * @endcode
+   *
+   * @see parse_with_errors() For single-threaded parsing with precise ordering.
+   * @see ErrorCollector::merge_sorted() For error merging details.
+   */
   bool parse_two_pass_with_errors(const uint8_t* buf, index& out, size_t len,
                                   ErrorCollector& errors) {
     // Handle empty input
@@ -797,8 +1078,60 @@ class two_pass {
     return !errors.has_fatal_errors();
   }
 
-  // Parse with error collection - single-threaded for reliable error reporting
-  // Use this when you need precise error ordering or for small files
+  /**
+   * @brief Parse a CSV buffer with detailed error collection (single-threaded).
+   *
+   * This method provides comprehensive error detection and collection while
+   * parsing. It runs single-threaded to ensure errors are reported in exact
+   * file order, making it ideal for validation and debugging.
+   *
+   * The method performs the following checks:
+   * - Empty header detection
+   * - Duplicate column name detection
+   * - Mixed line ending warnings
+   * - Quote errors (unclosed quotes, quotes in unquoted fields)
+   * - Inconsistent field counts across rows
+   * - Null byte detection
+   *
+   * @param buf Pointer to the CSV data buffer. Must remain valid during parsing.
+   * @param out The index structure to populate. Must be initialized via init().
+   * @param len Length of the CSV data in bytes.
+   * @param errors ErrorCollector to accumulate parsing errors. The collector's
+   *               mode (STRICT, PERMISSIVE, BEST_EFFORT) controls behavior.
+   *
+   * @return true if parsing completed without fatal errors, false if fatal
+   *         errors occurred or parsing was stopped early (STRICT mode).
+   *
+   * @note This method is single-threaded for precise error position tracking.
+   *       For large files where performance is critical, consider
+   *       parse_two_pass_with_errors() which uses multi-threading.
+   *
+   * @example
+   * @code
+   * simdcsv::two_pass parser;
+   * simdcsv::index idx = parser.init(length, 1);
+   * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+   *
+   * bool success = parser.parse_with_errors(buffer, idx, length, errors);
+   *
+   * // Check for errors
+   * if (errors.error_count() > 0) {
+   *     std::cout << "Found " << errors.error_count() << " errors:\n";
+   *     for (const auto& err : errors.get_errors()) {
+   *         std::cout << "Line " << err.line << ", Col " << err.column
+   *                   << ": " << err.message << "\n";
+   *     }
+   * }
+   *
+   * if (!success) {
+   *     std::cerr << "Parsing failed due to fatal errors\n";
+   * }
+   * @endcode
+   *
+   * @see parse_two_pass_with_errors() For multi-threaded parsing with errors.
+   * @see ErrorCollector For error handling configuration and access.
+   * @see ErrorMode For different error handling strategies.
+   */
   bool parse_with_errors(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors) {
     // Check structural issues first
     check_empty_header(buf, len, errors);
@@ -942,7 +1275,32 @@ class two_pass {
     }
   }
 
-  // Full validation parse - checks all error types
+  /**
+   * @brief Perform full CSV validation with comprehensive error checking.
+   *
+   * This method is functionally equivalent to parse_with_errors() but named
+   * to emphasize its validation purpose. Use this when your primary goal is
+   * to check a CSV file for errors rather than extract data.
+   *
+   * Validation checks performed:
+   * - Empty header row detection
+   * - Duplicate column name detection (warns on duplicates)
+   * - Mixed line endings detection (CRLF, LF, CR combinations)
+   * - Quote handling errors (unclosed quotes, quotes in unquoted fields)
+   * - Invalid characters after closing quotes
+   * - Inconsistent field counts across rows
+   * - Null byte detection
+   *
+   * @param buf Pointer to the CSV data buffer.
+   * @param out The index structure to populate (from init()).
+   * @param len Length of the CSV data in bytes.
+   * @param errors ErrorCollector to accumulate validation errors.
+   *
+   * @return true if validation passed without fatal errors, false otherwise.
+   *
+   * @see parse_with_errors() Equivalent functionality
+   * @see ErrorCollector For accessing validation results
+   */
   bool parse_validate(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors) {
     // Check structural issues first
     check_empty_header(buf, len, errors);
@@ -963,6 +1321,41 @@ class two_pass {
     return !errors.has_fatal_errors();
   }
 
+  /**
+   * @brief Initialize an index structure for parsing.
+   *
+   * Allocates memory for storing field separator positions. The index must be
+   * initialized before calling any parse method. The allocated size is based on
+   * the maximum possible number of fields (one per byte in worst case).
+   *
+   * @param len Length of the CSV buffer in bytes. Determines maximum index capacity.
+   * @param n_threads Number of threads to use for parsing. Use 1 for single-threaded
+   *                  parsing, or a higher value for multi-threaded parsing.
+   *                  Recommended: std::thread::hardware_concurrency() for large files.
+   *
+   * @return An initialized index structure ready for parsing.
+   *
+   * @note The returned index owns its memory and will free it on destruction.
+   *       Use move semantics to transfer ownership.
+   *
+   * @warning For very large files, this allocates len * sizeof(uint64_t) bytes
+   *          for the indexes array. Consider the memory implications.
+   *
+   * @example
+   * @code
+   * simdcsv::two_pass parser;
+   *
+   * // Single-threaded parsing
+   * simdcsv::index idx = parser.init(buffer_length, 1);
+   *
+   * // Multi-threaded parsing with 4 threads
+   * simdcsv::index idx = parser.init(buffer_length, 4);
+   *
+   * // Use hardware concurrency
+   * simdcsv::index idx = parser.init(buffer_length,
+   *                                   std::thread::hardware_concurrency());
+   * @endcode
+   */
   index init(size_t len, size_t n_threads) {
     index out;
     out.n_threads = n_threads;
