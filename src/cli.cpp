@@ -34,6 +34,11 @@ constexpr size_t MAX_COLUMN_WIDTH = 40;
 constexpr size_t DEFAULT_NUM_ROWS = 10;
 constexpr const char* VERSION = "0.1.0";
 
+// Performance tuning constants
+constexpr size_t QUOTE_LOOKBACK_LIMIT = 64 * 1024;  // 64KB lookback for quote state
+constexpr size_t MAX_BOUNDARY_SEARCH = 8192;        // Max search for row boundary
+constexpr size_t MIN_PARALLEL_SIZE = 1024 * 1024;   // Minimum size for parallel processing
+
 /**
  * CSV Iterator - Helper class to iterate over parsed CSV data
  */
@@ -209,11 +214,16 @@ size_t countRowsSimd(const uint8_t* buf, size_t len) {
     row_count += simdcsv::count_ones(valid_newlines);
   }
 
-  // Handle remaining bytes with scalar code
+  // Handle remaining bytes with scalar code (properly handles escaped quotes "")
   bool in_quote = (prev_iter_inside_quote != 0);
   for (; idx < len; ++idx) {
     if (buf[idx] == '"') {
-      in_quote = !in_quote;
+      // Check for escaped quote ("")
+      if (idx + 1 < len && buf[idx + 1] == '"') {
+        ++idx;  // Skip both quotes - escaped quote doesn't toggle state
+      } else {
+        in_quote = !in_quote;
+      }
     } else if (buf[idx] == '\n' && !in_quote) {
       ++row_count;
     }
@@ -228,12 +238,18 @@ size_t countRowsDirect(const uint8_t* buf, size_t len) {
     return countRowsSimd(buf, len);
   }
 
+  // Scalar path for small files (properly handles escaped quotes "")
   size_t row_count = 0;
   bool in_quote = false;
 
   for (size_t i = 0; i < len; ++i) {
     if (buf[i] == '"') {
-      in_quote = !in_quote;
+      // Check for escaped quote ("")
+      if (i + 1 < len && buf[i + 1] == '"') {
+        ++i;  // Skip both quotes - escaped quote doesn't toggle state
+      } else {
+        in_quote = !in_quote;
+      }
     } else if (buf[i] == '\n' && !in_quote) {
       ++row_count;
     }
@@ -243,34 +259,39 @@ size_t countRowsDirect(const uint8_t* buf, size_t len) {
 }
 
 // Determine if position is inside or outside a quoted field
-// Uses speculative approach - look back up to 64KB
+// Uses proven speculative approach from two_pass.h with 64KB lookback
 enum QuoteState { OUTSIDE_QUOTE, INSIDE_QUOTE, AMBIGUOUS };
 
-static QuoteState getQuoteState(const uint8_t* buf, size_t pos) {
-  constexpr size_t LOOKBACK_LIMIT = 64 * 1024;
+// Helper function matching two_pass.h logic
+static bool isOther(uint8_t c) { return c != ',' && c != '\n' && c != '"'; }
 
+static QuoteState getQuoteState(const uint8_t* buf, size_t pos) {
+  // Uses the same proven logic as two_pass::get_quotation_state
   if (pos == 0) return OUTSIDE_QUOTE;
 
-  size_t end = pos > LOOKBACK_LIMIT ? pos - LOOKBACK_LIMIT : 0;
-  size_t quote_count = 0;
+  size_t end = pos > QUOTE_LOOKBACK_LIMIT ? pos - QUOTE_LOOKBACK_LIMIT : 0;
+  size_t i = pos;
+  size_t num_quotes = 0;
 
-  for (size_t i = pos; i > end; --i) {
-    uint8_t c = buf[i - 1];
-    if (c == '"') {
-      if (i >= 2) {
-        uint8_t prev = buf[i - 2];
-        if (prev != '"' && prev != ',' && prev != '\n' && prev != '\r') {
-          return (quote_count % 2 == 0) ? OUTSIDE_QUOTE : INSIDE_QUOTE;
-        }
+  // Scan backwards looking for quote-other patterns that determine state
+  while (i > end) {
+    if (buf[i] == '"') {
+      // q-o case: quote followed by non-delimiter means we found end of quoted field
+      if (i + 1 < pos && isOther(buf[i + 1])) {
+        return num_quotes % 2 == 0 ? INSIDE_QUOTE : OUTSIDE_QUOTE;
       }
-      if (i < pos) {
-        uint8_t next = buf[i];
-        if (next != '"' && next != ',' && next != '\n' && next != '\r') {
-          return (quote_count % 2 == 0) ? INSIDE_QUOTE : OUTSIDE_QUOTE;
-        }
+      // o-q case: non-delimiter before quote means we found start of quoted field
+      else if (i > end && isOther(buf[i - 1])) {
+        return num_quotes % 2 == 0 ? OUTSIDE_QUOTE : INSIDE_QUOTE;
       }
-      quote_count++;
+      ++num_quotes;
     }
+    --i;
+  }
+
+  // Check the boundary position
+  if (buf[end] == '"') {
+    ++num_quotes;
   }
 
   return AMBIGUOUS;
@@ -278,15 +299,18 @@ static QuoteState getQuoteState(const uint8_t* buf, size_t pos) {
 
 // Find a valid row boundary near target position
 static size_t findRowBoundary(const uint8_t* buf, size_t len, size_t target) {
-  constexpr size_t MAX_SEARCH = 8192;
-
   QuoteState state = getQuoteState(buf, target);
-  size_t limit = std::min(target + MAX_SEARCH, len);
+  size_t limit = std::min(target + MAX_BOUNDARY_SEARCH, len);
   bool in_quote = (state == INSIDE_QUOTE);
 
   for (size_t pos = target; pos < limit; ++pos) {
     if (buf[pos] == '"') {
-      in_quote = !in_quote;
+      // Check for escaped quote ("")
+      if (pos + 1 < limit && buf[pos + 1] == '"') {
+        ++pos;  // Skip both quotes - escaped quote doesn't toggle state
+      } else {
+        in_quote = !in_quote;
+      }
     } else if (buf[pos] == '\n' && !in_quote) {
       return pos + 1;
     }
@@ -297,7 +321,7 @@ static size_t findRowBoundary(const uint8_t* buf, size_t len, size_t target) {
 
 // Parallel direct row counter
 size_t countRowsDirectParallel(const uint8_t* buf, size_t len, int n_threads) {
-  if (n_threads <= 1 || len < 1024 * 1024) {
+  if (n_threads <= 1 || len < MIN_PARALLEL_SIZE) {
     return countRowsDirect(buf, len);
   }
 
