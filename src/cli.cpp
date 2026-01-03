@@ -22,6 +22,7 @@
 #include "common_defs.h"
 #include "io_util.h"
 #include "mem_util.h"
+#include "simd_highway.h"
 #include "two_pass.h"
 
 using namespace std;
@@ -180,9 +181,50 @@ bool parseFile(const char* filename, int n_threads,
   return true;
 }
 
-// Direct row counter using SIMD - avoids building full index
-// This is much faster for the count command since we don't need field positions
+// SIMD row counter - processes 64 bytes at a time
+size_t countRowsSimd(const uint8_t* buf, size_t len) {
+  size_t row_count = 0;
+  size_t idx = 0;
+  uint64_t prev_iter_inside_quote = 0ULL;
+
+  // Process 64 bytes at a time using SIMD
+  for (; idx + 64 <= len; idx += 64) {
+    simdcsv::simd_input in = simdcsv::fill_input(buf + idx);
+
+    // Find all quotes and newlines in this 64-byte block
+    uint64_t quotes = simdcsv::cmp_mask_against_input(in, '"');
+    uint64_t newlines = simdcsv::cmp_mask_against_input(in, '\n');
+
+    // Build quote mask (1 = inside quote, 0 = outside)
+    uint64_t quote_mask = simdcsv::find_quote_mask2(in, quotes, prev_iter_inside_quote);
+
+    // Newlines outside quotes
+    uint64_t valid_newlines = newlines & ~quote_mask;
+
+    // Count the newlines
+    row_count += simdcsv::count_ones(valid_newlines);
+  }
+
+  // Handle remaining bytes with scalar code
+  bool in_quote = (prev_iter_inside_quote != 0);
+  for (; idx < len; ++idx) {
+    if (buf[idx] == '"') {
+      in_quote = !in_quote;
+    } else if (buf[idx] == '\n' && !in_quote) {
+      ++row_count;
+    }
+  }
+
+  return row_count;
+}
+
+// Direct row counter - scalar fallback
 size_t countRowsDirect(const uint8_t* buf, size_t len) {
+  // Use SIMD if we have enough data
+  if (len >= 64) {
+    return countRowsSimd(buf, len);
+  }
+
   size_t row_count = 0;
   bool in_quote = false;
 
