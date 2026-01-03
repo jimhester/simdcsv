@@ -32,13 +32,16 @@ jobs:
       - name: Install Doxygen
         run: sudo apt-get update && sudo apt-get install -y doxygen
 
-      - name: Build Doxygen API docs
-        working-directory: docs
-        run: doxygen Doxyfile
+      - name: Install doxybook2
+        run: |
+          curl -L https://github.com/matusnovak/doxybook2/releases/download/v1.5.0/doxybook2-linux-amd64-v1.5.0.zip -o /tmp/doxybook2.zip
+          unzip /tmp/doxybook2.zip -d /tmp/doxybook2
+          sudo mv /tmp/doxybook2/bin/doxybook2 /usr/local/bin/
+          sudo chmod +x /usr/local/bin/doxybook2
 
-      - name: Render Quarto site
+      - name: Build documentation
         working-directory: docs
-        run: quarto render
+        run: ./build.sh
 
       - name: Setup Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

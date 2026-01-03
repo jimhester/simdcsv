@@ -49,11 +49,14 @@ cd build && ctest --output-on-failure
 ```cpp
 #include "two_pass.h"
 #include "io_util.h"
+#include "mem_util.h"
 #include "error.h"
 
 int main() {
-    // Load CSV file
-    auto [buf, len] = simdcsv::load_file("data.csv");
+    // Load CSV file into SIMD-aligned buffer with padding
+    auto corpus = get_corpus("data.csv", 64);
+    const uint8_t* buf = corpus.data();
+    size_t len = corpus.size();
 
     // Initialize parser
     simdcsv::two_pass parser;
@@ -66,6 +69,9 @@ int main() {
     if (errors.has_errors()) {
         std::cerr << errors.summary() << std::endl;
     }
+
+    // Free the aligned buffer
+    aligned_free((void*)buf);
 
     return 0;
 }
