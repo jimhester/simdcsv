@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["matplotlib", "pandas"]
+# ///
 """
 Benchmark report generator and regression detection for simdcsv.
 Processes Google Benchmark JSON output and generates reports.
