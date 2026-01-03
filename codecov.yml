@@ -25,8 +25,11 @@ comment:
   behavior: default
   require_changes: false
 
-# Additional paths to ignore (lcov excludes are in .lcovrc)
+# Paths to ignore from coverage reports
 ignore:
+  - "test/**/*"
+  - "benchmark/**/*"
+  - "build/_deps/**/*"
   - "**/*.md"
 
 flags:
