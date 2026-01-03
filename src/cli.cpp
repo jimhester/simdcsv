@@ -191,6 +191,12 @@ bool parseFile(const char* filename, int n_threads,
 // ============================================================================
 
 // SIMD row counter - processes 64 bytes at a time
+// Note on escaped quotes (CSV ""): The SIMD path uses XOR-prefix to compute
+// quote state, which toggles on every quote. For escaped quotes "", this means
+// toggling twice (net effect: state unchanged). This is correct for row counting
+// because: (1) "" are adjacent by definition, so no newline can appear between
+// them, and (2) the final quote state after "" matches the correct semantics.
+// The scalar fallback explicitly handles "" for consistency with the library.
 size_t countRowsSimd(const uint8_t* buf, size_t len) {
   size_t row_count = 0;
   size_t idx = 0;
