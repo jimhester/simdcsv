@@ -25,9 +25,8 @@ comment:
   behavior: default
   require_changes: false
 
+# Additional paths to ignore (lcov excludes are in .lcovrc)
 ignore:
-  - "test/**/*"
-  - "build/**/*"
   - "**/*.md"
 
 flags:

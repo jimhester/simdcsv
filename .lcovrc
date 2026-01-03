@@ -1,0 +1,6 @@
+# lcov configuration file
+# Used by both local coverage runs and CI
+
+exclude = */test/*
+exclude = */benchmark/*
+exclude = */build/_deps/*

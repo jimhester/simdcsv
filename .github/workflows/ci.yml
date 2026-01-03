@@ -80,7 +80,7 @@ jobs:
     - name: Generate coverage info
       run: |
         cd build
-        lcov --capture --directory . --output-file coverage.info --exclude '*/build/_deps/*' --exclude '*/test/*' --exclude '*/benchmark/*' --ignore-errors mismatch,unused
+        lcov --config-file ../.lcovrc --capture --directory . --output-file coverage.info --ignore-errors mismatch,unused
         lcov --list coverage.info
 
     - name: Upload coverage to Codecov
