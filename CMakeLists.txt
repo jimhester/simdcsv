@@ -522,6 +522,31 @@ add_custom_command(TARGET streaming_test POST_BUILD
 # Register streaming tests with CTest
 gtest_discover_tests(streaming_test)
 
+# Branchless state machine test executable
+add_executable(branchless_test
+    test/branchless_test.cpp
+)
+
+target_link_libraries(branchless_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(branchless_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for branchless tests
+add_custom_command(TARGET branchless_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register branchless tests with CTest
+gtest_discover_tests(branchless_test)
+
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
     benchmark/benchmark_main.cpp
