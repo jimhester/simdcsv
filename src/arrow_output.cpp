@@ -10,8 +10,18 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <memory>
 
 namespace simdcsv {
+
+// RAII wrapper for aligned memory to ensure proper cleanup on all code paths
+// This prevents memory leaks when exceptions are thrown during parsing or conversion
+struct AlignedDeleter {
+    void operator()(uint8_t* ptr) const noexcept {
+        if (ptr) aligned_free(ptr);
+    }
+};
+using AlignedBufferPtr = std::unique_ptr<uint8_t, AlignedDeleter>;
 
 std::shared_ptr<arrow::DataType> column_type_to_arrow(ColumnType type) {
     switch (type) {
@@ -284,27 +294,44 @@ ArrowConvertResult csv_to_arrow(const std::string& filename, const ArrowConvertO
     ArrowConvertResult result;
     try {
         auto corpus = get_corpus(filename, 64);
+        // Use RAII to ensure memory is freed even if an exception is thrown
+        // during parsing or conversion. The buffer will be automatically freed
+        // when buffer_guard goes out of scope (either normally or via exception).
+        AlignedBufferPtr buffer_guard(const_cast<uint8_t*>(corpus.data()));
+
         two_pass parser;
         index idx = parser.init(corpus.size(), 1);
         parser.parse(corpus.data(), idx, corpus.size(), dialect);
         ArrowConverter converter(options);
         result = converter.convert(corpus.data(), corpus.size(), idx, dialect);
-        aligned_free(const_cast<uint8_t*>(corpus.data()));
-    } catch (const std::exception& e) { result.error_message = e.what(); }
+        // buffer_guard automatically frees memory when it goes out of scope
+    } catch (const std::exception& e) {
+        result.error_message = e.what();
+    }
     return result;
 }
 
 ArrowConvertResult csv_to_arrow_from_memory(const uint8_t* data, size_t len, const ArrowConvertOptions& options, const Dialect& dialect) {
     ArrowConvertResult result;
     uint8_t* buf = allocate_padded_buffer(len, 64);
-    if (!buf) { result.error_message = "Allocation failed"; return result; }
-    std::memcpy(buf, data, len);
-    two_pass parser;
-    index idx = parser.init(len, 1);
-    parser.parse(buf, idx, len, dialect);
-    ArrowConverter converter(options);
-    result = converter.convert(buf, len, idx, dialect);
-    aligned_free(buf);
+    if (!buf) {
+        result.error_message = "Allocation failed";
+        return result;
+    }
+    // Use RAII to ensure memory is freed even if an exception is thrown
+    AlignedBufferPtr buffer_guard(buf);
+
+    try {
+        std::memcpy(buf, data, len);
+        two_pass parser;
+        index idx = parser.init(len, 1);
+        parser.parse(buf, idx, len, dialect);
+        ArrowConverter converter(options);
+        result = converter.convert(buf, len, idx, dialect);
+        // buffer_guard automatically frees memory when it goes out of scope
+    } catch (const std::exception& e) {
+        result.error_message = e.what();
+    }
     return result;
 }
 
