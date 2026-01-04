@@ -119,6 +119,10 @@ struct DetectionOptions {
     /// Candidate quote characters to test
     std::vector<char> quote_chars = {'"', '\''};
 
+    /// Candidate escape characters to test (in addition to double-quote style)
+    /// Empty means only test double-quote escaping; backslash is common alternative
+    std::vector<char> escape_chars = {'\\'};
+
     /// Minimum confidence threshold for successful detection
     double min_confidence = 0.5;
 };

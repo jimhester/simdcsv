@@ -139,15 +139,30 @@ DetectionResult DialectDetector::detect_file(const std::string& filename) const 
 std::vector<Dialect> DialectDetector::generate_candidates() const {
     std::vector<Dialect> candidates;
 
-    // Generate all combinations of delimiter and quote char
+    // Generate all combinations of delimiter, quote char, and escape style
     for (char delim : options_.delimiters) {
         for (char quote : options_.quote_chars) {
-            Dialect d;
-            d.delimiter = delim;
-            d.quote_char = quote;
-            d.escape_char = quote;  // Default: double-quote escaping
-            d.double_quote = true;
-            candidates.push_back(d);
+            // Test double-quote escaping (RFC 4180 style: "" -> ")
+            {
+                Dialect d;
+                d.delimiter = delim;
+                d.quote_char = quote;
+                d.escape_char = quote;
+                d.double_quote = true;
+                candidates.push_back(d);
+            }
+
+            // Test each escape character (e.g., backslash: \" -> ")
+            for (char esc : options_.escape_chars) {
+                if (esc != quote) {  // Skip if same as quote (handled above)
+                    Dialect d;
+                    d.delimiter = delim;
+                    d.quote_char = quote;
+                    d.escape_char = esc;
+                    d.double_quote = false;
+                    candidates.push_back(d);
+                }
+            }
         }
         // Also test without quotes
         Dialect d;
@@ -159,6 +174,35 @@ std::vector<Dialect> DialectDetector::generate_candidates() const {
     }
 
     return candidates;
+}
+
+// Helper: detect escape pattern usage in data
+// Returns: -1 for double-quote pattern (RFC 4180), count of backslash escapes if > 0
+static int detect_escape_pattern(const uint8_t* buf, size_t len,
+                                  char quote_char, char escape_char) {
+    int backslash_escapes = 0;
+    int double_quote_escapes = 0;
+
+    for (size_t i = 0; i + 1 < len; ++i) {
+        // Check for escape_char followed by quote_char (e.g., \")
+        if (buf[i] == static_cast<uint8_t>(escape_char) &&
+            buf[i + 1] == static_cast<uint8_t>(quote_char)) {
+            backslash_escapes++;
+        }
+        // Check for double-quote pattern (e.g., "")
+        if (buf[i] == static_cast<uint8_t>(quote_char) &&
+            buf[i + 1] == static_cast<uint8_t>(quote_char)) {
+            double_quote_escapes++;
+        }
+    }
+
+    // Return negative for double-quote preference, positive for escape-char preference
+    if (backslash_escapes > 0 && double_quote_escapes == 0) {
+        return backslash_escapes;  // Backslash pattern detected
+    } else if (double_quote_escapes > 0 && backslash_escapes == 0) {
+        return -double_quote_escapes;  // Double-quote pattern detected
+    }
+    return 0;  // Ambiguous or no escapes
 }
 
 DialectCandidate DialectDetector::score_dialect(
@@ -207,6 +251,30 @@ DialectCandidate DialectDetector::score_dialect(
             std::sqrt(std::max(0.1, candidate.type_score));
     } else {
         candidate.consistency_score = candidate.pattern_score * candidate.type_score;
+    }
+
+    // Boost score based on escape pattern match
+    // This helps distinguish dialects that produce similar field counts
+    // but use different escape mechanisms
+    if (dialect.quote_char != '\0') {
+        char esc_to_check = dialect.double_quote ? '\0' : dialect.escape_char;
+        if (esc_to_check != '\0') {
+            int escape_signal = detect_escape_pattern(buf, len, dialect.quote_char, esc_to_check);
+            if (escape_signal > 0 && !dialect.double_quote) {
+                // Backslash escapes detected and this dialect uses backslash escaping
+                candidate.consistency_score *= 1.2;  // 20% boost
+            } else if (escape_signal < 0 && dialect.double_quote) {
+                // Double-quote escapes detected and this dialect uses double-quote
+                candidate.consistency_score *= 1.2;  // 20% boost
+            }
+        } else if (dialect.double_quote) {
+            // Check if double-quote escapes are present
+            int escape_signal = detect_escape_pattern(buf, len, dialect.quote_char, dialect.quote_char);
+            if (escape_signal < 0) {
+                // Double-quote escapes detected
+                candidate.consistency_score *= 1.1;  // 10% boost for matching
+            }
+        }
     }
 
     return candidate;
@@ -384,8 +452,16 @@ std::vector<std::pair<size_t, size_t>> DialectDetector::find_rows(
     for (size_t i = 0; i < len; ++i) {
         uint8_t c = buf[i];
 
+        // Handle escape character (backslash or other)
+        if (!dialect.double_quote && dialect.escape_char != '\0' &&
+            c == static_cast<uint8_t>(dialect.escape_char) && i + 1 < len) {
+            // Skip the escaped character
+            ++i;
+            continue;
+        }
+
         if (dialect.quote_char != '\0' && c == static_cast<uint8_t>(dialect.quote_char)) {
-            // Handle quote escaping
+            // Handle double-quote escaping (RFC 4180 style)
             if (dialect.double_quote && i + 1 < len &&
                 buf[i + 1] == static_cast<uint8_t>(dialect.quote_char)) {
                 ++i;  // Skip escaped quote
@@ -442,6 +518,14 @@ std::vector<std::string_view> DialectDetector::extract_fields(
 
     for (size_t i = 0; i < row_len; ++i) {
         char c = data[i];
+
+        // Handle escape character (backslash or other)
+        if (!dialect.double_quote && dialect.escape_char != '\0' &&
+            c == dialect.escape_char && i + 1 < row_len) {
+            // Skip the escaped character
+            ++i;
+            continue;
+        }
 
         if (dialect.quote_char != '\0' && c == dialect.quote_char) {
             if (dialect.double_quote && i + 1 < row_len &&
