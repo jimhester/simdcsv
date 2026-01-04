@@ -275,7 +275,11 @@ class two_pass {
     /// Set to null_pos if no such newline exists.
     uint64_t first_odd_nl{null_pos};
   };
-  static stats first_pass_simd(const uint8_t* buf, size_t start, size_t end) {
+  /**
+   * @brief First pass SIMD scan with dialect-aware quote character.
+   */
+  static stats first_pass_simd(const uint8_t* buf, size_t start, size_t end,
+                               char quote_char = '"') {
     stats out;
     size_t len = end - start;
     size_t idx = 0;
@@ -293,7 +297,7 @@ class two_pass {
         mask = blsmsk_u64(1ULL << (len - idx));
       }
 
-      uint64_t quotes = cmp_mask_against_input(in, '"') & mask;
+      uint64_t quotes = cmp_mask_against_input(in, static_cast<uint8_t>(quote_char)) & mask;
 
       if (needs_even || needs_odd) {
         uint64_t nl = cmp_mask_against_input(in, '\n') & mask;
@@ -323,7 +327,11 @@ class two_pass {
     return out;
   }
 
-  static stats first_pass_chunk(const uint8_t* buf, size_t start, size_t end) {
+  /**
+   * @brief First pass scalar scan with dialect-aware quote character.
+   */
+  static stats first_pass_chunk(const uint8_t* buf, size_t start, size_t end,
+                                char quote_char = '"') {
     stats out;
     uint64_t i = start;
     bool needs_even = out.first_even_nl == null_pos;
@@ -338,7 +346,7 @@ class two_pass {
           out.first_odd_nl = i;
           needs_odd = false;
         }
-      } else if (buf[i] == '"') {
+      } else if (buf[i] == static_cast<uint8_t>(quote_char)) {
         ++out.n_quotes;
       }
       ++i;
@@ -358,11 +366,20 @@ class two_pass {
     return out;
   }
 
-  static bool is_other(uint8_t c) { return c != ',' && c != '\n' && c != '"'; }
+  /**
+   * @brief Check if character is not a delimiter, newline, or quote.
+   */
+  static bool is_other(uint8_t c, char delimiter = ',', char quote_char = '"') {
+    return c != static_cast<uint8_t>(delimiter) && c != '\n' && c != static_cast<uint8_t>(quote_char);
+  }
 
   enum quote_state { AMBIGUOUS, QUOTED, UNQUOTED };
 
-  static quote_state get_quotation_state(const uint8_t* buf, size_t start) {
+  /**
+   * @brief Determine quote state at a position using backward scanning.
+   */
+  static quote_state get_quotation_state(const uint8_t* buf, size_t start,
+                                         char delimiter = ',', char quote_char = '"') {
     // 64kb
     constexpr int SPECULATION_SIZE = 1 << 16;
 
@@ -376,14 +393,14 @@ class two_pass {
 
     // FIXED: Use i > end to avoid unsigned underflow when i reaches 0
     while (i > end) {
-      if (buf[i] == '"') {
+      if (buf[i] == static_cast<uint8_t>(quote_char)) {
         // q-o case
-        if (i + 1 < start && is_other(buf[i + 1])) {
+        if (i + 1 < start && is_other(buf[i + 1], delimiter, quote_char)) {
           return num_quotes % 2 == 0 ? QUOTED : UNQUOTED;
         }
 
         // o-q case
-        else if (i > end && is_other(buf[i - 1])) {
+        else if (i > end && is_other(buf[i - 1], delimiter, quote_char)) {
           return num_quotes % 2 == 0 ? UNQUOTED : QUOTED;
         }
         ++num_quotes;
@@ -391,14 +408,18 @@ class two_pass {
       --i;
     }
     // Check the last position (i == end)
-    if (buf[end] == '"') {
+    if (buf[end] == static_cast<uint8_t>(quote_char)) {
       ++num_quotes;
     }
     return AMBIGUOUS;
   }
 
-  static stats first_pass_speculate(const uint8_t* buf, size_t start, size_t end) {
-    auto is_quoted = get_quotation_state(buf, start);
+  /**
+   * @brief Speculative first pass with dialect-aware quote character.
+   */
+  static stats first_pass_speculate(const uint8_t* buf, size_t start, size_t end,
+                                    char delimiter = ',', char quote_char = '"') {
+    auto is_quoted = get_quotation_state(buf, start, delimiter, quote_char);
 #ifndef SIMDCSV_BENCHMARK_MODE
     printf("start: %lu\tis_ambigious: %s\tstate: %s\n", start,
            is_quoted == AMBIGUOUS ? "true" : "false",
@@ -412,15 +433,19 @@ class two_pass {
         } else {
           return {1, null_pos, i};
         }
-      } else if (buf[i] == '"') {
+      } else if (buf[i] == static_cast<uint8_t>(quote_char)) {
         is_quoted = is_quoted == UNQUOTED ? QUOTED : UNQUOTED;
       }
     }
     return {0, null_pos, null_pos};
   }
 
+  /**
+   * @brief Second pass SIMD scan with dialect-aware delimiter and quote character.
+   */
   static uint64_t second_pass_simd(const uint8_t* buf, size_t start, size_t end,
-                                   index* out, size_t thread_id) {
+                                   index* out, size_t thread_id,
+                                   char delimiter = ',', char quote_char = '"') {
     bool is_quoted = false;
     size_t len = end - start;
     uint64_t idx = 0;
@@ -440,12 +465,12 @@ class two_pass {
         mask = blsmsk_u64(1ULL << (len - idx));
       }
 
-      uint64_t quotes = cmp_mask_against_input(in, '"') & mask;
+      uint64_t quotes = cmp_mask_against_input(in, static_cast<uint8_t>(quote_char)) & mask;
 
       uint64_t quote_mask = find_quote_mask2(in, quotes, prev_iter_inside_quote);
-      uint64_t sep = cmp_mask_against_input(in, ',');
-      uint64_t end = cmp_mask_against_input(in, '\n');
-      uint64_t field_sep = (end | sep) & ~quote_mask;
+      uint64_t sep = cmp_mask_against_input(in, static_cast<uint8_t>(delimiter));
+      uint64_t end_mask = cmp_mask_against_input(in, '\n');
+      uint64_t field_sep = (end_mask | sep) & ~quote_mask;
       n_indexes +=
           write(out->indexes + thread_id, base, start + idx, out->n_threads, field_sep);
     }
@@ -601,11 +626,14 @@ class two_pass {
     }
   }
 
-  // Second pass with error collection
+  /**
+   * @brief Second pass with error collection and dialect support.
+   */
   static uint64_t second_pass_chunk(const uint8_t* buf, size_t start, size_t end,
                                     index* out, size_t thread_id,
                                     ErrorCollector* errors = nullptr,
-                                    size_t total_len = 0) {
+                                    size_t total_len = 0,
+                                    char delimiter = ',', char quote_char = '"') {
     uint64_t pos = start;
     size_t n_indexes = 0;
     size_t i = thread_id;
@@ -630,46 +658,48 @@ class two_pass {
       }
 
       state_result result;
-      switch (value) {
-        case '"':
-          result = quoted_state(s);
-          if (result.error != ErrorCode::NONE && errors) {
-            size_t line, col;
-            get_line_column(buf, buf_len, pos, line, col);
-            errors->add_error(result.error, ErrorSeverity::ERROR,
-                              line, col, pos, "Quote character in unquoted field",
-                              get_context(buf, buf_len, pos));
-            if (errors->should_stop()) return n_indexes;
-          }
-          s = result.state;
-          break;
-        case ',':
-          if (s != QUOTED_FIELD) {
-            i = add_position(out, i, pos);
-            ++n_indexes;
-          }
-          result = comma_state(s);
-          s = result.state;
-          break;
-        case '\n':
-          if (s != QUOTED_FIELD) {
-            i = add_position(out, i, pos);
-            ++n_indexes;
-          }
-          result = newline_state(s);
-          s = result.state;
-          break;
-        default:
-          result = other_state(s);
-          if (result.error != ErrorCode::NONE && errors) {
-            size_t line, col;
-            get_line_column(buf, buf_len, pos, line, col);
-            errors->add_error(result.error, ErrorSeverity::ERROR,
-                              line, col, pos, "Invalid character after closing quote",
-                              get_context(buf, buf_len, pos));
-            if (errors->should_stop()) return n_indexes;
-          }
-          s = result.state;
+      if (value == static_cast<uint8_t>(quote_char)) {
+        result = quoted_state(s);
+        if (result.error != ErrorCode::NONE && errors) {
+          size_t line, col;
+          get_line_column(buf, buf_len, pos, line, col);
+          std::string msg = "Quote character '";
+          msg += quote_char;
+          msg += "' in unquoted field";
+          errors->add_error(result.error, ErrorSeverity::ERROR,
+                            line, col, pos, msg,
+                            get_context(buf, buf_len, pos));
+          if (errors->should_stop()) return n_indexes;
+        }
+        s = result.state;
+      } else if (value == static_cast<uint8_t>(delimiter)) {
+        if (s != QUOTED_FIELD) {
+          i = add_position(out, i, pos);
+          ++n_indexes;
+        }
+        result = comma_state(s);
+        s = result.state;
+      } else if (value == '\n') {
+        if (s != QUOTED_FIELD) {
+          i = add_position(out, i, pos);
+          ++n_indexes;
+        }
+        result = newline_state(s);
+        s = result.state;
+      } else {
+        result = other_state(s);
+        if (result.error != ErrorCode::NONE && errors) {
+          size_t line, col;
+          get_line_column(buf, buf_len, pos, line, col);
+          std::string msg = "Invalid character after closing quote '";
+          msg += quote_char;
+          msg += "'";
+          errors->add_error(result.error, ErrorSeverity::ERROR,
+                            line, col, pos, msg,
+                            get_context(buf, buf_len, pos));
+          if (errors->should_stop()) return n_indexes;
+        }
+        s = result.state;
       }
       ++pos;
     }
@@ -681,17 +711,23 @@ class two_pass {
     if (s == QUOTED_FIELD && errors && end == buf_len) {
       size_t line, col;
       get_line_column(buf, buf_len, pos > 0 ? pos - 1 : 0, line, col);
+      std::string msg = "Unclosed quote '";
+      msg += quote_char;
+      msg += "' at end of file";
       errors->add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL,
-                        line, col, pos, "Unclosed quote at end of file",
+                        line, col, pos, msg,
                         get_context(buf, buf_len, pos > 20 ? pos - 20 : 0));
     }
 
     return n_indexes;
   }
 
-  // Original version for backward compatibility (throws on error)
+  /**
+   * @brief Second pass that throws on error (backward compatible), with dialect support.
+   */
   static uint64_t second_pass_chunk_throwing(const uint8_t* buf, size_t start, size_t end,
-                                             index* out, size_t thread_id) {
+                                             index* out, size_t thread_id,
+                                             char delimiter = ',', char quote_char = '"') {
     uint64_t pos = start;
     size_t n_indexes = 0;
     size_t i = thread_id;
@@ -700,46 +736,54 @@ class two_pass {
     while (pos < end) {
       uint8_t value = buf[pos];
       state_result result;
-      switch (value) {
-        case '"':
-          result = quoted_state(s);
-          if (result.error != ErrorCode::NONE) {
-            throw std::runtime_error("Quote in unquoted field");
-          }
-          s = result.state;
-          break;
-        case ',':
-          if (s != QUOTED_FIELD) {
-            i = add_position(out, i, pos);
-            ++n_indexes;
-          }
-          s = comma_state(s).state;
-          break;
-        case '\n':
-          if (s != QUOTED_FIELD) {
-            i = add_position(out, i, pos);
-            ++n_indexes;
-          }
-          s = newline_state(s).state;
-          break;
-        default:
-          result = other_state(s);
-          if (result.error != ErrorCode::NONE) {
-            throw std::runtime_error("Invalid character after closing quote");
-          }
-          s = result.state;
+      if (value == static_cast<uint8_t>(quote_char)) {
+        result = quoted_state(s);
+        if (result.error != ErrorCode::NONE) {
+          std::string msg = "Quote character '";
+          msg += quote_char;
+          msg += "' in unquoted field";
+          throw std::runtime_error(msg);
+        }
+        s = result.state;
+      } else if (value == static_cast<uint8_t>(delimiter)) {
+        if (s != QUOTED_FIELD) {
+          i = add_position(out, i, pos);
+          ++n_indexes;
+        }
+        s = comma_state(s).state;
+      } else if (value == '\n') {
+        if (s != QUOTED_FIELD) {
+          i = add_position(out, i, pos);
+          ++n_indexes;
+        }
+        s = newline_state(s).state;
+      } else {
+        result = other_state(s);
+        if (result.error != ErrorCode::NONE) {
+          std::string msg = "Invalid character after closing quote '";
+          msg += quote_char;
+          msg += "'";
+          throw std::runtime_error(msg);
+        }
+        s = result.state;
       }
       ++pos;
     }
     return n_indexes;
   }
 
-  bool parse_speculate(const uint8_t* buf, index& out, size_t len) {
+  /**
+   * @brief Parse using speculative multi-threading with dialect support.
+   */
+  bool parse_speculate(const uint8_t* buf, index& out, size_t len,
+                       const Dialect& dialect = Dialect::csv()) {
+    char delim = dialect.delimiter;
+    char quote = dialect.quote_char;
     uint8_t n_threads = out.n_threads;
     // Validate n_threads: treat 0 as single-threaded to avoid division by zero
     if (n_threads == 0) n_threads = 1;
     if (n_threads == 1) {
-      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
+      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
       return true;
     }
     size_t chunk_size = len / n_threads;
@@ -748,7 +792,7 @@ class two_pass {
     if (chunk_size < 64) {
       // CRITICAL: Must update n_threads to 1 for correct stride in write()
       out.n_threads = 1;
-      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
+      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
       return true;
     }
     std::vector<uint64_t> chunk_pos(n_threads + 1);
@@ -756,8 +800,10 @@ class two_pass {
     std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
 
     for (int i = 0; i < n_threads; ++i) {
-      first_pass_fut[i] = std::async(std::launch::async, first_pass_speculate, buf,
-                                     chunk_size * i, chunk_size * (i + 1));
+      first_pass_fut[i] = std::async(std::launch::async,
+          [buf, chunk_size, i, delim, quote]() {
+            return first_pass_speculate(buf, chunk_size * i, chunk_size * (i + 1), delim, quote);
+          });
     }
 
     auto st = first_pass_fut[0].get();
@@ -781,14 +827,16 @@ class two_pass {
       if (chunk_pos[i] == null_pos) {
         // CRITICAL: Must update n_threads to 1 for correct stride in write()
         out.n_threads = 1;
-        out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
+        out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
         return true;
       }
     }
 
     for (int i = 0; i < n_threads; ++i) {
-      second_pass_fut[i] = std::async(std::launch::async, second_pass_simd, buf,
-                                      chunk_pos[i], chunk_pos[i + 1], &out, i);
+      second_pass_fut[i] = std::async(std::launch::async,
+          [buf, &out, &chunk_pos, i, delim, quote]() {
+            return second_pass_simd(buf, chunk_pos[i], chunk_pos[i + 1], &out, i, delim, quote);
+          });
     }
 
     for (int i = 0; i < n_threads; ++i) {
@@ -798,12 +846,18 @@ class two_pass {
     return true;
   }
 
-  bool parse_two_pass(const uint8_t* buf, index& out, size_t len) {
+  /**
+   * @brief Parse using two-pass algorithm with dialect support.
+   */
+  bool parse_two_pass(const uint8_t* buf, index& out, size_t len,
+                      const Dialect& dialect = Dialect::csv()) {
+    char delim = dialect.delimiter;
+    char quote = dialect.quote_char;
     uint8_t n_threads = out.n_threads;
     // Validate n_threads: treat 0 as single-threaded to avoid division by zero
     if (n_threads == 0) n_threads = 1;
     if (n_threads == 1) {
-      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
+      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
       return true;
     }
     size_t chunk_size = len / n_threads;
@@ -812,7 +866,7 @@ class two_pass {
     if (chunk_size < 64) {
       // CRITICAL: Must update n_threads to 1 for correct stride in write()
       out.n_threads = 1;
-      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
+      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
       return true;
     }
     std::vector<uint64_t> chunk_pos(n_threads + 1);
@@ -820,8 +874,10 @@ class two_pass {
     std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
 
     for (int i = 0; i < n_threads; ++i) {
-      first_pass_fut[i] = std::async(std::launch::async, first_pass_chunk, buf,
-                                     chunk_size * i, chunk_size * (i + 1));
+      first_pass_fut[i] = std::async(std::launch::async,
+          [buf, chunk_size, i, quote]() {
+            return first_pass_chunk(buf, chunk_size * i, chunk_size * (i + 1), quote);
+          });
     }
 
     auto st = first_pass_fut[0].get();
@@ -847,14 +903,16 @@ class two_pass {
       if (chunk_pos[i] == null_pos) {
         // CRITICAL: Must update n_threads to 1 for correct stride in write()
         out.n_threads = 1;
-        out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0);
+        out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
         return true;
       }
     }
 
     for (int i = 0; i < n_threads; ++i) {
-      second_pass_fut[i] = std::async(std::launch::async, second_pass_chunk_throwing, buf,
-                                      chunk_pos[i], chunk_pos[i + 1], &out, i);
+      second_pass_fut[i] = std::async(std::launch::async,
+          [buf, &out, &chunk_pos, i, delim, quote]() {
+            return second_pass_chunk_throwing(buf, chunk_pos[i], chunk_pos[i + 1], &out, i, delim, quote);
+          });
     }
 
     for (int i = 0; i < n_threads; ++i) {
@@ -878,6 +936,7 @@ class two_pass {
    *            Should have at least 32 bytes of padding beyond len for SIMD safety.
    * @param out The index structure to populate. Must be initialized via init().
    * @param len Length of the CSV data in bytes (excluding any padding).
+   * @param dialect The dialect to use for parsing (default: CSV with comma and double-quote).
    *
    * @return true if parsing completed successfully, false otherwise.
    *
@@ -894,30 +953,30 @@ class two_pass {
    * simdcsv::two_pass parser;
    * simdcsv::index idx = parser.init(length, 4);
    *
-   * try {
-   *     parser.parse(buffer, idx, length);
-   *     // Access field positions via idx.indexes
-   * } catch (const std::runtime_error& e) {
-   *     std::cerr << "Parse error: " << e.what() << "\n";
-   * }
+   * // Parse standard CSV
+   * parser.parse(buffer, idx, length);
+   *
+   * // Parse tab-separated values
+   * parser.parse(buffer, idx, length, simdcsv::Dialect::tsv());
+   *
+   * // Parse semicolon-separated (European style)
+   * parser.parse(buffer, idx, length, simdcsv::Dialect::semicolon());
    * @endcode
    *
    * @see parse_with_errors() For single-threaded parsing with error collection.
    * @see parse_two_pass_with_errors() For multi-threaded parsing with error collection.
    */
-  bool parse(const uint8_t* buf, index& out, size_t len) {
-    return parse_speculate(buf, out, len);
-    // auto index = parse_two_pass(buf, out, len);
-
-    // return index;
+  bool parse(const uint8_t* buf, index& out, size_t len,
+             const Dialect& dialect = Dialect::csv()) {
+    return parse_speculate(buf, out, len, dialect);
   }
 
   /**
    * @brief Parse a CSV buffer with automatic dialect detection.
    *
    * This method first detects the CSV dialect (delimiter, quote character, etc.)
-   * and then parses the file. It combines dialect detection with parsing in a
-   * single convenient call.
+   * and then parses the file using the detected dialect. It combines dialect
+   * detection with parsing in a single convenient call.
    *
    * The detection uses a CleverCSV-inspired algorithm that analyzes pattern
    * consistency and cell type inference to identify the most likely dialect.
@@ -931,11 +990,6 @@ class two_pass {
    *                 If nullptr, detection result is not returned.
    *
    * @return true if parsing completed successfully, false otherwise.
-   *
-   * @note Currently, the parser only supports standard CSV format (comma delimiter,
-   *       double-quote character). If a different dialect is detected, the method
-   *       will still parse using comma/quote but will set a warning in the detection
-   *       result. Full dialect-aware parsing is planned for a future release.
    *
    * @example
    * @code
@@ -967,22 +1021,22 @@ class two_pass {
       *detected = result;
     }
 
-    // Check if detected dialect differs from supported format
+    // Use detected dialect if successful, otherwise fall back to standard CSV
+    Dialect dialect = result.success() ? result.dialect : Dialect::csv();
+
+    // Add info message about detected dialect
     if (result.success()) {
       Dialect csv = Dialect::csv();
       if (result.dialect.delimiter != csv.delimiter ||
           result.dialect.quote_char != csv.quote_char) {
-        // Add warning that we're parsing with default dialect
-        std::string msg = "Detected dialect (" + result.dialect.to_string() +
-                          ") differs from parser default. Parsing with comma/quote.";
-        errors.add_error(ErrorCode::AMBIGUOUS_SEPARATOR, ErrorSeverity::WARNING,
+        std::string msg = "Auto-detected dialect: " + result.dialect.to_string();
+        errors.add_error(ErrorCode::NONE, ErrorSeverity::WARNING,
                          1, 1, 0, msg, "");
       }
     }
 
-    // Parse with standard comma/quote format
-    // (Full dialect-aware parsing is planned for future release)
-    return parse_two_pass_with_errors(buf, out, len, errors);
+    // Parse with detected dialect
+    return parse_two_pass_with_errors(buf, out, len, errors, dialect);
   }
 
   /**
@@ -1021,14 +1075,17 @@ class two_pass {
     chunk_result() : n_indexes(0), errors(ErrorMode::PERMISSIVE) {}
   };
 
-  // Static wrapper for thread-safe parsing with error collection
+  /**
+   * @brief Static wrapper for thread-safe parsing with error collection and dialect.
+   */
   static chunk_result second_pass_chunk_with_errors(
       const uint8_t* buf, size_t start, size_t end,
-      index* out, size_t thread_id, size_t total_len, ErrorMode mode) {
+      index* out, size_t thread_id, size_t total_len, ErrorMode mode,
+      char delimiter = ',', char quote_char = '"') {
     chunk_result result;
     result.errors.set_mode(mode);
     result.n_indexes = second_pass_chunk(buf, start, end, out, thread_id,
-                                         &result.errors, total_len);
+                                         &result.errors, total_len, delimiter, quote_char);
     return result;
   }
 
@@ -1054,6 +1111,7 @@ class two_pass {
    * @param len Length of the CSV data in bytes.
    * @param errors ErrorCollector to accumulate parsing errors. Thread-local
    *               errors are merged into this collector after parsing.
+   * @param dialect The dialect to use for parsing (default: CSV with comma and double-quote).
    *
    * @return true if parsing completed without fatal errors, false if fatal
    *         errors occurred.
@@ -1076,19 +1134,23 @@ class two_pass {
    * simdcsv::index idx = parser.init(length, num_threads);
    * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
    *
+   * // Parse with default CSV dialect
    * bool success = parser.parse_two_pass_with_errors(buffer, idx, length, errors);
    *
-   * // Errors are sorted by byte offset for consistent reporting
-   * for (const auto& err : errors.get_errors()) {
-   *     std::cout << "Offset " << err.byte_offset << ": " << err.message << "\n";
-   * }
+   * // Parse with tab-separated values
+   * bool success = parser.parse_two_pass_with_errors(buffer, idx, length, errors,
+   *                                                   simdcsv::Dialect::tsv());
    * @endcode
    *
    * @see parse_with_errors() For single-threaded parsing with precise ordering.
    * @see ErrorCollector::merge_sorted() For error merging details.
    */
   bool parse_two_pass_with_errors(const uint8_t* buf, index& out, size_t len,
-                                  ErrorCollector& errors) {
+                                  ErrorCollector& errors,
+                                  const Dialect& dialect = Dialect::csv()) {
+    char delim = dialect.delimiter;
+    char quote = dialect.quote_char;
+
     // Handle empty input
     if (len == 0) return true;
 
@@ -1096,7 +1158,7 @@ class two_pass {
     check_empty_header(buf, len, errors);
     if (errors.should_stop()) return false;
 
-    check_duplicate_columns(buf, len, errors);
+    check_duplicate_columns(buf, len, errors, delim, quote);
     if (errors.should_stop()) return false;
 
     check_line_endings(buf, len, errors);
@@ -1109,8 +1171,8 @@ class two_pass {
 
     // For single-threaded, use the simpler path
     if (n_threads == 1) {
-      out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len);
-      check_field_counts(buf, len, errors);
+      out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote);
+      check_field_counts(buf, len, errors, delim, quote);
       return !errors.has_fatal_errors();
     }
 
@@ -1121,8 +1183,10 @@ class two_pass {
 
     // First pass: find chunk boundaries
     for (int i = 0; i < n_threads; ++i) {
-      first_pass_fut[i] = std::async(std::launch::async, first_pass_chunk, buf,
-                                     chunk_size * i, chunk_size * (i + 1));
+      first_pass_fut[i] = std::async(std::launch::async,
+          [buf, chunk_size, i, quote]() {
+            return first_pass_chunk(buf, chunk_size * i, chunk_size * (i + 1), quote);
+          });
     }
 
     auto st = first_pass_fut[0].get();
@@ -1147,8 +1211,8 @@ class two_pass {
     for (int i = 1; i < n_threads; ++i) {
       if (chunk_pos[i] == null_pos) {
         out.n_threads = 1;
-        out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len);
-        check_field_counts(buf, len, errors);
+        out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote);
+        check_field_counts(buf, len, errors, delim, quote);
         return !errors.has_fatal_errors();
       }
     }
@@ -1157,8 +1221,10 @@ class two_pass {
     ErrorMode mode = errors.mode();
     for (int i = 0; i < n_threads; ++i) {
       second_pass_fut[i] = std::async(std::launch::async,
-          second_pass_chunk_with_errors, buf,
-          chunk_pos[i], chunk_pos[i + 1], &out, i, len, mode);
+          [buf, &out, &chunk_pos, i, len, mode, delim, quote]() {
+            return second_pass_chunk_with_errors(buf, chunk_pos[i], chunk_pos[i + 1],
+                                                  &out, i, len, mode, delim, quote);
+          });
     }
 
     // Collect results and merge errors
@@ -1175,7 +1241,7 @@ class two_pass {
     errors.merge_sorted(thread_errors);
 
     // Check field counts after parsing (single-threaded, scans file linearly)
-    check_field_counts(buf, len, errors);
+    check_field_counts(buf, len, errors, delim, quote);
 
     return !errors.has_fatal_errors();
   }
@@ -1234,22 +1300,29 @@ class two_pass {
    * @see ErrorCollector For error handling configuration and access.
    * @see ErrorMode For different error handling strategies.
    */
-  bool parse_with_errors(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors) {
+  /**
+   * @brief Parse a CSV buffer with detailed error collection (single-threaded).
+   */
+  bool parse_with_errors(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors,
+                         const Dialect& dialect = Dialect::csv()) {
+    char delim = dialect.delimiter;
+    char quote = dialect.quote_char;
+
     // Check structural issues first
     check_empty_header(buf, len, errors);
     if (errors.should_stop()) return false;
 
-    check_duplicate_columns(buf, len, errors);
+    check_duplicate_columns(buf, len, errors, delim, quote);
     if (errors.should_stop()) return false;
 
     check_line_endings(buf, len, errors);
     if (errors.should_stop()) return false;
 
     // Single-threaded parsing for accurate error position tracking
-    out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len);
+    out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote);
 
     // Check field counts after parsing
-    check_field_counts(buf, len, errors);
+    check_field_counts(buf, len, errors, delim, quote);
 
     return !errors.has_fatal_errors();
   }
@@ -1265,15 +1338,18 @@ class two_pass {
     return true;
   }
 
-  // Check for duplicate column names in header
-  static void check_duplicate_columns(const uint8_t* buf, size_t len, ErrorCollector& errors) {
+  /**
+   * @brief Check for duplicate column names in header with dialect support.
+   */
+  static void check_duplicate_columns(const uint8_t* buf, size_t len, ErrorCollector& errors,
+                                      char delimiter = ',', char quote_char = '"') {
     if (len == 0) return;
 
     // Find end of first line
     size_t header_end = 0;
     bool in_quote = false;
     while (header_end < len) {
-      if (buf[header_end] == '"') in_quote = !in_quote;
+      if (buf[header_end] == static_cast<uint8_t>(quote_char)) in_quote = !in_quote;
       else if (!in_quote && (buf[header_end] == '\n' || buf[header_end] == '\r')) break;
       ++header_end;
     }
@@ -1283,9 +1359,9 @@ class two_pass {
     std::string current;
     in_quote = false;
     for (size_t i = 0; i < header_end; ++i) {
-      if (buf[i] == '"') {
+      if (buf[i] == static_cast<uint8_t>(quote_char)) {
         in_quote = !in_quote;
-      } else if (!in_quote && buf[i] == ',') {
+      } else if (!in_quote && buf[i] == static_cast<uint8_t>(delimiter)) {
         fields.push_back(current);
         current.clear();
       } else if (buf[i] != '\r') {
@@ -1305,8 +1381,11 @@ class two_pass {
     }
   }
 
-  // Check for inconsistent field counts
-  static void check_field_counts(const uint8_t* buf, size_t len, ErrorCollector& errors) {
+  /**
+   * @brief Check for inconsistent field counts with dialect support.
+   */
+  static void check_field_counts(const uint8_t* buf, size_t len, ErrorCollector& errors,
+                                 char delimiter = ',', char quote_char = '"') {
     if (len == 0) return;
 
     size_t expected_fields = 0;
@@ -1317,10 +1396,10 @@ class two_pass {
     bool header_done = false;
 
     for (size_t i = 0; i < len; ++i) {
-      if (buf[i] == '"') {
+      if (buf[i] == static_cast<uint8_t>(quote_char)) {
         in_quote = !in_quote;
       } else if (!in_quote) {
-        if (buf[i] == ',') {
+        if (buf[i] == static_cast<uint8_t>(delimiter)) {
           ++current_fields;
         } else if (buf[i] == '\n') {
           if (!header_done) {
@@ -1397,28 +1476,33 @@ class two_pass {
    * @param out The index structure to populate (from init()).
    * @param len Length of the CSV data in bytes.
    * @param errors ErrorCollector to accumulate validation errors.
+   * @param dialect The dialect to use for validation (default: CSV with comma and double-quote).
    *
    * @return true if validation passed without fatal errors, false otherwise.
    *
    * @see parse_with_errors() Equivalent functionality
    * @see ErrorCollector For accessing validation results
    */
-  bool parse_validate(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors) {
+  bool parse_validate(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors,
+                      const Dialect& dialect = Dialect::csv()) {
+    char delim = dialect.delimiter;
+    char quote = dialect.quote_char;
+
     // Check structural issues first
     check_empty_header(buf, len, errors);
     if (errors.should_stop()) return false;
 
-    check_duplicate_columns(buf, len, errors);
+    check_duplicate_columns(buf, len, errors, delim, quote);
     if (errors.should_stop()) return false;
 
     check_line_endings(buf, len, errors);
     if (errors.should_stop()) return false;
 
     // Parse with error collection
-    out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len);
+    out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote);
 
     // Check field counts after parsing
-    check_field_counts(buf, len, errors);
+    check_field_counts(buf, len, errors, delim, quote);
 
     return !errors.has_fatal_errors();
   }

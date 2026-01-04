@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -70,6 +71,34 @@ struct Dialect {
 
     bool operator!=(const Dialect& other) const {
         return !(*this == other);
+    }
+
+    /// Validate the dialect configuration
+    /// @return true if valid, false otherwise
+    bool is_valid() const {
+        // Delimiter and quote must be different
+        if (delimiter == quote_char) return false;
+        // Neither can be newline characters
+        if (delimiter == '\n' || delimiter == '\r') return false;
+        if (quote_char == '\n' || quote_char == '\r') return false;
+        // Must be printable or tab
+        if (delimiter != '\t' && (delimiter < 32 || delimiter > 126)) return false;
+        if (quote_char < 32 || quote_char > 126) return false;
+        return true;
+    }
+
+    /// Validate and throw if invalid
+    /// @throws std::invalid_argument if dialect is invalid
+    void validate() const {
+        if (delimiter == quote_char) {
+            throw std::invalid_argument("Delimiter and quote character cannot be the same");
+        }
+        if (delimiter == '\n' || delimiter == '\r') {
+            throw std::invalid_argument("Delimiter cannot be a newline character");
+        }
+        if (quote_char == '\n' || quote_char == '\r') {
+            throw std::invalid_argument("Quote character cannot be a newline character");
+        }
     }
 
     /// Returns a human-readable description of the dialect
