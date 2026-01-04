@@ -51,6 +51,13 @@ public:
     bool valid() const { return data_ != nullptr; }
     bool empty() const { return size_ == 0; }
     explicit operator bool() const { return valid(); }
+
+    /**
+     * Release ownership of the buffer and return the raw pointer.
+     * After calling this method, the FileBuffer no longer owns the memory
+     * and the caller is responsible for freeing it using aligned_free().
+     * @return The raw pointer to the buffer data, or nullptr if the buffer was empty/invalid.
+     */
     uint8_t* release() {
         uint8_t* ptr = data_;
         data_ = nullptr;
@@ -93,6 +100,12 @@ inline FileBuffer load_file(const std::string& filename, size_t padding = 64) {
     return FileBuffer(const_cast<uint8_t*>(corpus.data()), corpus.size());
 }
 
+inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
+    if (corpus.data()) {
+        aligned_free(const_cast<uint8_t*>(corpus.data()));
+    }
+}
+
 class Parser {
 public:
     struct Result {
@@ -104,6 +117,7 @@ public:
         Result() = default;
         Result(Result&&) = default;
         Result& operator=(Result&&) = default;
+        // Prevent copying - index may contain raw pointers
         Result(const Result&) = delete;
         Result& operator=(const Result&) = delete;
 
