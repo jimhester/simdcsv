@@ -762,3 +762,841 @@ TEST(StreamingTest, LongFields) {
     EXPECT_EQ(reader.row()[0].data.size(), 10000);
     EXPECT_EQ(reader.row()[1].data.size(), 10000);
 }
+
+//-----------------------------------------------------------------------------
+// Field::unescaped() Edge Cases
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, UnescapedEmptyField) {
+    std::string csv = "\"\",test\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    // Empty quoted field
+    EXPECT_TRUE(reader.row()[0].is_quoted);
+    EXPECT_EQ(reader.row()[0].data, "");
+    EXPECT_EQ(reader.row()[0].unescaped(), "");
+}
+
+TEST(StreamingTest, UnescapedUnquotedField) {
+    std::string csv = "hello,world\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    // Unquoted field - unescaped returns data as-is
+    EXPECT_FALSE(reader.row()[0].is_quoted);
+    EXPECT_EQ(reader.row()[0].data, "hello");
+    EXPECT_EQ(reader.row()[0].unescaped(), "hello");
+}
+
+TEST(StreamingTest, UnescapedWithCustomQuoteChar) {
+    std::string csv = "'say ''hello''',test\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.dialect.quote_char = '\'';
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_TRUE(reader.row()[0].is_quoted);
+    // Raw data contains escaped quotes
+    EXPECT_EQ(reader.row()[0].data, "say ''hello''");
+    // unescaped with custom quote char
+    EXPECT_EQ(reader.row()[0].unescaped('\''), "say 'hello'");
+}
+
+//-----------------------------------------------------------------------------
+// Row Column Name Lookup Errors
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, ColumnNameLookupNoHeader) {
+    std::string csv = "a,b,c\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;  // No header parsing
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+
+    // Column name lookup without header parsing should throw
+    EXPECT_THROW(reader.row()["a"], std::out_of_range);
+}
+
+TEST(StreamingTest, ColumnNameLookupUnknownColumn) {
+    std::string csv = "name,age\nAlice,30\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = true;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+
+    // Valid column lookup
+    EXPECT_NO_THROW(reader.row()["name"]);
+
+    // Unknown column should throw
+    EXPECT_THROW(reader.row()["unknown_column"], std::out_of_range);
+}
+
+//-----------------------------------------------------------------------------
+// CR-Only Line Endings (Mac Classic)
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, CarriageReturnOnlyLineEndings) {
+    // Old Mac-style CR-only line endings
+    std::string csv = "a,b\r1,2\r3,4\r";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    std::vector<std::vector<std::string>> rows;
+    while (reader.next_row()) {
+        std::vector<std::string> fields;
+        for (const auto& field : reader.row()) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+    }
+
+    ASSERT_EQ(rows.size(), 3);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"a", "b"}));
+    EXPECT_EQ(rows[1], (std::vector<std::string>{"1", "2"}));
+    EXPECT_EQ(rows[2], (std::vector<std::string>{"3", "4"}));
+}
+
+TEST(StreamingTest, CRLFInQuotedField) {
+    // CRLF inside quoted field should be preserved
+    std::string csv = "\"line1\r\nline2\",test\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row()[0].data, "line1\r\nline2");
+    EXPECT_EQ(reader.row()[1].data, "test");
+}
+
+TEST(StreamingTest, CROnlyInUnquotedField) {
+    // CR-only at end of unquoted field
+    std::string csv = "hello\rworld\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row()[0].data, "hello");
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row()[0].data, "world");
+}
+
+TEST(StreamingTest, CROnlyAtQuotedEnd) {
+    // CR at end of quoted field
+    std::string csv = "\"quoted\"\rvalue\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row()[0].data, "quoted");
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row()[0].data, "value");
+}
+
+//-----------------------------------------------------------------------------
+// Invalid Character After Closing Quote
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, InvalidCharAfterQuote) {
+    std::string csv = "\"hello\"world,test\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_TRUE(reader.errors().has_errors());
+
+    bool found_error = false;
+    for (const auto& err : reader.errors().errors()) {
+        if (err.code == ErrorCode::INVALID_QUOTE_ESCAPE) {
+            found_error = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_error);
+}
+
+//-----------------------------------------------------------------------------
+// Skip Empty Rows
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, SkipEmptyRows) {
+    std::string csv = "a,b\n\n1,2\n\n3,4\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.skip_empty_rows = true;
+
+    StreamReader reader(input, config);
+
+    std::vector<std::vector<std::string>> rows;
+    while (reader.next_row()) {
+        std::vector<std::string> fields;
+        for (const auto& field : reader.row()) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+    }
+
+    // Only non-empty rows should be returned
+    ASSERT_EQ(rows.size(), 3);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"a", "b"}));
+    EXPECT_EQ(rows[1], (std::vector<std::string>{"1", "2"}));
+    EXPECT_EQ(rows[2], (std::vector<std::string>{"3", "4"}));
+}
+
+//-----------------------------------------------------------------------------
+// Max Field Size Exceeded
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, MaxFieldSizeExceeded) {
+    // Create a field that exceeds max size
+    std::string big_field(1000, 'x');
+    std::string csv = big_field + ",test\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.max_field_size = 100;  // Set a small limit
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamReader reader(input, config);
+
+    while (reader.next_row()) {
+        // Process rows
+    }
+
+    // Should have recorded an error for the oversized field
+    EXPECT_TRUE(reader.errors().has_errors());
+}
+
+TEST(StreamingTest, MaxFieldSizeWithErrorCallback) {
+    // Create a field that exceeds max size
+    std::string big_field(1000, 'x');
+    std::string csv = big_field + ",test\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.max_field_size = 100;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+
+    bool error_callback_invoked = false;
+    parser.set_error_handler([&error_callback_invoked](const ParseError& err) {
+        (void)err;
+        error_callback_invoked = true;
+        return true;  // Continue parsing
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    EXPECT_TRUE(error_callback_invoked);
+}
+
+//-----------------------------------------------------------------------------
+// Parser Already Finished/Stopped
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, ParseChunkAfterFinish) {
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    parser.parse_chunk("a,b\n");
+    parser.finish();
+
+    // Parse after finish should return END_OF_DATA
+    EXPECT_EQ(parser.parse_chunk("c,d\n"), StreamStatus::END_OF_DATA);
+}
+
+TEST(StreamingTest, ParseChunkAfterStop) {
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    // Stop early via callback
+    parser.set_row_handler([](const Row& row) {
+        (void)row;
+        return false;  // Stop immediately
+    });
+
+    parser.parse_chunk("a,b\n");
+
+    // Subsequent parse should return OK (stopped state)
+    EXPECT_EQ(parser.parse_chunk("c,d\n"), StreamStatus::OK);
+}
+
+TEST(StreamingTest, FinishWhenStopped) {
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    parser.set_row_handler([](const Row& row) {
+        (void)row;
+        return false;  // Stop
+    });
+
+    parser.parse_chunk("a,b\n");
+
+    // Finish when stopped
+    EXPECT_EQ(parser.finish(), StreamStatus::OK);
+}
+
+TEST(StreamingTest, FinishCalledTwice) {
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    parser.parse_chunk("a,b\n");
+    parser.finish();
+
+    // Second finish should return END_OF_DATA
+    EXPECT_EQ(parser.finish(), StreamStatus::END_OF_DATA);
+}
+
+//-----------------------------------------------------------------------------
+// Finish with Various Parser States
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, FinishInQuotedEndState) {
+    // File ends right after closing quote (no newline)
+    std::string csv = "\"hello\"";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    parser.parse_chunk(csv);
+    StreamStatus status = parser.finish();
+
+    EXPECT_EQ(status, StreamStatus::END_OF_DATA);
+    EXPECT_EQ(parser.next_row(), StreamStatus::ROW_READY);
+    EXPECT_EQ(parser.current_row()[0].data, "hello");
+}
+
+TEST(StreamingTest, FinishInFieldStartState) {
+    // File ends with a trailing delimiter (empty last field)
+    std::string csv = "a,b,";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    EXPECT_EQ(parser.next_row(), StreamStatus::ROW_READY);
+    EXPECT_EQ(parser.current_row().field_count(), 3);
+    EXPECT_EQ(parser.current_row()[0].data, "a");
+    EXPECT_EQ(parser.current_row()[1].data, "b");
+    EXPECT_EQ(parser.current_row()[2].data, "");
+}
+
+TEST(StreamingTest, FinishWithPartialFieldBounds) {
+    // This tests the branch where we have current_field_bounds but state is RECORD_START
+    std::string csv = "a,b\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    // Parse normally - should process row
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    EXPECT_EQ(parser.next_row(), StreamStatus::ROW_READY);
+}
+
+TEST(StreamingTest, UnclosedQuoteStrict) {
+    std::string csv = "\"unclosed";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::STRICT;
+
+    StreamParser parser(config);
+
+    parser.parse_chunk(csv);
+    StreamStatus status = parser.finish();
+
+    EXPECT_EQ(status, StreamStatus::ERROR);
+    EXPECT_TRUE(parser.errors().has_fatal_errors());
+}
+
+TEST(StreamingTest, UnclosedQuotePermissive) {
+    std::string csv = "\"unclosed";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    // Should still emit partial row in permissive mode
+    EXPECT_EQ(parser.next_row(), StreamStatus::ROW_READY);
+    EXPECT_TRUE(parser.errors().has_fatal_errors());
+}
+
+//-----------------------------------------------------------------------------
+// Pull Model Pending Row Cleanup
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, PullModelPendingRowCleanup) {
+    // Generate enough rows to trigger periodic cleanup (>100 rows)
+    std::ostringstream oss;
+    for (int i = 0; i < 150; ++i) {
+        oss << i << "\n";
+    }
+    std::string csv = oss.str();
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    int count = 0;
+    while (parser.next_row() == StreamStatus::ROW_READY) {
+        ++count;
+    }
+
+    EXPECT_EQ(count, 150);
+}
+
+//-----------------------------------------------------------------------------
+// File Operations
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, FileOpenError) {
+    StreamConfig config;
+
+    // Attempting to open non-existent file should throw
+    EXPECT_THROW(StreamReader("/nonexistent/path/to/file.csv", config),
+                 std::runtime_error);
+}
+
+//-----------------------------------------------------------------------------
+// RowIterator Edge Cases
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, RowIteratorPostIncrement) {
+    std::string csv = "a\n1\n2\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    auto it = reader.begin();
+    auto prev = it++;  // Post-increment
+
+    // prev should have the old value (though comparing iterators is tricky for input iterators)
+    EXPECT_NE(it, reader.end());
+
+    // Continue to exhaust
+    ++it;
+    ++it;
+    EXPECT_EQ(it, reader.end());
+}
+
+TEST(StreamingTest, RowIteratorDereference) {
+    std::string csv = "hello,world\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    auto it = reader.begin();
+
+    // Test operator*
+    const Row& row = *it;
+    EXPECT_EQ(row[0].data, "hello");
+
+    // Test operator->
+    EXPECT_EQ(it->field_count(), 2);
+    EXPECT_EQ(it->at(0).data, "hello");
+}
+
+TEST(StreamingTest, RowIteratorEndComparison) {
+    std::string csv = "";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    auto begin = reader.begin();
+    auto end = reader.end();
+    auto end2 = reader.end();
+
+    // Two end iterators should be equal
+    EXPECT_EQ(end, end2);
+
+    // begin should equal end for empty input
+    EXPECT_EQ(begin, end);
+}
+
+//-----------------------------------------------------------------------------
+// StreamParser Move Operations
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, StreamParserMove) {
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser1(config);
+    parser1.parse_chunk("a,b\n");
+
+    // Move construct
+    StreamParser parser2(std::move(parser1));
+
+    parser2.finish();
+    EXPECT_EQ(parser2.next_row(), StreamStatus::ROW_READY);
+    EXPECT_EQ(parser2.current_row()[0].data, "a");
+}
+
+TEST(StreamingTest, StreamParserMoveAssign) {
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser1(config);
+    parser1.parse_chunk("a,b\n");
+
+    StreamParser parser2(config);
+
+    // Move assign
+    parser2 = std::move(parser1);
+
+    parser2.finish();
+    EXPECT_EQ(parser2.next_row(), StreamStatus::ROW_READY);
+    EXPECT_EQ(parser2.current_row()[0].data, "a");
+}
+
+//-----------------------------------------------------------------------------
+// StreamReader Move Operations
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, StreamReaderMove) {
+    std::string csv = "a,b\n1,2\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader1(input, config);
+
+    // Move construct
+    StreamReader reader2(std::move(reader1));
+
+    ASSERT_TRUE(reader2.next_row());
+    EXPECT_EQ(reader2.row()[0].data, "a");
+}
+
+TEST(StreamingTest, StreamReaderMoveAssign) {
+    std::string csv1 = "a,b\n";
+    std::string csv2 = "x,y\n";
+    std::istringstream input1(csv1);
+    std::istringstream input2(csv2);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader1(input1, config);
+    StreamReader reader2(input2, config);
+
+    // Move assign
+    reader2 = std::move(reader1);
+
+    ASSERT_TRUE(reader2.next_row());
+    EXPECT_EQ(reader2.row()[0].data, "a");
+}
+
+//-----------------------------------------------------------------------------
+// Config Access
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, ConfigAccessParser) {
+    StreamConfig config;
+    config.dialect.delimiter = ';';
+    config.parse_header = true;
+
+    StreamParser parser(config);
+
+    EXPECT_EQ(parser.config().dialect.delimiter, ';');
+    EXPECT_TRUE(parser.config().parse_header);
+}
+
+TEST(StreamingTest, ConfigAccessReader) {
+    std::string csv = "a;b\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.dialect.delimiter = ';';
+
+    StreamReader reader(input, config);
+
+    EXPECT_EQ(reader.config().dialect.delimiter, ';');
+}
+
+//-----------------------------------------------------------------------------
+// AFTER_CR State Edge Cases
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, CRFollowedByNonLF) {
+    // CR followed by regular character (not LF)
+    std::string csv = "a\rb\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row()[0].data, "a");
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row()[0].data, "b");
+}
+
+TEST(StreamingTest, CRLFAtEndOfQuotedField) {
+    // Quoted field ending with CRLF
+    std::string csv = "\"hello\"\r\nworld\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row()[0].data, "hello");
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row()[0].data, "world");
+}
+
+//-----------------------------------------------------------------------------
+// Best Effort Mode - Quote in Unquoted Field
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, QuoteInUnquotedFieldBestEffort) {
+    std::string csv = "hello\"world,test\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::BEST_EFFORT;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    // In best effort mode, no error should be recorded
+    EXPECT_FALSE(reader.errors().has_errors());
+    // Field should contain the quote
+    EXPECT_EQ(reader.row()[0].data, "hello\"world");
+}
+
+//-----------------------------------------------------------------------------
+// Column Index on Parser
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, ParserColumnIndex) {
+    std::string csv = "name,age,city\nAlice,30,NYC\n";
+
+    StreamConfig config;
+    config.parse_header = true;
+
+    StreamParser parser(config);
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    // After parsing header
+    EXPECT_EQ(parser.column_index("name"), 0);
+    EXPECT_EQ(parser.column_index("age"), 1);
+    EXPECT_EQ(parser.column_index("city"), 2);
+    EXPECT_EQ(parser.column_index("unknown"), -1);
+}
+
+//-----------------------------------------------------------------------------
+// Bytes Processed
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, BytesProcessed) {
+    std::string csv = "hello,world\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    // Process all rows
+    while (parser.next_row() == StreamStatus::ROW_READY) {}
+
+    EXPECT_EQ(parser.bytes_processed(), csv.size());
+}
+
+//-----------------------------------------------------------------------------
+// Empty Row with Fields
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, EmptyRowAtRecordStart) {
+    // Multiple consecutive newlines
+    std::string csv = "\n\na,b\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.skip_empty_rows = false;
+
+    StreamReader reader(input, config);
+
+    // First empty row
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row().field_count(), 0);
+
+    // Second empty row
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row().field_count(), 0);
+
+    // Actual data row
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row().field_count(), 2);
+}
+
+//-----------------------------------------------------------------------------
+// Field Methods
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, FieldEmptyMethod) {
+    std::string csv = "hello,,world\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_FALSE(reader.row()[0].empty());
+    EXPECT_TRUE(reader.row()[1].empty());
+    EXPECT_FALSE(reader.row()[2].empty());
+}
+
+TEST(StreamingTest, FieldStrMethod) {
+    std::string csv = "hello,world\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    std::string s = reader.row()[0].str();
+    EXPECT_EQ(s, "hello");
+}
+
+//-----------------------------------------------------------------------------
+// Row Methods
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, RowEmptyMethod) {
+    std::string csv = "\na,b\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.skip_empty_rows = false;
+
+    StreamReader reader(input, config);
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_TRUE(reader.row().empty());
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_FALSE(reader.row().empty());
+}
+
+//-----------------------------------------------------------------------------
+// Strict Error Mode
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, StrictErrorModeStopsOnError) {
+    // Quote in unquoted field triggers an immediate error during parsing
+    std::string csv = "hello\"world,test\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::STRICT;
+
+    StreamParser parser(config);
+    StreamStatus status = parser.parse_chunk(csv);
+
+    // Strict mode should stop on first error (quote in unquoted field)
+    EXPECT_EQ(status, StreamStatus::ERROR);
+    EXPECT_TRUE(parser.errors().has_errors());
+}
