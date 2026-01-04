@@ -1175,6 +1175,58 @@ for (i = 0; i < data_len; i += 16) {
 
 ---
 
-**Document Status**: ✅ Phase 1 Complete + Recent Work Review (2020-2026)
-**Last Updated**: 2026-01-01
-**Next Review**: After AVX2 implementation (Phase 2)
+## 9. Implementation Gap Analysis (2026-01-03)
+
+This section identifies specific techniques from the literature that are not yet fully implemented in simdcsv, with links to corresponding GitHub issues for tracking.
+
+### 9.1 High Priority Gaps
+
+| Technique | Status | Issue | Expected Impact |
+|-----------|--------|-------|-----------------|
+| PCLMULQDQ Quote Mask | Not Implemented | [#39](https://github.com/jimhester/simdcsv/issues/39) | 2-4x speedup in quote handling |
+| Branchless State Machine | Partially Implemented | [#41](https://github.com/jimhester/simdcsv/issues/41) | Eliminate 90%+ branches |
+
+**Current Implementation Gap**: The `find_quote_mask` function uses a scalar loop instead of the PCLMULQDQ-based prefix XOR computation that simdjson and Sep use. This is a significant performance bottleneck.
+
+### 9.2 Medium Priority Gaps
+
+| Technique | Status | Issue | Expected Impact |
+|-----------|--------|-------|-----------------|
+| AVX-512 with Runtime Selection | Not Implemented | [#40](https://github.com/jimhester/simdcsv/issues/40) | 25-40% speedup (on compatible hardware) |
+| ARM SVE/SVE2 Optimization | Highway Only | [#42](https://github.com/jimhester/simdcsv/issues/42) | 5-10 GB/s on Apple Silicon |
+| SIMD Number Parsing | Not Implemented | [#44](https://github.com/jimhester/simdcsv/issues/44) | 5-10x speedup in type inference |
+
+**Current Implementation**: Using Google Highway for portable SIMD provides baseline ARM support via NEON, but explicit optimization for SVE2 and dedicated benchmarking has not been done.
+
+### 9.3 Low Priority Gaps (Post-1.0)
+
+| Technique | Status | Issue | Expected Impact |
+|-----------|--------|-------|-----------------|
+| Structure-Aware Raw Filters | Not Implemented | [#43](https://github.com/jimhester/simdcsv/issues/43) | 10-22x speedup on selective queries |
+
+### 9.4 Current Implementation Strengths
+
+The following techniques from the literature ARE implemented:
+
+1. **Two-Pass Algorithm** (Chang et al.): Speculative multi-threaded parsing with quote parity tracking
+2. **SIMD Character Classification** (Langdale & Lemire): Using Highway for parallel character comparison
+3. **CleverCSV Dialect Detection** (van den Burgh): Pattern and type scoring for delimiter/quote detection
+4. **Portable SIMD via Highway**: Cross-platform support without manual intrinsics
+5. **Error Collection Framework**: Three modes (STRICT, PERMISSIVE, BEST_EFFORT)
+
+### 9.5 Recommended Implementation Order
+
+Based on expected impact and dependencies:
+
+1. **PCLMULQDQ Quote Mask** (#39) - Highest impact, no dependencies
+2. **Branchless State Machine** (#41) - Works with or without #39
+3. **AVX-512 Support** (#40) - Requires #39 and #41 for full benefit
+4. **SIMD Number Parsing** (#44) - Independent, benefits vroom integration
+5. **ARM Optimization** (#42) - Platform-specific, lower urgency
+6. **Raw Filters** (#43) - Post-1.0, query integration feature
+
+---
+
+**Document Status**: ✅ Phase 1 Complete + Recent Work Review (2020-2026) + Gap Analysis
+**Last Updated**: 2026-01-03
+**Next Review**: After PCLMULQDQ implementation (Issue #39)
