@@ -6,6 +6,7 @@
 #ifndef SIMDCSV_TYPE_DETECTOR_H
 #define SIMDCSV_TYPE_DETECTOR_H
 
+#include <cassert>
 #include <cstdint>
 #include <cstddef>
 #include <string>
@@ -116,6 +117,7 @@ public:
     if (start >= end) return FieldType::EMPTY;
 
     const uint8_t* field = data + start;
+    assert(end >= start && "Invalid range: end must be >= start");
     size_t len = end - start;
 
     // Check date first for compact format (8 digits like YYYYMMDD)
