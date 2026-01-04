@@ -348,12 +348,14 @@ double DialectDetector::compute_type_score(
     // Skip first row if it might be a header
     size_t start_row = (rows.size() > 1) ? 1 : 0;
 
-    // Collect all fields for batch processing
+    // Collect all fields for batch processing.
+    // Note: field_ptrs point into the input buffer `buf` (via extract_fields),
+    // so they remain valid throughout this function's scope.
     std::vector<const uint8_t*> field_ptrs;
     std::vector<size_t> field_lengths;
 
-    // Pre-allocate based on estimated fields (rows * estimated columns)
-    size_t estimated_fields = (rows.size() - start_row) * 10;  // assume ~10 columns avg
+    // Pre-allocate based on estimated fields
+    size_t estimated_fields = (rows.size() - start_row) * 10;
     field_ptrs.reserve(estimated_fields);
     field_lengths.reserve(estimated_fields);
 
@@ -372,7 +374,8 @@ double DialectDetector::compute_type_score(
         return 0.0;
     }
 
-    // Use SIMD batch validation for integer/float detection
+    // Use SIMD batch validation for integer/float detection.
+    // This efficiently identifies numeric fields without calling infer_cell_type().
     size_t integer_count = 0;
     size_t float_count = 0;
     size_t other_count = 0;
@@ -389,19 +392,11 @@ double DialectDetector::compute_type_score(
     // Integer and float cells are definitely typed
     typed_cells = integer_count + float_count;
 
-    // For cells that aren't integer/float, check if they're other typed values
-    // (empty, boolean, date, time, datetime). This is the scalar fallback
-    // for types that SIMD batch validation doesn't detect.
+    // For non-numeric fields, check if they're other typed values using
+    // infer_cell_type(). We only call this for fields in the "other" category.
     //
-    // Approach: Iterate once through all fields and for non-numeric fields,
-    // apply lightweight checks for empty/boolean/datetime. The SIMD batch
-    // already identified which are numeric, so we can use the same validators
-    // to skip those.
-    //
-    // Note: The primary performance gain comes from CSV files with mostly
-    // numeric data, where we avoid the full regex-like infer_cell_type() for
-    // each numeric field. For files with many non-numeric fields, performance
-    // is similar to the original scalar approach.
+    // Trade-off: For numeric-heavy CSVs, we avoid calling infer_cell_type()
+    // for most fields. For mixed-type CSVs, performance is similar to scalar.
     if (other_count > 0) {
         for (size_t i = 0; i < total_cells; ++i) {
             const uint8_t* data = field_ptrs[i];
@@ -413,56 +408,12 @@ double DialectDetector::compute_type_score(
                 continue;
             }
 
-            // Check for other typed values using simplified detection:
-            // 1. Empty fields (trimmed whitespace)
-            // 2. Boolean values
-            // 3. Date/time/datetime patterns
-
-            // Trim whitespace
-            while (field_len > 0 && (*data == ' ' || *data == '\t')) {
-                ++data;
-                --field_len;
-            }
-            while (field_len > 0 && (data[field_len - 1] == ' ' || data[field_len - 1] == '\t')) {
-                --field_len;
-            }
-
-            // Empty fields count as typed
-            if (field_len == 0) {
+            // Use infer_cell_type for non-numeric fields to detect:
+            // empty, boolean, date, time, datetime
+            std::string_view sv(reinterpret_cast<const char*>(data), field_len);
+            CellType type = infer_cell_type(sv);
+            if (type != CellType::STRING) {
                 typed_cells++;
-                continue;
-            }
-
-            // Quick boolean check
-            if (field_len >= 4 && field_len <= 5) {
-                char c0 = static_cast<char>(data[0]);
-                if (c0 == 't' || c0 == 'T' || c0 == 'f' || c0 == 'F') {
-                    std::string_view sv(reinterpret_cast<const char*>(data), field_len);
-                    if (sv == "true" || sv == "false" ||
-                        sv == "TRUE" || sv == "FALSE" ||
-                        sv == "True" || sv == "False") {
-                        typed_cells++;
-                        continue;
-                    }
-                }
-            }
-
-            // Date/time/datetime: only check if field contains separator chars
-            // This avoids calling infer_cell_type for obvious strings
-            bool has_datetime_chars = false;
-            for (size_t j = 0; j < field_len && j < 20 && !has_datetime_chars; ++j) {
-                char c = static_cast<char>(data[j]);
-                if (c == '-' || c == '/' || c == ':' || c == 'T') {
-                    has_datetime_chars = true;
-                }
-            }
-
-            if (has_datetime_chars) {
-                std::string_view sv(reinterpret_cast<const char*>(data), field_len);
-                CellType type = infer_cell_type(sv);
-                if (type == CellType::DATE || type == CellType::TIME || type == CellType::DATETIME) {
-                    typed_cells++;
-                }
             }
         }
     }
