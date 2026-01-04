@@ -268,6 +268,9 @@ If there are any un-addressed issues identified from the PR review or implementa
 - Be thorough but avoid over-engineering
 - Write clear commit messages explaining the "why"
 - Keep PR description updated with significant changes
+- If a feature is related to performance be sure to benchmark the new changes
+  in comparison to the current code, and only accept changes that improve
+  performance.
 - If blocked by external factors (permissions, unclear requirements), explain and stop
 EOF
 )
