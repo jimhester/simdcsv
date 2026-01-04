@@ -290,11 +290,25 @@ EOF
     printf '\033]0;%s\007' "$title"
 
     echo ""
-    echo "Starting Claude Code session..."
     echo "  Worktree: $WORKTREE_PATH"
     echo "  Branch:   $BRANCH_NAME"
     echo "  Task:     $task_ref"
     echo ""
+
+    # Check if we're already inside a Claude Code session
+    # CLAUDE_CODE is set by Claude Code when running commands
+    if [[ -n "${CLAUDE_CODE:-}" ]]; then
+        echo "Already in Claude Code session. Outputting task info:"
+        echo ""
+        echo "=== TASK PROMPT ==="
+        echo "$prompt"
+        echo "=== END PROMPT ==="
+        echo ""
+        echo "Worktree ready at: $WORKTREE_PATH"
+        exit 0
+    fi
+
+    echo "Starting Claude Code session..."
 
     # Change to worktree and start Claude Code
     cd "$WORKTREE_PATH"
