@@ -159,6 +159,7 @@ add_library(simdcsv_lib STATIC
     src/dialect.cpp
     src/simdcsv_c.cpp
     src/value_extraction.cpp
+    src/streaming.cpp
 )
 
 target_include_directories(simdcsv_lib PUBLIC
@@ -472,6 +473,31 @@ add_custom_command(TARGET value_extraction_test POST_BUILD
 
 # Register value extraction tests with CTest
 gtest_discover_tests(value_extraction_test)
+
+# Streaming parser test executable
+add_executable(streaming_test
+    test/streaming_test.cpp
+)
+
+target_link_libraries(streaming_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(streaming_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for streaming tests
+add_custom_command(TARGET streaming_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register streaming tests with CTest
+gtest_discover_tests(streaming_test)
 
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
