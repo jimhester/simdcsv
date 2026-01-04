@@ -358,6 +358,98 @@ static void BM_SIMDDigitValidation(benchmark::State& state) {
 BENCHMARK(BM_SIMDDigitValidation);
 
 // =============================================================================
+// SIMDTypeDetector Benchmarks
+// =============================================================================
+
+// Benchmark SIMDTypeDetector::all_digits (SIMD implementation)
+static void BM_SIMDTypeDetector_AllDigits(benchmark::State& state) {
+    size_t len = static_cast<size_t>(state.range(0));
+
+    // Create a buffer of digits with proper alignment and padding
+    std::vector<uint8_t> buffer(len + 64, '5');  // Extra padding for safety
+
+    for (auto _ : state) {
+        bool result = SIMDTypeDetector::all_digits(buffer.data(), len);
+        benchmark::DoNotOptimize(result);
+    }
+
+    state.SetBytesProcessed(state.iterations() * len);
+}
+BENCHMARK(BM_SIMDTypeDetector_AllDigits)
+    ->Arg(8)     // Small (scalar path)
+    ->Arg(16)    // One SIMD vector (128-bit)
+    ->Arg(32)    // Two vectors or one 256-bit
+    ->Arg(64)    // Four vectors or one 512-bit
+    ->Arg(128)   // Multiple SIMD iterations
+    ->Arg(256)
+    ->Arg(1024);
+
+// Benchmark SIMDTypeDetector::classify_digits (SIMD implementation)
+static void BM_SIMDTypeDetector_ClassifyDigits(benchmark::State& state) {
+    size_t len = static_cast<size_t>(state.range(0));
+    len = std::min(len, size_t(64));  // classify_digits only processes up to 64 bytes
+
+    // Create a buffer of mixed digits and non-digits
+    std::vector<uint8_t> buffer(64, 0);
+    for (size_t i = 0; i < len; ++i) {
+        buffer[i] = (i % 2 == 0) ? '5' : 'a';  // Alternating pattern
+    }
+
+    for (auto _ : state) {
+        uint64_t result = SIMDTypeDetector::classify_digits(buffer.data(), len);
+        benchmark::DoNotOptimize(result);
+    }
+
+    state.SetBytesProcessed(state.iterations() * len);
+}
+BENCHMARK(BM_SIMDTypeDetector_ClassifyDigits)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(32)
+    ->Arg(64);
+
+// Comparison: all_digits with varying input patterns
+static void BM_SIMDTypeDetector_AllDigits_FailFast(benchmark::State& state) {
+    size_t len = static_cast<size_t>(state.range(0));
+
+    // Create a buffer where the first character is not a digit
+    std::vector<uint8_t> buffer(len + 64, '5');
+    buffer[0] = 'x';  // Non-digit at start - should fail fast
+
+    for (auto _ : state) {
+        bool result = SIMDTypeDetector::all_digits(buffer.data(), len);
+        benchmark::DoNotOptimize(result);
+    }
+
+    state.SetBytesProcessed(state.iterations() * len);
+}
+BENCHMARK(BM_SIMDTypeDetector_AllDigits_FailFast)
+    ->Arg(16)
+    ->Arg(64)
+    ->Arg(256)
+    ->Arg(1024);
+
+static void BM_SIMDTypeDetector_AllDigits_FailLate(benchmark::State& state) {
+    size_t len = static_cast<size_t>(state.range(0));
+
+    // Create a buffer where the last character is not a digit
+    std::vector<uint8_t> buffer(len + 64, '5');
+    buffer[len - 1] = 'x';  // Non-digit at end - must check all data
+
+    for (auto _ : state) {
+        bool result = SIMDTypeDetector::all_digits(buffer.data(), len);
+        benchmark::DoNotOptimize(result);
+    }
+
+    state.SetBytesProcessed(state.iterations() * len);
+}
+BENCHMARK(BM_SIMDTypeDetector_AllDigits_FailLate)
+    ->Arg(16)
+    ->Arg(64)
+    ->Arg(256)
+    ->Arg(1024);
+
+// =============================================================================
 // Column Parsing Benchmarks
 // =============================================================================
 

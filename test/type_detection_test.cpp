@@ -290,6 +290,124 @@ TEST_F(SIMDTypeDetectorTest, NotAllDigits) {
     EXPECT_FALSE(SIMDTypeDetector::all_digits(buffer.data(), mixed.size()));
 }
 
+TEST_F(SIMDTypeDetectorTest, AllDigitsEmpty) {
+    EXPECT_FALSE(SIMDTypeDetector::all_digits(buffer.data(), 0));
+}
+
+TEST_F(SIMDTypeDetectorTest, AllDigitsSingleDigit) {
+    buffer[0] = '5';
+    EXPECT_TRUE(SIMDTypeDetector::all_digits(buffer.data(), 1));
+}
+
+TEST_F(SIMDTypeDetectorTest, AllDigitsSingleNonDigit) {
+    buffer[0] = 'x';
+    EXPECT_FALSE(SIMDTypeDetector::all_digits(buffer.data(), 1));
+}
+
+TEST_F(SIMDTypeDetectorTest, AllDigitsLongString) {
+    // Test with a string longer than one SIMD vector (typically 16 or 32 bytes)
+    std::string long_digits(100, '7');
+    std::memcpy(buffer.data(), long_digits.data(), long_digits.size());
+    EXPECT_TRUE(SIMDTypeDetector::all_digits(buffer.data(), long_digits.size()));
+}
+
+TEST_F(SIMDTypeDetectorTest, AllDigitsLongStringWithNonDigitAtEnd) {
+    std::string long_digits(99, '7');
+    long_digits += 'x';
+    std::memcpy(buffer.data(), long_digits.data(), long_digits.size());
+    EXPECT_FALSE(SIMDTypeDetector::all_digits(buffer.data(), long_digits.size()));
+}
+
+TEST_F(SIMDTypeDetectorTest, AllDigitsExactVectorSize) {
+    // Test with exactly 16, 32, and 64 bytes (common SIMD vector sizes)
+    for (size_t size : {16, 32, 64}) {
+        if (size > buffer.size()) continue;
+        std::string digits(size, '9');
+        std::memcpy(buffer.data(), digits.data(), digits.size());
+        EXPECT_TRUE(SIMDTypeDetector::all_digits(buffer.data(), digits.size()))
+            << "Failed for size " << size;
+    }
+}
+
+TEST_F(SIMDTypeDetectorTest, ClassifyDigitsEmpty) {
+    EXPECT_EQ(SIMDTypeDetector::classify_digits(buffer.data(), 0), 0ULL);
+}
+
+TEST_F(SIMDTypeDetectorTest, ClassifyDigitsAllDigits) {
+    std::string digits = "12345678";
+    std::memcpy(buffer.data(), digits.data(), digits.size());
+    uint64_t result = SIMDTypeDetector::classify_digits(buffer.data(), digits.size());
+    // All 8 bits should be set
+    EXPECT_EQ(result, 0xFFULL);
+}
+
+TEST_F(SIMDTypeDetectorTest, ClassifyDigitsNoDigits) {
+    std::string text = "abcdefgh";
+    std::memcpy(buffer.data(), text.data(), text.size());
+    uint64_t result = SIMDTypeDetector::classify_digits(buffer.data(), text.size());
+    EXPECT_EQ(result, 0ULL);
+}
+
+TEST_F(SIMDTypeDetectorTest, ClassifyDigitsMixed) {
+    std::string mixed = "1a2b3c4d";  // digits at positions 0, 2, 4, 6
+    std::memcpy(buffer.data(), mixed.data(), mixed.size());
+    uint64_t result = SIMDTypeDetector::classify_digits(buffer.data(), mixed.size());
+    // Bits 0, 2, 4, 6 should be set: 0b01010101 = 0x55
+    EXPECT_EQ(result, 0x55ULL);
+}
+
+TEST_F(SIMDTypeDetectorTest, ClassifyDigitsSingleDigit) {
+    buffer[0] = '7';
+    uint64_t result = SIMDTypeDetector::classify_digits(buffer.data(), 1);
+    EXPECT_EQ(result, 1ULL);
+}
+
+TEST_F(SIMDTypeDetectorTest, ClassifyDigitsSingleNonDigit) {
+    buffer[0] = 'x';
+    uint64_t result = SIMDTypeDetector::classify_digits(buffer.data(), 1);
+    EXPECT_EQ(result, 0ULL);
+}
+
+TEST_F(SIMDTypeDetectorTest, ClassifyDigitsBoundaryChars) {
+    // Test characters just outside the '0'-'9' range
+    buffer[0] = '/' ;  // '0' - 1
+    buffer[1] = '0';   // boundary
+    buffer[2] = '9';   // boundary
+    buffer[3] = ':';   // '9' + 1
+    uint64_t result = SIMDTypeDetector::classify_digits(buffer.data(), 4);
+    // Only positions 1 and 2 should be digits: 0b0110 = 0x6
+    EXPECT_EQ(result, 0x6ULL);
+}
+
+TEST_F(SIMDTypeDetectorTest, ClassifyDigitsLongerThan64) {
+    // For classify_digits, only first 64 bytes matter
+    std::string digits(100, '5');
+    std::memcpy(buffer.data(), digits.data(), digits.size());
+    uint64_t result = SIMDTypeDetector::classify_digits(buffer.data(), 64);
+    EXPECT_EQ(result, ~0ULL);  // All 64 bits set
+}
+
+TEST_F(SIMDTypeDetectorTest, ClassifyDigitsExact64Bytes) {
+    std::string digits(64, '3');
+    std::memcpy(buffer.data(), digits.data(), digits.size());
+    uint64_t result = SIMDTypeDetector::classify_digits(buffer.data(), 64);
+    EXPECT_EQ(result, ~0ULL);  // All 64 bits set
+}
+
+TEST_F(SIMDTypeDetectorTest, ClassifyDigitsPatternAtVectorBoundary) {
+    // Create a pattern that spans SIMD vector boundaries
+    // Fill with digits, then put a non-digit at position 16 (common vector boundary)
+    std::string pattern(32, '8');
+    pattern[15] = 'x';  // just before common 16-byte boundary
+    pattern[16] = 'y';  // at common 16-byte boundary
+    std::memcpy(buffer.data(), pattern.data(), pattern.size());
+    uint64_t result = SIMDTypeDetector::classify_digits(buffer.data(), pattern.size());
+
+    // Expected: all bits set except 15 and 16
+    uint64_t expected = 0xFFFFFFFFULL & ~(1ULL << 15) & ~(1ULL << 16);
+    EXPECT_EQ(result, expected);
+}
+
 TEST_F(SIMDTypeDetectorTest, DetectBatch) {
     const char* fields[] = {"123", "3.14", "true", "hello"};
     size_t lengths[] = {3, 4, 4, 5};

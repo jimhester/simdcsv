@@ -435,58 +435,125 @@ private:
 };
 
 /**
- * BatchTypeDetector provides batch processing for type detection.
+ * SIMDTypeDetector provides SIMD-accelerated batch processing for type detection.
  *
- * Note: Despite creating simd_input structures, this class currently uses
- * scalar loops for actual digit classification. The SIMD infrastructure is
- * in place for future optimization using Highway intrinsics. For now, this
- * class primarily serves as a batch API wrapper around TypeDetector.
+ * Uses Highway SIMD operations to accelerate digit classification, following the
+ * cmp_mask_against_input pattern. The key operations are:
+ * - classify_digits: Returns a 64-bit mask where each bit indicates if the
+ *   corresponding byte is a digit ('0'-'9')
+ * - all_digits: Returns true if all bytes in the input are digits
  *
- * TODO: Implement actual SIMD digit classification using Highway's
- * comparison operations (similar to cmp_mask_against_input pattern).
+ * Implementation uses Highway's Ge/Le/And operations for range checking,
+ * similar to the SIMDIntegerParser::validate_digits_simd pattern.
  */
 class SIMDTypeDetector {
 public:
-  static uint64_t classify_digits(const uint8_t* data, size_t length) {
+  /**
+   * Classify which bytes in the input are ASCII digits ('0'-'9').
+   *
+   * Uses SIMD comparison operations to check if each byte is in the range
+   * ['0', '9'] and returns a 64-bit mask where bit i is set if data[i] is
+   * a digit.
+   *
+   * @param data Pointer to input data (should have at least 64 bytes accessible
+   *             for SIMD, padded with zeros if shorter)
+   * @param length Actual length of valid data (0-64)
+   * @return 64-bit mask where bit i indicates if data[i] is a digit
+   */
+  static HWY_ATTR uint64_t classify_digits(const uint8_t* data, size_t length) {
     if (length == 0) return 0;
 
-    simd_input in = fill_input(data);
-    uint64_t mask = ~0ULL;
-    if (length < 64) {
-      mask = blsmsk_u64(1ULL << length);
+    // Namespace alias for Highway operations
+    namespace hn = hwy::HWY_NAMESPACE;
+
+    const hn::ScalableTag<uint8_t> d;
+    const size_t N = hn::Lanes(d);
+
+    // Set comparison values for range check
+    const auto zero_char = hn::Set(d, '0');
+    const auto nine_char = hn::Set(d, '9');
+
+    uint64_t result = 0;
+
+    // Process data in Highway vector-sized chunks
+    size_t i = 0;
+    size_t max_len = std::min(length, size_t(64));
+
+    for (; i + N <= max_len; i += N) {
+      auto vec = hn::LoadU(d, data + i);
+
+      // Check if bytes are >= '0' and <= '9'
+      auto ge_zero = hn::Ge(vec, zero_char);
+      auto le_nine = hn::Le(vec, nine_char);
+      auto is_digit = hn::And(ge_zero, le_nine);
+
+      // Convert mask to bits
+      uint64_t bits = hn::BitsFromMask(d, is_digit);
+      result |= (bits << i);
     }
 
-    uint64_t le_9 = 0;
-    for (size_t i = 0; i < std::min(length, size_t(64)); ++i) {
+    // Handle remaining bytes with scalar code
+    for (; i < max_len; ++i) {
       if (data[i] >= '0' && data[i] <= '9') {
-        le_9 |= (1ULL << i);
+        result |= (1ULL << i);
       }
     }
 
-    return le_9 & mask;
+    // Apply length mask if length < 64
+    if (length < 64) {
+      uint64_t mask = blsmsk_u64(1ULL << length);
+      result &= mask;
+    }
+
+    return result;
   }
 
-  static bool all_digits(const uint8_t* data, size_t length) {
+  /**
+   * Check if all bytes in the input are ASCII digits ('0'-'9').
+   *
+   * Uses SIMD to validate entire vectors at once, with scalar fallback
+   * for the remainder. This is significantly faster than a byte-by-byte
+   * loop for longer inputs.
+   *
+   * @param data Pointer to input data
+   * @param length Length of input data
+   * @return true if all bytes are digits, false otherwise
+   */
+  static HWY_ATTR bool all_digits(const uint8_t* data, size_t length) {
     if (length == 0) return false;
 
-    if (length <= 8) {
-      for (size_t i = 0; i < length; ++i) {
-        if (data[i] < '0' || data[i] > '9') return false;
-      }
-      return true;
-    }
+    // Namespace alias for Highway operations
+    namespace hn = hwy::HWY_NAMESPACE;
+
+    const hn::ScalableTag<uint8_t> d;
+    const size_t N = hn::Lanes(d);
+
+    // Set comparison values for range check
+    const auto zero_char = hn::Set(d, '0');
+    const auto nine_char = hn::Set(d, '9');
 
     size_t i = 0;
-    for (; i + 64 <= length; i += 64) {
-      simd_input in = fill_input(data + i);
-      (void)in;
-      for (size_t j = 0; j < 64; ++j) {
-        if (data[i + j] < '0' || data[i + j] > '9') return false;
+
+    // Process full vectors using SIMD
+    for (; i + N <= length; i += N) {
+      auto vec = hn::LoadU(d, data + i);
+
+      // Check if bytes are >= '0' and <= '9'
+      auto ge_zero = hn::Ge(vec, zero_char);
+      auto le_nine = hn::Le(vec, nine_char);
+      auto is_digit = hn::And(ge_zero, le_nine);
+
+      // If any byte is not a digit, return false
+      if (!hn::AllTrue(d, is_digit)) {
+        return false;
       }
     }
 
+    // Scalar fallback for remainder
     for (; i < length; ++i) {
-      if (data[i] < '0' || data[i] > '9') return false;
+      if (data[i] < '0' || data[i] > '9') {
+        return false;
+      }
     }
 
     return true;
