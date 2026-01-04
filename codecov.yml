@@ -26,11 +26,26 @@ comment:
   require_changes: false
 
 # Paths to ignore from coverage reports
+# These patterns exclude entire directories from coverage analysis
 ignore:
-  - "test/**/*"
-  - "benchmark/**/*"
-  - "build/_deps/**/*"
+  - "test/**"
+  - "benchmark/**"
+  - "build/**"
+  - "docs/**"
   - "**/*.md"
+
+# Define coverage components for better organization
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+      - type: patch
+  individual_components:
+    - component_id: library
+      name: Library Code
+      paths:
+        - src/**
+        - include/**
 
 flags:
   unittests:

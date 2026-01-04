@@ -80,11 +80,20 @@ jobs:
     - name: Generate coverage info
       run: |
         cd build
-        # Capture coverage
-        lcov --capture --directory . --output-file coverage.info --ignore-errors mismatch,unused
+        # Capture coverage using the config file from repo root
+        lcov --config-file ../.lcovrc --capture --directory . --output-file coverage.info --ignore-errors mismatch,unused
         # Remove test, benchmark, and external dependencies from coverage
-        lcov --remove coverage.info '*/test/*' '*/benchmark/*' '*/build/_deps/*' '/usr/*' --output-file coverage.info --ignore-errors unused
+        lcov --config-file ../.lcovrc --remove coverage.info '*/test/*' '*/benchmark/*' '*/build/_deps/*' '/usr/*' --output-file coverage.info --ignore-errors unused
+        # Show what files remain in the coverage report
+        echo "=== Files in final coverage report ==="
         lcov --list coverage.info
+        echo "=== Verifying no test/benchmark files remain ==="
+        if grep -E "^SF:.*/test/|^SF:.*/benchmark/" coverage.info; then
+          echo "ERROR: test or benchmark files found in coverage report!"
+          exit 1
+        else
+          echo "OK: No test or benchmark files in coverage report"
+        fi
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
