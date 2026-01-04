@@ -144,7 +144,7 @@ public:
     }
 
     void dump_indexes(const uint64_t* indexes, size_t count, size_t thread_id,
-                      size_t stride = 1) const {
+                      size_t stride = 1, size_t total_size = 0) const {
         if (!config_.dump_masks) return;
         FILE* out = config_.output ? config_.output : stdout;
         size_t dump_count = (count < config_.max_indexes_dump) ? count : config_.max_indexes_dump;
@@ -153,6 +153,8 @@ public:
         fprintf(out, "  ");
         for (size_t i = 0; i < dump_count; ++i) {
             size_t idx = thread_id + i * stride;
+            // Bounds check: skip if index would exceed total array size
+            if (total_size > 0 && idx >= total_size) break;
             fprintf(out, "%llu", (unsigned long long)indexes[idx]);
             if (i + 1 < dump_count) fprintf(out, ", ");
             if ((i + 1) % 10 == 0 && i + 1 < dump_count) fprintf(out, "\n  ");

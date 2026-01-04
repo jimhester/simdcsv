@@ -70,15 +70,27 @@ private:
     size_t size_;
 };
 
+/**
+ * @brief Loads a file into a FileBuffer with SIMD-aligned memory.
+ *
+ * This function loads the entire file contents into a newly allocated buffer
+ * that is cache-line aligned with padding for safe SIMD operations. The
+ * FileBuffer takes ownership of the allocated memory and will free it when
+ * destroyed.
+ *
+ * @param filename Path to the file to load.
+ * @param padding Extra bytes to allocate for SIMD overreads (default: 64).
+ * @return FileBuffer containing the file data. Check valid() for success.
+ * @throws std::runtime_error if file cannot be opened or read.
+ *
+ * @note Memory ownership is transferred to FileBuffer - do not manually free.
+ */
 inline FileBuffer load_file(const std::string& filename, size_t padding = 64) {
     auto corpus = get_corpus(filename, padding);
+    // Note: get_corpus() allocates memory via allocate_padded_buffer() which
+    // must be freed with aligned_free(). FileBuffer takes ownership and will
+    // call aligned_free() in its destructor.
     return FileBuffer(const_cast<uint8_t*>(corpus.data()), corpus.size());
-}
-
-inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
-    if (corpus.data()) {
-        aligned_free(const_cast<uint8_t*>(corpus.data()));
-    }
 }
 
 class Parser {
@@ -92,6 +104,8 @@ public:
         Result() = default;
         Result(Result&&) = default;
         Result& operator=(Result&&) = default;
+        Result(const Result&) = delete;
+        Result& operator=(const Result&) = delete;
 
         bool success() const { return successful; }
         size_t num_columns() const { return idx.columns; }
