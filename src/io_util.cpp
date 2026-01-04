@@ -18,15 +18,19 @@ std::basic_string_view<uint8_t> get_corpus_stdin(size_t padding) {
     // Read stdin in chunks since we don't know the size upfront
     const size_t chunk_size = 64 * 1024;  // 64KB chunks
     std::vector<uint8_t> data;
+    data.reserve(chunk_size * 16);  // Reserve ~1MB upfront to reduce reallocations
 
     uint8_t buffer[chunk_size];
-    while (!std::feof(stdin)) {
+    while (true) {
         size_t bytes_read = std::fread(buffer, 1, chunk_size, stdin);
         if (bytes_read > 0) {
             data.insert(data.end(), buffer, buffer + bytes_read);
         }
-        if (std::ferror(stdin)) {
-            throw std::runtime_error("could not read from stdin");
+        if (bytes_read < chunk_size) {
+            if (std::ferror(stdin)) {
+                throw std::runtime_error("could not read from stdin");
+            }
+            break;  // EOF reached
         }
     }
 
