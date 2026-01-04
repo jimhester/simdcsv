@@ -1139,9 +1139,7 @@ really_inline ExtractResult<IntType> parse_integer_simd(const char* str, size_t 
         // Parse as int64 first, then check bounds
         auto result = SIMDIntegerParser::parse_int64(ptr, end - ptr, false);
         if (!result.ok()) {
-            return result.to_extract_result().error ?
-                   ExtractResult<IntType>{std::nullopt, result.error} :
-                   ExtractResult<IntType>{std::nullopt, nullptr};
+            return {std::nullopt, result.error};
         }
         if (result.value > std::numeric_limits<int32_t>::max() ||
             result.value < std::numeric_limits<int32_t>::min()) {
@@ -1151,9 +1149,7 @@ really_inline ExtractResult<IntType> parse_integer_simd(const char* str, size_t 
     } else if constexpr (std::is_same_v<IntType, uint32_t>) {
         auto result = SIMDIntegerParser::parse_uint64(ptr, end - ptr, false);
         if (!result.ok()) {
-            return result.to_extract_result().error ?
-                   ExtractResult<IntType>{std::nullopt, result.error} :
-                   ExtractResult<IntType>{std::nullopt, nullptr};
+            return {std::nullopt, result.error};
         }
         if (result.value > std::numeric_limits<uint32_t>::max()) {
             return {std::nullopt, "Integer overflow for uint32"};
@@ -1163,9 +1159,7 @@ really_inline ExtractResult<IntType> parse_integer_simd(const char* str, size_t 
         // Fallback: parse as int64 and cast
         auto result = SIMDIntegerParser::parse_int64(ptr, end - ptr, false);
         if (!result.ok()) {
-            return result.to_extract_result().error ?
-                   ExtractResult<IntType>{std::nullopt, result.error} :
-                   ExtractResult<IntType>{std::nullopt, nullptr};
+            return {std::nullopt, result.error};
         }
         return {static_cast<IntType>(result.value), nullptr};
     }

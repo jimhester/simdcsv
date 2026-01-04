@@ -792,6 +792,45 @@ TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDInt32Overflow) {
     EXPECT_NE(result.error, nullptr);
 }
 
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDInt32Underflow) {
+    auto result = parse_integer_simd<int32_t>("-2147483649", 11, config_);  // INT32_MIN - 1
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDUInt32) {
+    auto result = parse_integer_simd<uint32_t>("12345", 5, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), 12345u);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDUInt32Overflow) {
+    auto result = parse_integer_simd<uint32_t>("4294967296", 10, config_);  // UINT32_MAX + 1
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDUInt32Negative) {
+    auto result = parse_integer_simd<uint32_t>("-1", 2, config_);
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDUInt64) {
+    auto result = parse_integer_simd<uint64_t>("18446744073709551615", 20, config_);  // UINT64_MAX
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), UINT64_MAX);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDWhitespaceOnly) {
+    auto result = parse_integer_simd<int64_t>("   ", 3, config_);
+    EXPECT_TRUE(result.is_na());  // After trimming, empty = NA
+}
+
+TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDWhitespaceOnly) {
+    auto result = parse_double_simd("   ", 3, config_);
+    EXPECT_TRUE(result.is_na());  // After trimming, empty = NA
+}
+
 // Test parse_double_simd with ExtractionConfig
 TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDBasic) {
     auto result = parse_double_simd("3.14159", 7, config_);
