@@ -12,7 +12,6 @@
 #include <cstdio>
 #include <string>
 #include <vector>
-#include <sstream>
 #include <iomanip>
 #include <cstring>
 
@@ -66,7 +65,10 @@ public:
     bool dump_masks() const { return config_.dump_masks; }
     bool timing() const { return config_.timing; }
 
-    void log(const char* fmt, ...) const {
+    // SECURITY NOTE: log() uses printf-style format strings. When logging
+    // user-provided data (e.g., filenames), use log_str() instead to avoid
+    // format string vulnerabilities.
+    void log(const char* fmt, ...) const __attribute__((format(printf, 2, 3))) {
         if (!config_.verbose) return;
         FILE* out = config_.output ? config_.output : stdout;
         fprintf(out, "[simdcsv] ");
@@ -75,6 +77,15 @@ public:
         vfprintf(out, fmt, args);
         va_end(args);
         fprintf(out, "\n");
+        fflush(out);
+    }
+
+    // Safe string logging without format string interpretation.
+    // Use this when logging user-provided or untrusted strings.
+    void log_str(const char* msg) const {
+        if (!config_.verbose) return;
+        FILE* out = config_.output ? config_.output : stdout;
+        fprintf(out, "[simdcsv] %s\n", msg);
         fflush(out);
     }
 

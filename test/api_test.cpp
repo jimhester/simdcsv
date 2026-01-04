@@ -78,10 +78,10 @@ TEST_F(SimplifiedAPITest, ParserDialects) {
 
 TEST_F(SimplifiedAPITest, DetectDialect) {
     auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
-    auto detection = simdcsv::detect_dialect(data, len);
+    simdcsv::FileBuffer buffer(data, len);  // RAII wrapper handles cleanup
+    auto detection = simdcsv::detect_dialect(buffer.data(), buffer.size());
     EXPECT_TRUE(detection.success());
     EXPECT_EQ(detection.dialect.delimiter, ',');
-    aligned_free(data);
 }
 
 TEST_F(SimplifiedAPITest, ParserAutoDetection) {
