@@ -614,6 +614,31 @@ add_custom_command(TARGET cli_test POST_BUILD
 # Register CLI tests with CTest
 gtest_discover_tests(cli_test)
 
+# Two-pass coverage test executable (comprehensive tests for two_pass.h)
+add_executable(two_pass_coverage_test
+    test/two_pass_coverage_test.cpp
+)
+
+target_link_libraries(two_pass_coverage_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(two_pass_coverage_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for two-pass coverage tests
+add_custom_command(TARGET two_pass_coverage_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register two-pass coverage tests with CTest
+gtest_discover_tests(two_pass_coverage_test)
+
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
     benchmark/benchmark_main.cpp

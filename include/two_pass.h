@@ -363,6 +363,7 @@ class two_pass {
         out.first_even_nl = i;
         return out;
       }
+      ++i;
     }
     return out;
   }
