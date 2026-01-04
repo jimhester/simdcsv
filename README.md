@@ -44,6 +44,29 @@ cmake --build build
 cd build && ctest --output-on-failure
 ```
 
+## Command Line Tool
+
+The build produces an `scsv` command line tool for working with CSV files:
+
+```bash
+# Count rows in a CSV file
+./build/scsv count data.csv
+
+# Display first 10 rows
+./build/scsv head data.csv
+
+# Select specific columns
+./build/scsv select -c name,age data.csv
+
+# Pretty-print with aligned columns
+./build/scsv pretty data.csv
+
+# Get file info (rows, columns, dialect)
+./build/scsv info data.csv
+```
+
+See the [CLI Documentation](https://jimhester.github.io/simdcsv/cli.html) for all available options.
+
 ## Quick Start
 
 Include the single header `<simdcsv.h>` to access the full public API:
