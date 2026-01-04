@@ -90,9 +90,13 @@ struct StreamParser::Impl {
     // Buffer for partial records spanning chunk boundaries
     std::vector<uint8_t> partial_buffer;
 
-    // Current row being built - accumulates field data
-    std::vector<std::string> current_field_storage;
-    std::vector<Field> current_fields;
+    // Current row being built - store field boundaries to avoid dangling pointers
+    struct FieldBoundary {
+        size_t start;
+        size_t end;
+        bool is_quoted;
+    };
+    std::vector<FieldBoundary> current_field_bounds;
     size_t field_start = 0;
     bool field_is_quoted = false;
 
@@ -115,8 +119,7 @@ struct StreamParser::Impl {
 
     Impl(const StreamConfig& cfg)
         : config(cfg), errors(cfg.error_mode) {
-        current_fields.reserve(cfg.initial_field_capacity);
-        current_field_storage.reserve(cfg.initial_field_capacity);
+        current_field_bounds.reserve(cfg.initial_field_capacity);
     }
 
     void reset() {
@@ -124,9 +127,8 @@ struct StreamParser::Impl {
         finished = false;
         stopped = false;
         partial_buffer.clear();
-        current_field_storage.clear();
+        current_field_bounds.clear();
         current_row.clear();
-        current_fields.clear();
         field_start = 0;
         field_is_quoted = false;
         total_bytes = 0;
@@ -140,52 +142,63 @@ struct StreamParser::Impl {
         errors.clear();
     }
 
-    // Emit a completed field
-    void emit_field(const uint8_t* data, size_t start, size_t end) {
-        // Store the field data as a string
-        std::string field_data;
-        if (end > start) {
-            field_data = std::string(reinterpret_cast<const char*>(data + start), end - start);
+    // Emit a completed field - stores boundaries, not actual data
+    void emit_field(const uint8_t* /*data*/, size_t start, size_t end) {
+        // Check max field size to prevent DoS
+        if (end > start && (end - start) > config.max_field_size) {
+            if (error_callback) {
+                ParseError err(ErrorCode::IO_ERROR, ErrorSeverity::ERROR,
+                              row_count + 1, current_field_bounds.size() + 1,
+                              total_bytes, "Field exceeds maximum size");
+                error_callback(err);
+            }
+            errors.add_error(ErrorCode::IO_ERROR, ErrorSeverity::ERROR,
+                            row_count + 1, current_field_bounds.size() + 1,
+                            total_bytes, "Field exceeds maximum size");
+            return;
         }
-        current_field_storage.push_back(std::move(field_data));
 
-        Field field;
-        field.data = current_field_storage.back();
-        field.is_quoted = field_is_quoted;
-        field.field_index = current_fields.size();
-        current_fields.push_back(field);
+        current_field_bounds.push_back({start, end, field_is_quoted});
     }
 
     // Emit a completed row
     // Returns false if parsing should stop (callback returned false or error)
     bool emit_row() {
         // Handle empty rows
-        if (config.skip_empty_rows && current_fields.empty()) {
-            current_field_storage.clear();
+        if (config.skip_empty_rows && current_field_bounds.empty()) {
             return true;  // Continue parsing
         }
 
-        // Build the row - Row will own the string data
+        // Build the row - convert boundaries to actual field data
         Row row;
-        row.field_storage_ = std::move(current_field_storage);
         row.row_number_ = row_count + 1;  // 1-based
         row.byte_offset_ = current_row_start;
         row.column_map_ = header_parsed ? &column_map : nullptr;
 
-        // Rebuild fields with pointers to the row's storage
-        row.fields_.reserve(current_fields.size());
-        for (size_t i = 0; i < current_fields.size(); ++i) {
+        // First pass: build field storage from boundaries
+        row.field_storage_.reserve(current_field_bounds.size());
+        const uint8_t* data = partial_buffer.data();
+        for (const auto& bounds : current_field_bounds) {
+            std::string field_data;
+            if (bounds.end > bounds.start) {
+                field_data = std::string(reinterpret_cast<const char*>(data + bounds.start),
+                                        bounds.end - bounds.start);
+            }
+            row.field_storage_.push_back(std::move(field_data));
+        }
+
+        // Second pass: build fields with string_views into row's storage
+        row.fields_.reserve(current_field_bounds.size());
+        for (size_t i = 0; i < current_field_bounds.size(); ++i) {
             Field field;
             field.data = row.field_storage_[i];
-            field.is_quoted = current_fields[i].is_quoted;
+            field.is_quoted = current_field_bounds[i].is_quoted;
             field.field_index = i;
             row.fields_.push_back(field);
         }
 
-        current_fields.clear();
-        current_fields.reserve(config.initial_field_capacity);
-        current_field_storage.clear();
-        current_field_storage.reserve(config.initial_field_capacity);
+        current_field_bounds.clear();
+        current_field_bounds.reserve(config.initial_field_capacity);
 
         // Handle header row
         if (config.parse_header && !header_parsed) {
@@ -251,7 +264,7 @@ struct StreamParser::Impl {
                     field_start = pos + 1;
                 } else if (c == '\n') {
                     // Empty field at end of row, or empty row
-                    if (state == ParserState::FIELD_START || !current_fields.empty()) {
+                    if (state == ParserState::FIELD_START || !current_field_bounds.empty()) {
                         emit_field(data, pos, pos);
                     }
                     if (!emit_row()) return 0;
@@ -262,7 +275,7 @@ struct StreamParser::Impl {
                     return 1;
                 } else if (c == '\r') {
                     // CR - emit row and wait for LF
-                    if (state == ParserState::FIELD_START || !current_fields.empty()) {
+                    if (state == ParserState::FIELD_START || !current_field_bounds.empty()) {
                         emit_field(data, pos, pos);
                     }
                     if (!emit_row()) return 0;
@@ -303,7 +316,7 @@ struct StreamParser::Impl {
                     if (errors.mode() != ErrorMode::BEST_EFFORT) {
                         errors.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD,
                                         ErrorSeverity::ERROR,
-                                        row_count + 1, current_fields.size() + 1,
+                                        row_count + 1, current_field_bounds.size() + 1,
                                         total_bytes + (pos - buffer_start),
                                         "Quote character in unquoted field");
                     }
@@ -349,7 +362,7 @@ struct StreamParser::Impl {
                     if (errors.mode() != ErrorMode::BEST_EFFORT) {
                         errors.add_error(ErrorCode::INVALID_QUOTE_ESCAPE,
                                         ErrorSeverity::ERROR,
-                                        row_count + 1, current_fields.size() + 1,
+                                        row_count + 1, current_field_bounds.size() + 1,
                                         total_bytes + (pos - buffer_start),
                                         "Invalid character after closing quote");
                     }
@@ -387,8 +400,7 @@ struct StreamParser::Impl {
             if (result == 0) {
                 // Callback returned false, stop parsing
                 partial_buffer.clear();
-                current_field_storage.clear();
-                current_fields.clear();
+                current_field_bounds.clear();
                 return StreamStatus::OK;
             }
             if (result == 1) {
@@ -398,8 +410,7 @@ struct StreamParser::Impl {
 
             if (errors.should_stop()) {
                 partial_buffer.clear();
-                current_field_storage.clear();
-                current_fields.clear();
+                current_field_bounds.clear();
                 return StreamStatus::ERROR;
             }
         }
@@ -448,7 +459,7 @@ struct StreamParser::Impl {
                 // Unclosed quote at EOF
                 errors.add_error(ErrorCode::UNCLOSED_QUOTE,
                                 ErrorSeverity::FATAL,
-                                row_count + 1, current_fields.size() + 1,
+                                row_count + 1, current_field_bounds.size() + 1,
                                 total_bytes,
                                 "Unclosed quote at end of file");
                 if (errors.mode() != ErrorMode::STRICT) {
@@ -464,7 +475,7 @@ struct StreamParser::Impl {
                 // Empty field at end
                 emit_field(data, len, len);
                 emit_row();
-            } else if (!current_fields.empty()) {
+            } else if (!current_field_bounds.empty()) {
                 // Have partial row data
                 emit_row();
             }
