@@ -562,6 +562,61 @@ add_custom_command(TARGET simd_number_parsing_test POST_BUILD
 # Register SIMD number parsing tests with CTest
 gtest_discover_tests(simd_number_parsing_test)
 
+# stdin functionality test executable
+add_executable(stdin_test
+    test/stdin_test.cpp
+)
+
+target_link_libraries(stdin_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(stdin_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for stdin tests
+add_custom_command(TARGET stdin_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register stdin tests with CTest
+gtest_discover_tests(stdin_test)
+
+# CLI stdin integration tests (uses shell commands)
+add_test(
+    NAME cli_stdin_count
+    COMMAND sh -c "echo 'a,b,c\n1,2,3\n4,5,6' | $<TARGET_FILE:scsv> count -"
+)
+set_tests_properties(cli_stdin_count PROPERTIES
+    PASS_REGULAR_EXPRESSION "2"
+)
+
+add_test(
+    NAME cli_stdin_head
+    COMMAND sh -c "echo 'name,age\nAlice,30\nBob,25' | $<TARGET_FILE:scsv> head -n 1 -"
+)
+set_tests_properties(cli_stdin_head PROPERTIES
+    PASS_REGULAR_EXPRESSION "Alice.*30"
+)
+
+add_test(
+    NAME cli_stdin_info
+    COMMAND sh -c "echo 'col1,col2\n1,2\n3,4' | $<TARGET_FILE:scsv> info -"
+)
+set_tests_properties(cli_stdin_info PROPERTIES
+    PASS_REGULAR_EXPRESSION "Columns: 2"
+)
+
+add_test(
+    NAME cli_stdin_pipe_file
+    COMMAND sh -c "cat ${CMAKE_CURRENT_SOURCE_DIR}/test/data/basic/simple.csv | $<TARGET_FILE:scsv> count -"
+)
+
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
     benchmark/benchmark_main.cpp
