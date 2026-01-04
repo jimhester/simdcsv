@@ -529,7 +529,12 @@ TEST_F(IOUtilTest, Integration_BufferCanBeProcessed) {
 // Testing stdin requires special handling since we can't directly manipulate
 // stdin in the current process. These tests use subprocess execution with
 // pipes to test the function's behavior.
+//
+// NOTE: These tests use POSIX-specific APIs (fork, pipe, dup2, waitpid) and
+// are only available on Unix-like systems (Linux, macOS).
 // =============================================================================
+
+#ifndef _WIN32  // POSIX-only tests
 
 // Helper class for running subprocesses with stdin piped data
 class StdinTestRunner {
@@ -764,8 +769,10 @@ int main() {
 )";
         src.close();
 
-        // Compile the helper
-        std::string compile_cmd = "c++ -std=c++17 -o " + exe_path + " " + source_path + " 2>&1";
+        // Compile the helper using CXX environment variable if set, otherwise c++
+        const char* cxx = std::getenv("CXX");
+        std::string compiler = cxx ? cxx : "c++";
+        std::string compile_cmd = compiler + " -std=c++17 -o " + exe_path + " " + source_path + " 2>&1";
         int ret = system(compile_cmd.c_str());
         if (ret != 0) {
             return "";  // Compilation failed
@@ -908,3 +915,5 @@ TEST_F(GetCorpusStdinTest, NormalOperation_UTF8Content) {
     EXPECT_TRUE(result.stdout_output.find("SIZE:47") != std::string::npos)
         << "Output: " << result.stdout_output;
 }
+
+#endif  // !_WIN32
