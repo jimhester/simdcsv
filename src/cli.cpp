@@ -147,13 +147,16 @@ void printVersion() {
 
 void printUsage(const char* prog) {
   cerr << "scsv - High-performance CSV processing tool\n\n";
-  cerr << "Usage: " << prog << " <command> [options] <csvfile>\n\n";
+  cerr << "Usage: " << prog << " <command> [options] [csvfile]\n\n";
   cerr << "Commands:\n";
   cerr << "  count         Count the number of rows\n";
   cerr << "  head          Display the first N rows (default: " << DEFAULT_NUM_ROWS << ")\n";
   cerr << "  select        Select specific columns by name or index\n";
   cerr << "  info          Display information about the CSV file\n";
   cerr << "  pretty        Pretty-print the CSV with aligned columns\n";
+  cerr << "\nArguments:\n";
+  cerr << "  csvfile       Path to CSV file, or '-' to read from stdin.\n";
+  cerr << "                If omitted, reads from stdin.\n";
   cerr << "\nOptions:\n";
   cerr << "  -n <num>      Number of rows (for head/pretty)\n";
   cerr << "  -c <cols>     Comma-separated column names or indices (for select)\n";
@@ -174,18 +177,33 @@ void printUsage(const char* prog) {
   cerr << "  " << prog << " count -d tab data.tsv\n";
   cerr << "  " << prog << " head -d semicolon european.csv\n";
   cerr << "  " << prog << " info -a unknown_format.csv\n";
+  cerr << "  cat data.csv | " << prog << " count\n";
+  cerr << "  " << prog << " head - < data.csv\n";
 }
 
-// Parse a file - returns true on success
+// Helper to check if reading from stdin
+static bool isStdinInput(const char* filename) {
+  return filename == nullptr || strcmp(filename, "-") == 0;
+}
+
+// Parse a file or stdin - returns true on success
 // Caller is responsible for freeing data with aligned_free()
 bool parseFile(const char* filename, int n_threads,
                std::basic_string_view<uint8_t>& data, simdcsv::index& idx,
                const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
                bool auto_detect = false) {
   try {
-    data = get_corpus(filename, SIMDCSV_PADDING);
+    if (isStdinInput(filename)) {
+      data = get_corpus_stdin(SIMDCSV_PADDING);
+    } else {
+      data = get_corpus(filename, SIMDCSV_PADDING);
+    }
   } catch (const std::exception& e) {
-    cerr << "Error: Could not load file '" << filename << "'" << endl;
+    if (isStdinInput(filename)) {
+      cerr << "Error: Could not read from stdin: " << e.what() << endl;
+    } else {
+      cerr << "Error: Could not load file '" << filename << "'" << endl;
+    }
     return false;
   }
 
@@ -417,9 +435,17 @@ int cmdCount(const char* filename, int n_threads, bool has_header,
   std::basic_string_view<uint8_t> data;
 
   try {
-    data = get_corpus(filename, SIMDCSV_PADDING);
+    if (isStdinInput(filename)) {
+      data = get_corpus_stdin(SIMDCSV_PADDING);
+    } else {
+      data = get_corpus(filename, SIMDCSV_PADDING);
+    }
   } catch (const std::exception& e) {
-    cerr << "Error: Could not load file '" << filename << "'" << endl;
+    if (isStdinInput(filename)) {
+      cerr << "Error: Could not read from stdin: " << e.what() << endl;
+    } else {
+      cerr << "Error: Could not load file '" << filename << "'" << endl;
+    }
     return 1;
   }
 
@@ -582,7 +608,7 @@ int cmdInfo(const char* filename, int n_threads, bool has_header,
   CsvIterator iter(data.data(), idx);
   auto rows = iter.getRows();
 
-  cout << "File: " << filename << '\n';
+  cout << "Source: " << (isStdinInput(filename) ? "<stdin>" : filename) << '\n';
   cout << "Size: " << data.size() << " bytes\n";
   cout << "Dialect: " << dialect.to_string() << '\n';
 
@@ -765,13 +791,11 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  if (optind >= argc) {
-    cerr << "Error: No input file specified\n";
-    printUsage(argv[0]);
-    return 1;
+  // Allow reading from stdin if no filename is specified
+  const char* filename = nullptr;
+  if (optind < argc) {
+    filename = argv[optind];
   }
-
-  const char* filename = argv[optind];
   simdcsv::Dialect dialect = parseDialect(delimiter_str, quote_char);
 
   // Dispatch to command handlers

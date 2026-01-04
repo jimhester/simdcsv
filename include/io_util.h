@@ -75,6 +75,52 @@ uint8_t * allocate_padded_buffer(size_t length, size_t padding);
 
 
 /**
+ * @brief Reads all data from stdin into a SIMD-aligned, padded memory buffer.
+ *
+ * Reads the complete contents of standard input into a newly allocated buffer
+ * that is cache-line aligned (64 bytes) with additional padding bytes. This
+ * enables efficient SIMD processing of piped data without bounds checking at
+ * the end of the buffer.
+ *
+ * Since stdin has unknown size, this function reads data in chunks and
+ * dynamically grows the buffer as needed. The final buffer is reallocated
+ * to be properly aligned with the required padding.
+ *
+ * @param padding The number of extra bytes to allocate beyond the data size
+ *                for safe SIMD overreads. Use at least 32 bytes for SSE/NEON,
+ *                or 64 bytes for AVX/AVX2 operations.
+ *
+ * @return A std::basic_string_view<uint8_t> containing the stdin data.
+ *         The view's data() points to the allocated buffer, and size()
+ *         returns the actual data size (not including padding).
+ *
+ * @throws std::runtime_error If memory allocation fails ("could not allocate memory").
+ * @throws std::runtime_error If reading from stdin fails ("could not read from stdin").
+ *
+ * @note The caller is responsible for freeing the underlying buffer using
+ *       aligned_free((void*)result.data()). Do NOT use free() or delete.
+ *
+ * @note The padding bytes beyond the content are uninitialized and may
+ *       contain arbitrary values. Do not interpret them as valid data.
+ *
+ * @example
+ * @code
+ * #include "io_util.h"
+ * #include "mem_util.h"
+ *
+ * // Read piped CSV data: cat data.csv | ./scsv -
+ * auto corpus = get_corpus_stdin(64);
+ * // ... process corpus ...
+ * aligned_free((void*)corpus.data());
+ * @endcode
+ *
+ * @see get_corpus() for loading from a file path.
+ * @see aligned_free() in mem_util.h for proper deallocation.
+ */
+std::basic_string_view<uint8_t> get_corpus_stdin(size_t padding);
+
+
+/**
  * @brief Loads an entire file into a SIMD-aligned, padded memory buffer.
  *
  * Reads the complete contents of a file into a newly allocated buffer that
