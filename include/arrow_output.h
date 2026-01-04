@@ -89,6 +89,17 @@ private:
 
     std::vector<std::vector<FieldRange>> extract_field_ranges(
         const uint8_t* buf, size_t len, const index& idx, const Dialect& dialect);
+
+    /**
+     * @brief Extract a field from the buffer as a string_view.
+     * @param buf Pointer to the CSV buffer
+     * @param start Starting byte offset of the field (inclusive)
+     * @param end Ending byte offset of the field (exclusive)
+     * @param dialect CSV dialect settings
+     * @return A string_view of the field contents, with quotes stripped if present.
+     *         Returns empty string_view if start >= end.
+     * @pre end >= start (asserted in debug builds to catch corrupted index data)
+     */
     std::string_view extract_field(const uint8_t* buf, size_t start, size_t end, const Dialect& dialect);
     ColumnType infer_cell_type(std::string_view cell);
     bool is_null_value(std::string_view value);

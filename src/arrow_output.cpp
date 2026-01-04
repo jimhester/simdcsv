@@ -6,6 +6,7 @@
 #include <arrow/builder.h>
 #include <arrow/table.h>
 #include <algorithm>
+#include <cassert>
 #include <charconv>
 #include <cctype>
 #include <cerrno>
@@ -126,6 +127,10 @@ ColumnType ArrowConverter::infer_cell_type(std::string_view cell) {
 }
 
 std::string_view ArrowConverter::extract_field(const uint8_t* buf, size_t start, size_t end, const Dialect& dialect) {
+    // Validate bounds to catch corrupted index data early in debug builds.
+    // If end < start with unsigned types, subtraction would underflow causing
+    // buffer over-reads and undefined behavior.
+    assert(end >= start && "Invalid field range: end must be >= start");
     if (start >= end) return std::string_view();
     const char* field_start = reinterpret_cast<const char*>(buf + start);
     size_t len = end - start;

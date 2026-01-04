@@ -223,6 +223,25 @@ TEST_F(ArrowOutputTest, WhitespaceInNumbers) {
     EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::DOUBLE);
 }
 
+// Bounds validation tests (Issue #85)
+// These tests verify that extract_field handles edge cases safely
+TEST_F(ArrowOutputTest, FieldRangeStartEqualsEnd) {
+    // When start == end, should return empty string_view without crashing
+    auto result = parseAndConvert("a,b,c\n,,\n");
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    // Empty fields are handled gracefully
+    EXPECT_EQ(result.num_columns, 3);
+    EXPECT_EQ(result.num_rows, 1);
+}
+
+TEST_F(ArrowOutputTest, ConsecutiveDelimiters) {
+    // Tests multiple consecutive delimiters creating zero-length fields
+    auto result = parseAndConvert("a,b,c\n1,,3\n,2,\n");
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.num_columns, 3);
+    EXPECT_EQ(result.num_rows, 2);
+}
+
 // Error handling - empty data
 TEST_F(ArrowOutputTest, EmptyData) {
     auto result = parseAndConvert("");
