@@ -18,6 +18,8 @@ struct AlignedDeleter {
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (size == 0) return 0;
+    // 64KB limit: Large enough to test SIMD chunking (64-byte lanes) and
+    // multi-record parsing, small enough for fast fuzzing iterations
     constexpr size_t MAX_INPUT_SIZE = 64 * 1024;
     if (size > MAX_INPUT_SIZE) size = MAX_INPUT_SIZE;
 
@@ -31,7 +33,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     { // Single-threaded parsing
         simdcsv::index idx = parser.init(size, 1);
-        try { parser.parse(buf, idx, size); } catch (...) {}
+        parser.parse(buf, idx, size);
     }
 
     { // Error collection mode

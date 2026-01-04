@@ -19,6 +19,8 @@ struct AlignedDeleter {
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (size == 0) return 0;
+    // 64KB limit: Matches fuzz_csv_parser since parse_auto exercises both
+    // dialect detection and full parsing paths
     constexpr size_t MAX_INPUT_SIZE = 64 * 1024;
     if (size > MAX_INPUT_SIZE) size = MAX_INPUT_SIZE;
 
@@ -32,8 +34,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     simdcsv::index idx = parser.init(size, 1);
     simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
     simdcsv::DetectionResult detected;
-    parser.parse_auto(buf, idx, size, errors, &detected);
-    (void)detected.success();
+    bool success = parser.parse_auto(buf, idx, size, errors, &detected);
+
+    // Use the results to exercise different code paths
+    if (success && detected.success()) {
+        (void)idx.n_indexes;
+        (void)detected.detected_columns;
+    }
 
     return 0;
 }

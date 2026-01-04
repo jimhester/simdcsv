@@ -17,6 +17,8 @@ struct AlignedDeleter {
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (size == 0) return 0;
+    // 16KB limit: Dialect detection only examines the first portion of data,
+    // so a smaller limit allows faster fuzzing without losing coverage
     constexpr size_t MAX_INPUT_SIZE = 16 * 1024;
     if (size > MAX_INPUT_SIZE) size = MAX_INPUT_SIZE;
 

@@ -157,7 +157,6 @@ add_library(simdcsv_lib STATIC
     src/io_util.cpp
     src/error.cpp
     src/dialect.cpp
-    src/value_extraction.cpp
 )
 
 target_include_directories(simdcsv_lib PUBLIC
@@ -354,31 +353,6 @@ add_custom_command(TARGET dialect_detection_test POST_BUILD
 # Register dialect detection tests with CTest
 gtest_discover_tests(dialect_detection_test)
 
-# Debug mode test executable
-add_executable(debug_test
-    test/debug_test.cpp
-)
-
-target_link_libraries(debug_test PRIVATE
-    simdcsv_lib
-    GTest::gtest_main
-    pthread
-)
-
-target_include_directories(debug_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-# Copy test data to build directory for debug tests
-add_custom_command(TARGET debug_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
-
-# Register debug tests with CTest
-gtest_discover_tests(debug_test)
-
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
     benchmark/benchmark_main.cpp
@@ -447,8 +421,8 @@ if(ENABLE_FUZZING)
         message(FATAL_ERROR "Fuzz testing requires Clang compiler")
     endif()
 
-    set(FUZZ_FLAGS "-fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -g")
-    set(FUZZ_LINK_FLAGS "-fsanitize=fuzzer,address,undefined")
+    set(FUZZ_FLAGS -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -g)
+    set(FUZZ_LINK_FLAGS -fsanitize=fuzzer,address,undefined)
 
     add_executable(fuzz_csv_parser fuzz/fuzz_csv_parser.cpp)
     target_link_libraries(fuzz_csv_parser PRIVATE simdcsv_lib)
