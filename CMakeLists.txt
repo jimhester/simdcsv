@@ -158,6 +158,7 @@ add_library(simdcsv_lib STATIC
     src/error.cpp
     src/dialect.cpp
     src/simdcsv_c.cpp
+    src/value_extraction.cpp
 )
 
 target_include_directories(simdcsv_lib PUBLIC
@@ -421,6 +422,31 @@ add_custom_command(TARGET api_test POST_BUILD
 
 # Register API tests with CTest
 gtest_discover_tests(api_test)
+
+# Value extraction test executable
+add_executable(value_extraction_test
+    test/value_extraction_test.cpp
+)
+
+target_link_libraries(value_extraction_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(value_extraction_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for value extraction tests
+add_custom_command(TARGET value_extraction_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register value extraction tests with CTest
+gtest_discover_tests(value_extraction_test)
 
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
