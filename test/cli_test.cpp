@@ -6,6 +6,8 @@
  */
 
 #include <gtest/gtest.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <array>
 #include <cstdio>
@@ -20,23 +22,16 @@ class CliRunner {
  public:
   struct Result {
     int exit_code;
-    std::string stdout_output;
-    std::string stderr_output;
+    std::string output;  // Combined stdout/stderr output
   };
 
   // Run scsv with given arguments
-  // Note: This uses popen which combines stdout/stderr in practice,
-  // so we redirect stderr to stdout in the command
-  static Result run(const std::string& args, const std::string& stdin_input = "") {
+  // Note: stderr is redirected to stdout for simpler output capture
+  static Result run(const std::string& args) {
     Result result;
 
     // Build command - scsv binary is in the build directory
     std::string cmd = "./scsv " + args + " 2>&1";
-
-    // If we need to pipe stdin input, use a different approach
-    if (!stdin_input.empty()) {
-      cmd = "echo '" + stdin_input + "' | ./scsv " + args + " 2>&1";
-    }
 
     // Open pipe to command
     std::array<char, 4096> buffer;
@@ -44,23 +39,30 @@ class CliRunner {
 
     if (!pipe) {
       result.exit_code = -1;
-      result.stderr_output = "Failed to run command";
+      result.output = "Failed to run command";
       return result;
     }
 
     // Read output
     while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-      result.stdout_output += buffer.data();
+      result.output += buffer.data();
     }
 
-    // Get exit code
+    // Get exit code - properly handle signal termination
     int status = pclose(pipe.release());
-    result.exit_code = WEXITSTATUS(status);
+    if (WIFEXITED(status)) {
+      result.exit_code = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+      result.exit_code = 128 + WTERMSIG(status);  // Common convention
+    } else {
+      result.exit_code = -1;
+    }
 
     return result;
   }
 
   // Run with stdin from a file via redirection
+  // Note: file_path is expected to be a trusted path from test fixtures
   static Result runWithFileStdin(const std::string& args, const std::string& file_path) {
     Result result;
     std::string cmd = "./scsv " + args + " < " + file_path + " 2>&1";
@@ -70,16 +72,23 @@ class CliRunner {
 
     if (!pipe) {
       result.exit_code = -1;
-      result.stderr_output = "Failed to run command";
+      result.output = "Failed to run command";
       return result;
     }
 
     while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-      result.stdout_output += buffer.data();
+      result.output += buffer.data();
     }
 
+    // Get exit code - properly handle signal termination
     int status = pclose(pipe.release());
-    result.exit_code = WEXITSTATUS(status);
+    if (WIFEXITED(status)) {
+      result.exit_code = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+      result.exit_code = 128 + WTERMSIG(status);
+    } else {
+      result.exit_code = -1;
+    }
 
     return result;
   }
@@ -99,38 +108,38 @@ class CliTest : public ::testing::Test {
 TEST_F(CliTest, NoArgsShowsUsage) {
   auto result = CliRunner::run("");
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.stdout_output.find("Usage:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Usage:") != std::string::npos);
 }
 
 TEST_F(CliTest, HelpFlagShort) {
   auto result = CliRunner::run("-h");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("Usage:") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("Commands:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Usage:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Commands:") != std::string::npos);
 }
 
 TEST_F(CliTest, HelpFlagLong) {
   auto result = CliRunner::run("--help");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("Usage:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Usage:") != std::string::npos);
 }
 
 TEST_F(CliTest, VersionFlagShort) {
   auto result = CliRunner::run("-v");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("scsv version") != std::string::npos);
+  EXPECT_TRUE(result.output.find("scsv version") != std::string::npos);
 }
 
 TEST_F(CliTest, VersionFlagLong) {
   auto result = CliRunner::run("--version");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("scsv version") != std::string::npos);
+  EXPECT_TRUE(result.output.find("scsv version") != std::string::npos);
 }
 
 TEST_F(CliTest, UnknownCommandShowsError) {
   auto result = CliRunner::run("unknown");
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.stdout_output.find("Unknown command") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Unknown command") != std::string::npos);
 }
 
 // =============================================================================
@@ -141,20 +150,20 @@ TEST_F(CliTest, CountBasicFile) {
   auto result = CliRunner::run("count " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // simple.csv has header + 3 data rows, count subtracts header by default
-  EXPECT_TRUE(result.stdout_output.find("3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
 }
 
 TEST_F(CliTest, CountNoHeader) {
   auto result = CliRunner::run("count -H " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Without header flag, counts all 4 rows
-  EXPECT_TRUE(result.stdout_output.find("4") != std::string::npos);
+  EXPECT_TRUE(result.output.find("4") != std::string::npos);
 }
 
 TEST_F(CliTest, CountEmptyFile) {
   auto result = CliRunner::run("count " + testDataPath("edge_cases/empty_file.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("0") != std::string::npos);
+  EXPECT_TRUE(result.output.find("0") != std::string::npos);
 }
 
 TEST_F(CliTest, CountManyRows) {
@@ -166,14 +175,14 @@ TEST_F(CliTest, CountManyRows) {
 TEST_F(CliTest, CountWithThreads) {
   auto result = CliRunner::run("count -t 2 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
 }
 
 TEST_F(CliTest, CountQuotedFields) {
   auto result = CliRunner::run("count " + testDataPath("quoted/escaped_quotes.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // escaped_quotes.csv has header + 5 data rows
-  EXPECT_TRUE(result.stdout_output.find("5") != std::string::npos);
+  EXPECT_TRUE(result.output.find("5") != std::string::npos);
 }
 
 // =============================================================================
@@ -184,19 +193,19 @@ TEST_F(CliTest, HeadDefault) {
   auto result = CliRunner::run("head " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should output header and rows
-  EXPECT_TRUE(result.stdout_output.find("A,B,C") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("1,2,3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("1,2,3") != std::string::npos);
 }
 
 TEST_F(CliTest, HeadWithNumRows) {
   auto result = CliRunner::run("head -n 2 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should output header + 2 data rows
-  EXPECT_TRUE(result.stdout_output.find("A,B,C") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("1,2,3") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("4,5,6") != std::string::npos);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("1,2,3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("4,5,6") != std::string::npos);
   // Third data row should NOT be present
-  EXPECT_TRUE(result.stdout_output.find("7,8,9") == std::string::npos);
+  EXPECT_TRUE(result.output.find("7,8,9") == std::string::npos);
 }
 
 TEST_F(CliTest, HeadZeroRows) {
@@ -222,50 +231,50 @@ TEST_F(CliTest, HeadQuotedNewlines) {
 TEST_F(CliTest, SelectByIndex) {
   auto result = CliRunner::run("select -c 0 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("A") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("1") != std::string::npos);
+  EXPECT_TRUE(result.output.find("A") != std::string::npos);
+  EXPECT_TRUE(result.output.find("1") != std::string::npos);
   // Should NOT contain columns B or C
-  EXPECT_TRUE(result.stdout_output.find("B") == std::string::npos);
+  EXPECT_TRUE(result.output.find("B") == std::string::npos);
 }
 
 TEST_F(CliTest, SelectByName) {
   auto result = CliRunner::run("select -c B " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("B") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("2") != std::string::npos);
+  EXPECT_TRUE(result.output.find("B") != std::string::npos);
+  EXPECT_TRUE(result.output.find("2") != std::string::npos);
 }
 
 TEST_F(CliTest, SelectMultipleColumns) {
   auto result = CliRunner::run("select -c 0,2 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("A") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("A") != std::string::npos);
+  EXPECT_TRUE(result.output.find("C") != std::string::npos);
   // B should not be present
-  EXPECT_TRUE(result.stdout_output.find("B") == std::string::npos);
+  EXPECT_TRUE(result.output.find("B") == std::string::npos);
 }
 
 TEST_F(CliTest, SelectInvalidColumnIndex) {
   auto result = CliRunner::run("select -c 99 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.stdout_output.find("out of range") != std::string::npos);
+  EXPECT_TRUE(result.output.find("out of range") != std::string::npos);
 }
 
 TEST_F(CliTest, SelectInvalidColumnName) {
   auto result = CliRunner::run("select -c nonexistent " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.stdout_output.find("not found") != std::string::npos);
+  EXPECT_TRUE(result.output.find("not found") != std::string::npos);
 }
 
 TEST_F(CliTest, SelectMissingColumnArg) {
   auto result = CliRunner::run("select " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.stdout_output.find("-c option required") != std::string::npos);
+  EXPECT_TRUE(result.output.find("-c option required") != std::string::npos);
 }
 
 TEST_F(CliTest, SelectNoHeaderWithColumnName) {
   auto result = CliRunner::run("select -H -c name " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.stdout_output.find("Cannot use column names") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Cannot use column names") != std::string::npos);
 }
 
 // =============================================================================
@@ -275,33 +284,33 @@ TEST_F(CliTest, SelectNoHeaderWithColumnName) {
 TEST_F(CliTest, InfoBasicFile) {
   auto result = CliRunner::run("info " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("Source:") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("Size:") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("Rows:") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("Columns:") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("3") != std::string::npos);  // columns
+  EXPECT_TRUE(result.output.find("Source:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Size:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Rows:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Columns:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);  // columns
 }
 
 TEST_F(CliTest, InfoShowsColumnNames) {
   auto result = CliRunner::run("info " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("Column names:") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("A") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("B") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Column names:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("A") != std::string::npos);
+  EXPECT_TRUE(result.output.find("B") != std::string::npos);
+  EXPECT_TRUE(result.output.find("C") != std::string::npos);
 }
 
 TEST_F(CliTest, InfoNoHeader) {
   auto result = CliRunner::run("info -H " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should NOT show column names section when no header
-  EXPECT_TRUE(result.stdout_output.find("Column names:") == std::string::npos);
+  EXPECT_TRUE(result.output.find("Column names:") == std::string::npos);
 }
 
 TEST_F(CliTest, InfoEmptyFile) {
   auto result = CliRunner::run("info " + testDataPath("edge_cases/empty_file.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("Size: 0 bytes") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Size: 0 bytes") != std::string::npos);
 }
 
 // =============================================================================
@@ -312,18 +321,18 @@ TEST_F(CliTest, PrettyBasicFile) {
   auto result = CliRunner::run("pretty " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Pretty output should have table borders
-  EXPECT_TRUE(result.stdout_output.find("+") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("|") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("-") != std::string::npos);
+  EXPECT_TRUE(result.output.find("+") != std::string::npos);
+  EXPECT_TRUE(result.output.find("|") != std::string::npos);
+  EXPECT_TRUE(result.output.find("-") != std::string::npos);
 }
 
 TEST_F(CliTest, PrettyWithNumRows) {
   auto result = CliRunner::run("pretty -n 1 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have table format
-  EXPECT_TRUE(result.stdout_output.find("+") != std::string::npos);
+  EXPECT_TRUE(result.output.find("+") != std::string::npos);
   // Should have header and one data row
-  EXPECT_TRUE(result.stdout_output.find("A") != std::string::npos);
+  EXPECT_TRUE(result.output.find("A") != std::string::npos);
 }
 
 TEST_F(CliTest, PrettyEmptyFile) {
@@ -338,32 +347,32 @@ TEST_F(CliTest, PrettyEmptyFile) {
 TEST_F(CliTest, TabDelimiter) {
   auto result = CliRunner::run("count -d tab " + testDataPath("separators/tab.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
 }
 
 TEST_F(CliTest, SemicolonDelimiter) {
   auto result = CliRunner::run("count -d semicolon " + testDataPath("separators/semicolon.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
 }
 
 TEST_F(CliTest, PipeDelimiter) {
   auto result = CliRunner::run("count -d pipe " + testDataPath("separators/pipe.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
 }
 
 TEST_F(CliTest, SingleCharDelimiter) {
   auto result = CliRunner::run("count -d , " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
 }
 
 TEST_F(CliTest, HeadWithTabDelimiter) {
   auto result = CliRunner::run("head -d tab " + testDataPath("separators/tab.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Output should use tab delimiter
-  EXPECT_TRUE(result.stdout_output.find("\t") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\t") != std::string::npos);
 }
 
 TEST_F(CliTest, AutoDetectDialect) {
@@ -372,7 +381,7 @@ TEST_F(CliTest, AutoDetectDialect) {
   auto result = CliRunner::run("head -a " + testDataPath("separators/semicolon.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should auto-detect and report the dialect
-  EXPECT_TRUE(result.stdout_output.find("Auto-detected") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Auto-detected") != std::string::npos);
 }
 
 // =============================================================================
@@ -382,26 +391,26 @@ TEST_F(CliTest, AutoDetectDialect) {
 TEST_F(CliTest, NonexistentFile) {
   auto result = CliRunner::run("count nonexistent_file.csv");
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.stdout_output.find("Error:") != std::string::npos ||
-              result.stdout_output.find("Could not load") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Error:") != std::string::npos ||
+              result.output.find("Could not load") != std::string::npos);
 }
 
 TEST_F(CliTest, InvalidThreadCount) {
   auto result = CliRunner::run("count -t 0 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.stdout_output.find("Thread count") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Thread count") != std::string::npos);
 }
 
 TEST_F(CliTest, InvalidThreadCountTooHigh) {
   auto result = CliRunner::run("count -t 999 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.stdout_output.find("Thread count") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Thread count") != std::string::npos);
 }
 
 TEST_F(CliTest, InvalidRowCount) {
   auto result = CliRunner::run("head -n abc " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.stdout_output.find("Invalid row count") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Invalid row count") != std::string::npos);
 }
 
 TEST_F(CliTest, NegativeRowCount) {
@@ -412,7 +421,7 @@ TEST_F(CliTest, NegativeRowCount) {
 TEST_F(CliTest, InvalidQuoteChar) {
   auto result = CliRunner::run("count -q abc " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.stdout_output.find("Quote character must be a single character") !=
+  EXPECT_TRUE(result.output.find("Quote character must be a single character") !=
               std::string::npos);
 }
 
@@ -423,25 +432,25 @@ TEST_F(CliTest, InvalidQuoteChar) {
 TEST_F(CliTest, CountFromStdin) {
   auto result = CliRunner::runWithFileStdin("count -", testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
 }
 
 TEST_F(CliTest, CountFromStdinNoExplicitDash) {
   auto result = CliRunner::runWithFileStdin("count", testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
 }
 
 TEST_F(CliTest, HeadFromStdin) {
   auto result = CliRunner::runWithFileStdin("head -n 2 -", testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
 }
 
 TEST_F(CliTest, InfoFromStdin) {
   auto result = CliRunner::runWithFileStdin("info -", testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("<stdin>") != std::string::npos);
+  EXPECT_TRUE(result.output.find("<stdin>") != std::string::npos);
 }
 
 // =============================================================================
@@ -496,7 +505,7 @@ TEST_F(CliTest, EscapedQuotes) {
 TEST_F(CliTest, SingleRowHeaderOnly) {
   auto result = CliRunner::run("count " + testDataPath("edge_cases/single_row_header_only.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("0") != std::string::npos);
+  EXPECT_TRUE(result.output.find("0") != std::string::npos);
 }
 
 // =============================================================================
@@ -506,13 +515,13 @@ TEST_F(CliTest, SingleRowHeaderOnly) {
 TEST_F(CliTest, HelpAfterCommand) {
   auto result = CliRunner::run("count -h");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("Usage:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Usage:") != std::string::npos);
 }
 
 TEST_F(CliTest, VersionAfterCommand) {
   auto result = CliRunner::run("head -v");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("scsv version") != std::string::npos);
+  EXPECT_TRUE(result.output.find("scsv version") != std::string::npos);
 }
 
 // =============================================================================
@@ -523,18 +532,18 @@ TEST_F(CliTest, HeadWithMultipleOptions) {
   auto result =
       CliRunner::run("head -n 2 -t 2 -d comma " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
 }
 
 TEST_F(CliTest, SelectWithMultipleColumns) {
   auto result = CliRunner::run("select -c A,C " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("A") != std::string::npos);
-  EXPECT_TRUE(result.stdout_output.find("C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("A") != std::string::npos);
+  EXPECT_TRUE(result.output.find("C") != std::string::npos);
 }
 
 TEST_F(CliTest, InfoWithAutoDetect) {
   auto result = CliRunner::run("info -a " + testDataPath("separators/semicolon.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.stdout_output.find("Auto-detected") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Auto-detected") != std::string::npos);
 }
