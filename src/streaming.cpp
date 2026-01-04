@@ -150,7 +150,9 @@ struct StreamParser::Impl {
                 ParseError err(ErrorCode::IO_ERROR, ErrorSeverity::ERROR,
                               row_count + 1, current_field_bounds.size() + 1,
                               total_bytes, "Field exceeds maximum size");
-                error_callback(err);
+                if (!error_callback(err)) {
+                    stopped = true;
+                }
             }
             errors.add_error(ErrorCode::IO_ERROR, ErrorSeverity::ERROR,
                             row_count + 1, current_field_bounds.size() + 1,

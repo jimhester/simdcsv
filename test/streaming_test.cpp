@@ -1710,10 +1710,10 @@ TEST(StreamingTest, ErrorCallbackReturnFalseHaltsParsing) {
 
     // Error callback was invoked once
     EXPECT_EQ(error_count, 1);
-    // Parsing should have stopped, so we get fewer rows than if we continued
-    // The first row has an error mid-field, but the row is still emitted
-    // before we check the error callback return value
-    EXPECT_LE(row_count, 1);
+    // Parsing halts immediately after the error callback returns false.
+    // The stopped flag is checked after processing each character, so the
+    // row with the error is NOT emitted since we stop before reaching the newline.
+    EXPECT_EQ(row_count, 0);
 }
 
 TEST(StreamingTest, MultipleErrorsInvokeCallbackMultipleTimes) {
