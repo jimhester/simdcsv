@@ -60,6 +60,9 @@ option(ENABLE_DUCKDB_BENCHMARK "Enable DuckDB CSV parser benchmarks" OFF)
 option(ENABLE_ZSV_BENCHMARK "Enable zsv CSV parser benchmarks" OFF)
 option(ENABLE_ARROW_BENCHMARK "Enable Apache Arrow CSV parser benchmarks" OFF)
 
+# Apache Arrow output integration (optional)
+option(SIMDCSV_ENABLE_ARROW "Enable Apache Arrow output integration" OFF)
+
 # zsv integration (lightweight, SIMD CSV parser)
 # Note: zsv uses Makefile, so we download source only and build it as part of our project
 if(ENABLE_ZSV_BENCHMARK)
@@ -166,6 +169,9 @@ target_include_directories(simdcsv_lib PUBLIC
 target_link_libraries(simdcsv_lib PUBLIC
     hwy
 )
+
+# Optional Apache Arrow output integration
+include(cmake/ArrowIntegration.cmake)
 
 # Main executable (portable SIMD via Highway)
 add_executable(simdcsv
