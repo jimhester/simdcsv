@@ -378,6 +378,50 @@ add_custom_command(TARGET c_api_test POST_BUILD
 # Register C API tests with CTest
 gtest_discover_tests(c_api_test)
 
+# Debug mode test executable
+add_executable(debug_test
+    test/debug_test.cpp
+)
+
+target_link_libraries(debug_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(debug_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Register debug tests with CTest
+gtest_discover_tests(debug_test)
+
+
+# C API test executable
+add_executable(c_api_test
+    test/c_api_test.cpp
+)
+
+target_link_libraries(c_api_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(c_api_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for C API tests
+add_custom_command(TARGET c_api_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register C API tests with CTest
+gtest_discover_tests(c_api_test)
+
 # Simplified API test executable
 add_executable(api_test
     test/api_test.cpp
