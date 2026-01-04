@@ -6,6 +6,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Build options
+option(BUILD_TESTING "Build test executables" ON)
+option(BUILD_BENCHMARKS "Build benchmark executables" ON)
+option(BUILD_SHARED_LIBS "Build shared library instead of static" OFF)
+
 # Code coverage option
 option(ENABLE_COVERAGE "Enable code coverage reporting" OFF)
 
@@ -43,120 +48,127 @@ set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(highway)
 
-# Google Benchmark for performance testing
-FetchContent_Declare(
-  benchmark
-  GIT_REPOSITORY https://github.com/google/benchmark.git
-  GIT_TAG v1.8.3
-)
-set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_DOXYGEN OFF CACHE BOOL "" FORCE)
-set(BENCHMARK_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(benchmark)
+# Google Benchmark for performance testing (only if benchmarks enabled)
+if(BUILD_BENCHMARKS)
+    FetchContent_Declare(
+      benchmark
+      GIT_REPOSITORY https://github.com/google/benchmark.git
+      GIT_TAG v1.8.3
+    )
+    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_DOXYGEN OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(benchmark)
+endif()
 
-# External CSV parser benchmarks (optional)
-option(ENABLE_DUCKDB_BENCHMARK "Enable DuckDB CSV parser benchmarks" OFF)
-option(ENABLE_ZSV_BENCHMARK "Enable zsv CSV parser benchmarks" OFF)
-option(ENABLE_ARROW_BENCHMARK "Enable Apache Arrow CSV parser benchmarks" OFF)
+# External CSV parser benchmarks (optional, only relevant if benchmarks enabled)
+if(BUILD_BENCHMARKS)
+    option(ENABLE_DUCKDB_BENCHMARK "Enable DuckDB CSV parser benchmarks" OFF)
+    option(ENABLE_ZSV_BENCHMARK "Enable zsv CSV parser benchmarks" OFF)
+    option(ENABLE_ARROW_BENCHMARK "Enable Apache Arrow CSV parser benchmarks" OFF)
+endif()
 
 # Apache Arrow output integration (optional)
 option(SIMDCSV_ENABLE_ARROW "Enable Apache Arrow output integration" OFF)
 
-# zsv integration (lightweight, SIMD CSV parser)
-# Note: zsv uses Makefile, so we download source only and build it as part of our project
-if(ENABLE_ZSV_BENCHMARK)
-  message(STATUS "Enabling zsv CSV parser benchmarks")
+# External benchmark parsers (only built if benchmarks enabled)
+if(BUILD_BENCHMARKS)
+    # zsv integration (lightweight, SIMD CSV parser)
+    # Note: zsv uses Makefile, so we download source only and build it as part of our project
+    if(ENABLE_ZSV_BENCHMARK)
+      message(STATUS "Enabling zsv CSV parser benchmarks")
 
-  # Download zsv source - use FetchContent_Populate manually to avoid CMake configure
-  set(ZSV_SOURCE_DIR "${CMAKE_BINARY_DIR}/_deps/zsv-src")
-  set(ZSV_DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/_deps/zsv-subbuild")
+      # Download zsv source - use FetchContent_Populate manually to avoid CMake configure
+      set(ZSV_SOURCE_DIR "${CMAKE_BINARY_DIR}/_deps/zsv-src")
+      set(ZSV_DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/_deps/zsv-subbuild")
 
-  if(NOT EXISTS "${ZSV_SOURCE_DIR}/src/zsv.c")
-    message(STATUS "Downloading zsv...")
-    file(MAKE_DIRECTORY ${ZSV_DOWNLOAD_DIR})
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} -E env GIT_TERMINAL_PROMPT=0
-              git clone --depth 1 --branch v1.3.0
-              https://github.com/liquidaty/zsv.git
-              ${ZSV_SOURCE_DIR}
-      RESULT_VARIABLE GIT_RESULT
-    )
-    if(NOT GIT_RESULT EQUAL 0)
-      message(FATAL_ERROR "Failed to clone zsv repository")
+      if(NOT EXISTS "${ZSV_SOURCE_DIR}/src/zsv.c")
+        message(STATUS "Downloading zsv...")
+        file(MAKE_DIRECTORY ${ZSV_DOWNLOAD_DIR})
+        execute_process(
+          COMMAND ${CMAKE_COMMAND} -E env GIT_TERMINAL_PROMPT=0
+                  git clone --depth 1 --branch v1.3.0
+                  https://github.com/liquidaty/zsv.git
+                  ${ZSV_SOURCE_DIR}
+          RESULT_VARIABLE GIT_RESULT
+        )
+        if(NOT GIT_RESULT EQUAL 0)
+          message(FATAL_ERROR "Failed to clone zsv repository")
+        endif()
+      endif()
+
+      # Generate zsv.h from zsv.h.in (zsv uses sed to do this in their Makefile)
+      if(NOT EXISTS "${ZSV_SOURCE_DIR}/include/zsv.h")
+        message(STATUS "Generating zsv.h...")
+        file(READ "${ZSV_SOURCE_DIR}/include/zsv.h.in" ZSV_H_IN)
+        # Remove the __ZSV_EXTRAS__DEFINE__ placeholder (we don't need ZSV_EXTRAS)
+        string(REPLACE "__ZSV_EXTRAS__DEFINE__" "" ZSV_H_OUT "${ZSV_H_IN}")
+        file(WRITE "${ZSV_SOURCE_DIR}/include/zsv.h" "${ZSV_H_OUT}")
+      endif()
+
+      # Build zsv as a static library from source
+      add_library(zsv_lib STATIC
+        ${ZSV_SOURCE_DIR}/src/zsv.c
+      )
+      target_include_directories(zsv_lib PUBLIC
+        ${ZSV_SOURCE_DIR}/include
+      )
+      # zsv source files use relative includes, need to add include dir
+      target_include_directories(zsv_lib PRIVATE
+        ${ZSV_SOURCE_DIR}/include/zsv
+      )
+      # zsv uses C11/GNU11
+      set_target_properties(zsv_lib PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED ON
+      )
+      # Add compiler flags matching zsv's Makefile
+      target_compile_options(zsv_lib PRIVATE
+        -O3
+        -fsigned-char
+        -DNDEBUG
+        -fPIC
+      )
+      # Suppress some warnings from zsv code
+      target_compile_options(zsv_lib PRIVATE
+        -Wno-missing-braces
+        -Wno-gnu-statement-expression
+      )
+
+      set(HAVE_ZSV TRUE)
+      set(ZSV_INCLUDE_DIR ${ZSV_SOURCE_DIR}/include)
     endif()
-  endif()
 
-  # Generate zsv.h from zsv.h.in (zsv uses sed to do this in their Makefile)
-  if(NOT EXISTS "${ZSV_SOURCE_DIR}/include/zsv.h")
-    message(STATUS "Generating zsv.h...")
-    file(READ "${ZSV_SOURCE_DIR}/include/zsv.h.in" ZSV_H_IN)
-    # Remove the __ZSV_EXTRAS__DEFINE__ placeholder (we don't need ZSV_EXTRAS)
-    string(REPLACE "__ZSV_EXTRAS__DEFINE__" "" ZSV_H_OUT "${ZSV_H_IN}")
-    file(WRITE "${ZSV_SOURCE_DIR}/include/zsv.h" "${ZSV_H_OUT}")
-  endif()
+    # DuckDB integration (full database with CSV reader)
+    if(ENABLE_DUCKDB_BENCHMARK)
+      message(STATUS "Enabling DuckDB CSV parser benchmarks (this may take a while to build)")
+      FetchContent_Declare(
+        duckdb
+        GIT_REPOSITORY https://github.com/duckdb/duckdb.git
+        GIT_TAG v1.1.3
+        GIT_SHALLOW TRUE
+      )
+      set(BUILD_SHELL OFF CACHE BOOL "" FORCE)
+      set(BUILD_UNITTESTS OFF CACHE BOOL "" FORCE)
+      set(ENABLE_SANITIZER OFF CACHE BOOL "" FORCE)
+      set(BUILD_PARQUET_EXTENSION OFF CACHE BOOL "" FORCE)
+      set(BUILD_HTTPFS_EXTENSION OFF CACHE BOOL "" FORCE)
+      set(BUILD_JSON_EXTENSION OFF CACHE BOOL "" FORCE)
+      FetchContent_MakeAvailable(duckdb)
+      set(HAVE_DUCKDB TRUE)
+    endif()
 
-  # Build zsv as a static library from source
-  add_library(zsv_lib STATIC
-    ${ZSV_SOURCE_DIR}/src/zsv.c
-  )
-  target_include_directories(zsv_lib PUBLIC
-    ${ZSV_SOURCE_DIR}/include
-  )
-  # zsv source files use relative includes, need to add include dir
-  target_include_directories(zsv_lib PRIVATE
-    ${ZSV_SOURCE_DIR}/include/zsv
-  )
-  # zsv uses C11/GNU11
-  set_target_properties(zsv_lib PROPERTIES
-    C_STANDARD 11
-    C_STANDARD_REQUIRED ON
-  )
-  # Add compiler flags matching zsv's Makefile
-  target_compile_options(zsv_lib PRIVATE
-    -O3
-    -fsigned-char
-    -DNDEBUG
-    -fPIC
-  )
-  # Suppress some warnings from zsv code
-  target_compile_options(zsv_lib PRIVATE
-    -Wno-missing-braces
-    -Wno-gnu-statement-expression
-  )
-
-  set(HAVE_ZSV TRUE)
-  set(ZSV_INCLUDE_DIR ${ZSV_SOURCE_DIR}/include)
+    # Apache Arrow integration (columnar CSV reader)
+    if(ENABLE_ARROW_BENCHMARK)
+      message(STATUS "Enabling Apache Arrow CSV parser benchmarks")
+      find_package(Arrow REQUIRED)
+      set(HAVE_ARROW TRUE)
+    endif()
 endif()
 
-# DuckDB integration (full database with CSV reader)
-if(ENABLE_DUCKDB_BENCHMARK)
-  message(STATUS "Enabling DuckDB CSV parser benchmarks (this may take a while to build)")
-  FetchContent_Declare(
-    duckdb
-    GIT_REPOSITORY https://github.com/duckdb/duckdb.git
-    GIT_TAG v1.1.3
-    GIT_SHALLOW TRUE
-  )
-  set(BUILD_SHELL OFF CACHE BOOL "" FORCE)
-  set(BUILD_UNITTESTS OFF CACHE BOOL "" FORCE)
-  set(ENABLE_SANITIZER OFF CACHE BOOL "" FORCE)
-  set(BUILD_PARQUET_EXTENSION OFF CACHE BOOL "" FORCE)
-  set(BUILD_HTTPFS_EXTENSION OFF CACHE BOOL "" FORCE)
-  set(BUILD_JSON_EXTENSION OFF CACHE BOOL "" FORCE)
-  FetchContent_MakeAvailable(duckdb)
-  set(HAVE_DUCKDB TRUE)
-endif()
-
-# Apache Arrow integration (columnar CSV reader)
-if(ENABLE_ARROW_BENCHMARK)
-  message(STATUS "Enabling Apache Arrow CSV parser benchmarks")
-  find_package(Arrow REQUIRED)
-  set(HAVE_ARROW TRUE)
-endif()
-
-# Library target
-add_library(simdcsv_lib STATIC
+# Library target (SHARED or STATIC based on BUILD_SHARED_LIBS)
+add_library(simdcsv_lib
     src/io_util.cpp
     src/error.cpp
     src/dialect.cpp
@@ -189,19 +201,22 @@ target_link_libraries(scsv PRIVATE
 # Suppress debug output for CLI
 target_compile_definitions(scsv PRIVATE SIMDCSV_BENCHMARK_MODE)
 
-# Testing
-enable_testing()
+# =============================================================================
+# Testing (optional, controlled by BUILD_TESTING)
+# =============================================================================
+if(BUILD_TESTING)
+    enable_testing()
 
-# Download and configure Google Test
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG v1.14.0
-)
+    # Download and configure Google Test
+    FetchContent_Declare(
+      googletest
+      GIT_REPOSITORY https://github.com/google/googletest.git
+      GIT_TAG v1.14.0
+    )
 
-# For Windows: Prevent overriding the parent project's compiler/linker settings
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+    # For Windows: Prevent overriding the parent project's compiler/linker settings
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
 
 # Test executable
 add_executable(simdcsv_test
@@ -639,7 +654,31 @@ add_custom_command(TARGET two_pass_coverage_test POST_BUILD
 # Register two-pass coverage tests with CTest
 gtest_discover_tests(two_pass_coverage_test)
 
-# Benchmark executable - base sources
+# Arrow output test (only if Arrow is enabled)
+if(SIMDCSV_ENABLE_ARROW)
+    add_executable(arrow_output_test test/arrow_output_test.cpp)
+    target_link_libraries(arrow_output_test PRIVATE simdcsv_lib GTest::gtest_main pthread)
+    target_include_directories(arrow_output_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_custom_command(TARGET arrow_output_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
+    gtest_discover_tests(arrow_output_test)
+
+    # Arrow file-based tests (loading real CSV files)
+    add_executable(arrow_file_test test/arrow_file_test.cpp)
+    target_link_libraries(arrow_file_test PRIVATE simdcsv_lib GTest::gtest_main pthread)
+    target_include_directories(arrow_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_custom_command(TARGET arrow_file_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
+    gtest_discover_tests(arrow_file_test)
+endif()
+
+endif() # BUILD_TESTING
+
+# =============================================================================
+# Benchmarks (optional, controlled by BUILD_BENCHMARKS)
+# =============================================================================
+if(BUILD_BENCHMARKS)
+    # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
     benchmark/benchmark_main.cpp
     benchmark/basic_benchmarks.cpp
@@ -696,24 +735,6 @@ add_custom_command(TARGET simdcsv_benchmark POST_BUILD
     ${CMAKE_CURRENT_BINARY_DIR}/benchmark/data
 )
 
-# Arrow output test (only if Arrow is enabled)
-if(SIMDCSV_ENABLE_ARROW)
-    add_executable(arrow_output_test test/arrow_output_test.cpp)
-    target_link_libraries(arrow_output_test PRIVATE simdcsv_lib GTest::gtest_main pthread)
-    target_include_directories(arrow_output_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    add_custom_command(TARGET arrow_output_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
-    gtest_discover_tests(arrow_output_test)
-
-    # Arrow file-based tests (loading real CSV files)
-    add_executable(arrow_file_test test/arrow_file_test.cpp)
-    target_link_libraries(arrow_file_test PRIVATE simdcsv_lib GTest::gtest_main pthread)
-    target_include_directories(arrow_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    add_custom_command(TARGET arrow_file_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
-    gtest_discover_tests(arrow_file_test)
-endif()
-
 # Quote mask micro-benchmark (scalar vs CLMul comparison)
 # This is a standalone benchmark for measuring the performance improvement
 # of the PCLMULQDQ/PMULL-based quote mask implementation vs the scalar loop.
@@ -726,6 +747,8 @@ target_link_libraries(quote_mask_benchmark PRIVATE
 target_include_directories(quote_mask_benchmark PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+endif() # BUILD_BENCHMARKS
 
 # =============================================================================
 # Fuzz Testing Support
