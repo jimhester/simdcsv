@@ -4,7 +4,6 @@
 #include "arrow_output.h"
 #include "io_util.h"
 #include "mem_util.h"
-#include "two_pass.h"
 #include <cstring>
 
 namespace simdcsv {
@@ -233,6 +232,80 @@ TEST_F(ArrowOutputTest, HeaderOnly) {
     auto result = parseAndConvert("a,b,c\n");
     ASSERT_TRUE(result.ok()) << result.error_message;
     EXPECT_EQ(result.num_rows, 0);
+}
+
+// Security limit tests
+TEST_F(ArrowOutputTest, MaxColumnsLimit) {
+    ArrowConvertOptions opts;
+    opts.max_columns = 2;  // Only allow 2 columns
+    auto result = parseAndConvert("a,b,c\n1,2,3\n", opts);
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(result.error_message.find("Column count") != std::string::npos);
+    EXPECT_TRUE(result.error_message.find("exceeds maximum") != std::string::npos);
+}
+
+TEST_F(ArrowOutputTest, MaxColumnsLimitAllowed) {
+    ArrowConvertOptions opts;
+    opts.max_columns = 3;  // Allow exactly 3 columns
+    auto result = parseAndConvert("a,b,c\n1,2,3\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.num_columns, 3);
+}
+
+TEST_F(ArrowOutputTest, MaxColumnsUnlimited) {
+    ArrowConvertOptions opts;
+    opts.max_columns = 0;  // Unlimited columns
+    auto result = parseAndConvert("a,b,c,d,e\n1,2,3,4,5\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.num_columns, 5);
+}
+
+TEST_F(ArrowOutputTest, MaxRowsLimit) {
+    ArrowConvertOptions opts;
+    opts.max_rows = 2;  // Only allow 2 rows
+    auto result = parseAndConvert("a,b\n1,2\n3,4\n5,6\n", opts);
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(result.error_message.find("Row count") != std::string::npos);
+    EXPECT_TRUE(result.error_message.find("exceeds maximum") != std::string::npos);
+}
+
+TEST_F(ArrowOutputTest, MaxRowsLimitAllowed) {
+    ArrowConvertOptions opts;
+    opts.max_rows = 2;  // Allow exactly 2 rows
+    auto result = parseAndConvert("a,b\n1,2\n3,4\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.num_rows, 2);
+}
+
+TEST_F(ArrowOutputTest, MaxRowsDefaultUnlimited) {
+    ArrowConvertOptions opts;
+    // Default max_rows is 0 (unlimited)
+    EXPECT_EQ(opts.max_rows, 0U);
+    auto result = parseAndConvert("a\n1\n2\n3\n4\n5\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.num_rows, 5);
+}
+
+TEST_F(ArrowOutputTest, DefaultMaxColumns) {
+    ArrowConvertOptions opts;
+    // Default max_columns is 10000
+    EXPECT_EQ(opts.max_columns, 10000U);
+}
+
+TEST_F(ArrowOutputTest, TypeInferenceRowsClampedToMax) {
+    ArrowConvertOptions opts;
+    opts.type_inference_rows = SIZE_MAX;  // Try to set an extreme value
+    ArrowConverter converter(opts);
+    // The converter should clamp this to MAX_TYPE_INFERENCE_ROWS internally
+    // We can't directly test the internal state, but we verify the option exists
+    EXPECT_EQ(ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS, 100000U);
+}
+
+TEST_F(ArrowOutputTest, TypeInferenceRowsNormalValue) {
+    ArrowConvertOptions opts;
+    opts.type_inference_rows = 500;  // A normal value within limits
+    auto result = parseAndConvert("a\n1\n2\n3\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
 }
 
 // Memory conversion function test

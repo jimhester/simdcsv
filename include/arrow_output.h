@@ -53,6 +53,12 @@ struct ArrowConvertOptions {
     std::vector<std::string> true_values = {"true", "True", "TRUE", "1", "yes", "Yes", "YES"};
     std::vector<std::string> false_values = {"false", "False", "FALSE", "0", "no", "No", "NO"};
     arrow::MemoryPool* memory_pool = nullptr;
+
+    // Security limits to prevent resource exhaustion from malformed/malicious CSV files.
+    // A value of 0 means no limit (unlimited).
+    size_t max_columns = 10000;         // Maximum number of columns allowed
+    size_t max_rows = 0;                // Maximum number of rows allowed (0 = unlimited)
+    static constexpr size_t MAX_TYPE_INFERENCE_ROWS = 100000;  // Upper bound for type_inference_rows
 };
 
 struct ArrowConvertResult {
