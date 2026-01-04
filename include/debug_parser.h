@@ -64,9 +64,16 @@ public:
         trace.end_phase(len);
 
         if (trace.dump_masks() && result) {
+            // Calculate safe total_size: max index accessed + 1
+            // For strided layout: max_idx = thread_id + (count-1) * stride
+            size_t max_count = 0;
+            for (uint8_t t = 0; t < out.n_threads; ++t) {
+                if (out.n_indexes[t] > max_count) max_count = out.n_indexes[t];
+            }
+            size_t total_size = max_count * out.n_threads;
             for (uint8_t t = 0; t < out.n_threads; ++t) {
                 if (out.n_indexes[t] > 0) {
-                    trace.dump_indexes(out.indexes, out.n_indexes[t], t, out.n_threads);
+                    trace.dump_indexes(out.indexes, out.n_indexes[t], t, out.n_threads, total_size);
                 }
             }
         }
@@ -91,7 +98,13 @@ public:
         trace.end_phase(len);
 
         if (trace.dump_masks()) {
-            trace.dump_indexes(out.indexes, out.n_indexes[0], 0, out.n_threads);
+            // Calculate safe total_size for strided layout
+            size_t max_count = 0;
+            for (uint8_t t = 0; t < out.n_threads; ++t) {
+                if (out.n_indexes[t] > max_count) max_count = out.n_indexes[t];
+            }
+            size_t total_size = max_count * out.n_threads;
+            trace.dump_indexes(out.indexes, out.n_indexes[0], 0, out.n_threads, total_size);
         }
 
         trace.log("Parse complete: %zu errors, %s",
