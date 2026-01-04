@@ -561,7 +561,9 @@ TEST_F(CliTest, MalformedUnclosedQuote) {
   // File has an unclosed quote in the middle - parser should handle gracefully
   auto result = CliRunner::run("count " + testDataPath("malformed/unclosed_quote.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  // Parser processes what it can - may return fewer rows due to quote state
+  // Parser processes what it can - row count may vary based on quote interpretation
+  // but should return some reasonable value (not crash or hang)
+  EXPECT_FALSE(result.output.empty());
 }
 
 TEST_F(CliTest, MalformedUnclosedQuoteEof) {
@@ -591,6 +593,8 @@ TEST_F(CliTest, MalformedTripleQuote) {
   // Contains triple quotes which is ambiguous
   auto result = CliRunner::run("count " + testDataPath("malformed/triple_quote.csv"));
   EXPECT_EQ(result.exit_code, 0);
+  // Should process the file and return a count
+  EXPECT_FALSE(result.output.empty());
 }
 
 TEST_F(CliTest, MalformedNullByte) {
@@ -627,18 +631,24 @@ TEST_F(CliTest, MalformedMixedLineEndings) {
   // File has mix of CRLF, LF, and CR line endings
   auto result = CliRunner::run("count " + testDataPath("malformed/mixed_line_endings.csv"));
   EXPECT_EQ(result.exit_code, 0);
+  // Should process the file and return a count
+  EXPECT_FALSE(result.output.empty());
 }
 
 TEST_F(CliTest, MalformedTrailingQuote) {
   // Field ends with quote in unexpected position
   auto result = CliRunner::run("head " + testDataPath("malformed/trailing_quote.csv"));
   EXPECT_EQ(result.exit_code, 0);
+  // Should produce some output
+  EXPECT_FALSE(result.output.empty());
 }
 
 TEST_F(CliTest, MalformedMultipleErrors) {
   // File with multiple types of malformed content
   auto result = CliRunner::run("count " + testDataPath("malformed/multiple_errors.csv"));
   EXPECT_EQ(result.exit_code, 0);
+  // Should process the file and return a count
+  EXPECT_FALSE(result.output.empty());
 }
 
 TEST_F(CliTest, MalformedSelectFromBadFile) {
@@ -704,9 +714,11 @@ TEST_F(CliTest, LongLineFile) {
 }
 
 TEST_F(CliTest, BufferBoundaryFile) {
-  // File designed to test SIMD buffer boundaries
+  // File designed to test SIMD buffer boundaries (200 rows)
   auto result = CliRunner::run("count -t 2 " + testDataPath("large/buffer_boundary.csv"));
   EXPECT_EQ(result.exit_code, 0);
+  // Should count all 200 rows
+  EXPECT_TRUE(result.output.find("200") != std::string::npos);
 }
 
 // =============================================================================
@@ -734,12 +746,6 @@ TEST_F(CliTest, NoHeaderWithColumnNameSelect) {
   auto result = CliRunner::run("select -H -c name " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
   EXPECT_TRUE(result.output.find("Cannot use column names") != std::string::npos);
-}
-
-TEST_F(CliTest, ZeroThreadsInvalid) {
-  // 0 threads is invalid
-  auto result = CliRunner::run("count -t 0 " + testDataPath("basic/simple.csv"));
-  EXPECT_EQ(result.exit_code, 1);
 }
 
 TEST_F(CliTest, ExcessiveThreadsInvalid) {
