@@ -508,6 +508,39 @@ TEST_F(BranchlessParsingTest, LargeDataMultithreaded) {
     EXPECT_TRUE(success) << "Branchless parser should handle large multithreaded data";
 }
 
+TEST_F(BranchlessParsingTest, CustomDelimiterMultithreaded) {
+    // Test multi-threaded parsing with semicolon delimiter
+    std::vector<uint8_t> data;
+    std::string content;
+
+    // Generate large semicolon-delimited data
+    content = "A;B;C\n";
+    for (int i = 0; i < 10000; i++) {
+        content += std::to_string(i) + ";";
+        content += "\"value" + std::to_string(i) + "\";";
+        content += "data" + std::to_string(i) + "\n";
+    }
+
+    data.resize(content.size() + SIMDCSV_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(data.size(), 4);
+
+    bool success = parser.parse_branchless(data.data(), idx, content.size(),
+                                           simdcsv::Dialect::semicolon());
+
+    EXPECT_TRUE(success) << "Branchless parser should handle multi-threaded semicolon delimiter";
+
+    // Verify we found the expected number of separators
+    uint64_t total_seps = 0;
+    for (int i = 0; i < 4; i++) {
+        total_seps += idx.n_indexes[i];
+    }
+    // Should have ~30000 separators (3 per row * 10001 rows including header)
+    EXPECT_GT(total_seps, 30000) << "Should find separators with semicolon delimiter";
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

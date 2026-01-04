@@ -1021,9 +1021,15 @@ class two_pass {
    * @return true if parsing completed successfully, false otherwise.
    *
    * @note This method is optimized for performance over error reporting.
-   *       Use parse_with_errors() for detailed error information.
+   *       It does NOT collect errors like unclosed quotes, null bytes, or
+   *       invalid escape sequences. For detailed error information, use
+   *       parse_with_errors() instead.
+   *
+   * @warning When parsing untrusted input, consider using parse_with_errors()
+   *          to detect malformed CSV that this method may silently accept.
    *
    * @see parse() For the standard parsing method
+   * @see parse_with_errors() For parsing with error collection
    * @see BranchlessStateMachine For implementation details
    */
   bool parse_branchless(const uint8_t* buf, index& out, size_t len,
@@ -1053,13 +1059,14 @@ class two_pass {
     std::vector<std::future<stats>> first_pass_fut(n_threads);
     std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
 
+    char delim = dialect.delimiter;
     char quote = dialect.quote_char;
 
     // First pass: find chunk boundaries (reuse existing implementation)
     for (int i = 0; i < n_threads; ++i) {
       first_pass_fut[i] = std::async(std::launch::async,
-          [buf, chunk_size, i, quote]() {
-            return first_pass_speculate(buf, chunk_size * i, chunk_size * (i + 1), ',', quote);
+          [buf, chunk_size, i, delim, quote]() {
+            return first_pass_speculate(buf, chunk_size * i, chunk_size * (i + 1), delim, quote);
           });
     }
 
@@ -1081,9 +1088,10 @@ class two_pass {
     }
 
     // Second pass: branchless parsing of each chunk
+    // Capture sm by value since it's small (~300 bytes) and we need thread safety
     for (int i = 0; i < n_threads; ++i) {
       second_pass_fut[i] = std::async(std::launch::async,
-          [&sm, buf, &out, &chunk_pos, i]() {
+          [sm, buf, &out, &chunk_pos, i]() {
             return second_pass_simd_branchless(sm, buf, chunk_pos[i], chunk_pos[i + 1], &out, i);
           });
     }
