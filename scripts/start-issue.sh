@@ -4,7 +4,9 @@ set -euo pipefail
 # start-issue.sh - Start a Claude Code session for a GitHub issue
 # Usage: ./start-issue.sh <issue-url-or-number> [description]
 #        ./start-issue.sh "description of new feature"
+#        ./start-issue.sh --spawn <issue> [...]  # Spawn in new iTerm2 tab(s)
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 WORKTREE_BASE="${REPO_ROOT}/../worktrees"
 MAIN_BRANCH="${MAIN_BRANCH:-main}"
@@ -13,11 +15,16 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") <issue-url-or-number> [description]
        $(basename "$0") "description of new feature"
+       $(basename "$0") --spawn <issue> [issue2 ...]
 
 Examples:
   $(basename "$0") https://github.com/owner/repo/issues/42
   $(basename "$0") 42 "fix memory leak"
   $(basename "$0") "add dark mode support"
+  $(basename "$0") --spawn 97 98 99    # Spawn multiple in new tabs
+
+Options:
+  --spawn    Spawn issue(s) in new iTerm2 tab(s) instead of current terminal
 
 Environment:
   MAIN_BRANCH    Base branch for new branches (default: main)
@@ -110,6 +117,21 @@ find_existing_worktree() {
 main() {
     if [[ $# -lt 1 ]]; then
         usage
+    fi
+
+    # Handle --spawn flag: delegate to spawn-issue.sh
+    if [[ "$1" == "--spawn" ]]; then
+        shift
+        if [[ $# -lt 1 ]]; then
+            echo "Error: --spawn requires at least one issue"
+            exit 1
+        fi
+        local spawn_script="${SCRIPT_DIR}/spawn-issue.sh"
+        if [[ ! -x "$spawn_script" ]]; then
+            echo "Error: spawn-issue.sh not found at: $spawn_script"
+            exit 1
+        fi
+        exec "$spawn_script" --batch "$@"
     fi
 
     local input="$1"
