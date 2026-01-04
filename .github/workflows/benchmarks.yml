@@ -42,7 +42,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake build-essential python3-pip jq
-        pip3 install pandas matplotlib
+        pip3 install --break-system-packages pandas matplotlib || pip3 install pandas matplotlib
 
     - name: Install dependencies (macOS)
       if: runner.os == 'macOS'
@@ -82,10 +82,15 @@ jobs:
         # Create output directory
         mkdir -p benchmark_output
 
-        # Determine benchmark filter
-        FILTER="${{ github.event.inputs.benchmark_filter }}"
+        # Determine benchmark filter (validated and quoted to prevent injection)
+        FILTER='${{ github.event.inputs.benchmark_filter }}'
         FILTER_ARG=""
         if [ -n "$FILTER" ]; then
+          # Validate filter contains only safe characters (alphanumeric, _, -, /, .)
+          if ! echo "$FILTER" | grep -qE '^[a-zA-Z0-9_./\-*]+$'; then
+            echo "Error: Invalid benchmark filter pattern. Only alphanumeric, underscore, dash, dot, slash, and asterisk are allowed."
+            exit 1
+          fi
           FILTER_ARG="--benchmark_filter=$FILTER"
         fi
 
@@ -108,7 +113,7 @@ jobs:
           --benchmark_out="$RESULTS_FILE" \
           --benchmark_repetitions=3 \
           --benchmark_report_aggregates_only=true \
-          $FILTER_ARG || true
+          $FILTER_ARG
 
         # Store results file path for later steps
         echo "results_file=$RESULTS_FILE" >> $GITHUB_OUTPUT
@@ -132,7 +137,7 @@ jobs:
           REPORT_FILE="benchmark_output/benchmark_report_${REF_NAME}_${RUNNER_OS}.md"
 
           if [ -f "benchmark/report_generator.py" ]; then
-            python3 benchmark/report_generator.py "$RESULTS_FILE" --output "$REPORT_FILE" || true
+            python3 benchmark/report_generator.py "$RESULTS_FILE" --output "$REPORT_FILE"
           fi
 
           # Create a summary for GitHub Actions
@@ -175,12 +180,18 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake build-essential python3-pip jq
-        pip3 install pandas matplotlib
+        pip3 install --break-system-packages pandas matplotlib || pip3 install pandas matplotlib
 
     - name: Build benchmark for comparison ref
       run: |
-        # Checkout comparison ref
-        git checkout ${{ github.event.inputs.compare_ref }}
+        # Validate and checkout comparison ref
+        COMPARE_REF='${{ github.event.inputs.compare_ref }}'
+        # Validate ref contains only safe characters (alphanumeric, _, -, /, .)
+        if ! echo "$COMPARE_REF" | grep -qE '^[a-zA-Z0-9_./\-]+$'; then
+          echo "Error: Invalid compare_ref. Only alphanumeric, underscore, dash, dot, and slash are allowed."
+          exit 1
+        fi
+        git checkout "$COMPARE_REF"
 
         # Build
         cmake -B build-compare -DCMAKE_BUILD_TYPE=Release
@@ -188,9 +199,14 @@ jobs:
 
         # Run benchmarks
         mkdir -p comparison_output
-        FILTER="${{ github.event.inputs.benchmark_filter }}"
+        FILTER='${{ github.event.inputs.benchmark_filter }}'
         FILTER_ARG=""
         if [ -n "$FILTER" ]; then
+          # Validate filter contains only safe characters (alphanumeric, _, -, /, .)
+          if ! echo "$FILTER" | grep -qE '^[a-zA-Z0-9_./\-*]+$'; then
+            echo "Error: Invalid benchmark filter pattern. Only alphanumeric, underscore, dash, dot, slash, and asterisk are allowed."
+            exit 1
+          fi
           FILTER_ARG="--benchmark_filter=$FILTER"
         fi
 
@@ -199,7 +215,7 @@ jobs:
           --benchmark_out="comparison_output/baseline.json" \
           --benchmark_repetitions=3 \
           --benchmark_report_aggregates_only=true \
-          $FILTER_ARG || true
+          $FILTER_ARG
 
     - name: Download current benchmark results
       uses: actions/download-artifact@v4
@@ -224,7 +240,7 @@ jobs:
             python3 benchmark/report_generator.py "$CURRENT_FILE" \
               --baseline "$BASELINE_FILE" \
               --output comparison_output/comparison_report.md \
-              --regression-threshold 10.0 || true
+              --regression-threshold 10.0
 
             if [ -f "comparison_output/comparison_report.md" ]; then
               cat comparison_output/comparison_report.md >> $GITHUB_STEP_SUMMARY
@@ -243,9 +259,9 @@ jobs:
             while IFS='|' read -r name current_time; do
               baseline_time=$(grep "^$name|" /tmp/baseline.txt | cut -d'|' -f2)
               if [ -n "$baseline_time" ]; then
-                current_ms=$(echo "scale=2; $current_time / 1000000" | bc)
-                baseline_ms=$(echo "scale=2; $baseline_time / 1000000" | bc)
-                change=$(echo "scale=1; (($current_time - $baseline_time) / $baseline_time) * 100" | bc)
+                current_ms=$(echo "scale=2; $current_time / 1000000" | bc -l)
+                baseline_ms=$(echo "scale=2; $baseline_time / 1000000" | bc -l)
+                change=$(echo "scale=1; (($current_time - $baseline_time) / $baseline_time) * 100" | bc -l)
                 echo "| $name | $current_ms | $baseline_ms | ${change}% |" >> $GITHUB_STEP_SUMMARY
               fi
             done < /tmp/current.txt
@@ -306,5 +322,25 @@ jobs:
         git config user.email "github-actions[bot]@users.noreply.github.com"
 
         git add benchmark_results/releases/
-        git diff --staged --quiet || git commit -m "chore: Store benchmark results for ${{ github.ref_name }}"
-        git push || true
+
+        # Check if there are changes to commit
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+          exit 0
+        fi
+
+        git commit -m "chore: Store benchmark results for ${{ github.ref_name }}"
+
+        # Retry push with rebase to handle concurrent pushes
+        MAX_RETRIES=3
+        for i in $(seq 1 $MAX_RETRIES); do
+          if git push; then
+            echo "Successfully pushed results"
+            exit 0
+          fi
+          echo "Push failed, attempt $i of $MAX_RETRIES. Rebasing and retrying..."
+          git pull --rebase origin main
+        done
+
+        echo "Failed to push after $MAX_RETRIES attempts"
+        exit 1
