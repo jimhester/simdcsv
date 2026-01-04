@@ -332,6 +332,83 @@ TEST_F(ArrowOutputTest, TypeInferenceRowsNormalValue) {
     ASSERT_TRUE(result.ok()) << result.error_message;
 }
 
+// Total cell count limit tests (Issue #91)
+TEST_F(ArrowOutputTest, MaxTotalCellsLimit) {
+    ArrowConvertOptions opts;
+    opts.max_total_cells = 5;  // 3 columns × 2 rows = 6 cells exceeds limit
+    auto result = parseAndConvert("a,b,c\n1,2,3\n4,5,6\n", opts);
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(result.error_message.find("Total cell count") != std::string::npos);
+    EXPECT_TRUE(result.error_message.find("exceeds maximum") != std::string::npos);
+}
+
+TEST_F(ArrowOutputTest, MaxTotalCellsLimitAllowed) {
+    ArrowConvertOptions opts;
+    opts.max_total_cells = 6;  // 3 columns × 2 rows = 6 cells exactly at limit
+    auto result = parseAndConvert("a,b,c\n1,2,3\n4,5,6\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.num_columns, 3);
+    EXPECT_EQ(result.num_rows, 2);
+}
+
+TEST_F(ArrowOutputTest, MaxTotalCellsUnlimited) {
+    ArrowConvertOptions opts;
+    opts.max_total_cells = 0;  // Unlimited cells
+    auto result = parseAndConvert("a,b,c,d,e\n1,2,3,4,5\n6,7,8,9,10\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.num_columns, 5);
+    EXPECT_EQ(result.num_rows, 2);
+}
+
+TEST_F(ArrowOutputTest, DefaultMaxTotalCells) {
+    ArrowConvertOptions opts;
+    // Default max_total_cells is 100M
+    EXPECT_EQ(opts.max_total_cells, 100000000U);
+}
+
+TEST_F(ArrowOutputTest, MaxTotalCellsWithLargeColumnsSmallRows) {
+    // Tests that high column × low row count is caught
+    ArrowConvertOptions opts;
+    opts.max_columns = 0;  // Disable column limit for this test
+    opts.max_total_cells = 10;  // Only allow 10 total cells
+    // 5 columns × 3 rows = 15 cells > 10
+    auto result = parseAndConvert("a,b,c,d,e\n1,2,3,4,5\n6,7,8,9,10\n11,12,13,14,15\n", opts);
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(result.error_message.find("Total cell count") != std::string::npos);
+}
+
+TEST_F(ArrowOutputTest, MaxTotalCellsWithSmallColumnsLargeRows) {
+    // Tests that low column × high row count is caught
+    ArrowConvertOptions opts;
+    opts.max_total_cells = 5;  // Only allow 5 total cells
+    // 2 columns × 4 rows = 8 cells > 5
+    auto result = parseAndConvert("a,b\n1,2\n3,4\n5,6\n7,8\n", opts);
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(result.error_message.find("Total cell count") != std::string::npos);
+}
+
+TEST_F(ArrowOutputTest, MaxTotalCellsInteractionWithColumnLimit) {
+    // Both column limit and total cell limit are enforced
+    ArrowConvertOptions opts;
+    opts.max_columns = 2;      // Only allow 2 columns
+    opts.max_total_cells = 100; // Plenty of cell room
+    // 3 columns should fail on column limit first
+    auto result = parseAndConvert("a,b,c\n1,2,3\n", opts);
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(result.error_message.find("Column count") != std::string::npos);
+}
+
+TEST_F(ArrowOutputTest, MaxTotalCellsInteractionWithRowLimit) {
+    // Both row limit and total cell limit are enforced
+    ArrowConvertOptions opts;
+    opts.max_rows = 2;          // Only allow 2 rows
+    opts.max_total_cells = 100; // Plenty of cell room
+    // 3 rows should fail on row limit first
+    auto result = parseAndConvert("a,b\n1,2\n3,4\n5,6\n", opts);
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(result.error_message.find("Row count") != std::string::npos);
+}
+
 // Memory conversion function test
 TEST_F(ArrowOutputTest, FromMemoryConversion) {
     std::string csv = "name,age\nAlice,30\nBob,25\n";
