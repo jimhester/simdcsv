@@ -1768,3 +1768,38 @@ TEST(StreamingTest, ErrorCallbackNotInvokedInBestEffortMode) {
     // Error callback should NOT be invoked in BEST_EFFORT mode
     EXPECT_FALSE(error_callback_invoked);
 }
+
+TEST(StreamingTest, MaxFieldSizeErrorCallbackReturnFalseHaltsParsing) {
+    // Test that max field size error callback return value is respected
+    std::string big_field(1000, 'x');
+    std::string csv = big_field + ",test\nnormal,data\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.max_field_size = 100;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+
+    int error_count = 0;
+    parser.set_error_handler([&error_count](const ParseError& err) {
+        (void)err;
+        ++error_count;
+        return false;  // Request halt
+    });
+
+    int row_count = 0;
+    parser.set_row_handler([&row_count](const Row& row) {
+        (void)row;
+        ++row_count;
+        return true;
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    // Error callback was invoked once for the oversized field
+    EXPECT_EQ(error_count, 1);
+    // Parsing should have halted, so second row is not processed
+    EXPECT_EQ(row_count, 0);
+}
