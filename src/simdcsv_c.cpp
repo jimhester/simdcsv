@@ -28,7 +28,10 @@ struct simdcsv_index {
 
     simdcsv_index(size_t buffer_length, size_t threads)
         : idx(), num_threads(threads) {
-        // Initialize will be called during parsing
+        // Pre-allocate the index arrays
+        idx.n_threads = threads;
+        idx.n_indexes = new uint64_t[threads]();  // Zero-initialize
+        idx.indexes = new uint64_t[buffer_length];
     }
 };
 
@@ -58,8 +61,8 @@ struct simdcsv_detection_result {
     std::string warning_str;
 
     simdcsv_detection_result(const simdcsv::DetectionResult& r) : result(r) {
-        if (r.warning) {
-            warning_str = *r.warning;
+        if (!r.warning.empty()) {
+            warning_str = r.warning;
         }
     }
 };
@@ -85,18 +88,18 @@ static simdcsv_error_mode_t to_c_mode(simdcsv::ErrorMode mode) {
 
 static simdcsv_error_t to_c_error(simdcsv::ErrorCode code) {
     switch (code) {
-        case simdcsv::ErrorCode::OK: return SIMDCSV_OK;
+        case simdcsv::ErrorCode::NONE: return SIMDCSV_OK;
         case simdcsv::ErrorCode::UNCLOSED_QUOTE: return SIMDCSV_ERROR_UNCLOSED_QUOTE;
         case simdcsv::ErrorCode::INVALID_QUOTE_ESCAPE: return SIMDCSV_ERROR_INVALID_QUOTE_ESCAPE;
-        case simdcsv::ErrorCode::QUOTE_IN_UNQUOTED: return SIMDCSV_ERROR_QUOTE_IN_UNQUOTED;
-        case simdcsv::ErrorCode::INCONSISTENT_FIELDS: return SIMDCSV_ERROR_INCONSISTENT_FIELDS;
+        case simdcsv::ErrorCode::QUOTE_IN_UNQUOTED_FIELD: return SIMDCSV_ERROR_QUOTE_IN_UNQUOTED;
+        case simdcsv::ErrorCode::INCONSISTENT_FIELD_COUNT: return SIMDCSV_ERROR_INCONSISTENT_FIELDS;
         case simdcsv::ErrorCode::FIELD_TOO_LARGE: return SIMDCSV_ERROR_FIELD_TOO_LARGE;
         case simdcsv::ErrorCode::MIXED_LINE_ENDINGS: return SIMDCSV_ERROR_MIXED_LINE_ENDINGS;
         case simdcsv::ErrorCode::INVALID_LINE_ENDING: return SIMDCSV_ERROR_INVALID_LINE_ENDING;
         case simdcsv::ErrorCode::INVALID_UTF8: return SIMDCSV_ERROR_INVALID_UTF8;
         case simdcsv::ErrorCode::NULL_BYTE: return SIMDCSV_ERROR_NULL_BYTE;
         case simdcsv::ErrorCode::EMPTY_HEADER: return SIMDCSV_ERROR_EMPTY_HEADER;
-        case simdcsv::ErrorCode::DUPLICATE_COLUMNS: return SIMDCSV_ERROR_DUPLICATE_COLUMNS;
+        case simdcsv::ErrorCode::DUPLICATE_COLUMN_NAMES: return SIMDCSV_ERROR_DUPLICATE_COLUMNS;
         case simdcsv::ErrorCode::AMBIGUOUS_SEPARATOR: return SIMDCSV_ERROR_AMBIGUOUS_SEPARATOR;
         case simdcsv::ErrorCode::FILE_TOO_LARGE: return SIMDCSV_ERROR_FILE_TOO_LARGE;
         case simdcsv::ErrorCode::IO_ERROR: return SIMDCSV_ERROR_IO;
@@ -156,9 +159,15 @@ simdcsv_buffer_t* simdcsv_buffer_load_file(const char* filename) {
         if (corpus.empty()) return nullptr;
 
         auto* buffer = new (std::nothrow) simdcsv_buffer();
-        if (!buffer) return nullptr;
+        if (!buffer) {
+            aligned_free(const_cast<uint8_t*>(corpus.data()));
+            return nullptr;
+        }
 
-        buffer->data = std::move(corpus);
+        // Copy from string_view into vector
+        buffer->data.assign(corpus.begin(), corpus.end());
+        // Free the original aligned buffer
+        aligned_free(const_cast<uint8_t*>(corpus.data()));
         return buffer;
     } catch (...) {
         return nullptr;
@@ -328,7 +337,7 @@ bool simdcsv_error_collector_has_errors(const simdcsv_error_collector_t* collect
 
 bool simdcsv_error_collector_has_fatal(const simdcsv_error_collector_t* collector) {
     if (!collector) return false;
-    return collector->collector.has_fatal();
+    return collector->collector.has_fatal_errors();
 }
 
 size_t simdcsv_error_collector_count(const simdcsv_error_collector_t* collector) {
@@ -383,27 +392,29 @@ size_t simdcsv_index_num_threads(const simdcsv_index_t* index) {
 
 size_t simdcsv_index_columns(const simdcsv_index_t* index) {
     if (!index) return 0;
-    return index->idx.n_cols;
+    return index->idx.columns;
 }
 
 uint64_t simdcsv_index_count(const simdcsv_index_t* index, size_t thread_id) {
     if (!index) return 0;
     if (thread_id >= index->num_threads) return 0;
-    return index->idx.cnt[thread_id];
+    if (!index->idx.n_indexes) return 0;
+    return index->idx.n_indexes[thread_id];
 }
 
 uint64_t simdcsv_index_total_count(const simdcsv_index_t* index) {
     if (!index) return 0;
+    if (!index->idx.n_indexes) return 0;
     uint64_t total = 0;
     for (size_t i = 0; i < index->num_threads; ++i) {
-        total += index->idx.cnt[i];
+        total += index->idx.n_indexes[i];
     }
     return total;
 }
 
 const uint64_t* simdcsv_index_positions(const simdcsv_index_t* index) {
     if (!index) return nullptr;
-    return index->idx.pos.data();
+    return index->idx.indexes;
 }
 
 void simdcsv_index_destroy(simdcsv_index_t* index) {
@@ -449,7 +460,7 @@ simdcsv_error_t simdcsv_parse_with_errors(simdcsv_parser_t* parser, const simdcs
             parser->parser.parse(buffer->data.data(), index->idx, buffer->data.size(), d);
         }
 
-        if (errors && errors->collector.has_fatal()) {
+        if (errors && errors->collector.has_fatal_errors()) {
             const auto& errs = errors->collector.errors();
             for (const auto& e : errs) {
                 if (e.severity == simdcsv::ErrorSeverity::FATAL) {
@@ -480,7 +491,7 @@ simdcsv_error_t simdcsv_parse_two_pass_with_errors(simdcsv_parser_t* parser, con
             parser->parser.parse_two_pass(buffer->data.data(), index->idx, buffer->data.size(), d);
         }
 
-        if (errors && errors->collector.has_fatal()) {
+        if (errors && errors->collector.has_fatal_errors()) {
             const auto& errs = errors->collector.errors();
             for (const auto& e : errs) {
                 if (e.severity == simdcsv::ErrorSeverity::FATAL) {
@@ -514,7 +525,7 @@ simdcsv_detection_result_t* simdcsv_detect_dialect(const simdcsv_buffer_t* buffe
 
 bool simdcsv_detection_result_success(const simdcsv_detection_result_t* result) {
     if (!result) return false;
-    return result->result.success;
+    return result->result.success();
 }
 
 double simdcsv_detection_result_confidence(const simdcsv_detection_result_t* result) {
@@ -572,7 +583,7 @@ simdcsv_error_t simdcsv_parse_auto(simdcsv_parser_t* parser, const simdcsv_buffe
             *detected = new (std::nothrow) simdcsv_detection_result(result);
         }
 
-        if (!result.success) {
+        if (!result.success()) {
             return SIMDCSV_ERROR_AMBIGUOUS_SEPARATOR;
         }
 
