@@ -261,6 +261,9 @@ Once CI passes and there are no blocking reviews:
 1. Merge the PR using \`gh pr merge --squash --delete-branch\`
 2. Confirm the merge succeeded
 
+## Phase 5: Follow up issues
+If there are any un-addressed issues identified from the PR review or implementation, please open new issues to track them.
+
 ## Guidelines
 - Be thorough but avoid over-engineering
 - Write clear commit messages explaining the "why"
