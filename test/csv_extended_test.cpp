@@ -462,13 +462,11 @@ TEST_F(CSVExtendedTest, BadEscapeParsing) {
 
     // Parser should handle backslash escapes without crashing
     // (non-RFC 4180 - backslashes are treated as literal characters)
-    // Use parse_validate to check for errors
     simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
     parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
-    
-    // Backslash escapes may cause quote errors since they're not recognized
-    // Just verify the parser completed without crashing
-    EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing";
+
+    // Just verify the parser completes without crashing
+    EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing without crashing";
 
 }
 
@@ -485,12 +483,12 @@ TEST_F(CSVExtendedTest, InvalidUTF8Parsing) {
     simdcsv::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should not crash on invalid UTF-8 sequences (0xFE, 0xFF, truncated multibyte)
-    // Invalid UTF-8 should be detected
+    // Note: UTF-8 validation is not yet implemented (INVALID_UTF8 is reserved)
     simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
     parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
-    
-    // Invalid UTF-8 sequences may produce errors
-    EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing";
+
+    // Just verify the parser completes without crashing
+    EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing without crashing";
 
 }
 
