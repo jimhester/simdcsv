@@ -1400,6 +1400,252 @@ TEST(StreamingTest, ConfigAccessReader) {
 }
 
 //-----------------------------------------------------------------------------
+// AFTER_CR State Chunk Boundary Tests
+//-----------------------------------------------------------------------------
+
+// Test AFTER_CR state persists correctly across chunk boundaries when CR is
+// at the end of one chunk and LF is at the start of the next chunk.
+// This validates the fix for issue #112.
+
+TEST(StreamingTest, ChunkBoundaryAfterCR_CRLFSplit) {
+    // CRLF split across chunks: CR at end of chunk 1, LF at start of chunk 2
+    std::string chunk1 = "hello,world\r";
+    std::string chunk2 = "\nnext,row\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    std::vector<std::vector<std::string>> rows;
+    parser.set_row_handler([&rows](const Row& row) {
+        std::vector<std::string> fields;
+        for (const auto& field : row) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+        return true;
+    });
+
+    parser.parse_chunk(chunk1);
+    parser.parse_chunk(chunk2);
+    parser.finish();
+
+    ASSERT_EQ(rows.size(), 2);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"hello", "world"}));
+    EXPECT_EQ(rows[1], (std::vector<std::string>{"next", "row"}));
+}
+
+TEST(StreamingTest, ChunkBoundaryAfterCR_CRLFSplitMultipleRows) {
+    // Multiple CRLF pairs split across chunks
+    std::string chunk1 = "a,b\r";
+    std::string chunk2 = "\nc,d\r";
+    std::string chunk3 = "\ne,f\r";
+    std::string chunk4 = "\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    std::vector<std::vector<std::string>> rows;
+    parser.set_row_handler([&rows](const Row& row) {
+        std::vector<std::string> fields;
+        for (const auto& field : row) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+        return true;
+    });
+
+    parser.parse_chunk(chunk1);
+    parser.parse_chunk(chunk2);
+    parser.parse_chunk(chunk3);
+    parser.parse_chunk(chunk4);
+    parser.finish();
+
+    ASSERT_EQ(rows.size(), 3);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"a", "b"}));
+    EXPECT_EQ(rows[1], (std::vector<std::string>{"c", "d"}));
+    EXPECT_EQ(rows[2], (std::vector<std::string>{"e", "f"}));
+}
+
+TEST(StreamingTest, ChunkBoundaryAfterCR_CRNotFollowedByLF) {
+    // CR at end of chunk, next chunk starts with regular character (not LF)
+    // This tests that CR-only line endings work across chunk boundaries
+    std::string chunk1 = "hello\r";
+    std::string chunk2 = "world\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    std::vector<std::vector<std::string>> rows;
+    parser.set_row_handler([&rows](const Row& row) {
+        std::vector<std::string> fields;
+        for (const auto& field : row) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+        return true;
+    });
+
+    parser.parse_chunk(chunk1);
+    parser.parse_chunk(chunk2);
+    parser.finish();
+
+    ASSERT_EQ(rows.size(), 2);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"hello"}));
+    EXPECT_EQ(rows[1], (std::vector<std::string>{"world"}));
+}
+
+TEST(StreamingTest, ChunkBoundaryAfterCR_QuotedFieldCRLFSplit) {
+    // Quoted field followed by CRLF split across chunks
+    std::string chunk1 = "\"quoted\"\r";
+    std::string chunk2 = "\nnext\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    std::vector<std::vector<std::string>> rows;
+    parser.set_row_handler([&rows](const Row& row) {
+        std::vector<std::string> fields;
+        for (const auto& field : row) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+        return true;
+    });
+
+    parser.parse_chunk(chunk1);
+    parser.parse_chunk(chunk2);
+    parser.finish();
+
+    ASSERT_EQ(rows.size(), 2);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"quoted"}));
+    EXPECT_EQ(rows[1], (std::vector<std::string>{"next"}));
+}
+
+TEST(StreamingTest, ChunkBoundaryAfterCR_EmptyFieldCRLFSplit) {
+    // Row ending with empty field followed by CRLF split across chunks
+    std::string chunk1 = "a,\r";
+    std::string chunk2 = "\nb,c\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    std::vector<std::vector<std::string>> rows;
+    parser.set_row_handler([&rows](const Row& row) {
+        std::vector<std::string> fields;
+        for (const auto& field : row) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+        return true;
+    });
+
+    parser.parse_chunk(chunk1);
+    parser.parse_chunk(chunk2);
+    parser.finish();
+
+    ASSERT_EQ(rows.size(), 2);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"a", ""}));
+    EXPECT_EQ(rows[1], (std::vector<std::string>{"b", "c"}));
+}
+
+TEST(StreamingTest, ChunkBoundaryAfterCR_SingleCharChunks) {
+    // Extreme case: single character chunks around CR LF
+    std::string csv = "a\r\nb\r\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    std::vector<std::vector<std::string>> rows;
+    parser.set_row_handler([&rows](const Row& row) {
+        std::vector<std::string> fields;
+        for (const auto& field : row) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+        return true;
+    });
+
+    // Feed one character at a time
+    for (char c : csv) {
+        parser.parse_chunk(std::string_view(&c, 1));
+    }
+    parser.finish();
+
+    ASSERT_EQ(rows.size(), 2);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"a"}));
+    EXPECT_EQ(rows[1], (std::vector<std::string>{"b"}));
+}
+
+TEST(StreamingTest, ChunkBoundaryAfterCR_CRAtEndOfFile) {
+    // CR at end of chunk, then finish() called (no more data)
+    std::string csv = "hello,world\r";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    std::vector<std::vector<std::string>> rows;
+    parser.set_row_handler([&rows](const Row& row) {
+        std::vector<std::string> fields;
+        for (const auto& field : row) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+        return true;
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    ASSERT_EQ(rows.size(), 1);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"hello", "world"}));
+}
+
+TEST(StreamingTest, ChunkBoundaryAfterCR_PullModel) {
+    // Test AFTER_CR chunk boundary using pull model
+    std::string chunk1 = "a,b\r";
+    std::string chunk2 = "\nc,d\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    parser.parse_chunk(chunk1);
+    // At this point, row is emitted but parser is in AFTER_CR state
+
+    parser.parse_chunk(chunk2);
+    parser.finish();
+
+    // Collect rows
+    std::vector<std::vector<std::string>> rows;
+    while (parser.next_row() == StreamStatus::ROW_READY) {
+        std::vector<std::string> fields;
+        for (const auto& field : parser.current_row()) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+    }
+
+    ASSERT_EQ(rows.size(), 2);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"a", "b"}));
+    EXPECT_EQ(rows[1], (std::vector<std::string>{"c", "d"}));
+}
+
+//-----------------------------------------------------------------------------
 // AFTER_CR State Edge Cases
 //-----------------------------------------------------------------------------
 
