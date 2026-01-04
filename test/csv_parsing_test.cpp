@@ -2,6 +2,7 @@
 #include <string>
 
 #include "two_pass.h"
+#include "error.h"
 #include "io_util.h"
 
 // ============================================================================
@@ -209,12 +210,13 @@ TEST_F(CSVParserTest, ParseMalformedUnclosedQuote) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    // Parser should handle this - may succeed or fail depending on implementation
-    // Key is to exercise the code path and not crash
-    bool success = parser.parse(data.data(), idx, data.size());
+    // Use parse_validate to detect the error
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
 
-    // Document current behavior: parser completes without crashing
-    EXPECT_TRUE(success || !success) << "Parser should handle unclosed quote without crashing";
+    // Should detect the unclosed quote error
+    EXPECT_FALSE(success) << "Parser should fail on unclosed quote";
+    EXPECT_TRUE(errors.has_errors()) << "Should have detected errors";
 }
 
 TEST_F(CSVParserTest, ParseMalformedUnclosedQuoteEOF) {
@@ -225,10 +227,13 @@ TEST_F(CSVParserTest, ParseMalformedUnclosedQuoteEOF) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    bool success = parser.parse(data.data(), idx, data.size());
+    // Use parse_validate to detect the error
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
 
-    // Parser should handle EOF with unclosed quote
-    EXPECT_TRUE(success || !success) << "Parser should handle unclosed quote at EOF without crashing";
+    // Should detect the unclosed quote at EOF
+    EXPECT_FALSE(success) << "Parser should fail on unclosed quote at EOF";
+    EXPECT_TRUE(errors.has_errors()) << "Should have detected errors";
 }
 
 TEST_F(CSVParserTest, ParseMalformedQuoteInUnquotedField) {
@@ -239,9 +244,12 @@ TEST_F(CSVParserTest, ParseMalformedQuoteInUnquotedField) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    bool success = parser.parse(data.data(), idx, data.size());
+    // Use parse_validate to detect the error
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    parser.parse_validate(data.data(), idx, data.size(), errors);
 
-    EXPECT_TRUE(success || !success) << "Parser should handle quote in unquoted field";
+    // Should detect quote in unquoted field error
+    EXPECT_TRUE(errors.has_errors()) << "Should have detected quote in unquoted field";
 }
 
 TEST_F(CSVParserTest, ParseMalformedInconsistentColumns) {
@@ -252,10 +260,12 @@ TEST_F(CSVParserTest, ParseMalformedInconsistentColumns) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    bool success = parser.parse(data.data(), idx, data.size());
+    // Use parse_validate to detect the error
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    parser.parse_validate(data.data(), idx, data.size(), errors);
 
-    // Parser can parse despite inconsistent columns
-    EXPECT_TRUE(success || !success) << "Parser should handle inconsistent columns";
+    // Should detect inconsistent column count
+    EXPECT_TRUE(errors.has_errors()) << "Should have detected inconsistent column count";
 }
 
 TEST_F(CSVParserTest, ParseMalformedTripleQuote) {
@@ -266,9 +276,13 @@ TEST_F(CSVParserTest, ParseMalformedTripleQuote) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    bool success = parser.parse(data.data(), idx, data.size());
+    // Triple quote sequence """bad""" is actually valid RFC 4180 CSV
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
 
-    EXPECT_TRUE(success || !success) << "Parser should handle triple quote sequence";
+    // This is valid CSV, should parse successfully
+    EXPECT_TRUE(success) << "Triple quote is valid RFC 4180 CSV";
+    EXPECT_FALSE(errors.has_errors()) << "Should have no errors for valid CSV";
 }
 
 TEST_F(CSVParserTest, ParseMalformedMixedLineEndings) {
@@ -293,9 +307,12 @@ TEST_F(CSVParserTest, ParseMalformedNullByte) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    bool success = parser.parse(data.data(), idx, data.size());
+    // Use parse_validate to detect the null byte error
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    parser.parse_validate(data.data(), idx, data.size(), errors);
 
-    EXPECT_TRUE(success || !success) << "Parser should handle null byte without crashing";
+    // Should detect null byte in data
+    EXPECT_TRUE(errors.has_errors()) << "Should have detected null byte error";
 }
 
 TEST_F(CSVParserTest, ParseMalformedMultipleErrors) {
@@ -306,9 +323,13 @@ TEST_F(CSVParserTest, ParseMalformedMultipleErrors) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 1);
 
-    bool success = parser.parse(data.data(), idx, data.size());
+    // Use parse_validate to detect errors
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    parser.parse_validate(data.data(), idx, data.size(), errors);
 
-    EXPECT_TRUE(success || !success) << "Parser should handle file with multiple errors";
+    // Should detect multiple errors
+    EXPECT_TRUE(errors.has_errors()) << "Should have detected multiple errors";
+    EXPECT_GE(errors.error_count(), 2) << "Should have at least 2 errors";
 }
 
 // ============================================================================
@@ -555,9 +576,13 @@ TEST_F(CSVParserTest, ParseMultiThreadedMalformed) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(data.size(), 2);  // Use 2 threads with malformed data
 
-    bool success = parser.parse(data.data(), idx, data.size());
+    // Use parse_validate to detect the error
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
 
-    EXPECT_TRUE(success || !success) << "Parser should handle malformed CSV with multiple threads";
+    // Should detect unclosed quote error
+    EXPECT_FALSE(success) << "Parser should fail on malformed CSV with multiple threads";
+    EXPECT_TRUE(errors.has_errors()) << "Should detect errors in malformed CSV";
 }
 
 // ============================================================================

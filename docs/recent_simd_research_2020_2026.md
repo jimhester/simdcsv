@@ -653,6 +653,43 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 
 ---
 
-**Document Status**: ✅ Research Complete
-**Last Updated**: 2026-01-01
+## 11. Action Items from Research (2026-01-03)
+
+Based on this research review, the following GitHub issues have been created to track implementation of promising techniques:
+
+### High Priority
+
+- **Issue #39**: [PCLMULQDQ-based Quote Mask](https://github.com/jimhester/simdcsv/issues/39)
+  - Replace scalar loop in `find_quote_mask` with carryless multiply
+  - Expected: 2-4x speedup in quote handling
+
+- **Issue #41**: [Branchless CSV State Machine](https://github.com/jimhester/simdcsv/issues/41)
+  - Replace switch-based state machine with lookup tables
+  - Expected: Eliminate 90%+ branches
+
+### Medium Priority
+
+- **Issue #40**: [AVX-512 with Runtime Selection](https://github.com/jimhester/simdcsv/issues/40)
+  - Add AVX-512 support with automatic fallback to AVX2
+  - Expected: 25-40% speedup on compatible hardware
+
+- **Issue #42**: [ARM NEON/SVE Optimization](https://github.com/jimhester/simdcsv/issues/42)
+  - Benchmark and optimize for Apple Silicon and Graviton
+  - Expected: 5-10 GB/s on modern ARM
+
+- **Issue #44**: [SIMD Number Parsing](https://github.com/jimhester/simdcsv/issues/44)
+  - Add SIMD-accelerated integer, float, and timestamp parsing
+  - Expected: 5-10x speedup in type inference
+
+### Low Priority (Post-1.0)
+
+- **Issue #43**: [Structure-Aware Raw Filters](https://github.com/jimhester/simdcsv/issues/43)
+  - Sparser-style filtering for query pushdown
+  - Expected: 10-22x speedup on selective queries
+
+---
+
+**Document Status**: ✅ Research Complete + Action Items Created
+**Last Updated**: 2026-01-03
 **Conclusion**: **Stick with simdjson approach. No better alternative found in 2020-2026 research.**
+**Next Steps**: See Issue #39 (PCLMULQDQ) as highest priority implementation

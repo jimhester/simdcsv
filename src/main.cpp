@@ -1,13 +1,29 @@
 #include <unistd.h>  // for getopt
+#include <getopt.h>  // for getopt_long
 #include <iostream>
 #include <limits>
 #include "common_defs.h"
 #include "io_util.h"
 #include "mem_util.h"
 #include "timing.h"
-#include "two_pass.h"
+#include "debug.h"
+#include "debug_parser.h"  // includes two_pass.h
 
 using namespace std;
+
+void print_usage(const char* program_name) {
+  cerr << "Usage: " << program_name << " [options] <csvfile>" << endl;
+  cerr << "Options:" << endl;
+  cerr << "  -v, --verbose      Enable verbose output" << endl;
+  cerr << "  -d, --dump         Dump index data" << endl;
+  cerr << "  -t, --threads N    Number of threads (default: 1)" << endl;
+  cerr << "  -i, --iterations N Number of iterations (default: 10)" << endl;
+  cerr << "  --debug            Enable debug mode (verbose + timing + masks)" << endl;
+  cerr << "  --debug-verbose    Enable verbose debug output" << endl;
+  cerr << "  --debug-timing     Enable timing output" << endl;
+  cerr << "  --debug-masks      Enable mask/buffer dumps" << endl;
+  cerr << "  -h, --help         Show this help message" << endl;
+}
 
 int main(int argc, char* argv[]) {
   int c;
@@ -15,8 +31,23 @@ int main(int argc, char* argv[]) {
   bool verbose = false;
   bool dump = false;
   size_t iterations = 10;
+  simdcsv::DebugConfig debug_config;
 
-  while ((c = getopt(argc, argv, "vdt:si:s")) != -1) {
+  static struct option long_options[] = {
+    {"verbose",       no_argument,       0, 'v'},
+    {"dump",          no_argument,       0, 'd'},
+    {"threads",       required_argument, 0, 't'},
+    {"iterations",    required_argument, 0, 'i'},
+    {"debug",         no_argument,       0, 'D'},
+    {"debug-verbose", no_argument,       0, 'V'},
+    {"debug-timing",  no_argument,       0, 'T'},
+    {"debug-masks",   no_argument,       0, 'M'},
+    {"help",          no_argument,       0, 'h'},
+    {0, 0, 0, 0}
+  };
+
+  int option_index = 0;
+  while ((c = getopt_long(argc, argv, "vdt:i:h", long_options, &option_index)) != -1) {
     switch (c) {
       case 'v':
         verbose = true;
@@ -30,10 +61,28 @@ int main(int argc, char* argv[]) {
       case 'i':
         iterations = atoi(optarg);
         break;
+      case 'D':
+        debug_config = simdcsv::DebugConfig::all();
+        break;
+      case 'V':
+        debug_config.verbose = true;
+        break;
+      case 'T':
+        debug_config.timing = true;
+        break;
+      case 'M':
+        debug_config.dump_masks = true;
+        break;
+      case 'h':
+        print_usage(argv[0]);
+        return 0;
+      default:
+        print_usage(argv[0]);
+        return 1;
     }
   }
   if (optind >= argc) {
-    cerr << "Usage: " << argv[0] << " <csvfile>" << endl;
+    print_usage(argv[0]);
     exit(1);
   }
 
@@ -46,7 +95,19 @@ int main(int argc, char* argv[]) {
     return EXIT_FAILURE;
   }
 
-  simdcsv::two_pass parser;
+  simdcsv::debug_parser parser;
+  simdcsv::DebugTrace trace(debug_config);
+
+  // Print debug info if enabled
+  if (debug_config.enabled()) {
+    cout << "[simdcsv] Debug mode enabled" << endl;
+    cout << "[simdcsv] SIMD: " << simdcsv::get_simd_info() << endl;
+    cout << "[simdcsv] Input file: " << filename << endl;
+    cout << "[simdcsv] File size: " << p.size() << " bytes" << endl;
+    cout << "[simdcsv] Threads: " << n_threads << endl;
+    cout << "[simdcsv] Iterations: " << iterations << endl;
+    cout << endl;
+  }
 
 #ifdef __linux__
   vector<int> evts;
@@ -69,7 +130,12 @@ int main(int argc, char* argv[]) {
     {
       TimingPhase p1(ta, 0);
 #endif  // __linux__
-      parser.parse(p.data(), res, p.size());
+      if (debug_config.enabled() && i == 0) {
+        // Use debug parsing on first iteration
+        parser.parse_debug(p.data(), res, p.size(), trace);
+      } else {
+        parser.parse(p.data(), res, p.size());
+      }
 #ifdef __linux__
     }
 #endif  // __linux__
