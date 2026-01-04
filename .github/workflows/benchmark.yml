@@ -70,9 +70,11 @@ EOF
         ls -la build/benchmark_ci/
 
     - name: Run quick benchmark
+      timeout-minutes: 10
       run: |
         # Run only specific benchmarks with limited iterations for speed
         # Filter to run essential benchmarks only, with JSON output for comparison
+        # Benchmark names defined in benchmark/basic_benchmarks.cpp
         cd build
         ./simdcsv_benchmark \
           --benchmark_filter="BM_ParseSimple_Threads/1|BM_ParseManyRows_Threads/1|BM_ParseQuoted/1" \
@@ -98,15 +100,21 @@ EOF
 import json
 import sys
 import os
+import shutil
 
 REGRESSION_THRESHOLD = 0.10  # 10% regression threshold
+EXPECTED_BENCHMARK_COUNT = 3  # Number of benchmarks we expect to run
 
 def load_benchmark(filepath):
     """Load benchmark results from JSON file."""
     if not os.path.exists(filepath):
         return None
-    with open(filepath, 'r') as f:
-        data = json.load(f)
+    try:
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Failed to parse JSON from {filepath}: {e}")
+        return None
 
     # Extract benchmark results, keyed by name
     results = {}
@@ -148,18 +156,29 @@ def compare_benchmarks(baseline, current):
 
     return regressions, improvements, unchanged
 
+# Check if this is a main branch push
+is_main_push = os.environ.get('GITHUB_EVENT_NAME') == 'push' and \
+               os.environ.get('GITHUB_REF') in ('refs/heads/main', 'refs/heads/master')
+
 # Load results
 current = load_benchmark('build/benchmark_results.json')
 baseline = load_benchmark('baseline_benchmark.json')
 
 if current is None:
-    print("ERROR: Current benchmark results not found!")
+    print("ERROR: Current benchmark results not found or invalid!")
+    sys.exit(1)
+
+# Validate we have the expected number of benchmarks
+if len(current) < EXPECTED_BENCHMARK_COUNT:
+    print(f"ERROR: Expected at least {EXPECTED_BENCHMARK_COUNT} benchmarks but got {len(current)}")
+    print(f"Found benchmarks: {list(current.keys())}")
     sys.exit(1)
 
 print("=" * 70)
 print("PERFORMANCE REGRESSION CHECK")
 print("=" * 70)
 print(f"Regression threshold: {REGRESSION_THRESHOLD * 100:.0f}%")
+print(f"Benchmarks found: {len(current)}")
 print()
 
 if baseline is None:
@@ -169,11 +188,14 @@ if baseline is None:
     for name, time in sorted(current.items()):
         print(f"  {name}: {time:.2f} ns")
 
-    # Save current as new baseline
-    import shutil
-    shutil.copy('build/benchmark_results.json', 'baseline_benchmark.json')
-    print()
-    print("Baseline saved for future comparisons.")
+    # Only save baseline on main branch pushes
+    if is_main_push:
+        shutil.copy('build/benchmark_results.json', 'baseline_benchmark.json')
+        print()
+        print("Baseline saved for future comparisons (main branch push).")
+    else:
+        print()
+        print("Skipping baseline save (not a main branch push).")
 else:
     regressions, improvements, unchanged = compare_benchmarks(baseline, current)
 
@@ -204,13 +226,8 @@ else:
                 print(f"  {name}: (new benchmark)")
         print()
 
-    # Update baseline if no regressions (on main branch pushes)
-    is_main_push = os.environ.get('GITHUB_EVENT_NAME') == 'push' and \
-                   os.environ.get('GITHUB_REF') in ('refs/heads/main', 'refs/heads/master')
-
     if not regressions:
         if is_main_push:
-            import shutil
             shutil.copy('build/benchmark_results.json', 'baseline_benchmark.json')
             print("Baseline updated with current results (main branch push).")
         print()
