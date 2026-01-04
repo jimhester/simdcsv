@@ -50,7 +50,7 @@ The core algorithm in `include/two_pass.h` uses speculative multi-threaded parsi
 | `include/error.h` | Error codes, severity levels, ErrorCollector class |
 | `include/io_util.h` | File loading with SIMD-aligned padding (32+ bytes) |
 | `include/mem_util.h` | Aligned memory allocation for SIMD |
-| `src/main.cpp` | CLI parser with profiling support |
+| `src/cli.cpp` | User-friendly CSV tool (scsv) |
 
 ### Error Handling Framework
 
