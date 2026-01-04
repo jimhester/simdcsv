@@ -300,6 +300,20 @@ ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const
         return result;
     }
 
+    // Validate total cell count against security limit (defense-in-depth)
+    // Use overflow-safe comparison: instead of num_columns * num_rows > max_total_cells,
+    // check if num_columns > max_total_cells / num_rows (when num_rows > 0)
+    if (options_.max_total_cells > 0 && num_rows > 0) {
+        // Overflow-safe check: num_columns * num_rows > max_total_cells
+        // Rewritten as: num_columns > max_total_cells / num_rows
+        if (num_columns > options_.max_total_cells / num_rows) {
+            result.error_message = "Total cell count (" + std::to_string(num_columns) +
+                " columns x " + std::to_string(num_rows) + " rows) exceeds maximum allowed " +
+                std::to_string(options_.max_total_cells);
+            return result;
+        }
+    }
+
     // Extract column names from header
     std::vector<std::string> column_names;
     size_t total_seps = 0;

@@ -60,6 +60,7 @@ struct ArrowConvertOptions {
     // A value of 0 means no limit (unlimited).
     size_t max_columns = 10000;         // Maximum number of columns allowed (e.g., 5000 rejects CSVs with > 5000 columns)
     size_t max_rows = 0;                // Maximum number of rows allowed (0 = unlimited)
+    size_t max_total_cells = 0;         // Maximum total number of cells (rows * columns, 0 = unlimited)
     static constexpr size_t MAX_TYPE_INFERENCE_ROWS = 100000;  // Upper bound for type_inference_rows
 };
 

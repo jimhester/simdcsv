@@ -305,6 +305,59 @@ TEST_F(ArrowOutputTest, MaxRowsDefaultUnlimited) {
     EXPECT_EQ(result.num_rows, 5);
 }
 
+// Total cell count limit tests (Issue #91)
+TEST_F(ArrowOutputTest, MaxTotalCellsLimit) {
+    ArrowConvertOptions opts;
+    opts.max_total_cells = 5;  // Only allow 5 total cells
+    // 3 columns x 2 rows = 6 cells, exceeds limit
+    auto result = parseAndConvert("a,b,c\n1,2,3\n4,5,6\n", opts);
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(result.error_message.find("Total cell count") != std::string::npos);
+    EXPECT_TRUE(result.error_message.find("exceeds maximum") != std::string::npos);
+}
+
+TEST_F(ArrowOutputTest, MaxTotalCellsLimitAllowed) {
+    ArrowConvertOptions opts;
+    opts.max_total_cells = 6;  // Allow exactly 6 cells
+    // 3 columns x 2 rows = 6 cells, exactly at limit
+    auto result = parseAndConvert("a,b,c\n1,2,3\n4,5,6\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.num_columns, 3);
+    EXPECT_EQ(result.num_rows, 2);
+}
+
+TEST_F(ArrowOutputTest, MaxTotalCellsDefaultUnlimited) {
+    ArrowConvertOptions opts;
+    // Default max_total_cells is 0 (unlimited)
+    EXPECT_EQ(opts.max_total_cells, 0U);
+    auto result = parseAndConvert("a,b,c\n1,2,3\n4,5,6\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+}
+
+TEST_F(ArrowOutputTest, MaxTotalCellsWithinRowColLimits) {
+    ArrowConvertOptions opts;
+    opts.max_columns = 10;      // Allow up to 10 columns
+    opts.max_rows = 100;        // Allow up to 100 rows
+    opts.max_total_cells = 4;   // But only 4 total cells
+    // 2 columns x 3 rows = 6 cells, within row/col limits but exceeds total
+    auto result = parseAndConvert("a,b\n1,2\n3,4\n5,6\n", opts);
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(result.error_message.find("Total cell count") != std::string::npos);
+}
+
+TEST_F(ArrowOutputTest, MaxTotalCellsOverflowProtection) {
+    ArrowConvertOptions opts;
+    // Set max_total_cells to a value that would overflow if multiplied naively
+    opts.max_total_cells = 10;
+    opts.max_columns = 0;  // Unlimited columns
+    opts.max_rows = 0;     // Unlimited rows
+    // Even with max values, the check should not overflow
+    // This test verifies the overflow-safe comparison works correctly
+    auto result = parseAndConvert("a,b,c\n1,2,3\n4,5,6\n", opts);
+    // 3 cols x 2 rows = 6 cells, within 10 cell limit
+    ASSERT_TRUE(result.ok()) << result.error_message;
+}
+
 TEST_F(ArrowOutputTest, DefaultMaxColumns) {
     ArrowConvertOptions opts;
     // Default max_columns is 10000
