@@ -1,0 +1,122 @@
+---
+title: "Command Line Interface"
+---
+
+## Overview
+
+The `scsv` command line tool provides a simple way to parse CSV files and measure parsing performance. It's built alongside the library when you run `cmake --build build`.
+
+## Basic Usage
+
+```bash
+./build/scsv [options] <csvfile>
+```
+
+The tool parses the specified CSV file, runs multiple iterations, and reports timing statistics including throughput in GB/s.
+
+## Options
+
+### General Options
+
+| Option | Description |
+|--------|-------------|
+| `-h, --help` | Show help message and exit |
+| `-v, --verbose` | Enable verbose output with detailed performance counters (Linux only) |
+
+### Performance Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-t, --threads N` | Number of threads to use for parsing | 1 |
+| `-i, --iterations N` | Number of parsing iterations to run | 10 |
+
+### Debug Options
+
+| Option | Description |
+|--------|-------------|
+| `--debug` | Enable all debug output (verbose + timing + masks) |
+| `--debug-verbose` | Enable verbose debug messages |
+| `--debug-timing` | Enable timing output |
+| `--debug-masks` | Enable SIMD mask and buffer dumps |
+| `-d, --dump` | Dump index data with access pattern timing |
+
+## Examples
+
+### Basic Parsing
+
+Parse a CSV file with default settings (1 thread, 10 iterations):
+
+```bash
+./build/scsv data.csv
+```
+
+Output:
+```
+Total time in (s) = 0.023456
+GB/s: 1.234567
+```
+
+### Multi-threaded Parsing
+
+Use 4 threads for faster parsing of large files:
+
+```bash
+./build/scsv -t 4 large_file.csv
+```
+
+### Benchmarking
+
+Run 100 iterations for more accurate performance measurements:
+
+```bash
+./build/scsv -i 100 -t 4 data.csv
+```
+
+### Debug Mode
+
+Enable debug output to see detailed parsing information:
+
+```bash
+./build/scsv --debug data.csv
+```
+
+Output:
+```
+[simdcsv] Debug mode enabled
+[simdcsv] SIMD: AVX2
+[simdcsv] Input file: data.csv
+[simdcsv] File size: 1048576 bytes
+[simdcsv] Threads: 1
+[simdcsv] Iterations: 10
+```
+
+### Verbose Mode (Linux)
+
+On Linux, verbose mode shows detailed hardware performance counters:
+
+```bash
+./build/scsv -v data.csv
+```
+
+This displays:
+
+- CPU cycles and cycles per byte
+- Instructions and instructions per byte
+- Branch misses
+- Cache references and misses
+- Effective and base CPU frequency
+
+## Performance Tips
+
+1. **Thread count**: For large files, use `-t` with the number of physical CPU cores for best performance. More threads than cores typically doesn't help.
+
+2. **Iteration count**: Use higher iteration counts (`-i 100` or more) for stable benchmark results, especially with small files where startup overhead can dominate.
+
+3. **File size**: The SIMD-accelerated parsing shows the most benefit on larger files (>1MB) where the vectorized code can process many 64-byte chunks.
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Error (invalid arguments or file not found) |

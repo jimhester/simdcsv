@@ -44,6 +44,26 @@ cmake --build build
 cd build && ctest --output-on-failure
 ```
 
+## Command Line Tool
+
+The build produces an `scsv` command line tool for parsing and benchmarking CSV files:
+
+```bash
+# Basic usage
+./build/scsv data.csv
+
+# Use 4 threads for parsing
+./build/scsv -t 4 data.csv
+
+# Run 100 iterations for benchmarking
+./build/scsv -i 100 data.csv
+
+# Enable debug output
+./build/scsv --debug data.csv
+```
+
+See the [CLI Documentation](https://jimhester.github.io/simdcsv/cli.html) for all available options.
+
 ## Quick Start
 
 Include the single header `<simdcsv.h>` to access the full public API:

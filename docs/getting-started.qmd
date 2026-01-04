@@ -64,6 +64,23 @@ To benchmark parser performance:
 ./build/simdcsv_benchmark
 ```
 
+## Command Line Tool
+
+The build produces an `scsv` command line tool for quick parsing and benchmarking:
+
+```bash
+# Parse a CSV file and display timing results
+./build/scsv data.csv
+
+# Use multiple threads
+./build/scsv -t 4 data.csv
+
+# Run multiple iterations for more accurate benchmarks
+./build/scsv -i 100 data.csv
+```
+
+See the [CLI Documentation](cli.qmd) for complete usage information.
+
 ## Dependencies
 
 All dependencies are automatically fetched via CMake's FetchContent:
