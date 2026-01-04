@@ -300,6 +300,22 @@ ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const
         return result;
     }
 
+    // Validate total cell count against security limit (with overflow protection)
+    // CSVs with individually acceptable dimensions can still exhaust memory through
+    // their multiplicative effect (e.g., 9999 columns × 1M rows = ~10B cells)
+    if (options_.max_total_cells > 0 && num_columns > 0) {
+        // Use division-based check to prevent integer overflow in multiplication.
+        // If num_rows > max_total_cells / num_columns, then num_rows * num_columns > max_total_cells.
+        // This is guaranteed by integer division properties and avoids computing the potentially
+        // overflowing product. The num_columns > 0 check prevents division by zero.
+        if (num_rows > options_.max_total_cells / num_columns) {
+            result.error_message = "Total cell count (" + std::to_string(num_columns) +
+                " columns × " + std::to_string(num_rows) + " rows) exceeds maximum allowed " +
+                std::to_string(options_.max_total_cells);
+            return result;
+        }
+    }
+
     // Extract column names from header
     std::vector<std::string> column_names;
     size_t total_seps = 0;
