@@ -113,6 +113,7 @@ bool ValueExtractor::get_field_bounds(size_t row, size_t col, size_t& start, siz
     size_t field_idx = compute_field_index(row, col);
     start = (field_idx == 0) ? 0 : linear_indexes_[field_idx - 1] + 1;
     end = linear_indexes_[field_idx];
+    assert(end >= start && "Invalid field bounds: end must be >= start");
     return true;
 }
 
