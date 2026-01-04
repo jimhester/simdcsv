@@ -819,7 +819,15 @@ TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDNaNNotTreatedAsNA) {
 }
 
 TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDNAValue) {
+    // Note: parse_double_simd doesn't check NA values (matching scalar behavior)
+    // It returns a parse error, not NA
     auto result = parse_double_simd("NA", 2, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_FALSE(result.is_na());  // It's a parse error, not NA
+}
+
+TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDEmptyIsNA) {
+    auto result = parse_double_simd("", 0, config_);
     EXPECT_TRUE(result.is_na());
 }
 

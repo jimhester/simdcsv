@@ -1198,20 +1198,11 @@ really_inline ExtractResult<double> parse_double_simd(const char* str, size_t le
         if (ptr == end) return {std::nullopt, nullptr};
     }
 
-    // Check for NA values (except NaN which is a valid double)
-    std::string_view sv(ptr, end - ptr);
-
-    // Check if it looks like NaN first (case-insensitive)
-    bool looks_like_nan = (sv.size() == 3 &&
-                          (sv[0] == 'N' || sv[0] == 'n') &&
-                          (sv[1] == 'a' || sv[1] == 'A') &&
-                          (sv[2] == 'N' || sv[2] == 'n'));
-
-    if (!looks_like_nan) {
-        for (const auto& na : config.na_values) {
-            if (sv == na) return {std::nullopt, nullptr};
-        }
-    }
+    // Note: Unlike parse_integer_simd, we do NOT check NA values here.
+    // This matches the scalar parse_double behavior, which directly parses
+    // special values (NaN, Inf) and returns parse errors for other non-numeric
+    // strings. If users need NA handling for doubles, they should check at a
+    // higher level (e.g., ValueExtractor) or use is_na() first.
 
     // Use SIMD parser for the actual parsing
     auto result = SIMDDoubleParser::parse_double(ptr, end - ptr, false);  // Already trimmed
