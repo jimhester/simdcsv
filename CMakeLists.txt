@@ -547,6 +547,31 @@ add_custom_command(TARGET branchless_test POST_BUILD
 # Register branchless tests with CTest
 gtest_discover_tests(branchless_test)
 
+# SIMD number parsing test executable
+add_executable(simd_number_parsing_test
+    test/simd_number_parsing_test.cpp
+)
+
+target_link_libraries(simd_number_parsing_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(simd_number_parsing_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for SIMD number parsing tests
+add_custom_command(TARGET simd_number_parsing_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register SIMD number parsing tests with CTest
+gtest_discover_tests(simd_number_parsing_test)
+
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
     benchmark/benchmark_main.cpp
@@ -557,6 +582,7 @@ set(BENCHMARK_SOURCES
     benchmark/performance_metrics.cpp
     benchmark/simd_benchmarks.cpp
     benchmark/energy_benchmarks.cpp
+    benchmark/number_parsing_benchmarks.cpp
 )
 
 # Add external parser benchmarks if any external parser is enabled
