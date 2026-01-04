@@ -587,6 +587,33 @@ add_custom_command(TARGET io_util_test POST_BUILD
 # Register IO utility tests with CTest
 gtest_discover_tests(io_util_test)
 
+# CLI integration test executable
+add_executable(cli_test
+    test/cli_test.cpp
+)
+
+target_link_libraries(cli_test PRIVATE
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(cli_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# CLI test depends on scsv executable being built
+add_dependencies(cli_test scsv)
+
+# Copy test data to build directory for CLI tests
+add_custom_command(TARGET cli_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register CLI tests with CTest
+gtest_discover_tests(cli_test)
+
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
     benchmark/benchmark_main.cpp
