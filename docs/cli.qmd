@@ -4,15 +4,23 @@ title: "Command Line Interface"
 
 ## Overview
 
-The `scsv` command line tool provides a simple way to parse CSV files and measure parsing performance. It's built alongside the library when you run `cmake --build build`.
+The `scsv` command line tool provides a user-friendly way to work with CSV files using the high-performance simdcsv parser. It supports common operations like counting rows, displaying data, and selecting columns.
 
 ## Basic Usage
 
 ```bash
-./build/scsv [options] <csvfile>
+scsv <command> [options] <csvfile>
 ```
 
-The tool parses the specified CSV file, runs multiple iterations, and reports timing statistics including throughput in GB/s.
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `count` | Count the number of rows |
+| `head` | Display the first N rows (default: 10) |
+| `select` | Select specific columns by name or index |
+| `info` | Display information about the CSV file |
+| `pretty` | Pretty-print the CSV with aligned columns |
 
 ## Options
 
@@ -20,103 +28,174 @@ The tool parses the specified CSV file, runs multiple iterations, and reports ti
 
 | Option | Description |
 |--------|-------------|
-| `-h, --help` | Show help message and exit |
-| `-v, --verbose` | Enable verbose output with detailed performance counters (Linux only) |
+| `-h` | Show help message |
+| `-v` | Show version information |
+
+### Data Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-n <num>` | Number of rows (for head/pretty) | 10 |
+| `-c <cols>` | Comma-separated column names or indices (for select) | - |
+| `-H` | No header row in input | (header assumed) |
 
 ### Performance Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-t, --threads N` | Number of threads to use for parsing | 1 |
-| `-i, --iterations N` | Number of parsing iterations to run | 10 |
+| `-t <threads>` | Number of threads | 1 |
 
-### Debug Options
+### Dialect Options
 
-| Option | Description |
-|--------|-------------|
-| `--debug` | Enable all debug output (verbose + timing + masks) |
-| `--debug-verbose` | Enable verbose debug messages |
-| `--debug-timing` | Enable timing output |
-| `--debug-masks` | Enable SIMD mask and buffer dumps |
-| `-d, --dump` | Dump index data with access pattern timing |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-d <delim>` | Field delimiter: `comma`, `tab`, `semicolon`, `pipe`, or any character | comma |
+| `-q <char>` | Quote character | `"` |
+| `-a` | Auto-detect dialect | off |
 
 ## Examples
 
-### Basic Parsing
+### Counting Rows
 
-Parse a CSV file with default settings (1 thread, 10 iterations):
+Count the number of data rows (excluding header):
 
 ```bash
-./build/scsv data.csv
+scsv count data.csv
+```
+
+### Viewing First Rows
+
+Display the first 10 rows (default):
+
+```bash
+scsv head data.csv
+```
+
+Display the first 5 rows:
+
+```bash
+scsv head -n 5 data.csv
+```
+
+### Selecting Columns
+
+Select columns by name:
+
+```bash
+scsv select -c name,age,city data.csv
+```
+
+Select columns by index (0-based):
+
+```bash
+scsv select -c 0,2,4 data.csv
+```
+
+### File Information
+
+Display metadata about a CSV file:
+
+```bash
+scsv info data.csv
 ```
 
 Output:
 ```
-Total time in (s) = 0.023456
-GB/s: 1.234567
+File: data.csv
+Size: 1048576 bytes
+Dialect: delimiter=',' quote='"'
+Rows: 10000 (excluding header)
+Columns: 5
+
+Column names:
+  0: id
+  1: name
+  2: email
+  3: age
+  4: city
+```
+
+### Pretty Printing
+
+Display CSV data in a formatted table:
+
+```bash
+scsv pretty data.csv
+```
+
+Output:
+```
++----+--------+-------------------+-----+----------+
+| id | name   | email             | age | city     |
++----+--------+-------------------+-----+----------+
+| 1  | Alice  | alice@example.com | 30  | New York |
+| 2  | Bob    | bob@example.com   | 25  | Boston   |
+| 3  | Carol  | carol@example.com | 35  | Chicago  |
++----+--------+-------------------+-----+----------+
+```
+
+Limit to first 20 rows:
+
+```bash
+scsv pretty -n 20 data.csv
+```
+
+### Working with Different Delimiters
+
+Parse a tab-separated file:
+
+```bash
+scsv count -d tab data.tsv
+```
+
+Parse a semicolon-separated file (common in European locales):
+
+```bash
+scsv head -d semicolon european.csv
+```
+
+Parse a pipe-separated file:
+
+```bash
+scsv select -d pipe -c 0,1 data.txt
+```
+
+### Auto-detecting Dialect
+
+Let scsv detect the delimiter and quote character:
+
+```bash
+scsv info -a unknown_format.csv
 ```
 
 ### Multi-threaded Parsing
 
-Use 4 threads for faster parsing of large files:
+Use multiple threads for faster parsing of large files:
 
 ```bash
-./build/scsv -t 4 large_file.csv
+scsv count -t 4 large_file.csv
 ```
 
-### Benchmarking
+### Files Without Headers
 
-Run 100 iterations for more accurate performance measurements:
+When the CSV has no header row, use `-H`:
 
 ```bash
-./build/scsv -i 100 -t 4 data.csv
+scsv count -H no_header.csv
+scsv select -H -c 0,1,2 no_header.csv
 ```
-
-### Debug Mode
-
-Enable debug output to see detailed parsing information:
-
-```bash
-./build/scsv --debug data.csv
-```
-
-Output:
-```
-[simdcsv] Debug mode enabled
-[simdcsv] SIMD: AVX2
-[simdcsv] Input file: data.csv
-[simdcsv] File size: 1048576 bytes
-[simdcsv] Threads: 1
-[simdcsv] Iterations: 10
-```
-
-### Verbose Mode (Linux)
-
-On Linux, verbose mode shows detailed hardware performance counters:
-
-```bash
-./build/scsv -v data.csv
-```
-
-This displays:
-
-- CPU cycles and cycles per byte
-- Instructions and instructions per byte
-- Branch misses
-- Cache references and misses
-- Effective and base CPU frequency
 
 ## Performance Tips
 
-1. **Thread count**: For large files, use `-t` with the number of physical CPU cores for best performance. More threads than cores typically doesn't help.
+1. **Thread count**: For large files (>1MB), use `-t` with the number of physical CPU cores for best performance.
 
-2. **Iteration count**: Use higher iteration counts (`-i 100` or more) for stable benchmark results, especially with small files where startup overhead can dominate.
+2. **Row counting**: The `count` command uses an optimized SIMD algorithm that doesn't build a full index, making it very fast for counting rows.
 
-3. **File size**: The SIMD-accelerated parsing shows the most benefit on larger files (>1MB) where the vectorized code can process many 64-byte chunks.
+3. **Auto-detection overhead**: Using `-a` (auto-detect) adds some overhead. If you know the file format, specify it explicitly with `-d`.
 
 ## Exit Codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | Success |
-| 1 | Error (invalid arguments or file not found) |
+| 1 | Error (invalid arguments, file not found, or processing error) |

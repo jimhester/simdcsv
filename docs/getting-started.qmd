@@ -66,17 +66,23 @@ To benchmark parser performance:
 
 ## Command Line Tool
 
-The build produces an `scsv` command line tool for quick parsing and benchmarking:
+The build produces an `scsv` command line tool for working with CSV files:
 
 ```bash
-# Parse a CSV file and display timing results
-./build/scsv data.csv
+# Count rows in a CSV file
+./build/scsv count data.csv
 
-# Use multiple threads
-./build/scsv -t 4 data.csv
+# Display first 10 rows
+./build/scsv head data.csv
 
-# Run multiple iterations for more accurate benchmarks
-./build/scsv -i 100 data.csv
+# Select specific columns by name or index
+./build/scsv select -c name,age data.csv
+
+# Pretty-print with aligned columns
+./build/scsv pretty data.csv
+
+# Get file info (rows, columns, dialect)
+./build/scsv info data.csv
 ```
 
 See the [CLI Documentation](cli.qmd) for complete usage information.

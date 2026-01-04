@@ -46,20 +46,23 @@ cd build && ctest --output-on-failure
 
 ## Command Line Tool
 
-The build produces an `scsv` command line tool for parsing and benchmarking CSV files:
+The build produces an `scsv` command line tool for working with CSV files:
 
 ```bash
-# Basic usage
-./build/scsv data.csv
+# Count rows in a CSV file
+./build/scsv count data.csv
 
-# Use 4 threads for parsing
-./build/scsv -t 4 data.csv
+# Display first 10 rows
+./build/scsv head data.csv
 
-# Run 100 iterations for benchmarking
-./build/scsv -i 100 data.csv
+# Select specific columns
+./build/scsv select -c name,age data.csv
 
-# Enable debug output
-./build/scsv --debug data.csv
+# Pretty-print with aligned columns
+./build/scsv pretty data.csv
+
+# Get file info (rows, columns, dialect)
+./build/scsv info data.csv
 ```
 
 See the [CLI Documentation](https://jimhester.github.io/simdcsv/cli.html) for all available options.
