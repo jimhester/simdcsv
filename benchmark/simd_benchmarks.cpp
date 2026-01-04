@@ -378,6 +378,247 @@ static void BM_MemoryAccess_SIMD(benchmark::State& state) {
 
 BENCHMARK(BM_MemoryAccess_SIMD)
   ->Arg(0)  // Sequential
-  ->Arg(1)  // Strided  
+  ->Arg(1)  // Strided
   ->Arg(2)  // Random
+  ->Unit(benchmark::kMillisecond);
+
+// ============================================================================
+// BRANCHLESS STATE MACHINE BENCHMARKS
+// ============================================================================
+
+// Compare branchless vs standard state machine for different data patterns
+static void BM_Branchless_vs_Standard(benchmark::State& state) {
+  int use_branchless = static_cast<int>(state.range(0));
+  int pattern_type = static_cast<int>(state.range(1));
+
+  std::string pattern;
+  switch (pattern_type) {
+    case 0: pattern = "mixed"; break;
+    case 1: pattern = "quote_heavy"; break;
+    case 2: pattern = "many_commas"; break;
+    default: pattern = "mixed"; break;
+  }
+
+  size_t rows = 10000;
+  size_t cols = 10;
+  auto csv_data = generate_simd_test_data(rows, cols, pattern);
+  TempCSVFile temp_file(csv_data);
+
+  try {
+    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+
+    if (!global_parser) {
+      global_parser = new simdcsv::two_pass();
+    }
+
+    simdcsv::index result = global_parser->init(data.size(), 1);
+
+    for (auto _ : state) {
+      if (use_branchless) {
+        global_parser->parse_branchless(data.data(), result, data.size());
+      } else {
+        global_parser->parse(data.data(), result, data.size());
+      }
+      benchmark::DoNotOptimize(result);
+    }
+
+    state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
+    state.counters["Branchless"] = static_cast<double>(use_branchless);
+    state.counters["PatternType"] = static_cast<double>(pattern_type);
+    state.counters["FileSize"] = static_cast<double>(data.size());
+
+  } catch (const std::exception& e) {
+    state.SkipWithError(e.what());
+  }
+}
+
+BENCHMARK(BM_Branchless_vs_Standard)
+  ->ArgsProduct({{0, 1}, {0, 1, 2}}) // use_branchless: 0-1, pattern_type: 0-2
+  ->Unit(benchmark::kMillisecond);
+
+// Branchless state machine with varying file sizes
+static void BM_Branchless_Scalability(benchmark::State& state) {
+  size_t rows = static_cast<size_t>(state.range(0));
+  int use_branchless = static_cast<int>(state.range(1));
+
+  auto csv_data = generate_simd_test_data(rows, 10, "mixed");
+  TempCSVFile temp_file(csv_data);
+
+  try {
+    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+
+    if (!global_parser) {
+      global_parser = new simdcsv::two_pass();
+    }
+
+    simdcsv::index result = global_parser->init(data.size(), 1);
+
+    for (auto _ : state) {
+      if (use_branchless) {
+        global_parser->parse_branchless(data.data(), result, data.size());
+      } else {
+        global_parser->parse(data.data(), result, data.size());
+      }
+      benchmark::DoNotOptimize(result);
+    }
+
+    state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
+    state.counters["Rows"] = static_cast<double>(rows);
+    state.counters["Branchless"] = static_cast<double>(use_branchless);
+    state.counters["FileSize"] = static_cast<double>(data.size());
+
+    // Calculate throughput in MB/s
+    double bytes = static_cast<double>(data.size());
+    state.counters["MB"] = bytes / (1024.0 * 1024.0);
+
+  } catch (const std::exception& e) {
+    state.SkipWithError(e.what());
+  }
+}
+
+BENCHMARK(BM_Branchless_Scalability)
+  ->ArgsProduct({{1000, 5000, 10000, 50000}, {0, 1}}) // rows, use_branchless
+  ->Unit(benchmark::kMillisecond);
+
+// Branchless multithreaded performance comparison
+static void BM_Branchless_Multithreaded(benchmark::State& state) {
+  int n_threads = static_cast<int>(state.range(0));
+  int use_branchless = static_cast<int>(state.range(1));
+
+  size_t rows = 50000;
+  size_t cols = 10;
+  auto csv_data = generate_simd_test_data(rows, cols, "mixed");
+  TempCSVFile temp_file(csv_data);
+
+  try {
+    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+
+    if (!global_parser) {
+      global_parser = new simdcsv::two_pass();
+    }
+
+    simdcsv::index result = global_parser->init(data.size(), n_threads);
+
+    for (auto _ : state) {
+      if (use_branchless) {
+        global_parser->parse_branchless(data.data(), result, data.size());
+      } else {
+        global_parser->parse(data.data(), result, data.size());
+      }
+      benchmark::DoNotOptimize(result);
+    }
+
+    state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
+    state.counters["Threads"] = static_cast<double>(n_threads);
+    state.counters["Branchless"] = static_cast<double>(use_branchless);
+    state.counters["FileSize"] = static_cast<double>(data.size());
+
+  } catch (const std::exception& e) {
+    state.SkipWithError(e.what());
+  }
+}
+
+BENCHMARK(BM_Branchless_Multithreaded)
+  ->ArgsProduct({{1, 2, 4, 8}, {0, 1}}) // n_threads, use_branchless
+  ->Unit(benchmark::kMillisecond);
+
+// Branch misprediction sensitive patterns
+static void BM_Branchless_BranchSensitive(benchmark::State& state) {
+  int use_branchless = static_cast<int>(state.range(0));
+  int pattern_type = static_cast<int>(state.range(1));
+
+  size_t data_size = 1024 * 1024; // 1MB
+  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + SIMDCSV_PADDING));
+
+  std::random_device rd;
+  std::mt19937 gen(rd());
+
+  // Generate patterns that are particularly sensitive to branch prediction
+  switch (pattern_type) {
+    case 0: // Highly predictable: regular pattern
+      for (size_t i = 0; i < data_size; ++i) {
+        if (i % 10 == 0) data[i] = ',';
+        else if (i % 100 == 0) data[i] = '\n';
+        else data[i] = 'a' + (i % 26);
+      }
+      break;
+    case 1: // Unpredictable: random quotes
+      {
+        std::uniform_int_distribution<> dist(0, 99);
+        bool in_quote = false;
+        for (size_t i = 0; i < data_size; ++i) {
+          if (!in_quote && dist(gen) < 5) {
+            data[i] = '"';
+            in_quote = true;
+          } else if (in_quote && dist(gen) < 10) {
+            data[i] = '"';
+            in_quote = false;
+          } else if (!in_quote && i % 10 == 0) {
+            data[i] = ',';
+          } else if (!in_quote && i % 100 == 0) {
+            data[i] = '\n';
+          } else {
+            data[i] = 'a' + (i % 26);
+          }
+        }
+        // Close any open quote
+        if (in_quote) data[data_size - 1] = '"';
+      }
+      break;
+    case 2: // Alternating: quote every other field
+      {
+        bool use_quote = false;
+        for (size_t i = 0; i < data_size; ++i) {
+          if (i % 10 == 0) {
+            data[i] = ',';
+            use_quote = !use_quote;
+          } else if (i % 100 == 0) {
+            data[i] = '\n';
+            use_quote = false;
+          } else if (i % 10 == 1 && use_quote) {
+            data[i] = '"';
+          } else if (i % 10 == 9 && use_quote) {
+            data[i] = '"';
+          } else {
+            data[i] = 'a' + (i % 26);
+          }
+        }
+      }
+      break;
+  }
+
+  // Add padding
+  for (size_t i = data_size; i < data_size + SIMDCSV_PADDING; ++i) {
+    data[i] = '\0';
+  }
+
+  if (!global_parser) {
+    global_parser = new simdcsv::two_pass();
+  }
+
+  simdcsv::index result = global_parser->init(data_size, 1);
+
+  for (auto _ : state) {
+    if (use_branchless) {
+      global_parser->parse_branchless(data, result, data_size);
+    } else {
+      global_parser->parse(data, result, data_size);
+    }
+    benchmark::DoNotOptimize(result);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(data_size * state.iterations()));
+  state.counters["Branchless"] = static_cast<double>(use_branchless);
+  state.counters["PatternType"] = static_cast<double>(pattern_type);
+  state.counters["DataSize"] = static_cast<double>(data_size);
+
+  // Pattern descriptions for reporting
+  const char* pattern_names[] = {"predictable", "random_quotes", "alternating"};
+  state.SetLabel(pattern_names[pattern_type]);
+
+  aligned_free(data);
+}
+
+BENCHMARK(BM_Branchless_BranchSensitive)
+  ->ArgsProduct({{0, 1}, {0, 1, 2}}) // use_branchless, pattern_type
   ->Unit(benchmark::kMillisecond);
