@@ -528,3 +528,46 @@ add_custom_command(TARGET simdcsv_benchmark POST_BUILD
     ${CMAKE_CURRENT_SOURCE_DIR}/test/data
     ${CMAKE_CURRENT_BINARY_DIR}/benchmark/data
 )
+
+# =============================================================================
+# Fuzz Testing Support
+# =============================================================================
+option(ENABLE_FUZZING "Enable fuzz testing targets (requires Clang with libFuzzer)" OFF)
+
+if(ENABLE_FUZZING)
+    message(STATUS "Fuzz testing enabled")
+
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "Fuzz testing requires Clang compiler")
+    endif()
+
+    set(FUZZ_FLAGS -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -g)
+    set(FUZZ_LINK_FLAGS -fsanitize=fuzzer,address,undefined)
+
+    add_executable(fuzz_csv_parser fuzz/fuzz_csv_parser.cpp)
+    target_link_libraries(fuzz_csv_parser PRIVATE simdcsv_lib)
+    target_include_directories(fuzz_csv_parser PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_options(fuzz_csv_parser PRIVATE ${FUZZ_FLAGS})
+    target_link_options(fuzz_csv_parser PRIVATE ${FUZZ_LINK_FLAGS})
+    target_compile_definitions(fuzz_csv_parser PRIVATE SIMDCSV_BENCHMARK_MODE)
+
+    add_executable(fuzz_dialect_detection fuzz/fuzz_dialect_detection.cpp)
+    target_link_libraries(fuzz_dialect_detection PRIVATE simdcsv_lib)
+    target_include_directories(fuzz_dialect_detection PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_options(fuzz_dialect_detection PRIVATE ${FUZZ_FLAGS})
+    target_link_options(fuzz_dialect_detection PRIVATE ${FUZZ_LINK_FLAGS})
+    target_compile_definitions(fuzz_dialect_detection PRIVATE SIMDCSV_BENCHMARK_MODE)
+
+    add_executable(fuzz_parse_auto fuzz/fuzz_parse_auto.cpp)
+    target_link_libraries(fuzz_parse_auto PRIVATE simdcsv_lib)
+    target_include_directories(fuzz_parse_auto PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_options(fuzz_parse_auto PRIVATE ${FUZZ_FLAGS})
+    target_link_options(fuzz_parse_auto PRIVATE ${FUZZ_LINK_FLAGS})
+    target_compile_definitions(fuzz_parse_auto PRIVATE SIMDCSV_BENCHMARK_MODE)
+
+    add_custom_command(TARGET fuzz_csv_parser POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/fuzz_corpus
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/fuzz_corpus
+        COMMENT "Setting up fuzz corpus from test data"
+    )
+endif()
