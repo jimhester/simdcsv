@@ -24,9 +24,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     constexpr size_t MAX_INPUT_SIZE = 64 * 1024;
     if (size > MAX_INPUT_SIZE) size = MAX_INPUT_SIZE;
 
-    uint8_t* buf = static_cast<uint8_t*>(aligned_malloc(64, size + 64));
-    if (!buf) return 0;
-    std::unique_ptr<uint8_t, AlignedDeleter> guard(buf);
+    // Use immediate RAII to prevent leaks if an exception occurs
+    std::unique_ptr<uint8_t, AlignedDeleter> guard(
+        static_cast<uint8_t*>(aligned_malloc(64, size + 64)));
+    if (!guard) return 0;
+    uint8_t* buf = guard.get();
     std::memcpy(buf, data, size);
     std::memset(buf + size, 0, 64);
 
