@@ -176,16 +176,6 @@ target_link_libraries(simdcsv_lib PUBLIC
 # Optional Apache Arrow output integration
 include(cmake/ArrowIntegration.cmake)
 
-# Main executable (portable SIMD via Highway)
-add_executable(simdcsv
-    src/main.cpp
-)
-
-target_link_libraries(simdcsv PRIVATE
-    simdcsv_lib
-    pthread
-)
-
 # CLI utility (user-friendly CSV tool)
 add_executable(scsv
     src/cli.cpp
