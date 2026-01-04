@@ -663,8 +663,11 @@ class two_pass {
         if (result.error != ErrorCode::NONE && errors) {
           size_t line, col;
           get_line_column(buf, buf_len, pos, line, col);
+          std::string msg = "Quote character '";
+          msg += quote_char;
+          msg += "' in unquoted field";
           errors->add_error(result.error, ErrorSeverity::ERROR,
-                            line, col, pos, "Quote character in unquoted field",
+                            line, col, pos, msg,
                             get_context(buf, buf_len, pos));
           if (errors->should_stop()) return n_indexes;
         }
@@ -688,8 +691,11 @@ class two_pass {
         if (result.error != ErrorCode::NONE && errors) {
           size_t line, col;
           get_line_column(buf, buf_len, pos, line, col);
+          std::string msg = "Invalid character after closing quote '";
+          msg += quote_char;
+          msg += "'";
           errors->add_error(result.error, ErrorSeverity::ERROR,
-                            line, col, pos, "Invalid character after closing quote",
+                            line, col, pos, msg,
                             get_context(buf, buf_len, pos));
           if (errors->should_stop()) return n_indexes;
         }
@@ -705,8 +711,11 @@ class two_pass {
     if (s == QUOTED_FIELD && errors && end == buf_len) {
       size_t line, col;
       get_line_column(buf, buf_len, pos > 0 ? pos - 1 : 0, line, col);
+      std::string msg = "Unclosed quote '";
+      msg += quote_char;
+      msg += "' at end of file";
       errors->add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL,
-                        line, col, pos, "Unclosed quote at end of file",
+                        line, col, pos, msg,
                         get_context(buf, buf_len, pos > 20 ? pos - 20 : 0));
     }
 
@@ -730,7 +739,10 @@ class two_pass {
       if (value == static_cast<uint8_t>(quote_char)) {
         result = quoted_state(s);
         if (result.error != ErrorCode::NONE) {
-          throw std::runtime_error("Quote in unquoted field");
+          std::string msg = "Quote character '";
+          msg += quote_char;
+          msg += "' in unquoted field";
+          throw std::runtime_error(msg);
         }
         s = result.state;
       } else if (value == static_cast<uint8_t>(delimiter)) {
@@ -748,7 +760,10 @@ class two_pass {
       } else {
         result = other_state(s);
         if (result.error != ErrorCode::NONE) {
-          throw std::runtime_error("Invalid character after closing quote");
+          std::string msg = "Invalid character after closing quote '";
+          msg += quote_char;
+          msg += "'";
+          throw std::runtime_error(msg);
         }
         s = result.state;
       }

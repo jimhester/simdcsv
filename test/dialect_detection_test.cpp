@@ -545,3 +545,48 @@ TEST_F(DialectDetectionTest, ParseTwoPassWithErrorsDialect) {
     EXPECT_TRUE(success) << "Should parse successfully with multi-threading";
     EXPECT_EQ(errors.error_count(), 0) << "Should have no errors";
 }
+
+// ============================================================================
+// Dialect Validation Tests
+// ============================================================================
+
+TEST_F(DialectDetectionTest, DialectValidation_Valid) {
+    simdcsv::Dialect csv = simdcsv::Dialect::csv();
+    EXPECT_TRUE(csv.is_valid()) << "Standard CSV should be valid";
+
+    simdcsv::Dialect tsv = simdcsv::Dialect::tsv();
+    EXPECT_TRUE(tsv.is_valid()) << "TSV should be valid";
+
+    simdcsv::Dialect semicolon = simdcsv::Dialect::semicolon();
+    EXPECT_TRUE(semicolon.is_valid()) << "Semicolon-separated should be valid";
+
+    simdcsv::Dialect pipe = simdcsv::Dialect::pipe();
+    EXPECT_TRUE(pipe.is_valid()) << "Pipe-separated should be valid";
+}
+
+TEST_F(DialectDetectionTest, DialectValidation_SameDelimiterAndQuote) {
+    simdcsv::Dialect invalid;
+    invalid.delimiter = '"';
+    invalid.quote_char = '"';
+    EXPECT_FALSE(invalid.is_valid()) << "Same delimiter and quote should be invalid";
+
+    EXPECT_THROW(invalid.validate(), std::invalid_argument);
+}
+
+TEST_F(DialectDetectionTest, DialectValidation_NewlineDelimiter) {
+    simdcsv::Dialect invalid;
+    invalid.delimiter = '\n';
+    invalid.quote_char = '"';
+    EXPECT_FALSE(invalid.is_valid()) << "Newline delimiter should be invalid";
+
+    EXPECT_THROW(invalid.validate(), std::invalid_argument);
+}
+
+TEST_F(DialectDetectionTest, DialectValidation_NewlineQuote) {
+    simdcsv::Dialect invalid;
+    invalid.delimiter = ',';
+    invalid.quote_char = '\n';
+    EXPECT_FALSE(invalid.is_valid()) << "Newline quote should be invalid";
+
+    EXPECT_THROW(invalid.validate(), std::invalid_argument);
+}
