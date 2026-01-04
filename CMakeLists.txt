@@ -396,6 +396,23 @@ add_custom_command(TARGET api_test POST_BUILD
 # Register API tests with CTest
 gtest_discover_tests(api_test)
 
+# Quote mask unit tests (verifies PCLMULQDQ/PMULL implementation)
+add_executable(quote_mask_test
+    test/quote_mask_test.cpp
+)
+
+target_link_libraries(quote_mask_test PRIVATE
+    hwy
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(quote_mask_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+gtest_discover_tests(quote_mask_test)
+
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
     benchmark/benchmark_main.cpp
@@ -450,4 +467,17 @@ add_custom_command(TARGET simdcsv_benchmark POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_CURRENT_SOURCE_DIR}/test/data
     ${CMAKE_CURRENT_BINARY_DIR}/benchmark/data
+)
+
+# Quote mask micro-benchmark (scalar vs CLMul comparison)
+# This is a standalone benchmark for measuring the performance improvement
+# of the PCLMULQDQ/PMULL-based quote mask implementation vs the scalar loop.
+# Not part of the main benchmark suite - run separately with ./quote_mask_benchmark
+add_executable(quote_mask_benchmark benchmark/quote_mask_benchmark.cpp)
+target_link_libraries(quote_mask_benchmark PRIVATE
+    hwy
+    benchmark::benchmark
+)
+target_include_directories(quote_mask_benchmark PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
