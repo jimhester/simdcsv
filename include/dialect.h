@@ -119,6 +119,10 @@ struct DetectionOptions {
     /// Candidate quote characters to test
     std::vector<char> quote_chars = {'"', '\''};
 
+    /// Candidate escape characters to test (in addition to double-quote style)
+    /// Empty means only test double-quote escaping; backslash is common alternative
+    std::vector<char> escape_chars = {'\\'};
+
     /// Minimum confidence threshold for successful detection
     double min_confidence = 0.5;
 };
@@ -134,12 +138,34 @@ struct DialectCandidate {
     size_t num_columns = 0;          ///< Detected column count
 
     bool operator<(const DialectCandidate& other) const {
-        // Higher consistency score is better
-        if (consistency_score != other.consistency_score) {
-            return consistency_score > other.consistency_score;
+        // Higher consistency score is better (use epsilon for floating-point)
+        constexpr double epsilon = 1e-9;
+        double score_diff = consistency_score - other.consistency_score;
+        if (score_diff > epsilon) {
+            return true;  // this has higher score
         }
-        // Tie-break: prefer more columns
-        return num_columns > other.num_columns;
+        if (score_diff < -epsilon) {
+            return false;  // other has higher score
+        }
+        // Scores are effectively equal, apply tie-breakers
+
+        // Tie-break 1: prefer more columns
+        if (num_columns != other.num_columns) {
+            return num_columns > other.num_columns;
+        }
+        // Tie-break 2: prefer double-quote character (RFC 4180 standard)
+        if (dialect.quote_char != other.dialect.quote_char) {
+            return dialect.quote_char == '"';
+        }
+        // Tie-break 3: prefer RFC 4180 double-quote escaping style
+        if (dialect.double_quote != other.dialect.double_quote) {
+            return dialect.double_quote;
+        }
+        // Tie-break 4: prefer comma delimiter (most common)
+        if (dialect.delimiter != other.dialect.delimiter) {
+            return dialect.delimiter == ',';
+        }
+        return false;  // Equal
     }
 };
 

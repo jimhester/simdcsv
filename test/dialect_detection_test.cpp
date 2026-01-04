@@ -590,3 +590,165 @@ TEST_F(DialectDetectionTest, DialectValidation_NewlineQuote) {
 
     EXPECT_THROW(invalid.validate(), std::invalid_argument);
 }
+
+// ============================================================================
+// Escape Sequence Detection Tests
+// ============================================================================
+
+TEST_F(DialectDetectionTest, DetectBackslashEscape) {
+    // CSV with backslash-escaped quotes: \"
+    const std::string csv_data =
+        "Name,Value\n"
+        "\"John \\\"Boss\\\" Smith\",100\n"
+        "\"Jane Doe\",200\n"
+        "\"Bob\",300\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success()) << "Detection should succeed for backslash-escaped CSV";
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.dialect.quote_char, '"');
+    // Should detect backslash escape, not double-quote
+    EXPECT_EQ(result.dialect.escape_char, '\\');
+    EXPECT_FALSE(result.dialect.double_quote);
+}
+
+TEST_F(DialectDetectionTest, DetectDoubleQuoteEscape) {
+    // Standard RFC 4180 CSV with "" escaping
+    const std::string csv_data =
+        "Name,Value\n"
+        "\"John \"\"Boss\"\" Smith\",100\n"
+        "\"Jane Doe\",200\n"
+        "\"Bob\",300\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success()) << "Detection should succeed for double-quote escaped CSV";
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.dialect.quote_char, '"');
+    EXPECT_TRUE(result.dialect.double_quote);
+}
+
+TEST_F(DialectDetectionTest, BackslashEscapedDelimiter) {
+    // CSV with backslash-escaped delimiter
+    const std::string csv_data =
+        "Name,Description\n"
+        "\"Item A\",\"Has \\, comma\"\n"
+        "\"Item B\",\"Normal text\"\n"
+        "\"Item C\",\"More text\"\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.detected_columns, 2);
+}
+
+TEST_F(DialectDetectionTest, EscapeCharOptions) {
+    // Test with custom escape character options
+    simdcsv::DetectionOptions opts;
+    opts.escape_chars = {'\\', '~'};  // Test backslash and tilde
+
+    simdcsv::DialectDetector custom_detector(opts);
+
+    const std::string csv_data =
+        "A,B\n"
+        "\"X \\\" Y\",1\n"
+        "\"Z\",2\n"
+        "\"W\",3\n";
+
+    auto result = custom_detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.escape_char, '\\');
+}
+
+TEST_F(DialectDetectionTest, NoEscapeNeeded) {
+    // Simple CSV without any escape sequences
+    const std::string csv_data =
+        "Name,Value\n"
+        "John,100\n"
+        "Jane,200\n"
+        "Bob,300\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    // Should default to double-quote style when no escapes are present
+    EXPECT_TRUE(result.dialect.double_quote);
+}
+
+TEST_F(DialectDetectionTest, MixedEscapeStyles) {
+    // CSV with both \" and "" patterns - should be ambiguous
+    // The tie-breaker should prefer RFC 4180 (double_quote = true)
+    const std::string csv_data =
+        "Name,Value\n"
+        "\"John \\\"Boss\\\" Smith\",100\n"
+        "\"Jane \"\"Doe\"\" Jones\",200\n"
+        "\"Bob\",300\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    // When mixed, tie-breakers prefer RFC 4180
+    EXPECT_TRUE(result.dialect.double_quote);
+}
+
+TEST_F(DialectDetectionTest, EscapeInMiddleOfField) {
+    // Test escape character appearing in the middle of field content
+    const std::string csv_data =
+        "Name,Description\n"
+        "\"Test\",\"Hello \\\"World\\\" Here\"\n"
+        "\"Item\",\"Normal\"\n"
+        "\"Other\",\"Text\"\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.dialect.escape_char, '\\');
+    EXPECT_FALSE(result.dialect.double_quote);
+}
+
+TEST_F(DialectDetectionTest, ConsecutiveEscapes) {
+    // Test multiple consecutive escape sequences
+    // Each row has backslash-escaped quotes to ensure clear signal
+    const std::string csv_data =
+        "A,B\n"
+        "\"First \\\"One\\\" here\",1\n"
+        "\"Second \\\"Two\\\" here\",2\n"
+        "\"Third \\\"Three\\\" here\",3\n"
+        "\"Fourth \\\"Four\\\" here\",4\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.escape_char, '\\');
+    EXPECT_FALSE(result.dialect.double_quote);
+}
