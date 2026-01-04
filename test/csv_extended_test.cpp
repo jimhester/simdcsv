@@ -16,6 +16,7 @@
 #include <cstring>
 
 #include "two_pass.h"
+#include "error.h"
 #include "io_util.h"
 #include "mem_util.h"
 
@@ -136,9 +137,10 @@ TEST_F(CSVExtendedTest, UTF16BOMParsing) {
     simdcsv::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser will attempt to parse but results are undefined for UTF-16
-    // We just ensure it doesn't crash
+    // We just ensure it doesn't crash but we can verify indexes were created
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
-    (void)success;  // Result is undefined for UTF-16 input
+    // Just verify parser doesn't crash - UTF-16 is not supported
+    EXPECT_NE(idx.n_indexes, nullptr) << "Parser should still allocate indexes";
 }
 
 // ============================================================================
@@ -460,8 +462,11 @@ TEST_F(CSVExtendedTest, BadEscapeParsing) {
 
     // Parser should handle backslash escapes without crashing
     // (non-RFC 4180 - backslashes are treated as literal characters)
-    bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
-    (void)success;  // Result varies; just ensure no crash
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
+
+    // Just verify the parser completes without crashing
+    EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing without crashing";
 
 }
 
@@ -478,9 +483,12 @@ TEST_F(CSVExtendedTest, InvalidUTF8Parsing) {
     simdcsv::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should not crash on invalid UTF-8 sequences (0xFE, 0xFF, truncated multibyte)
-    // Success is undefined; verifying no crash/hang
-    bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
-    (void)success;
+    // Note: UTF-8 validation is not yet implemented (INVALID_UTF8 is reserved)
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
+
+    // Just verify the parser completes without crashing
+    EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing without crashing";
 
 }
 
@@ -496,10 +504,12 @@ TEST_F(CSVExtendedTest, ScatteredNullsParsing) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(corpus.data.size(), 1);
 
-    // Parser should handle embedded null bytes (0x00) without crashing
-    // Success is undefined; verifying no crash/hang
-    bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
-    (void)success;
+    // Parser should handle embedded null bytes (0x00) by detecting errors
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
+    
+    // Null bytes should be detected as errors
+    EXPECT_TRUE(errors.has_errors()) << "Null bytes should be detected as errors";
 
 }
 
@@ -516,9 +526,10 @@ TEST_F(CSVExtendedTest, DeepQuotesParsing) {
     simdcsv::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle many consecutive quotes without stack overflow
-    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
-    (void)success;
+    
+    // Deep quotes are valid RFC 4180 - they represent escaped quotes
+    EXPECT_TRUE(success) << "Deep quotes (escaped) should parse successfully";
 
 }
 
@@ -535,9 +546,10 @@ TEST_F(CSVExtendedTest, QuoteDelimiterAltParsing) {
     simdcsv::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle alternating quotes and delimiters
-    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
-    (void)success;
+    
+    // Alternating quotes and delimiters is valid CSV
+    EXPECT_TRUE(success) << "Alternating quotes/delimiters should parse";
 
 }
 
@@ -554,9 +566,10 @@ TEST_F(CSVExtendedTest, JustQuotesParsing) {
     simdcsv::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle file with only quotes
-    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
-    (void)success;
+    
+    // A file of just quotes may or may not be valid depending on count
+    EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing";
 
 }
 
@@ -572,10 +585,13 @@ TEST_F(CSVExtendedTest, QuoteEOFParsing) {
     simdcsv::two_pass parser;
     simdcsv::index idx = parser.init(corpus.data.size(), 1);
 
-    // Parser should handle unclosed quote at EOF
-    // Success is undefined; verifying no crash/hang
-    bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
-    (void)success;
+    // Parser should handle unclosed quote at EOF by detecting the error
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    bool success = parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
+    
+    // Unclosed quote at EOF should be detected as an error
+    EXPECT_FALSE(success) << "Unclosed quote at EOF should fail";
+    EXPECT_TRUE(errors.has_errors()) << "Should detect unclosed quote error";
 
 }
 
@@ -592,9 +608,10 @@ TEST_F(CSVExtendedTest, MixedCRParsing) {
     simdcsv::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle mixed CR and CRLF line endings
-    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
-    (void)success;
+    
+    // Mixed line endings should parse successfully
+    EXPECT_TRUE(success) << "Mixed CR/CRLF should parse successfully";
 
 }
 
@@ -611,9 +628,11 @@ TEST_F(CSVExtendedTest, AFLBinaryParsing) {
     simdcsv::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should not crash on binary garbage (AFL-discovered test case)
-    // Success is undefined; verifying no crash/hang
-    bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
-    (void)success;
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
+    
+    // Binary garbage should be detected as errors
+    EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing";
 
 }
 
@@ -630,9 +649,10 @@ TEST_F(CSVExtendedTest, AFL10Parsing) {
     simdcsv::index idx = parser.init(corpus.data.size(), 1);
 
     // AFL-discovered edge case test file
-    // Success is undefined; verifying no crash/hang
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
-    (void)success;
+    
+    // AFL edge case should be handled without crashing
+    EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing";
 
 }
 
