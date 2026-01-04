@@ -1087,6 +1087,172 @@ using SIMDUInt64Result = SIMDParseResult<uint64_t>;
 using SIMDDoubleResult = SIMDParseResult<double>;
 using SIMDDateTimeResult = SIMDParseResult<DateTime>;
 
+// =============================================================================
+// Integration with value_extraction.h
+// =============================================================================
+
+/**
+ * SIMD-accelerated integer parsing with NA value support.
+ * This integrates SIMDIntegerParser with ExtractionConfig for NA handling.
+ *
+ * Use this function when you need SIMD-accelerated parsing with the same
+ * interface as parse_integer(). The function handles NA values, whitespace
+ * trimming, and overflow detection just like the scalar version.
+ *
+ * @tparam IntType The target integer type (int64_t, int32_t, uint64_t, uint32_t)
+ * @param str Pointer to the string to parse
+ * @param len Length of the string
+ * @param config Extraction configuration for NA values and whitespace handling
+ * @return ExtractResult with parsed value or error
+ */
+template <typename IntType>
+really_inline ExtractResult<IntType> parse_integer_simd(const char* str, size_t len,
+                                                         const ExtractionConfig& config = ExtractionConfig::defaults()) {
+    static_assert(std::is_integral_v<IntType>, "IntType must be an integral type");
+
+    if (len == 0) return {std::nullopt, nullptr};
+
+    const char* ptr = str;
+    const char* end = str + len;
+
+    // Trim whitespace if requested
+    if (config.trim_whitespace) {
+        while (ptr < end && (*ptr == ' ' || *ptr == '\t')) ++ptr;
+        while (end > ptr && (*(end - 1) == ' ' || *(end - 1) == '\t')) --end;
+        if (ptr == end) return {std::nullopt, nullptr};
+    }
+
+    // Check for NA values
+    std::string_view sv(ptr, end - ptr);
+    for (const auto& na : config.na_values) {
+        if (sv == na) return {std::nullopt, nullptr};
+    }
+
+    // Use SIMD parser for the actual parsing
+    if constexpr (std::is_same_v<IntType, int64_t>) {
+        auto result = SIMDIntegerParser::parse_int64(ptr, end - ptr, false);  // Already trimmed
+        return result.to_extract_result();
+    } else if constexpr (std::is_same_v<IntType, uint64_t>) {
+        auto result = SIMDIntegerParser::parse_uint64(ptr, end - ptr, false);
+        return result.to_extract_result();
+    } else if constexpr (std::is_same_v<IntType, int32_t>) {
+        // Parse as int64 first, then check bounds
+        auto result = SIMDIntegerParser::parse_int64(ptr, end - ptr, false);
+        if (!result.ok()) {
+            return result.to_extract_result().error ?
+                   ExtractResult<IntType>{std::nullopt, result.error} :
+                   ExtractResult<IntType>{std::nullopt, nullptr};
+        }
+        if (result.value > std::numeric_limits<int32_t>::max() ||
+            result.value < std::numeric_limits<int32_t>::min()) {
+            return {std::nullopt, "Integer overflow for int32"};
+        }
+        return {static_cast<int32_t>(result.value), nullptr};
+    } else if constexpr (std::is_same_v<IntType, uint32_t>) {
+        auto result = SIMDIntegerParser::parse_uint64(ptr, end - ptr, false);
+        if (!result.ok()) {
+            return result.to_extract_result().error ?
+                   ExtractResult<IntType>{std::nullopt, result.error} :
+                   ExtractResult<IntType>{std::nullopt, nullptr};
+        }
+        if (result.value > std::numeric_limits<uint32_t>::max()) {
+            return {std::nullopt, "Integer overflow for uint32"};
+        }
+        return {static_cast<uint32_t>(result.value), nullptr};
+    } else {
+        // Fallback: parse as int64 and cast
+        auto result = SIMDIntegerParser::parse_int64(ptr, end - ptr, false);
+        if (!result.ok()) {
+            return result.to_extract_result().error ?
+                   ExtractResult<IntType>{std::nullopt, result.error} :
+                   ExtractResult<IntType>{std::nullopt, nullptr};
+        }
+        return {static_cast<IntType>(result.value), nullptr};
+    }
+}
+
+/**
+ * SIMD-accelerated double parsing with NA value support.
+ * This integrates SIMDDoubleParser with ExtractionConfig for NA handling.
+ *
+ * Use this function when you need SIMD-accelerated parsing with the same
+ * interface as parse_double(). The function handles NA values, whitespace
+ * trimming, and special values (NaN, Inf) just like the scalar version.
+ *
+ * @param str Pointer to the string to parse
+ * @param len Length of the string
+ * @param config Extraction configuration for NA values and whitespace handling
+ * @return ExtractResult with parsed value or error
+ */
+really_inline ExtractResult<double> parse_double_simd(const char* str, size_t len,
+                                                       const ExtractionConfig& config = ExtractionConfig::defaults()) {
+    if (len == 0) return {std::nullopt, nullptr};
+
+    const char* ptr = str;
+    const char* end = str + len;
+
+    // Trim whitespace if requested
+    if (config.trim_whitespace) {
+        while (ptr < end && (*ptr == ' ' || *ptr == '\t')) ++ptr;
+        while (end > ptr && (*(end - 1) == ' ' || *(end - 1) == '\t')) --end;
+        if (ptr == end) return {std::nullopt, nullptr};
+    }
+
+    // Check for NA values (except NaN which is a valid double)
+    std::string_view sv(ptr, end - ptr);
+
+    // Check if it looks like NaN first (case-insensitive)
+    bool looks_like_nan = (sv.size() == 3 &&
+                          (sv[0] == 'N' || sv[0] == 'n') &&
+                          (sv[1] == 'a' || sv[1] == 'A') &&
+                          (sv[2] == 'N' || sv[2] == 'n'));
+
+    if (!looks_like_nan) {
+        for (const auto& na : config.na_values) {
+            if (sv == na) return {std::nullopt, nullptr};
+        }
+    }
+
+    // Use SIMD parser for the actual parsing
+    auto result = SIMDDoubleParser::parse_double(ptr, end - ptr, false);  // Already trimmed
+    return result.to_extract_result();
+}
+
+/**
+ * Generic SIMD-accelerated value extraction function.
+ *
+ * This is the SIMD-accelerated equivalent of the generic extract_value pattern.
+ * It dispatches to the appropriate SIMD parser based on the requested type.
+ *
+ * Supported types:
+ * - int64_t: Uses SIMDIntegerParser::parse_int64()
+ * - int32_t: Uses SIMDIntegerParser::parse_int64() with bounds checking
+ * - uint64_t: Uses SIMDIntegerParser::parse_uint64()
+ * - double: Uses SIMDDoubleParser::parse_double()
+ * - bool: Falls back to scalar parse_bool() (no SIMD benefit)
+ *
+ * @tparam T The target type
+ * @param str Pointer to the string to parse
+ * @param len Length of the string
+ * @param config Extraction configuration
+ * @return ExtractResult with parsed value or error
+ */
+template <typename T>
+really_inline ExtractResult<T> extract_value_simd(const char* str, size_t len,
+                                                   const ExtractionConfig& config = ExtractionConfig::defaults()) {
+    if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, int32_t> ||
+                  std::is_same_v<T, uint64_t> || std::is_same_v<T, uint32_t>) {
+        return parse_integer_simd<T>(str, len, config);
+    } else if constexpr (std::is_same_v<T, double>) {
+        return parse_double_simd(str, len, config);
+    } else if constexpr (std::is_same_v<T, bool>) {
+        // Boolean parsing doesn't benefit from SIMD, use scalar
+        return parse_bool(str, len, config);
+    } else {
+        static_assert(!std::is_same_v<T, T>, "Unsupported type for extract_value_simd");
+    }
+}
+
 }  // namespace simdcsv
 
 #endif  // SIMDCSV_SIMD_NUMBER_PARSING_H

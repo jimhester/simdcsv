@@ -240,6 +240,7 @@ really_inline bool is_na(const char* str, size_t len, const ExtractionConfig& co
     return false;
 }
 
+
 class ValueExtractor {
 public:
     ValueExtractor(const uint8_t* buf, size_t len, const index& idx,
@@ -257,10 +258,15 @@ public:
     template <typename T>
     ExtractResult<T> get(size_t row, size_t col) const {
         auto sv = get_string_view_internal(row, col);
-        if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, int32_t>) return parse_integer<T>(sv.data(), sv.size(), config_);
-        else if constexpr (std::is_same_v<T, double>) return parse_double(sv.data(), sv.size(), config_);
-        else if constexpr (std::is_same_v<T, bool>) return parse_bool(sv.data(), sv.size(), config_);
-        else static_assert(!std::is_same_v<T, T>, "Unsupported type");
+        if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, int32_t>) {
+            return parse_integer<T>(sv.data(), sv.size(), config_);
+        } else if constexpr (std::is_same_v<T, double>) {
+            return parse_double(sv.data(), sv.size(), config_);
+        } else if constexpr (std::is_same_v<T, bool>) {
+            return parse_bool(sv.data(), sv.size(), config_);
+        } else {
+            static_assert(!std::is_same_v<T, T>, "Unsupported type");
+        }
     }
 
     std::vector<std::string_view> extract_column_string_view(size_t col) const;
