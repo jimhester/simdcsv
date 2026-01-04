@@ -1,5 +1,6 @@
 #include <unistd.h>  // for getopt
 #include <getopt.h>  // for getopt_long
+#include <cstring>   // for strcmp
 #include <iostream>
 #include <limits>
 #include "common_defs.h"
@@ -12,7 +13,14 @@
 using namespace std;
 
 void print_usage(const char* program_name) {
-  cerr << "Usage: " << program_name << " [options] <csvfile>" << endl;
+  cerr << "Usage: " << program_name << " [options] [csvfile]" << endl;
+  cerr << endl;
+  cerr << "Parse and benchmark CSV file processing using SIMD operations." << endl;
+  cerr << endl;
+  cerr << "Arguments:" << endl;
+  cerr << "  csvfile            Path to CSV file, or '-' to read from stdin." << endl;
+  cerr << "                     If omitted, reads from stdin." << endl;
+  cerr << endl;
   cerr << "Options:" << endl;
   cerr << "  -v, --verbose      Enable verbose output" << endl;
   cerr << "  -d, --dump         Dump index data" << endl;
@@ -23,6 +31,11 @@ void print_usage(const char* program_name) {
   cerr << "  --debug-timing     Enable timing output" << endl;
   cerr << "  --debug-masks      Enable mask/buffer dumps" << endl;
   cerr << "  -h, --help         Show this help message" << endl;
+  cerr << endl;
+  cerr << "Examples:" << endl;
+  cerr << "  " << program_name << " data.csv" << endl;
+  cerr << "  cat data.csv | " << program_name << endl;
+  cerr << "  " << program_name << " - < data.csv" << endl;
 }
 
 int main(int argc, char* argv[]) {
@@ -81,17 +94,34 @@ int main(int argc, char* argv[]) {
         return 1;
     }
   }
+  // Determine if reading from stdin or file
+  bool read_from_stdin = false;
+  const char* filename = nullptr;
+
   if (optind >= argc) {
-    print_usage(argv[0]);
-    exit(1);
+    // No filename provided - read from stdin
+    read_from_stdin = true;
+  } else {
+    filename = argv[optind];
+    // Check if filename is "-" (stdin convention)
+    if (std::strcmp(filename, "-") == 0) {
+      read_from_stdin = true;
+    }
   }
 
-  const char* filename = argv[optind];
   std::basic_string_view<uint8_t> p;
   try {
-    p = get_corpus(filename, SIMDCSV_PADDING);
+    if (read_from_stdin) {
+      p = get_corpus_stdin(SIMDCSV_PADDING);
+    } else {
+      p = get_corpus(filename, SIMDCSV_PADDING);
+    }
   } catch (const std::exception& e) {  // caught by reference to base
-    std::cout << "Could not load the file " << filename << std::endl;
+    if (read_from_stdin) {
+      std::cout << "Could not read from stdin: " << e.what() << std::endl;
+    } else {
+      std::cout << "Could not load the file " << filename << std::endl;
+    }
     return EXIT_FAILURE;
   }
 
@@ -102,8 +132,8 @@ int main(int argc, char* argv[]) {
   if (debug_config.enabled()) {
     cout << "[simdcsv] Debug mode enabled" << endl;
     cout << "[simdcsv] SIMD: " << simdcsv::get_simd_info() << endl;
-    cout << "[simdcsv] Input file: " << filename << endl;
-    cout << "[simdcsv] File size: " << p.size() << " bytes" << endl;
+    cout << "[simdcsv] Input: " << (read_from_stdin ? "<stdin>" : filename) << endl;
+    cout << "[simdcsv] Data size: " << p.size() << " bytes" << endl;
     cout << "[simdcsv] Threads: " << n_threads << endl;
     cout << "[simdcsv] Iterations: " << iterations << endl;
     cout << endl;
