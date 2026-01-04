@@ -1,29 +1,92 @@
 #!/bin/bash
 set -euo pipefail
 
-# start-issue.sh - Start a Claude Code session for a GitHub issue
-# Usage: ./start-issue.sh <issue-url-or-number> [description]
-#        ./start-issue.sh "description of new feature"
+# start-issue.sh - Start Claude Code session(s) for GitHub issue(s)
+#
+# By default, spawns each issue in a new iTerm2 tab (macOS only).
+# Use --here to run in the current terminal instead.
+#
+# Usage: ./start-issue.sh <issue> [issue2 ...]      # Each in new tab (default)
+#        ./start-issue.sh --here <issue>            # Run in current terminal
+#        ./start-issue.sh "feature description"    # New feature branch
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 WORKTREE_BASE="${REPO_ROOT}/../worktrees"
 MAIN_BRANCH="${MAIN_BRANCH:-main}"
+SPAWN_DELAY="${SPAWN_DELAY:-0.5}"
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") <issue-url-or-number> [description]
+Usage: $(basename "$0") <issue> [issue2 ...]
+       $(basename "$0") --here <issue-url-or-number> [description]
        $(basename "$0") "description of new feature"
 
+By default, spawns each issue in a new iTerm2 tab (macOS only).
+
 Examples:
+  $(basename "$0") 97 98 99                    # Spawn 3 issues in new tabs
   $(basename "$0") https://github.com/owner/repo/issues/42
-  $(basename "$0") 42 "fix memory leak"
-  $(basename "$0") "add dark mode support"
+  $(basename "$0") --here 42 "fix memory leak"  # Run in current terminal
+  $(basename "$0") "add dark mode support"      # New feature branch
+
+Options:
+  --here     Run in current terminal instead of spawning new tab
+  --help     Show this help message
 
 Environment:
   MAIN_BRANCH    Base branch for new branches (default: main)
   WORKTREE_BASE  Directory for worktrees (default: ../worktrees)
+  SPAWN_DELAY    Delay between spawns in seconds (default: 0.5)
 EOF
     exit 1
+}
+
+# Check prerequisites for spawning
+check_spawn_prerequisites() {
+    if [[ "$(uname)" != "Darwin" ]]; then
+        echo "Error: Spawning new tabs requires macOS (detected: $(uname))"
+        echo "Use --here to run in current terminal instead."
+        exit 1
+    fi
+
+    if ! osascript -e 'tell application "System Events" to (name of processes) contains "iTerm2"' 2>/dev/null | grep -q "true"; then
+        echo "Error: iTerm2 is not running. Please start iTerm2 first."
+        echo "Or use --here to run in current terminal."
+        exit 1
+    fi
+}
+
+# Spawn a single issue in a new iTerm2 tab
+spawn_in_new_tab() {
+    local issue="$1"
+
+    # Capture current directory
+    local current_dir
+    current_dir="$(pwd)"
+
+    # Safely escape parameters for shell
+    local escaped_issue escaped_dir escaped_script
+    escaped_issue=$(printf '%q' "$issue")
+    escaped_dir=$(printf '%q' "$current_dir")
+    escaped_script=$(printf '%q' "${SCRIPT_DIR}/start-issue.sh")
+
+    # Build the command to run in the new tab
+    local cmd="${escaped_script} --here ${escaped_issue}"
+
+    # Use AppleScript to create a new tab and run the command
+    osascript <<EOF
+tell application "iTerm2"
+    tell current window
+        create tab with default profile
+        tell current session
+            write text "cd ${escaped_dir} && ${cmd}"
+        end tell
+    end tell
+end tell
+EOF
+
+    echo "Spawned new tab for: $issue"
 }
 
 # Slugify a string for use in branch names
@@ -89,7 +152,6 @@ fetch_pr_branch() {
 # Find existing branch for an issue
 find_existing_branch() {
     local issue_num="$1"
-    # Look for branches matching issue-NUM-* pattern
     git branch -a --list "*issue-${issue_num}-*" 2>/dev/null | \
         sed 's/^[* ]*//' | \
         sed 's|remotes/origin/||' | \
@@ -106,12 +168,8 @@ find_existing_worktree() {
         sed 's/^worktree //' || true
 }
 
-# Main logic
-main() {
-    if [[ $# -lt 1 ]]; then
-        usage
-    fi
-
+# Run issue in current terminal (the original behavior)
+run_here() {
     local input="$1"
     local description="${2:-}"
 
@@ -126,7 +184,6 @@ main() {
     if parse_issue_input "$input"; then
         if [[ "$ISSUE_TYPE" == "pull" ]]; then
             echo "Found PR #${ISSUE_NUMBER}"
-            # For PRs, fetch the actual branch name from GitHub
             if [[ -n "$ISSUE_OWNER" ]] && [[ -n "$ISSUE_REPO" ]]; then
                 echo "Fetching PR branch from GitHub..."
                 BRANCH_NAME=$(fetch_pr_branch)
@@ -139,14 +196,11 @@ main() {
             fi
         else
             echo "Found issue #${ISSUE_NUMBER}"
-
-            # Check for existing branch
             BRANCH_NAME=$(find_existing_branch "$ISSUE_NUMBER")
 
             if [[ -n "$BRANCH_NAME" ]]; then
                 echo "Found existing branch: $BRANCH_NAME"
             else
-                # Create new branch name
                 if [[ -z "$description" ]] && [[ -n "$ISSUE_OWNER" ]] && [[ -n "$ISSUE_REPO" ]]; then
                     echo "Fetching issue title from GitHub..."
                     description=$(fetch_issue_title)
@@ -161,11 +215,9 @@ main() {
             fi
         fi
     else
-        # Treat input as description for a new feature branch
         description="$input"
         BRANCH_NAME="feature-$(slugify "$description")"
 
-        # Check if branch exists
         if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}" 2>/dev/null; then
             echo "Found existing branch: $BRANCH_NAME"
         else
@@ -179,13 +231,10 @@ main() {
     if [[ -n "$WORKTREE_PATH" ]]; then
         echo "Using existing worktree: $WORKTREE_PATH"
     else
-        # Create worktree directory
         mkdir -p "$WORKTREE_BASE"
         WORKTREE_PATH="${WORKTREE_BASE}/${BRANCH_NAME}"
 
-        # Check if directory already exists (but not registered as worktree)
         if [[ -d "$WORKTREE_PATH" ]]; then
-            # Check if it's a valid git directory on the correct branch
             if git -C "$WORKTREE_PATH" rev-parse --git-dir &>/dev/null; then
                 local current_branch
                 current_branch=$(git -C "$WORKTREE_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
@@ -193,16 +242,12 @@ main() {
                     echo "Using existing directory (not registered as worktree): $WORKTREE_PATH"
                 else
                     echo "Error: Directory exists but is on branch '$current_branch', expected '$BRANCH_NAME'"
-                    echo "Path: $WORKTREE_PATH"
-                    echo "Please remove or rename the directory and try again."
                     exit 1
                 fi
             else
                 echo "Error: Directory exists but is not a valid git directory: $WORKTREE_PATH"
-                echo "Please remove or rename the directory and try again."
                 exit 1
             fi
-        # Check if branch exists (locally or remotely)
         elif git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}" 2>/dev/null; then
             echo "Creating worktree for existing branch..."
             git worktree add "$WORKTREE_PATH" "$BRANCH_NAME"
@@ -229,7 +274,6 @@ main() {
         task_ref="${description}"
     fi
 
-    # Build comprehensive agent instructions
     local prompt
     prompt=$(cat <<EOF
 Complete this task end-to-end: ${task_ref}
@@ -308,7 +352,6 @@ EOF
     else
         title="${description:0:30}"
     fi
-    # \033]0; sets both window and tab title, \007 terminates
     printf '\033]0;%s\007' "$title"
 
     echo ""
@@ -318,7 +361,6 @@ EOF
     echo ""
 
     # Check if we're already inside a Claude Code session
-    # CLAUDE_CODE is set by Claude Code when running commands
     if [[ -n "${CLAUDE_CODE:-}" ]]; then
         echo "Already in Claude Code session. Outputting task info:"
         echo ""
@@ -332,9 +374,47 @@ EOF
 
     echo "Starting Claude Code session..."
 
-    # Change to worktree and start Claude Code
     cd "$WORKTREE_PATH"
     exec claude --dangerously-skip-permissions "$prompt"
+}
+
+# Main logic
+main() {
+    if [[ $# -lt 1 ]]; then
+        usage
+    fi
+
+    case "$1" in
+        --help|-h)
+            usage
+            ;;
+        --here)
+            # Run in current terminal
+            shift
+            if [[ $# -lt 1 ]]; then
+                echo "Error: --here requires an issue or description"
+                exit 1
+            fi
+            run_here "$@"
+            ;;
+        *)
+            # Default: spawn in new tab(s)
+            check_spawn_prerequisites
+
+            # Spawn each argument in its own tab
+            for issue in "$@"; do
+                spawn_in_new_tab "$issue"
+                if [[ $# -gt 1 ]]; then
+                    sleep "$SPAWN_DELAY"
+                fi
+            done
+
+            if [[ $# -gt 1 ]]; then
+                echo ""
+                echo "Spawned $# tabs for: $*"
+            fi
+            ;;
+    esac
 }
 
 main "$@"
