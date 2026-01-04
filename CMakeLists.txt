@@ -562,6 +562,31 @@ add_custom_command(TARGET simd_number_parsing_test POST_BUILD
 # Register SIMD number parsing tests with CTest
 gtest_discover_tests(simd_number_parsing_test)
 
+# IO utility test executable
+add_executable(io_util_test
+    test/io_util_test.cpp
+)
+
+target_link_libraries(io_util_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(io_util_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for IO utility tests
+add_custom_command(TARGET io_util_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register IO utility tests with CTest
+gtest_discover_tests(io_util_test)
+
 # Two-pass coverage test executable (comprehensive tests for two_pass.h)
 add_executable(two_pass_coverage_test
     test/two_pass_coverage_test.cpp

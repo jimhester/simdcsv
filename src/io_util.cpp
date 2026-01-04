@@ -6,6 +6,10 @@
 #include <vector>
 
 uint8_t * allocate_padded_buffer(size_t length, size_t padding) {
+    // Check for integer overflow before addition
+    if (length > SIZE_MAX - padding) {
+        return nullptr;
+    }
     // we could do a simple malloc
     //return (char *) malloc(length + padding);
     // However, we might as well align to cache lines...
