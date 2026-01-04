@@ -1,0 +1,244 @@
+name: Performance Regression Check
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchmark:
+    name: Performance Regression Detection
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+
+    - name: Configure CMake (Release)
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build benchmark
+      run: |
+        cmake --build build --target simdcsv_benchmark --config Release
+
+    - name: Generate test data for benchmarks
+      run: |
+        # Create a reasonably sized test file for consistent benchmarking
+        # 10000 rows, 10 columns of varied data
+        mkdir -p build/benchmark_ci
+        python3 << 'EOF'
+import random
+import string
+
+random.seed(42)  # Fixed seed for reproducibility
+
+def random_string(length):
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+
+def random_quoted():
+    content = random_string(random.randint(5, 20))
+    if random.random() < 0.3:  # 30% chance of embedded comma
+        content = content[:len(content)//2] + ',' + content[len(content)//2:]
+    return f'"{content}"'
+
+with open('build/benchmark_ci/test_10k.csv', 'w') as f:
+    # Header
+    f.write(','.join([f'col{i}' for i in range(10)]) + '\n')
+    # Data rows
+    for _ in range(10000):
+        row = []
+        for col in range(10):
+            if col % 3 == 0:
+                row.append(random_quoted())
+            elif col % 3 == 1:
+                row.append(str(random.randint(0, 1000000)))
+            else:
+                row.append(random_string(random.randint(5, 15)))
+        f.write(','.join(row) + '\n')
+EOF
+        ls -la build/benchmark_ci/
+
+    - name: Run quick benchmark
+      run: |
+        # Run only specific benchmarks with limited iterations for speed
+        # Filter to run essential benchmarks only, with JSON output for comparison
+        cd build
+        ./simdcsv_benchmark \
+          --benchmark_filter="BM_ParseSimple_Threads/1|BM_ParseManyRows_Threads/1|BM_ParseQuoted/1" \
+          --benchmark_repetitions=3 \
+          --benchmark_min_time=0.1s \
+          --benchmark_out=benchmark_results.json \
+          --benchmark_out_format=json
+
+    - name: Download previous benchmark results
+      uses: actions/cache@v4
+      id: cache-benchmark
+      with:
+        path: baseline_benchmark.json
+        key: benchmark-baseline-${{ runner.os }}-${{ github.base_ref || 'main' }}
+        restore-keys: |
+          benchmark-baseline-${{ runner.os }}-main
+          benchmark-baseline-${{ runner.os }}-
+
+    - name: Compare benchmarks and detect regression
+      id: compare
+      run: |
+        python3 << 'EOF'
+import json
+import sys
+import os
+
+REGRESSION_THRESHOLD = 0.10  # 10% regression threshold
+
+def load_benchmark(filepath):
+    """Load benchmark results from JSON file."""
+    if not os.path.exists(filepath):
+        return None
+    with open(filepath, 'r') as f:
+        data = json.load(f)
+
+    # Extract benchmark results, keyed by name
+    results = {}
+    for bench in data.get('benchmarks', []):
+        name = bench.get('name', '')
+        # Skip aggregate results (mean, median, stddev)
+        if bench.get('aggregate_name'):
+            continue
+        # Use real_time as the primary metric (nanoseconds)
+        if 'real_time' in bench:
+            if name not in results:
+                results[name] = []
+            results[name].append(bench['real_time'])
+
+    # Average multiple runs
+    return {name: sum(times) / len(times) for name, times in results.items()}
+
+def compare_benchmarks(baseline, current):
+    """Compare current results against baseline and detect regressions."""
+    regressions = []
+    improvements = []
+    unchanged = []
+
+    for name, curr_time in current.items():
+        if name not in baseline:
+            unchanged.append((name, curr_time, None, None))
+            continue
+
+        base_time = baseline[name]
+        # Positive ratio means regression (slower), negative means improvement
+        ratio = (curr_time - base_time) / base_time
+
+        if ratio > REGRESSION_THRESHOLD:
+            regressions.append((name, base_time, curr_time, ratio))
+        elif ratio < -REGRESSION_THRESHOLD:
+            improvements.append((name, base_time, curr_time, ratio))
+        else:
+            unchanged.append((name, base_time, curr_time, ratio))
+
+    return regressions, improvements, unchanged
+
+# Load results
+current = load_benchmark('build/benchmark_results.json')
+baseline = load_benchmark('baseline_benchmark.json')
+
+if current is None:
+    print("ERROR: Current benchmark results not found!")
+    sys.exit(1)
+
+print("=" * 70)
+print("PERFORMANCE REGRESSION CHECK")
+print("=" * 70)
+print(f"Regression threshold: {REGRESSION_THRESHOLD * 100:.0f}%")
+print()
+
+if baseline is None:
+    print("No baseline found. This run will establish the baseline.")
+    print()
+    print("Current benchmark results:")
+    for name, time in sorted(current.items()):
+        print(f"  {name}: {time:.2f} ns")
+
+    # Save current as new baseline
+    import shutil
+    shutil.copy('build/benchmark_results.json', 'baseline_benchmark.json')
+    print()
+    print("Baseline saved for future comparisons.")
+else:
+    regressions, improvements, unchanged = compare_benchmarks(baseline, current)
+
+    if regressions:
+        print("REGRESSIONS DETECTED:")
+        for name, base, curr, ratio in regressions:
+            print(f"  {name}")
+            print(f"    Baseline: {base:.2f} ns")
+            print(f"    Current:  {curr:.2f} ns")
+            print(f"    Change:   +{ratio * 100:.1f}% (REGRESSION)")
+        print()
+
+    if improvements:
+        print("IMPROVEMENTS:")
+        for name, base, curr, ratio in improvements:
+            print(f"  {name}")
+            print(f"    Baseline: {base:.2f} ns")
+            print(f"    Current:  {curr:.2f} ns")
+            print(f"    Change:   {ratio * 100:.1f}%")
+        print()
+
+    if unchanged:
+        print("UNCHANGED (within threshold):")
+        for name, base, curr, ratio in unchanged:
+            if ratio is not None:
+                print(f"  {name}: {ratio * 100:+.1f}%")
+            else:
+                print(f"  {name}: (new benchmark)")
+        print()
+
+    # Update baseline if no regressions (on main branch pushes)
+    is_main_push = os.environ.get('GITHUB_EVENT_NAME') == 'push' and \
+                   os.environ.get('GITHUB_REF') in ('refs/heads/main', 'refs/heads/master')
+
+    if not regressions:
+        if is_main_push:
+            import shutil
+            shutil.copy('build/benchmark_results.json', 'baseline_benchmark.json')
+            print("Baseline updated with current results (main branch push).")
+        print()
+        print("SUCCESS: No performance regressions detected!")
+    else:
+        print()
+        print(f"FAILURE: {len(regressions)} benchmark(s) regressed by more than {REGRESSION_THRESHOLD * 100:.0f}%")
+        # Set output for GitHub Actions
+        with open(os.environ.get('GITHUB_OUTPUT', '/dev/null'), 'a') as f:
+            f.write('regression=true\n')
+        sys.exit(1)
+
+print("=" * 70)
+EOF
+
+    - name: Save baseline for future runs
+      uses: actions/cache/save@v4
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      with:
+        path: baseline_benchmark.json
+        key: benchmark-baseline-${{ runner.os }}-main-${{ github.sha }}
+
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: benchmark-results
+        path: |
+          build/benchmark_results.json
+          baseline_benchmark.json
+        retention-days: 30
