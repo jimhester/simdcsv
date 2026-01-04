@@ -32,45 +32,8 @@ jobs:
       run: |
         cmake --build build --target simdcsv_benchmark --config Release
 
-    - name: Generate test data for benchmarks
-      run: |
-        # Create a reasonably sized test file for consistent benchmarking
-        # 10000 rows, 10 columns of varied data
-        mkdir -p build/benchmark_ci
-        python3 << 'EOF'
-import random
-import string
-
-random.seed(42)  # Fixed seed for reproducibility
-
-def random_string(length):
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
-
-def random_quoted():
-    content = random_string(random.randint(5, 20))
-    if random.random() < 0.3:  # 30% chance of embedded comma
-        content = content[:len(content)//2] + ',' + content[len(content)//2:]
-    return f'"{content}"'
-
-with open('build/benchmark_ci/test_10k.csv', 'w') as f:
-    # Header
-    f.write(','.join([f'col{i}' for i in range(10)]) + '\n')
-    # Data rows
-    for _ in range(10000):
-        row = []
-        for col in range(10):
-            if col % 3 == 0:
-                row.append(random_quoted())
-            elif col % 3 == 1:
-                row.append(str(random.randint(0, 1000000)))
-            else:
-                row.append(random_string(random.randint(5, 15)))
-        f.write(','.join(row) + '\n')
-EOF
-        ls -la build/benchmark_ci/
-
     - name: Run quick benchmark
-      timeout-minutes: 10
+      timeout-minutes: 5
       run: |
         # Run only specific benchmarks with limited iterations for speed
         # Filter to run essential benchmarks only, with JSON output for comparison
@@ -84,14 +47,13 @@ EOF
           --benchmark_out_format=json
 
     - name: Download previous benchmark results
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       id: cache-benchmark
       with:
         path: baseline_benchmark.json
-        key: benchmark-baseline-${{ runner.os }}-${{ github.base_ref || 'main' }}
+        key: benchmark-baseline-${{ runner.os }}-main
         restore-keys: |
           benchmark-baseline-${{ runner.os }}-main
-          benchmark-baseline-${{ runner.os }}-
 
     - name: Compare benchmarks and detect regression
       id: compare
@@ -248,7 +210,7 @@ EOF
       if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
       with:
         path: baseline_benchmark.json
-        key: benchmark-baseline-${{ runner.os }}-main-${{ github.sha }}
+        key: benchmark-baseline-${{ runner.os }}-main
 
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4
