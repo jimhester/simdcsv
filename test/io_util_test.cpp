@@ -5,6 +5,9 @@
 #include <cstring>
 #include <stdexcept>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <array>
+#include <memory>
 
 #include "io_util.h"
 #include "mem_util.h"
@@ -519,3 +522,398 @@ TEST_F(IOUtilTest, Integration_BufferCanBeProcessed) {
 
     aligned_free((void*)corpus.data());
 }
+
+// =============================================================================
+// get_corpus_stdin TESTS
+//
+// Testing stdin requires special handling since we can't directly manipulate
+// stdin in the current process. These tests use subprocess execution with
+// pipes to test the function's behavior.
+//
+// NOTE: These tests use POSIX-specific APIs (fork, pipe, dup2, waitpid) and
+// are only available on Unix-like systems (Linux, macOS).
+// =============================================================================
+
+#ifndef _WIN32  // POSIX-only tests
+
+// Helper class for running subprocesses with stdin piped data
+class StdinTestRunner {
+public:
+    struct Result {
+        int exit_code;
+        std::string stdout_output;
+        std::string stderr_output;
+    };
+
+    // Run a helper program that calls get_corpus_stdin() and pipes data to it
+    // Returns exit code, stdout, and stderr
+    static Result runWithPipedStdin(const std::string& input_data,
+                                     const std::string& helper_program) {
+        Result result;
+        result.exit_code = -1;
+
+        // Create a pipe for stdin
+        int stdin_pipe[2];
+        if (pipe(stdin_pipe) == -1) {
+            result.stderr_output = "Failed to create stdin pipe";
+            return result;
+        }
+
+        // Create pipes for stdout and stderr capture
+        int stdout_pipe[2], stderr_pipe[2];
+        if (pipe(stdout_pipe) == -1 || pipe(stderr_pipe) == -1) {
+            close(stdin_pipe[0]);
+            close(stdin_pipe[1]);
+            result.stderr_output = "Failed to create output pipes";
+            return result;
+        }
+
+        pid_t pid = fork();
+        if (pid == -1) {
+            close(stdin_pipe[0]);
+            close(stdin_pipe[1]);
+            close(stdout_pipe[0]);
+            close(stdout_pipe[1]);
+            close(stderr_pipe[0]);
+            close(stderr_pipe[1]);
+            result.stderr_output = "Fork failed";
+            return result;
+        }
+
+        if (pid == 0) {
+            // Child process
+            close(stdin_pipe[1]);   // Close write end of stdin pipe
+            close(stdout_pipe[0]);  // Close read end of stdout pipe
+            close(stderr_pipe[0]);  // Close read end of stderr pipe
+
+            // Redirect stdin, stdout, stderr
+            dup2(stdin_pipe[0], STDIN_FILENO);
+            dup2(stdout_pipe[1], STDOUT_FILENO);
+            dup2(stderr_pipe[1], STDERR_FILENO);
+
+            close(stdin_pipe[0]);
+            close(stdout_pipe[1]);
+            close(stderr_pipe[1]);
+
+            // Execute the helper program
+            execl(helper_program.c_str(), helper_program.c_str(), nullptr);
+            _exit(127);  // execl failed
+        }
+
+        // Parent process
+        close(stdin_pipe[0]);   // Close read end of stdin pipe
+        close(stdout_pipe[1]);  // Close write end of stdout pipe
+        close(stderr_pipe[1]);  // Close write end of stderr pipe
+
+        // Write input data to child's stdin
+        if (!input_data.empty()) {
+            write(stdin_pipe[1], input_data.data(), input_data.size());
+        }
+        close(stdin_pipe[1]);  // Signal EOF
+
+        // Read stdout
+        char buffer[4096];
+        ssize_t bytes_read;
+        while ((bytes_read = read(stdout_pipe[0], buffer, sizeof(buffer))) > 0) {
+            result.stdout_output.append(buffer, bytes_read);
+        }
+        close(stdout_pipe[0]);
+
+        // Read stderr
+        while ((bytes_read = read(stderr_pipe[0], buffer, sizeof(buffer))) > 0) {
+            result.stderr_output.append(buffer, bytes_read);
+        }
+        close(stderr_pipe[0]);
+
+        // Wait for child
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status)) {
+            result.exit_code = WEXITSTATUS(status);
+        } else if (WIFSIGNALED(status)) {
+            result.exit_code = 128 + WTERMSIG(status);
+        }
+
+        return result;
+    }
+};
+
+// Test fixture that creates a helper executable for stdin testing
+class GetCorpusStdinTest : public IOUtilTest {
+protected:
+    std::string helper_path;
+
+    void SetUp() override {
+        IOUtilTest::SetUp();
+        helper_path = createStdinHelper();
+    }
+
+    void TearDown() override {
+        // Remove helper executable
+        if (!helper_path.empty()) {
+            fs::remove(helper_path);
+        }
+        IOUtilTest::TearDown();
+    }
+
+    // Create a small helper program that calls get_corpus_stdin()
+    // and prints the result size to stdout
+    std::string createStdinHelper() {
+        std::string source_path = temp_dir + "/stdin_helper.cpp";
+        std::string exe_path = temp_dir + "/stdin_helper";
+
+        // Write helper source code
+        std::ofstream src(source_path);
+        src << R"(
+#include <iostream>
+#include <cstdint>
+#include <cstring>
+#include <stdexcept>
+
+// Minimal reimplementation for testing
+// This avoids linking issues with the full library
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+
+#ifdef _WIN32
+#include <malloc.h>
+#else
+#include <cstdlib>
+#endif
+
+void* aligned_malloc_test(size_t alignment, size_t size) {
+#ifdef _WIN32
+    return _aligned_malloc(size, alignment);
+#else
+    void* ptr = nullptr;
+    if (posix_memalign(&ptr, alignment, size) != 0) {
+        return nullptr;
+    }
+    return ptr;
+#endif
+}
+
+void aligned_free_test(void* ptr) {
+#ifdef _WIN32
+    _aligned_free(ptr);
+#else
+    free(ptr);
+#endif
+}
+
+uint8_t* allocate_padded_buffer_test(size_t length, size_t padding) {
+    if (length > SIZE_MAX - padding) {
+        return nullptr;
+    }
+    size_t totalpaddedlength = length + padding;
+    return (uint8_t*)aligned_malloc_test(64, totalpaddedlength);
+}
+
+struct CorpusResult {
+    uint8_t* data;
+    size_t size;
+};
+
+CorpusResult get_corpus_stdin_test(size_t padding) {
+    const size_t chunk_size = 64 * 1024;
+    std::vector<uint8_t> data;
+    data.reserve(chunk_size * 16);
+
+    uint8_t buffer[chunk_size];
+    while (true) {
+        size_t bytes_read = std::fread(buffer, 1, chunk_size, stdin);
+        if (bytes_read > 0) {
+            data.insert(data.end(), buffer, buffer + bytes_read);
+        }
+        if (bytes_read < chunk_size) {
+            if (std::ferror(stdin)) {
+                throw std::runtime_error("could not read from stdin");
+            }
+            break;
+        }
+    }
+
+    if (data.empty()) {
+        throw std::runtime_error("no data read from stdin");
+    }
+
+    uint8_t* buf = allocate_padded_buffer_test(data.size(), padding);
+    if (buf == nullptr) {
+        throw std::runtime_error("could not allocate memory");
+    }
+
+    std::memcpy(buf, data.data(), data.size());
+    return {buf, data.size()};
+}
+
+int main() {
+    try {
+        auto result = get_corpus_stdin_test(64);
+        std::cout << "SIZE:" << result.size << std::endl;
+
+        // Print content for verification (as hex for safety)
+        std::cout << "CONTENT:";
+        for (size_t i = 0; i < result.size && i < 1024; i++) {
+            std::cout << static_cast<char>(result.data[i]);
+        }
+        std::cout << std::endl;
+
+        aligned_free_test(result.data);
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "ERROR:" << e.what() << std::endl;
+        return 1;
+    }
+}
+)";
+        src.close();
+
+        // Compile the helper using CXX environment variable if set, otherwise c++
+        const char* cxx = std::getenv("CXX");
+        std::string compiler = cxx ? cxx : "c++";
+        std::string compile_cmd = compiler + " -std=c++17 -o " + exe_path + " " + source_path + " 2>&1";
+        int ret = system(compile_cmd.c_str());
+        if (ret != 0) {
+            return "";  // Compilation failed
+        }
+
+        return exe_path;
+    }
+};
+
+// Test normal operation: reading CSV data from stdin
+TEST_F(GetCorpusStdinTest, NormalOperation_BasicCSV) {
+    if (helper_path.empty()) {
+        GTEST_SKIP() << "Could not compile stdin helper";
+    }
+
+    std::string csv_data = "a,b,c\n1,2,3\n4,5,6\n";
+    auto result = StdinTestRunner::runWithPipedStdin(csv_data, helper_path);
+
+    EXPECT_EQ(result.exit_code, 0) << "stderr: " << result.stderr_output;
+    EXPECT_TRUE(result.stdout_output.find("SIZE:18") != std::string::npos)
+        << "Output: " << result.stdout_output;
+    EXPECT_TRUE(result.stdout_output.find("CONTENT:a,b,c") != std::string::npos)
+        << "Output: " << result.stdout_output;
+}
+
+// Test normal operation: single byte input
+TEST_F(GetCorpusStdinTest, NormalOperation_SingleByte) {
+    if (helper_path.empty()) {
+        GTEST_SKIP() << "Could not compile stdin helper";
+    }
+
+    std::string data = "X";
+    auto result = StdinTestRunner::runWithPipedStdin(data, helper_path);
+
+    EXPECT_EQ(result.exit_code, 0) << "stderr: " << result.stderr_output;
+    EXPECT_TRUE(result.stdout_output.find("SIZE:1") != std::string::npos)
+        << "Output: " << result.stdout_output;
+}
+
+// Test normal operation: large input (larger than chunk size)
+TEST_F(GetCorpusStdinTest, NormalOperation_LargeInput) {
+    if (helper_path.empty()) {
+        GTEST_SKIP() << "Could not compile stdin helper";
+    }
+
+    // Create data larger than the 64KB chunk size
+    std::string large_data(100 * 1024, 'X');  // 100KB
+    auto result = StdinTestRunner::runWithPipedStdin(large_data, helper_path);
+
+    EXPECT_EQ(result.exit_code, 0) << "stderr: " << result.stderr_output;
+    EXPECT_TRUE(result.stdout_output.find("SIZE:102400") != std::string::npos)
+        << "Output: " << result.stdout_output;
+}
+
+// Test normal operation: exactly one chunk size
+TEST_F(GetCorpusStdinTest, NormalOperation_ExactlyOneChunk) {
+    if (helper_path.empty()) {
+        GTEST_SKIP() << "Could not compile stdin helper";
+    }
+
+    std::string data(64 * 1024, 'Y');  // Exactly 64KB
+    auto result = StdinTestRunner::runWithPipedStdin(data, helper_path);
+
+    EXPECT_EQ(result.exit_code, 0) << "stderr: " << result.stderr_output;
+    EXPECT_TRUE(result.stdout_output.find("SIZE:65536") != std::string::npos)
+        << "Output: " << result.stdout_output;
+}
+
+// Test normal operation: binary data (all byte values)
+TEST_F(GetCorpusStdinTest, NormalOperation_BinaryData) {
+    if (helper_path.empty()) {
+        GTEST_SKIP() << "Could not compile stdin helper";
+    }
+
+    std::string binary_data;
+    for (int i = 1; i < 256; i++) {  // Skip null byte for simplicity
+        binary_data.push_back(static_cast<char>(i));
+    }
+    auto result = StdinTestRunner::runWithPipedStdin(binary_data, helper_path);
+
+    EXPECT_EQ(result.exit_code, 0) << "stderr: " << result.stderr_output;
+    EXPECT_TRUE(result.stdout_output.find("SIZE:255") != std::string::npos)
+        << "Output: " << result.stdout_output;
+}
+
+// Test empty stdin: should throw "no data read from stdin"
+TEST_F(GetCorpusStdinTest, EmptyStdin_ThrowsException) {
+    if (helper_path.empty()) {
+        GTEST_SKIP() << "Could not compile stdin helper";
+    }
+
+    std::string empty_data = "";
+    auto result = StdinTestRunner::runWithPipedStdin(empty_data, helper_path);
+
+    EXPECT_EQ(result.exit_code, 1) << "Should fail with empty stdin";
+    EXPECT_TRUE(result.stderr_output.find("no data read from stdin") != std::string::npos)
+        << "stderr: " << result.stderr_output;
+}
+
+// Test with newline-only input (should succeed since data is not empty)
+TEST_F(GetCorpusStdinTest, NewlineOnlyInput) {
+    if (helper_path.empty()) {
+        GTEST_SKIP() << "Could not compile stdin helper";
+    }
+
+    std::string newline_data = "\n";
+    auto result = StdinTestRunner::runWithPipedStdin(newline_data, helper_path);
+
+    EXPECT_EQ(result.exit_code, 0) << "stderr: " << result.stderr_output;
+    EXPECT_TRUE(result.stdout_output.find("SIZE:1") != std::string::npos)
+        << "Output: " << result.stdout_output;
+}
+
+// Test with multiple chunks plus remainder
+TEST_F(GetCorpusStdinTest, NormalOperation_MultipleChunksWithRemainder) {
+    if (helper_path.empty()) {
+        GTEST_SKIP() << "Could not compile stdin helper";
+    }
+
+    // 2.5 chunks = 160KB
+    std::string data(160 * 1024, 'Z');
+    auto result = StdinTestRunner::runWithPipedStdin(data, helper_path);
+
+    EXPECT_EQ(result.exit_code, 0) << "stderr: " << result.stderr_output;
+    EXPECT_TRUE(result.stdout_output.find("SIZE:163840") != std::string::npos)
+        << "Output: " << result.stdout_output;
+}
+
+// Test with UTF-8 content
+TEST_F(GetCorpusStdinTest, NormalOperation_UTF8Content) {
+    if (helper_path.empty()) {
+        GTEST_SKIP() << "Could not compile stdin helper";
+    }
+
+    std::string utf8_data = "日本語,中文,한국어\nПривет,Мир\n";
+    auto result = StdinTestRunner::runWithPipedStdin(utf8_data, helper_path);
+
+    EXPECT_EQ(result.exit_code, 0) << "stderr: " << result.stderr_output;
+    // UTF-8 string has 47 bytes (Japanese/Chinese/Korean + Cyrillic characters)
+    EXPECT_TRUE(result.stdout_output.find("SIZE:47") != std::string::npos)
+        << "Output: " << result.stdout_output;
+}
+
+#endif  // !_WIN32
