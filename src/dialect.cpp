@@ -5,6 +5,7 @@
 
 #include "dialect.h"
 #include "io_util.h"
+#include "simd_number_parsing.h"
 
 #include <algorithm>
 #include <cmath>
@@ -347,22 +348,79 @@ double DialectDetector::compute_type_score(
     // Skip first row if it might be a header
     size_t start_row = (rows.size() > 1) ? 1 : 0;
 
+    // Collect all fields for batch processing.
+    // Note: field_ptrs point into the input buffer `buf` (via extract_fields),
+    // so they remain valid throughout this function's scope.
+    std::vector<const uint8_t*> field_ptrs;
+    std::vector<size_t> field_lengths;
+
+    // Pre-allocate based on estimated fields
+    size_t estimated_fields = (rows.size() - start_row) * 10;
+    field_ptrs.reserve(estimated_fields);
+    field_lengths.reserve(estimated_fields);
+
     for (size_t i = start_row; i < rows.size(); ++i) {
         const auto& [start, end] = rows[i];
         auto fields = extract_fields(dialect, buf + start, end - start);
 
         for (const auto& field : fields) {
-            CellType type = infer_cell_type(field);
-            // Non-string types count as "typed"
-            if (type != CellType::STRING) {
-                typed_cells++;
-            }
+            field_ptrs.push_back(reinterpret_cast<const uint8_t*>(field.data()));
+            field_lengths.push_back(field.size());
             total_cells++;
         }
     }
 
     if (total_cells == 0) {
         return 0.0;
+    }
+
+    // Use SIMD batch validation for integer/float detection.
+    // This efficiently identifies numeric fields without calling infer_cell_type().
+    size_t integer_count = 0;
+    size_t float_count = 0;
+    size_t other_count = 0;
+
+    SIMDTypeValidator::validate_batch(
+        field_ptrs.data(),
+        field_lengths.data(),
+        total_cells,
+        integer_count,
+        float_count,
+        other_count
+    );
+
+    // Integer and float cells are definitely typed
+    typed_cells = integer_count + float_count;
+
+    // For non-numeric fields, check if they're other typed values using
+    // infer_cell_type(). We only call this for fields in the "other" category.
+    //
+    // Trade-off: For numeric-heavy CSVs, we avoid calling infer_cell_type()
+    // for most fields. For mixed-type CSVs, performance is similar to scalar.
+    //
+    // Note: We re-call could_be_integer/could_be_float to identify which
+    // specific fields to skip. This is a trade-off: avoiding storing a
+    // per-field type marker array vs. re-validating numeric fields.
+    // For most CSV files, numeric fields are quick to validate.
+    if (other_count > 0) {
+        for (size_t i = 0; i < total_cells; ++i) {
+            const uint8_t* data = field_ptrs[i];
+            size_t field_len = field_lengths[i];
+
+            // Skip cells already counted as integer or float by SIMD
+            if (SIMDTypeValidator::could_be_integer(data, field_len) ||
+                SIMDTypeValidator::could_be_float(data, field_len)) {
+                continue;
+            }
+
+            // Use infer_cell_type for non-numeric fields to detect:
+            // empty, boolean, date, time, datetime
+            std::string_view sv(reinterpret_cast<const char*>(data), field_len);
+            CellType type = infer_cell_type(sv);
+            if (type != CellType::STRING) {
+                typed_cells++;
+            }
+        }
     }
 
     // Add small epsilon to avoid zero scores

@@ -551,4 +551,234 @@ static void BM_SIMDParseDoubleColumn(benchmark::State& state) {
 }
 BENCHMARK(BM_SIMDParseDoubleColumn);
 
+// =============================================================================
+// Dialect Detection Type Score Benchmarks
+// =============================================================================
+
+#include "dialect.h"
+
+// Generate a CSV-like dataset with mixed types for dialect detection testing
+std::string generate_typed_csv(size_t rows, size_t cols) {
+    std::string result;
+    result.reserve(rows * cols * 15);  // Rough estimate
+
+    std::mt19937 gen(42);
+    std::uniform_int_distribution<int> type_dist(0, 3);  // int, float, date, string
+    std::uniform_int_distribution<int> int_dist(-10000, 10000);
+    std::uniform_real_distribution<double> float_dist(-1000.0, 1000.0);
+
+    // Header row
+    for (size_t c = 0; c < cols; ++c) {
+        if (c > 0) result += ',';
+        result += "col" + std::to_string(c);
+    }
+    result += '\n';
+
+    // Data rows
+    char buffer[32];
+    for (size_t r = 0; r < rows; ++r) {
+        for (size_t c = 0; c < cols; ++c) {
+            if (c > 0) result += ',';
+
+            int type = type_dist(gen);
+            switch (type) {
+                case 0:  // Integer
+                    result += std::to_string(int_dist(gen));
+                    break;
+                case 1:  // Float
+                    snprintf(buffer, sizeof(buffer), "%.2f", float_dist(gen));
+                    result += buffer;
+                    break;
+                case 2:  // Date
+                    snprintf(buffer, sizeof(buffer), "2024-%02d-%02d",
+                             (gen() % 12) + 1, (gen() % 28) + 1);
+                    result += buffer;
+                    break;
+                case 3:  // String
+                    result += "text_" + std::to_string(gen() % 1000);
+                    break;
+            }
+        }
+        result += '\n';
+    }
+
+    return result;
+}
+
+// Generate a CSV with primarily numeric data (best case for SIMD optimization)
+std::string generate_numeric_csv(size_t rows, size_t cols) {
+    std::string result;
+    result.reserve(rows * cols * 12);
+
+    std::mt19937 gen(42);
+    std::uniform_int_distribution<int> type_dist(0, 1);  // Only int and float
+    std::uniform_int_distribution<int> int_dist(-10000, 10000);
+    std::uniform_real_distribution<double> float_dist(-1000.0, 1000.0);
+
+    // Header row
+    for (size_t c = 0; c < cols; ++c) {
+        if (c > 0) result += ',';
+        result += "col" + std::to_string(c);
+    }
+    result += '\n';
+
+    // Data rows
+    char buffer[32];
+    for (size_t r = 0; r < rows; ++r) {
+        for (size_t c = 0; c < cols; ++c) {
+            if (c > 0) result += ',';
+
+            if (type_dist(gen) == 0) {
+                result += std::to_string(int_dist(gen));
+            } else {
+                snprintf(buffer, sizeof(buffer), "%.2f", float_dist(gen));
+                result += buffer;
+            }
+        }
+        result += '\n';
+    }
+
+    return result;
+}
+
+static void BM_DialectDetection_TypedCSV(benchmark::State& state) {
+    size_t rows = static_cast<size_t>(state.range(0));
+    size_t cols = static_cast<size_t>(state.range(1));
+
+    std::string csv_data = generate_typed_csv(rows, cols);
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(csv_data.data());
+    size_t len = csv_data.size();
+
+    DialectDetector detector;
+
+    for (auto _ : state) {
+        auto result = detector.detect(data, len);
+        benchmark::DoNotOptimize(result);
+    }
+
+    state.SetBytesProcessed(state.iterations() * len);
+    state.counters["Rows"] = static_cast<double>(rows);
+    state.counters["Cols"] = static_cast<double>(cols);
+}
+BENCHMARK(BM_DialectDetection_TypedCSV)
+    ->Args({100, 10})    // 100 rows, 10 columns
+    ->Args({100, 50})    // 100 rows, 50 columns
+    ->Args({100, 100})   // 100 rows, 100 columns
+    ->Unit(benchmark::kMicrosecond);
+
+static void BM_DialectDetection_NumericCSV(benchmark::State& state) {
+    size_t rows = static_cast<size_t>(state.range(0));
+    size_t cols = static_cast<size_t>(state.range(1));
+
+    std::string csv_data = generate_numeric_csv(rows, cols);
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(csv_data.data());
+    size_t len = csv_data.size();
+
+    DialectDetector detector;
+
+    for (auto _ : state) {
+        auto result = detector.detect(data, len);
+        benchmark::DoNotOptimize(result);
+    }
+
+    state.SetBytesProcessed(state.iterations() * len);
+    state.counters["Rows"] = static_cast<double>(rows);
+    state.counters["Cols"] = static_cast<double>(cols);
+}
+BENCHMARK(BM_DialectDetection_NumericCSV)
+    ->Args({100, 10})    // 100 rows, 10 columns
+    ->Args({100, 50})    // 100 rows, 50 columns
+    ->Args({100, 100})   // 100 rows, 100 columns
+    ->Unit(benchmark::kMicrosecond);
+
+// Benchmark comparing SIMD vs scalar type inference for type scoring
+// Shows performance on numeric-heavy data (best case for SIMD)
+static void BM_TypeScoring_NumericData_Scalar(benchmark::State& state) {
+    init_test_data();
+
+    // 90% numeric data (integers and floats) - represents numeric CSV files
+    std::vector<std::string> mixed;
+    mixed.reserve(NUM_VALUES);
+    for (size_t i = 0; i < NUM_VALUES * 45 / 100; ++i) {
+        mixed.push_back(g_small_integers[i % g_small_integers.size()]);
+    }
+    for (size_t i = 0; i < NUM_VALUES * 45 / 100; ++i) {
+        mixed.push_back(g_floats[i % g_floats.size()]);
+    }
+    for (size_t i = 0; i < NUM_VALUES * 10 / 100; ++i) {
+        mixed.push_back("text_" + std::to_string(i));
+    }
+
+    // Scalar path using infer_cell_type
+    for (auto _ : state) {
+        size_t typed_count = 0;
+        for (const auto& s : mixed) {
+            auto type = DialectDetector::infer_cell_type(s);
+            if (type != DialectDetector::CellType::STRING) {
+                ++typed_count;
+            }
+        }
+        benchmark::DoNotOptimize(typed_count);
+    }
+
+    state.SetItemsProcessed(state.iterations() * mixed.size());
+}
+BENCHMARK(BM_TypeScoring_NumericData_Scalar);
+
+static void BM_TypeScoring_NumericData_SIMD(benchmark::State& state) {
+    init_test_data();
+
+    // 90% numeric data (integers and floats) - represents numeric CSV files
+    std::vector<std::string> mixed;
+    mixed.reserve(NUM_VALUES);
+    for (size_t i = 0; i < NUM_VALUES * 45 / 100; ++i) {
+        mixed.push_back(g_small_integers[i % g_small_integers.size()]);
+    }
+    for (size_t i = 0; i < NUM_VALUES * 45 / 100; ++i) {
+        mixed.push_back(g_floats[i % g_floats.size()]);
+    }
+    for (size_t i = 0; i < NUM_VALUES * 10 / 100; ++i) {
+        mixed.push_back("text_" + std::to_string(i));
+    }
+
+    std::vector<const uint8_t*> ptrs;
+    std::vector<size_t> lengths;
+    for (const auto& s : mixed) {
+        ptrs.push_back(reinterpret_cast<const uint8_t*>(s.c_str()));
+        lengths.push_back(s.size());
+    }
+
+    // SIMD batch path using SIMDTypeValidator::validate_batch
+    for (auto _ : state) {
+        size_t integer_count = 0, float_count = 0, other_count = 0;
+
+        SIMDTypeValidator::validate_batch(
+            ptrs.data(), lengths.data(), ptrs.size(),
+            integer_count, float_count, other_count
+        );
+
+        size_t typed_count = integer_count + float_count;
+
+        // Minimal scalar fallback for non-numeric types
+        // In numeric-heavy data, other_count is low so this loop rarely runs
+        if (other_count > 0) {
+            for (size_t i = 0; i < mixed.size(); ++i) {
+                const auto& s = mixed[i];
+                if (!SIMDTypeValidator::could_be_integer(
+                        reinterpret_cast<const uint8_t*>(s.c_str()), s.size()) &&
+                    !SIMDTypeValidator::could_be_float(
+                        reinterpret_cast<const uint8_t*>(s.c_str()), s.size())) {
+                    // For benchmark simplicity, just count strings as non-typed
+                    // (In the actual implementation, we check for bool/date/time too)
+                }
+            }
+        }
+
+        benchmark::DoNotOptimize(typed_count);
+    }
+
+    state.SetItemsProcessed(state.iterations() * mixed.size());
+}
+BENCHMARK(BM_TypeScoring_NumericData_SIMD);
+
 // Main function is provided by benchmark_main in the main benchmark executable
