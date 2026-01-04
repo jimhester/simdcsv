@@ -265,8 +265,30 @@ Once CI passes and there are no blocking reviews:
    - \`git branch -d <branch-name>\` (deletes the local branch)
    - The remote branch is automatically deleted by GitHub after merge
 
-## Phase 5: Follow up issues
-If there are any un-addressed issues identified from the PR review or implementation, please open new issues to track them.
+### Phase 5: Follow-up Issues (REQUIRED)
+**After merging, you MUST review for follow-up issues.** This is a critical step that ensures technical debt and improvements are tracked.
+
+**Check these sources for follow-up items:**
+1. **PR review comments** - Any suggestions marked "consider for future" or "nice to have"
+2. **Code review feedback** - Items you acknowledged but didn't implement in this PR
+3. **TODOs you added** - Any TODO/FIXME comments you wrote during implementation
+4. **Incomplete integrations** - Features that work but aren't fully integrated everywhere
+5. **Missing edge cases** - Test coverage gaps or error handling improvements noted
+6. **Performance optimizations** - Potential improvements identified but not prioritized
+7. **Documentation gaps** - API docs, README updates, or examples that should be added
+
+**For each follow-up item, create an issue with:**
+- Clear title describing the work
+- Background context (reference this PR)
+- Specific problem or improvement
+- Proposed solution if known
+
+**Example command:**
+\`\`\`bash
+gh issue create --title "Add SIMD support to ValueExtractor" --body "Background: PR #93 added SIMD parsers but ValueExtractor still uses scalar..."
+\`\`\`
+
+**If no follow-up issues are needed, explicitly confirm:** "Reviewed for follow-up issues: none identified."
 
 ## Guidelines
 - Be thorough but avoid over-engineering
