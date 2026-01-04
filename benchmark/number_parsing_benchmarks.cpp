@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <memory>
 
 #include "simd_number_parsing.h"
 #include "value_extraction.h"
@@ -396,13 +397,12 @@ static void BM_SIMDParseIntColumn(benchmark::State& state) {
     }
 
     std::vector<int64_t> results(NUM_VALUES);
-    std::vector<uint8_t> valid_storage(NUM_VALUES);
-    // Use reinterpret_cast to convert uint8_t* to bool* since bool[] doesn't have data()
-    bool* valid = reinterpret_cast<bool*>(valid_storage.data());
+    // Allocate a proper bool array to avoid type confusion with std::vector<bool>
+    std::unique_ptr<bool[]> valid(new bool[NUM_VALUES]);
 
     for (auto _ : state) {
         SIMDIntegerParser::parse_int64_column(ptrs.data(), lengths.data(), NUM_VALUES,
-                                               results.data(), valid);
+                                               results.data(), valid.get());
         benchmark::DoNotOptimize(results.data());
     }
 
@@ -446,12 +446,12 @@ static void BM_SIMDParseDoubleColumn(benchmark::State& state) {
     }
 
     std::vector<double> results(NUM_VALUES);
-    std::vector<uint8_t> valid_storage(NUM_VALUES);
-    bool* valid = reinterpret_cast<bool*>(valid_storage.data());
+    // Allocate a proper bool array to avoid type confusion with std::vector<bool>
+    std::unique_ptr<bool[]> valid(new bool[NUM_VALUES]);
 
     for (auto _ : state) {
         SIMDDoubleParser::parse_double_column(ptrs.data(), lengths.data(), NUM_VALUES,
-                                               results.data(), valid);
+                                               results.data(), valid.get());
         benchmark::DoNotOptimize(results.data());
     }
 

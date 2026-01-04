@@ -89,6 +89,32 @@ TEST_F(SIMDIntegerParserTest, Int64Underflow) {
     EXPECT_NE(result.error, nullptr);
 }
 
+// Uint64 boundary tests
+TEST_F(SIMDIntegerParserTest, Uint64MaxBoundary) {
+    // 18446744073709551615 is UINT64_MAX
+    auto result = SIMDIntegerParser::parse_uint64("18446744073709551615", 20);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), UINT64_MAX);
+}
+
+TEST_F(SIMDIntegerParserTest, Uint64Overflow) {
+    // 18446744073709551616 is UINT64_MAX + 1
+    auto result = SIMDIntegerParser::parse_uint64("18446744073709551616", 20);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(SIMDIntegerParserTest, Uint64OverflowByLastDigit) {
+    // Test that the boundary condition at max_before_mul works correctly
+    // 1844674407370955161 * 10 + 6 = 18446744073709551616 (overflow)
+    auto result = SIMDIntegerParser::parse_uint64("18446744073709551616", 20);
+    EXPECT_FALSE(result.ok());
+
+    // 1844674407370955161 * 10 + 5 = 18446744073709551615 (UINT64_MAX, ok)
+    auto result2 = SIMDIntegerParser::parse_uint64("18446744073709551615", 20);
+    EXPECT_TRUE(result2.ok());
+}
+
 // Whitespace handling
 TEST_F(SIMDIntegerParserTest, WhitespaceTrimming) {
     auto result = SIMDIntegerParser::parse_int64("  42  ", 6);
@@ -112,6 +138,12 @@ TEST_F(SIMDIntegerParserTest, TabWhitespace) {
     auto result = SIMDIntegerParser::parse_int64("\t789\t", 5);
     EXPECT_TRUE(result.ok());
     EXPECT_EQ(result.get(), 789);
+}
+
+TEST_F(SIMDIntegerParserTest, MixedTabsAndSpaces) {
+    auto result = SIMDIntegerParser::parse_int64(" \t 42 \t ", 8);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), 42);
 }
 
 TEST_F(SIMDIntegerParserTest, NoTrimWhitespace) {
@@ -579,6 +611,21 @@ TEST_F(SIMDDateTimeParserTest, ValidLeapDay) {
 TEST_F(SIMDDateTimeParserTest, InvalidLeapDay) {
     auto result = SIMDDateTimeParser::parse_datetime("2023-02-29", 10);
     EXPECT_FALSE(result.ok());
+}
+
+// Timezone limit tests (UTC-12 to UTC+14)
+TEST_F(SIMDDateTimeParserTest, TimezoneMaxPositive) {
+    // UTC+14:00 (Line Islands, Kiribati)
+    auto result = SIMDDateTimeParser::parse_datetime("2024-01-15T14:30:45+14:00", 25);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get().tz_offset_minutes, 14 * 60);
+}
+
+TEST_F(SIMDDateTimeParserTest, TimezoneMaxNegative) {
+    // UTC-12:00 (Baker Island)
+    auto result = SIMDDateTimeParser::parse_datetime("2024-01-15T14:30:45-12:00", 25);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get().tz_offset_minutes, -12 * 60);
 }
 
 // NA handling

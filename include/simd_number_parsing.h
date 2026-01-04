@@ -316,16 +316,16 @@ private:
             uint8_t digit = c - '0';
 
             // Check for overflow before multiplying
+            // max uint64 is 18446744073709551615
+            // max_before_mul is 1844674407370955161
             if (result > max_before_mul) {
-                // Check more carefully - we might still be okay
-                if (result == max_before_mul) {
-                    // max uint64 is 18446744073709551615
-                    // max_before_mul is 1844674407370955161
-                    // So if result == max_before_mul, digit must be <= 5
-                    if (digit > 5) return false;
-                } else {
-                    return false;
-                }
+                return false;  // Definitely overflow
+            }
+            if (result == max_before_mul && digit > 5) {
+                // At the boundary: 1844674407370955161 * 10 + digit
+                // Only digits 0-5 are safe (result would be 18446744073709551610-15)
+                // Digits 6-9 would overflow
+                return false;
             }
 
             result = result * 10 + digit;
