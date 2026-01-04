@@ -741,6 +741,214 @@ TEST_F(SIMDPerformanceTest, ParseManyDoubles) {
     }
 }
 
+// =============================================================================
+// SIMD Value Extraction Integration Tests
+// =============================================================================
+
+class SIMDValueExtractionTest : public ::testing::Test {
+protected:
+    ExtractionConfig config_ = ExtractionConfig::defaults();
+};
+
+// Test parse_integer_simd with ExtractionConfig
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDBasic) {
+    auto result = parse_integer_simd<int64_t>("12345", 5, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), 12345);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDNegative) {
+    auto result = parse_integer_simd<int64_t>("-12345", 6, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), -12345);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDWithWhitespace) {
+    auto result = parse_integer_simd<int64_t>("  42  ", 6, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), 42);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDNAValue) {
+    auto result = parse_integer_simd<int64_t>("NA", 2, config_);
+    EXPECT_TRUE(result.is_na());
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDEmptyIsNA) {
+    auto result = parse_integer_simd<int64_t>("", 0, config_);
+    EXPECT_TRUE(result.is_na());
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDInt32) {
+    auto result = parse_integer_simd<int32_t>("12345", 5, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), 12345);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDInt32Overflow) {
+    auto result = parse_integer_simd<int32_t>("9999999999", 10, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDInt32Underflow) {
+    auto result = parse_integer_simd<int32_t>("-2147483649", 11, config_);  // INT32_MIN - 1
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDUInt32) {
+    auto result = parse_integer_simd<uint32_t>("12345", 5, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), 12345u);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDUInt32Overflow) {
+    auto result = parse_integer_simd<uint32_t>("4294967296", 10, config_);  // UINT32_MAX + 1
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDUInt32Negative) {
+    auto result = parse_integer_simd<uint32_t>("-1", 2, config_);
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDUInt64) {
+    auto result = parse_integer_simd<uint64_t>("18446744073709551615", 20, config_);  // UINT64_MAX
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), UINT64_MAX);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseIntegerSIMDWhitespaceOnly) {
+    auto result = parse_integer_simd<int64_t>("   ", 3, config_);
+    EXPECT_TRUE(result.is_na());  // After trimming, empty = NA
+}
+
+TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDWhitespaceOnly) {
+    auto result = parse_double_simd("   ", 3, config_);
+    EXPECT_TRUE(result.is_na());  // After trimming, empty = NA
+}
+
+// Test parse_double_simd with ExtractionConfig
+TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDBasic) {
+    auto result = parse_double_simd("3.14159", 7, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_NEAR(result.get(), 3.14159, 0.00001);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDScientific) {
+    auto result = parse_double_simd("1.5e10", 6, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_NEAR(result.get(), 1.5e10, 1e5);
+}
+
+TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDNaN) {
+    auto result = parse_double_simd("NaN", 3, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_TRUE(std::isnan(result.get()));
+}
+
+TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDNaNNotTreatedAsNA) {
+    // NaN should be parsed as the float value, not as NA
+    auto result = parse_double_simd("NaN", 3, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_FALSE(result.is_na());
+}
+
+TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDNAValue) {
+    // Note: parse_double_simd doesn't check NA values (matching scalar behavior)
+    // It returns a parse error, not NA
+    auto result = parse_double_simd("NA", 2, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_FALSE(result.is_na());  // It's a parse error, not NA
+}
+
+TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDEmptyIsNA) {
+    auto result = parse_double_simd("", 0, config_);
+    EXPECT_TRUE(result.is_na());
+}
+
+TEST_F(SIMDValueExtractionTest, ParseDoubleSIMDWithWhitespace) {
+    auto result = parse_double_simd("  3.14  ", 8, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_NEAR(result.get(), 3.14, 0.001);
+}
+
+// Test extract_value_simd
+TEST_F(SIMDValueExtractionTest, ExtractValueSIMDInt64) {
+    auto result = extract_value_simd<int64_t>("12345", 5, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), 12345);
+}
+
+TEST_F(SIMDValueExtractionTest, ExtractValueSIMDDouble) {
+    auto result = extract_value_simd<double>("3.14", 4, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_NEAR(result.get(), 3.14, 0.001);
+}
+
+TEST_F(SIMDValueExtractionTest, ExtractValueSIMDBool) {
+    auto result = extract_value_simd<bool>("true", 4, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_TRUE(result.get());
+}
+
+TEST_F(SIMDValueExtractionTest, ExtractValueSIMDInt32) {
+    auto result = extract_value_simd<int32_t>("42", 2, config_);
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.get(), 42);
+}
+
+// Test that SIMD and scalar produce equivalent results
+TEST_F(SIMDValueExtractionTest, SIMDEquivalentToScalar) {
+    std::vector<std::string> test_values = {
+        "0", "1", "-1", "42", "-42",
+        "12345", "-12345",
+        "9223372036854775807",  // INT64_MAX
+        "-9223372036854775808"  // INT64_MIN
+    };
+
+    for (const auto& value : test_values) {
+        auto scalar_result = parse_integer<int64_t>(value.c_str(), value.size(), config_);
+        auto simd_result = parse_integer_simd<int64_t>(value.c_str(), value.size(), config_);
+
+        EXPECT_EQ(scalar_result.ok(), simd_result.ok()) << "Mismatch for: " << value;
+        if (scalar_result.ok() && simd_result.ok()) {
+            EXPECT_EQ(scalar_result.get(), simd_result.get()) << "Value mismatch for: " << value;
+        }
+    }
+}
+
+TEST_F(SIMDValueExtractionTest, SIMDDoubleEquivalentToScalar) {
+    std::vector<std::string> test_values = {
+        "0", "0.0", "1", "-1", "3.14", "-3.14",
+        "1e10", "1e-10", "1.5e10", "-1.5e-10",
+        "Inf", "-Inf", "Infinity", "-Infinity"
+    };
+
+    for (const auto& value : test_values) {
+        auto scalar_result = parse_double(value.c_str(), value.size(), config_);
+        auto simd_result = parse_double_simd(value.c_str(), value.size(), config_);
+
+        EXPECT_EQ(scalar_result.ok(), simd_result.ok()) << "Mismatch for: " << value;
+        if (scalar_result.ok() && simd_result.ok()) {
+            if (std::isnan(scalar_result.get())) {
+                EXPECT_TRUE(std::isnan(simd_result.get())) << "NaN mismatch for: " << value;
+            } else if (std::isinf(scalar_result.get())) {
+                EXPECT_TRUE(std::isinf(simd_result.get())) << "Inf mismatch for: " << value;
+                EXPECT_EQ(std::signbit(scalar_result.get()), std::signbit(simd_result.get()))
+                    << "Inf sign mismatch for: " << value;
+            } else {
+                EXPECT_NEAR(scalar_result.get(), simd_result.get(),
+                            std::abs(scalar_result.get()) * 1e-10 + 1e-15)
+                    << "Value mismatch for: " << value;
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
