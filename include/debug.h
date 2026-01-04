@@ -12,7 +12,6 @@
 #include <cstdio>
 #include <string>
 #include <vector>
-#include <iomanip>
 #include <cstring>
 
 namespace simdcsv {
@@ -74,10 +73,11 @@ public:
     bool dump_masks() const { return config_.dump_masks; }
     bool timing() const { return config_.timing; }
 
-    // SECURITY NOTE: log() uses printf-style format strings. When logging
-    // user-provided data (e.g., filenames), use log_str() instead to avoid
-    // format string vulnerabilities.
-    void log(const char* fmt, ...) const __attribute__((format(printf, 2, 3))) {
+    // Note: The format attribute uses index 2 for fmt because 'this' is implicit parameter 1
+    #if defined(__GNUC__) || defined(__clang__)
+    __attribute__((format(printf, 2, 3)))
+    #endif
+    void log(const char* fmt, ...) const {
         if (!config_.verbose) return;
         FILE* out = config_.output ? config_.output : stdout;
         fprintf(out, "[simdcsv] ");

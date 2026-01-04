@@ -157,6 +157,9 @@ add_library(simdcsv_lib STATIC
     src/io_util.cpp
     src/error.cpp
     src/dialect.cpp
+    src/simdcsv_c.cpp
+    src/value_extraction.cpp
+    src/streaming.cpp
 )
 
 target_include_directories(simdcsv_lib PUBLIC
@@ -353,6 +356,56 @@ add_custom_command(TARGET dialect_detection_test POST_BUILD
 # Register dialect detection tests with CTest
 gtest_discover_tests(dialect_detection_test)
 
+# Type detection test executable
+add_executable(type_detection_test
+    test/type_detection_test.cpp
+)
+
+target_link_libraries(type_detection_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(type_detection_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for type detection tests
+add_custom_command(TARGET type_detection_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register type detection tests with CTest
+gtest_discover_tests(type_detection_test)
+
+# C API test executable
+add_executable(c_api_test
+    test/c_api_test.cpp
+)
+
+target_link_libraries(c_api_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(c_api_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for C API tests
+add_custom_command(TARGET c_api_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register C API tests with CTest
+gtest_discover_tests(c_api_test)
+
 # Debug mode test executable
 add_executable(debug_test
     test/debug_test.cpp
@@ -412,6 +465,56 @@ target_include_directories(quote_mask_test PRIVATE
 )
 
 gtest_discover_tests(quote_mask_test)
+
+# Value extraction test executable
+add_executable(value_extraction_test
+    test/value_extraction_test.cpp
+)
+
+target_link_libraries(value_extraction_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(value_extraction_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for value extraction tests
+add_custom_command(TARGET value_extraction_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register value extraction tests with CTest
+gtest_discover_tests(value_extraction_test)
+
+# Streaming parser test executable
+add_executable(streaming_test
+    test/streaming_test.cpp
+)
+
+target_link_libraries(streaming_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(streaming_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for streaming tests
+add_custom_command(TARGET streaming_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register streaming tests with CTest
+gtest_discover_tests(streaming_test)
 
 # Benchmark executable - base sources
 set(BENCHMARK_SOURCES
@@ -481,3 +584,46 @@ target_link_libraries(quote_mask_benchmark PRIVATE
 target_include_directories(quote_mask_benchmark PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+# =============================================================================
+# Fuzz Testing Support
+# =============================================================================
+option(ENABLE_FUZZING "Enable fuzz testing targets (requires Clang with libFuzzer)" OFF)
+
+if(ENABLE_FUZZING)
+    message(STATUS "Fuzz testing enabled")
+
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "Fuzz testing requires Clang compiler")
+    endif()
+
+    set(FUZZ_FLAGS -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -g)
+    set(FUZZ_LINK_FLAGS -fsanitize=fuzzer,address,undefined)
+
+    add_executable(fuzz_csv_parser fuzz/fuzz_csv_parser.cpp)
+    target_link_libraries(fuzz_csv_parser PRIVATE simdcsv_lib)
+    target_include_directories(fuzz_csv_parser PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_options(fuzz_csv_parser PRIVATE ${FUZZ_FLAGS})
+    target_link_options(fuzz_csv_parser PRIVATE ${FUZZ_LINK_FLAGS})
+    target_compile_definitions(fuzz_csv_parser PRIVATE SIMDCSV_BENCHMARK_MODE)
+
+    add_executable(fuzz_dialect_detection fuzz/fuzz_dialect_detection.cpp)
+    target_link_libraries(fuzz_dialect_detection PRIVATE simdcsv_lib)
+    target_include_directories(fuzz_dialect_detection PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_options(fuzz_dialect_detection PRIVATE ${FUZZ_FLAGS})
+    target_link_options(fuzz_dialect_detection PRIVATE ${FUZZ_LINK_FLAGS})
+    target_compile_definitions(fuzz_dialect_detection PRIVATE SIMDCSV_BENCHMARK_MODE)
+
+    add_executable(fuzz_parse_auto fuzz/fuzz_parse_auto.cpp)
+    target_link_libraries(fuzz_parse_auto PRIVATE simdcsv_lib)
+    target_include_directories(fuzz_parse_auto PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_options(fuzz_parse_auto PRIVATE ${FUZZ_FLAGS})
+    target_link_options(fuzz_parse_auto PRIVATE ${FUZZ_LINK_FLAGS})
+    target_compile_definitions(fuzz_parse_auto PRIVATE SIMDCSV_BENCHMARK_MODE)
+
+    add_custom_command(TARGET fuzz_csv_parser POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/fuzz_corpus
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/fuzz_corpus
+        COMMENT "Setting up fuzz corpus from test data"
+    )
+endif()

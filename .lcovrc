@@ -1,6 +1,18 @@
 # lcov configuration file
 # Used by both local coverage runs and CI
+# These patterns filter out test code, benchmarks, and external dependencies
 
+# Exclude test files
 exclude = */test/*
+
+# Exclude benchmark files
 exclude = */benchmark/*
+
+# Exclude external dependencies (fetched via CMake)
 exclude = */build/_deps/*
+
+# Exclude system headers
+exclude = /usr/*
+
+# Exclude documentation
+exclude = */docs/*

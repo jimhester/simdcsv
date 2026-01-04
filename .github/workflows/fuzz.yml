@@ -1,0 +1,52 @@
+name: Fuzz Testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Fuzzing duration in seconds (max 1800)'
+        default: '300'
+      target:
+        description: 'Fuzz target'
+        default: 'all'
+        type: choice
+        options: [all, fuzz_csv_parser, fuzz_dialect_detection, fuzz_parse_auto]
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install deps
+      run: sudo apt-get update && sudo apt-get install -y cmake clang llvm
+    - name: Build
+      run: |
+        cmake -B build -DENABLE_FUZZING=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+        cmake --build build --target fuzz_csv_parser fuzz_dialect_detection fuzz_parse_auto
+    - name: Setup RAM disk
+      run: |
+        sudo mkdir -p /mnt/ramdisk && sudo mount -t tmpfs -o size=512M tmpfs /mnt/ramdisk
+        cp -r build/fuzz_corpus /mnt/ramdisk/corpus
+        mkdir -p /mnt/ramdisk/artifacts
+    - name: Fuzz
+      run: |
+        DUR=${{ github.event.inputs.duration }}; [ "$DUR" -gt 1800 ] && DUR=1800
+        for t in fuzz_csv_parser fuzz_dialect_detection fuzz_parse_auto; do
+          if [ "${{ github.event.inputs.target }}" = "all" ] || [ "${{ github.event.inputs.target }}" = "$t" ]; then
+            timeout ${DUR}s ./build/$t /mnt/ramdisk/corpus -artifact_prefix=/mnt/ramdisk/artifacts/ -max_len=65536 -timeout=5 || true
+          fi
+        done
+    - name: Check crashes
+      id: check
+      run: |
+        CRASHES=$(find /mnt/ramdisk/artifacts -name 'crash-*' -o -name 'oom-*' 2>/dev/null | wc -l)
+        echo "count=$CRASHES" >> $GITHUB_OUTPUT
+    - name: Upload crashes
+      if: steps.check.outputs.count != '0'
+      uses: actions/upload-artifact@v4
+      with:
+        name: fuzz-crashes
+        path: /mnt/ramdisk/artifacts
+    - name: Fail on crashes
+      if: steps.check.outputs.count != '0'
+      run: exit 1
