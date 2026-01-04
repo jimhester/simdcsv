@@ -780,8 +780,9 @@ TEST_F(ValueExtractorTest, QuotedHeaderWithCRLF) {
     EXPECT_EQ(headers[1], "age");
 }
 
-TEST_F(ValueExtractorTest, EmptyCSV) {
-    ParseCSV("\n");
+TEST_F(ValueExtractorTest, SingleRowNoData) {
+    // Single header row with no data rows
+    ParseCSV("header\n");
     ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
     EXPECT_EQ(extractor.num_rows(), 0);
 }
