@@ -33,6 +33,9 @@ struct simdcsv_index {
         idx.n_indexes = new uint64_t[threads]();  // Zero-initialize
         idx.indexes = new uint64_t[buffer_length];
     }
+
+    // Note: No explicit destructor needed - simdcsv::index has its own destructor
+    // that handles cleanup of n_indexes and indexes arrays
 };
 
 struct simdcsv_buffer {
@@ -437,8 +440,8 @@ simdcsv_error_t simdcsv_parse(simdcsv_parser_t* parser, const simdcsv_buffer_t* 
     try {
         simdcsv::Dialect d = dialect ? dialect->dialect : simdcsv::Dialect::csv();
         index->idx = parser->parser.init(buffer->data.size(), index->num_threads);
-        parser->parser.parse(buffer->data.data(), index->idx, buffer->data.size(), d);
-        return SIMDCSV_OK;
+        bool success = parser->parser.parse(buffer->data.data(), index->idx, buffer->data.size(), d);
+        return success ? SIMDCSV_OK : SIMDCSV_ERROR_INTERNAL;
     } catch (...) {
         return SIMDCSV_ERROR_INTERNAL;
     }
@@ -453,11 +456,12 @@ simdcsv_error_t simdcsv_parse_with_errors(simdcsv_parser_t* parser, const simdcs
         simdcsv::Dialect d = dialect ? dialect->dialect : simdcsv::Dialect::csv();
         index->idx = parser->parser.init(buffer->data.size(), index->num_threads);
 
+        bool success;
         if (errors) {
-            parser->parser.parse_with_errors(buffer->data.data(), index->idx,
+            success = parser->parser.parse_with_errors(buffer->data.data(), index->idx,
                                              buffer->data.size(), errors->collector, d);
         } else {
-            parser->parser.parse(buffer->data.data(), index->idx, buffer->data.size(), d);
+            success = parser->parser.parse(buffer->data.data(), index->idx, buffer->data.size(), d);
         }
 
         if (errors && errors->collector.has_fatal_errors()) {
@@ -469,7 +473,7 @@ simdcsv_error_t simdcsv_parse_with_errors(simdcsv_parser_t* parser, const simdcs
             }
         }
 
-        return SIMDCSV_OK;
+        return success ? SIMDCSV_OK : SIMDCSV_ERROR_INTERNAL;
     } catch (...) {
         return SIMDCSV_ERROR_INTERNAL;
     }
@@ -484,11 +488,12 @@ simdcsv_error_t simdcsv_parse_two_pass_with_errors(simdcsv_parser_t* parser, con
         simdcsv::Dialect d = dialect ? dialect->dialect : simdcsv::Dialect::csv();
         index->idx = parser->parser.init(buffer->data.size(), index->num_threads);
 
+        bool success;
         if (errors) {
-            parser->parser.parse_two_pass_with_errors(buffer->data.data(), index->idx,
+            success = parser->parser.parse_two_pass_with_errors(buffer->data.data(), index->idx,
                                                       buffer->data.size(), errors->collector, d);
         } else {
-            parser->parser.parse_two_pass(buffer->data.data(), index->idx, buffer->data.size(), d);
+            success = parser->parser.parse_two_pass(buffer->data.data(), index->idx, buffer->data.size(), d);
         }
 
         if (errors && errors->collector.has_fatal_errors()) {
@@ -500,7 +505,7 @@ simdcsv_error_t simdcsv_parse_two_pass_with_errors(simdcsv_parser_t* parser, con
             }
         }
 
-        return SIMDCSV_OK;
+        return success ? SIMDCSV_OK : SIMDCSV_ERROR_INTERNAL;
     } catch (...) {
         return SIMDCSV_ERROR_INTERNAL;
     }

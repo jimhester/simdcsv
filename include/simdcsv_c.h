@@ -64,14 +64,24 @@ typedef struct simdcsv_dialect simdcsv_dialect_t;
 typedef struct simdcsv_error_collector simdcsv_error_collector_t;
 typedef struct simdcsv_detection_result simdcsv_detection_result_t;
 
+/**
+ * Parse error information returned from error collector.
+ *
+ * @note The `message` and `context` pointers point to internal strings owned by the
+ *       error collector. They are only valid as long as:
+ *       1. The error collector has not been destroyed
+ *       2. The error collector has not been cleared (simdcsv_error_collector_clear)
+ *       3. No new errors have been added to the collector
+ *       If you need to persist error information, copy the strings before any of these events.
+ */
 typedef struct simdcsv_parse_error {
     simdcsv_error_t code;
     simdcsv_severity_t severity;
     size_t line;
     size_t column;
     size_t byte_offset;
-    const char* message;
-    const char* context;
+    const char* message;   /**< Error message - see struct documentation for lifetime */
+    const char* context;   /**< Context around error - see struct documentation for lifetime */
 } simdcsv_parse_error_t;
 
 /* Buffer Management */
