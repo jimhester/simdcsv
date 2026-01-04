@@ -153,7 +153,7 @@ fetch_pr_branch() {
 find_existing_branch() {
     local issue_num="$1"
     git branch -a --list "*issue-${issue_num}-*" 2>/dev/null | \
-        sed 's/^[* ]*//' | \
+        sed 's/^[*+ ]*//' | \
         sed 's|remotes/origin/||' | \
         head -1
 }
