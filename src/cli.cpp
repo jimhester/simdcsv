@@ -154,6 +154,7 @@ void printUsage(const char* prog) {
   cerr << "  select        Select specific columns by name or index\n";
   cerr << "  info          Display information about the CSV file\n";
   cerr << "  pretty        Pretty-print the CSV with aligned columns\n";
+  cerr << "  dialect       Detect and output the CSV dialect\n";
   cerr << "\nArguments:\n";
   cerr << "  csvfile       Path to CSV file, or '-' to read from stdin.\n";
   cerr << "                If omitted, reads from stdin.\n";
@@ -162,11 +163,15 @@ void printUsage(const char* prog) {
   cerr << "  -c <cols>     Comma-separated column names or indices (for select)\n";
   cerr << "  -H            No header row in input\n";
   cerr << "  -t <threads>  Number of threads (default: 1, max: " << MAX_THREADS << ")\n";
-  cerr << "  -d <delim>    Field delimiter: comma (default), tab, semicolon, pipe, or character\n";
+  cerr << "  -d <delim>    Field delimiter (disables auto-detection)\n";
+  cerr << "                Values: comma, tab, semicolon, pipe, or single character\n";
   cerr << "  -q <char>     Quote character (default: \")\n";
-  cerr << "  -a            Auto-detect dialect\n";
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
+  cerr << "\nDialect Detection:\n";
+  cerr << "  By default, scsv auto-detects the CSV dialect (delimiter, quote character,\n";
+  cerr << "  escape style). Use -d to explicitly specify a delimiter and disable\n";
+  cerr << "  auto-detection.\n";
   cerr << "\nExamples:\n";
   cerr << "  " << prog << " count data.csv\n";
   cerr << "  " << prog << " head -n 5 data.csv\n";
@@ -176,7 +181,8 @@ void printUsage(const char* prog) {
   cerr << "  " << prog << " pretty -n 20 data.csv\n";
   cerr << "  " << prog << " count -d tab data.tsv\n";
   cerr << "  " << prog << " head -d semicolon european.csv\n";
-  cerr << "  " << prog << " info -a unknown_format.csv\n";
+  cerr << "  " << prog << " dialect unknown_format.csv\n";
+  cerr << "  " << prog << " dialect -j data.csv       # JSON output\n";
   cerr << "  cat data.csv | " << prog << " count\n";
   cerr << "  " << prog << " head - < data.csv\n";
 }
@@ -705,6 +711,129 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
   return 0;
 }
 
+// Helper: format delimiter for display
+static std::string formatDelimiter(char delim) {
+  switch (delim) {
+    case ',': return "comma";
+    case '\t': return "tab";
+    case ';': return "semicolon";
+    case '|': return "pipe";
+    case ':': return "colon";
+    default: return std::string(1, delim);
+  }
+}
+
+// Helper: format quote char for display
+static std::string formatQuoteChar(char quote) {
+  if (quote == '"') return "double-quote";
+  if (quote == '\'') return "single-quote";
+  if (quote == '\0') return "none";
+  return std::string(1, quote);
+}
+
+// Helper: format line ending for display
+static std::string formatLineEnding(simdcsv::Dialect::LineEnding le) {
+  switch (le) {
+    case simdcsv::Dialect::LineEnding::LF: return "LF";
+    case simdcsv::Dialect::LineEnding::CRLF: return "CRLF";
+    case simdcsv::Dialect::LineEnding::CR: return "CR";
+    case simdcsv::Dialect::LineEnding::MIXED: return "mixed";
+    default: return "unknown";
+  }
+}
+
+// Command: dialect - detect and output CSV dialect
+int cmdDialect(const char* filename, bool json_output) {
+  std::basic_string_view<uint8_t> data;
+
+  try {
+    if (isStdinInput(filename)) {
+      data = get_corpus_stdin(SIMDCSV_PADDING);
+    } else {
+      data = get_corpus(filename, SIMDCSV_PADDING);
+    }
+  } catch (const std::exception& e) {
+    if (isStdinInput(filename)) {
+      cerr << "Error: Could not read from stdin: " << e.what() << endl;
+    } else {
+      cerr << "Error: Could not load file '" << filename << "'" << endl;
+    }
+    return 1;
+  }
+
+  simdcsv::DialectDetector detector;
+  auto result = detector.detect(data.data(), data.size());
+
+  if (!result.success()) {
+    cerr << "Error: Could not detect CSV dialect";
+    if (!result.warning.empty()) {
+      cerr << ": " << result.warning;
+    }
+    cerr << endl;
+    aligned_free((void*)data.data());
+    return 1;
+  }
+
+  const auto& d = result.dialect;
+
+  if (json_output) {
+    // JSON output for programmatic use
+    cout << "{\n";
+    cout << "  \"delimiter\": \"";
+    if (d.delimiter == '\t') {
+      cout << "\\t";
+    } else if (d.delimiter == '"') {
+      cout << "\\\"";
+    } else if (d.delimiter == '\\') {
+      cout << "\\\\";
+    } else {
+      cout << d.delimiter;
+    }
+    cout << "\",\n";
+    cout << "  \"quote\": \"";
+    if (d.quote_char == '\0') {
+      cout << "";
+    } else if (d.quote_char == '"') {
+      cout << "\\\"";
+    } else if (d.quote_char == '\\') {
+      cout << "\\\\";
+    } else {
+      cout << d.quote_char;
+    }
+    cout << "\",\n";
+    cout << "  \"escape\": \"" << (d.double_quote ? "double" : "backslash") << "\",\n";
+    cout << "  \"line_ending\": \"" << formatLineEnding(d.line_ending) << "\",\n";
+    cout << "  \"has_header\": " << (result.has_header ? "true" : "false") << ",\n";
+    cout << "  \"columns\": " << result.detected_columns << ",\n";
+    cout << "  \"confidence\": " << result.confidence << "\n";
+    cout << "}\n";
+  } else {
+    // Human-readable output with CLI flags
+    cout << "Detected dialect:\n";
+    cout << "  Delimiter:    " << formatDelimiter(d.delimiter) << "\n";
+    cout << "  Quote:        " << formatQuoteChar(d.quote_char) << "\n";
+    cout << "  Escape:       " << (d.double_quote ? "double-quote (\"\")" : "backslash (\\)") << "\n";
+    cout << "  Line ending:  " << formatLineEnding(d.line_ending) << "\n";
+    cout << "  Has header:   " << (result.has_header ? "yes" : "no") << "\n";
+    cout << "  Columns:      " << result.detected_columns << "\n";
+    cout << "  Confidence:   " << static_cast<int>(result.confidence * 100) << "%\n";
+    cout << "\n";
+
+    // Output CLI flags that can be reused
+    cout << "CLI flags: -d " << formatDelimiter(d.delimiter);
+    if (d.quote_char != '"') {
+      cout << " -q " << d.quote_char;
+    }
+    if (!result.has_header) {
+      cout << " -H";
+    }
+    cout << "\n";
+  }
+
+  aligned_free((void*)data.data());
+  return 0;
+}
+
 int main(int argc, char* argv[]) {
   if (argc < 2) {
     printUsage(argv[0]);
@@ -730,13 +859,15 @@ int main(int argc, char* argv[]) {
   int n_threads = 1;
   size_t num_rows = DEFAULT_NUM_ROWS;
   bool has_header = true;
-  bool auto_detect = false;
+  bool auto_detect = true;  // Auto-detect by default
+  bool delimiter_specified = false;  // Track if user specified delimiter
+  bool json_output = false;  // JSON output for dialect command
   string columns;
   string delimiter_str = "comma";
   char quote_char = '"';
 
   int c;
-  while ((c = getopt(argc, argv, "n:c:Ht:d:q:ahv")) != -1) {
+  while ((c = getopt(argc, argv, "n:c:Ht:d:q:jhv")) != -1) {
     switch (c) {
       case 'n': {
         char* endptr;
@@ -767,6 +898,8 @@ int main(int argc, char* argv[]) {
       }
       case 'd':
         delimiter_str = optarg;
+        delimiter_specified = true;
+        auto_detect = false;  // Disable auto-detect when delimiter is specified
         break;
       case 'q':
         if (strlen(optarg) == 1) {
@@ -776,8 +909,8 @@ int main(int argc, char* argv[]) {
           return 1;
         }
         break;
-      case 'a':
-        auto_detect = true;
+      case 'j':
+        json_output = true;
         break;
       case 'h':
         printUsage(argv[0]);
@@ -813,6 +946,10 @@ int main(int argc, char* argv[]) {
     return cmdInfo(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "pretty") {
     return cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect);
+  } else if (command == "dialect") {
+    // Note: dialect command ignores -d flag since it's for detection
+    (void)delimiter_specified;  // Suppress unused warning
+    return cmdDialect(filename, json_output);
   } else {
     cerr << "Error: Unknown command '" << command << "'\n";
     printUsage(argv[0]);
