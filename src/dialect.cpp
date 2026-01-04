@@ -177,30 +177,32 @@ std::vector<Dialect> DialectDetector::generate_candidates() const {
 }
 
 // Helper: detect escape pattern usage in data
-// Returns: -1 for double-quote pattern (RFC 4180), count of backslash escapes if > 0
+// Returns: negative for double-quote pattern (RFC 4180), positive for escape-char preference
 static int detect_escape_pattern(const uint8_t* buf, size_t len,
                                   char quote_char, char escape_char) {
-    int backslash_escapes = 0;
-    int double_quote_escapes = 0;
+    int escape_char_count = 0;
+    int double_quote_count = 0;
 
     for (size_t i = 0; i + 1 < len; ++i) {
         // Check for escape_char followed by quote_char (e.g., \")
-        if (buf[i] == static_cast<uint8_t>(escape_char) &&
+        // Only count if escape_char is different from quote_char
+        if (escape_char != quote_char &&
+            buf[i] == static_cast<uint8_t>(escape_char) &&
             buf[i + 1] == static_cast<uint8_t>(quote_char)) {
-            backslash_escapes++;
+            escape_char_count++;
         }
         // Check for double-quote pattern (e.g., "")
         if (buf[i] == static_cast<uint8_t>(quote_char) &&
             buf[i + 1] == static_cast<uint8_t>(quote_char)) {
-            double_quote_escapes++;
+            double_quote_count++;
         }
     }
 
     // Return negative for double-quote preference, positive for escape-char preference
-    if (backslash_escapes > 0 && double_quote_escapes == 0) {
-        return backslash_escapes;  // Backslash pattern detected
-    } else if (double_quote_escapes > 0 && backslash_escapes == 0) {
-        return -double_quote_escapes;  // Double-quote pattern detected
+    if (escape_char_count > 0 && double_quote_count == 0) {
+        return escape_char_count;  // Escape char pattern detected (e.g., \")
+    } else if (double_quote_count > 0 && escape_char_count == 0) {
+        return -double_quote_count;  // Double-quote pattern detected (e.g., "")
     }
     return 0;  // Ambiguous or no escapes
 }
