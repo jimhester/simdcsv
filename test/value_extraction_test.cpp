@@ -23,6 +23,44 @@ private:
     uint8_t* buffer_;
 };
 
+class ExtractResultTest : public ::testing::Test {};
+
+TEST_F(ExtractResultTest, OkResult) {
+    ExtractResult<int64_t> result{42, nullptr};
+    EXPECT_TRUE(result.ok());
+    EXPECT_FALSE(result.is_na());
+    EXPECT_EQ(result.get(), 42);
+    EXPECT_EQ(result.get_or(0), 42);
+}
+
+TEST_F(ExtractResultTest, NAResult) {
+    ExtractResult<int64_t> result{std::nullopt, nullptr};
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(result.is_na());
+    EXPECT_THROW(result.get(), std::runtime_error);
+    EXPECT_EQ(result.get_or(-1), -1);
+}
+
+TEST_F(ExtractResultTest, ErrorResult) {
+    ExtractResult<int64_t> result{std::nullopt, "Some error"};
+    EXPECT_FALSE(result.ok());
+    EXPECT_FALSE(result.is_na());
+    EXPECT_THROW(result.get(), std::runtime_error);
+    EXPECT_EQ(result.get_or(-1), -1);
+}
+
+TEST_F(ExtractResultTest, GetWithErrorMessage) {
+    ExtractResult<int64_t> result{std::nullopt, "Custom error message"};
+    EXPECT_THROW({
+        try {
+            result.get();
+        } catch (const std::runtime_error& e) {
+            EXPECT_STREQ(e.what(), "Custom error message");
+            throw;
+        }
+    }, std::runtime_error);
+}
+
 class IntegerParsingTest : public ::testing::Test {
 protected:
     ExtractionConfig config_ = ExtractionConfig::defaults();
@@ -86,6 +124,90 @@ TEST_F(IntegerParsingTest, UnsignedNegative) {
 
 TEST_F(IntegerParsingTest, WhitespaceTrimming) {
     EXPECT_EQ(parse_integer<int64_t>("  42  ", 6, config_).get(), 42);
+}
+
+TEST_F(IntegerParsingTest, PositiveSign) {
+    EXPECT_EQ(parse_integer<int64_t>("+12345", 6, config_).get(), 12345);
+}
+
+TEST_F(IntegerParsingTest, PositiveSignUnsigned) {
+    EXPECT_EQ(parse_integer<uint64_t>("+999", 4, config_).get(), 999u);
+}
+
+TEST_F(IntegerParsingTest, UInt64Max) {
+    EXPECT_EQ(parse_integer<uint64_t>("18446744073709551615", 20, config_).get(), UINT64_MAX);
+}
+
+TEST_F(IntegerParsingTest, UInt64Overflow) {
+    auto result = parse_integer<uint64_t>("18446744073709551616", 20, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(IntegerParsingTest, TooManyDigits) {
+    auto result = parse_integer<int64_t>("123456789012345678901", 21, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(IntegerParsingTest, InvalidCharacter) {
+    auto result = parse_integer<int64_t>("12a34", 5, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(IntegerParsingTest, JustSign) {
+    auto result = parse_integer<int64_t>("-", 1, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(IntegerParsingTest, JustPlusSign) {
+    auto result = parse_integer<int64_t>("+", 1, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(IntegerParsingTest, NAValue) {
+    EXPECT_TRUE(parse_integer<int64_t>("NA", 2, config_).is_na());
+    EXPECT_TRUE(parse_integer<int64_t>("N/A", 3, config_).is_na());
+    EXPECT_TRUE(parse_integer<int64_t>("null", 4, config_).is_na());
+    EXPECT_TRUE(parse_integer<int64_t>("NULL", 4, config_).is_na());
+    EXPECT_TRUE(parse_integer<int64_t>("None", 4, config_).is_na());
+}
+
+TEST_F(IntegerParsingTest, WhitespaceOnly) {
+    EXPECT_TRUE(parse_integer<int64_t>("   ", 3, config_).is_na());
+}
+
+TEST_F(IntegerParsingTest, TabWhitespace) {
+    EXPECT_EQ(parse_integer<int64_t>("\t42\t", 4, config_).get(), 42);
+}
+
+TEST_F(IntegerParsingTest, Int32Underflow) {
+    auto result = parse_integer<int32_t>("-2147483649", 11, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(IntegerParsingTest, Int16Max) {
+    EXPECT_EQ(parse_integer<int16_t>("32767", 5, config_).get(), INT16_MAX);
+}
+
+TEST_F(IntegerParsingTest, Int16Overflow) {
+    auto result = parse_integer<int16_t>("32768", 5, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(IntegerParsingTest, UInt32Max) {
+    EXPECT_EQ(parse_integer<uint32_t>("4294967295", 10, config_).get(), UINT32_MAX);
+}
+
+TEST_F(IntegerParsingTest, UInt32Overflow) {
+    auto result = parse_integer<uint32_t>("4294967296", 10, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
 }
 
 class DoubleParsingTest : public ::testing::Test {
@@ -161,6 +283,114 @@ TEST_F(DoubleParsingTest, NegativeZero) {
     EXPECT_TRUE(std::signbit(result));
 }
 
+TEST_F(DoubleParsingTest, PositiveSign) {
+    EXPECT_NEAR(parse_double("+3.14", 5, config_).get(), 3.14, 0.01);
+}
+
+TEST_F(DoubleParsingTest, LeadingDecimalPoint) {
+    EXPECT_NEAR(parse_double(".5", 2, config_).get(), 0.5, 0.001);
+}
+
+TEST_F(DoubleParsingTest, TrailingDecimalPoint) {
+    EXPECT_NEAR(parse_double("5.", 2, config_).get(), 5.0, 0.001);
+}
+
+TEST_F(DoubleParsingTest, VeryLongMantissa) {
+    // More than 19 digits in mantissa - should still work
+    EXPECT_NEAR(parse_double("12345678901234567890.5", 22, config_).get(), 1.2345678901234568e19, 1e5);
+}
+
+TEST_F(DoubleParsingTest, LargeExponent) {
+    // Exponent > 400 - parsing stops early, causing "unexpected characters" error
+    // because not all digits after 'e' are consumed
+    auto result = parse_double("1e500", 5, config_);
+    // This fails because the parser breaks when exp_value > 400 leaving unconsumed chars
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(DoubleParsingTest, MaxExponentThatWorks) {
+    // 400 is the max exponent that parses fully
+    auto result = parse_double("1e400", 5, config_);
+    EXPECT_TRUE(result.ok());
+    // 1e400 overflows to infinity
+    EXPECT_TRUE(std::isinf(result.get()));
+}
+
+TEST_F(DoubleParsingTest, NegativeExponent) {
+    EXPECT_NEAR(parse_double("1e-10", 5, config_).get(), 1e-10, 1e-15);
+}
+
+TEST_F(DoubleParsingTest, PositiveExponentSign) {
+    EXPECT_NEAR(parse_double("1e+10", 5, config_).get(), 1e10, 1e5);
+}
+
+TEST_F(DoubleParsingTest, EmptyIsNA) {
+    EXPECT_TRUE(parse_double("", 0, config_).is_na());
+}
+
+TEST_F(DoubleParsingTest, WhitespaceOnly) {
+    EXPECT_TRUE(parse_double("   ", 3, config_).is_na());
+}
+
+TEST_F(DoubleParsingTest, WhitespaceTrimming) {
+    EXPECT_NEAR(parse_double("  3.14  ", 8, config_).get(), 3.14, 0.01);
+}
+
+TEST_F(DoubleParsingTest, TabWhitespace) {
+    EXPECT_NEAR(parse_double("\t3.14\t", 6, config_).get(), 3.14, 0.01);
+}
+
+TEST_F(DoubleParsingTest, JustDecimalPoint) {
+    auto result = parse_double(".", 1, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(DoubleParsingTest, JustSign) {
+    auto result = parse_double("-", 1, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(DoubleParsingTest, JustPlusSign) {
+    auto result = parse_double("+", 1, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(DoubleParsingTest, UppercaseE) {
+    EXPECT_NEAR(parse_double("1E10", 4, config_).get(), 1E10, 1e5);
+}
+
+TEST_F(DoubleParsingTest, PlusSignThenLettersInvalid) {
+    // +Inf is not specially recognized (only -Inf is), so +Inf fails as invalid number
+    auto result = parse_double("+Inf", 4, config_);
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(DoubleParsingTest, ZeroExponent) {
+    EXPECT_NEAR(parse_double("1e0", 3, config_).get(), 1.0, 0.001);
+}
+
+TEST_F(DoubleParsingTest, PartialInfinity) {
+    // "Infin" - not complete "Infinity"
+    auto result = parse_double("Infin", 5, config_);
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(DoubleParsingTest, VerySmallNumber) {
+    // Very small number that might underflow
+    EXPECT_NEAR(parse_double("1e-300", 6, config_).get(), 1e-300, 1e-310);
+}
+
+TEST_F(DoubleParsingTest, DecimalWithExponent) {
+    EXPECT_NEAR(parse_double("3.14e2", 6, config_).get(), 314.0, 0.001);
+}
+
+TEST_F(DoubleParsingTest, NegativeDecimalWithExponent) {
+    EXPECT_NEAR(parse_double("-3.14e-2", 8, config_).get(), -0.0314, 0.0001);
+}
+
 class BoolParsingTest : public ::testing::Test {
 protected:
     ExtractionConfig config_ = ExtractionConfig::defaults();
@@ -168,6 +398,54 @@ protected:
 
 TEST_F(BoolParsingTest, ParseTrue) { EXPECT_TRUE(parse_bool("true", 4, config_).get()); }
 TEST_F(BoolParsingTest, ParseFalse) { EXPECT_FALSE(parse_bool("false", 5, config_).get()); }
+
+TEST_F(BoolParsingTest, ParseTrueVariants) {
+    EXPECT_TRUE(parse_bool("True", 4, config_).get());
+    EXPECT_TRUE(parse_bool("TRUE", 4, config_).get());
+    EXPECT_TRUE(parse_bool("1", 1, config_).get());
+    EXPECT_TRUE(parse_bool("yes", 3, config_).get());
+    EXPECT_TRUE(parse_bool("Yes", 3, config_).get());
+    EXPECT_TRUE(parse_bool("YES", 3, config_).get());
+    EXPECT_TRUE(parse_bool("T", 1, config_).get());
+}
+
+TEST_F(BoolParsingTest, ParseFalseVariants) {
+    EXPECT_FALSE(parse_bool("False", 5, config_).get());
+    EXPECT_FALSE(parse_bool("FALSE", 5, config_).get());
+    EXPECT_FALSE(parse_bool("0", 1, config_).get());
+    EXPECT_FALSE(parse_bool("no", 2, config_).get());
+    EXPECT_FALSE(parse_bool("No", 2, config_).get());
+    EXPECT_FALSE(parse_bool("NO", 2, config_).get());
+    EXPECT_FALSE(parse_bool("F", 1, config_).get());
+}
+
+TEST_F(BoolParsingTest, EmptyIsNA) {
+    EXPECT_TRUE(parse_bool("", 0, config_).is_na());
+}
+
+TEST_F(BoolParsingTest, NAValueIsNA) {
+    EXPECT_TRUE(parse_bool("NA", 2, config_).is_na());
+    EXPECT_TRUE(parse_bool("null", 4, config_).is_na());
+}
+
+TEST_F(BoolParsingTest, InvalidValue) {
+    auto result = parse_bool("maybe", 5, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(BoolParsingTest, WhitespaceTrimming) {
+    EXPECT_TRUE(parse_bool("  true  ", 8, config_).get());
+    EXPECT_FALSE(parse_bool("  false  ", 9, config_).get());
+}
+
+TEST_F(BoolParsingTest, TabWhitespace) {
+    EXPECT_TRUE(parse_bool("\ttrue\t", 6, config_).get());
+}
+
+TEST_F(BoolParsingTest, WhitespaceOnly) {
+    EXPECT_TRUE(parse_bool("   ", 3, config_).is_na());
+}
 
 class NATest : public ::testing::Test {
 protected:
@@ -177,6 +455,80 @@ protected:
 TEST_F(NATest, EmptyIsNA) { EXPECT_TRUE(is_na("", 0, config_)); }
 TEST_F(NATest, NAIsNA) { EXPECT_TRUE(is_na("NA", 2, config_)); }
 TEST_F(NATest, ValueNotNA) { EXPECT_FALSE(is_na("hello", 5, config_)); }
+
+TEST_F(NATest, AllNAValues) {
+    EXPECT_TRUE(is_na("N/A", 3, config_));
+    EXPECT_TRUE(is_na("NaN", 3, config_));
+    EXPECT_TRUE(is_na("null", 4, config_));
+    EXPECT_TRUE(is_na("NULL", 4, config_));
+    EXPECT_TRUE(is_na("None", 4, config_));
+}
+
+TEST_F(NATest, WhitespaceOnly) {
+    EXPECT_TRUE(is_na("   ", 3, config_));
+    EXPECT_TRUE(is_na("\t\t", 2, config_));
+}
+
+TEST_F(NATest, WhitespaceTrimming) {
+    EXPECT_TRUE(is_na("  NA  ", 6, config_));
+    EXPECT_TRUE(is_na("\tNA\t", 4, config_));
+}
+
+TEST_F(NATest, NumberNotNA) {
+    EXPECT_FALSE(is_na("123", 3, config_));
+}
+
+class ExtractionConfigTest : public ::testing::Test {};
+
+TEST_F(ExtractionConfigTest, DefaultsFactory) {
+    auto config = ExtractionConfig::defaults();
+    EXPECT_TRUE(config.trim_whitespace);
+    EXPECT_TRUE(config.allow_leading_zeros);
+    EXPECT_EQ(config.max_integer_digits, 20);
+    EXPECT_FALSE(config.na_values.empty());
+    EXPECT_FALSE(config.true_values.empty());
+    EXPECT_FALSE(config.false_values.empty());
+}
+
+TEST_F(ExtractionConfigTest, NoWhitespaceTrimming) {
+    ExtractionConfig config;
+    config.trim_whitespace = false;
+
+    // With trimming disabled, leading space makes it invalid
+    auto result = parse_integer<int64_t>("  42", 4, config);
+    EXPECT_FALSE(result.ok());
+
+    // With trimming disabled, "  " is not treated as empty/NA
+    result = parse_integer<int64_t>("  ", 2, config);
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(ExtractionConfigTest, NoWhitespaceTrimmingDouble) {
+    ExtractionConfig config;
+    config.trim_whitespace = false;
+
+    auto result = parse_double("  3.14", 6, config);
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(ExtractionConfigTest, NoWhitespaceTrimmingBool) {
+    ExtractionConfig config;
+    config.trim_whitespace = false;
+
+    auto result = parse_bool("  true", 6, config);
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(ExtractionConfigTest, NoWhitespaceTrimmingNA) {
+    ExtractionConfig config;
+    config.trim_whitespace = false;
+
+    // With no trimming, "  " is not recognized as NA
+    EXPECT_FALSE(is_na("  ", 2, config));
+
+    // But empty string still is NA
+    EXPECT_TRUE(is_na("", 0, config));
+}
 
 class ValueExtractorTest : public ::testing::Test {
 protected:
@@ -267,6 +619,214 @@ TEST_F(ValueExtractorTest, ExtractColumnOr) {
     EXPECT_EQ(vals[0], 1);
     EXPECT_EQ(vals[1], -1);  // NA replaced with default
     EXPECT_EQ(vals[2], 3);
+}
+
+TEST_F(ValueExtractorTest, RowOutOfRange) {
+    ParseCSV("a,b\n1,2\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_THROW(extractor.get_string_view(99, 0), std::out_of_range);
+}
+
+TEST_F(ValueExtractorTest, ColOutOfRange) {
+    ParseCSV("a,b\n1,2\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_THROW(extractor.get_string_view(0, 99), std::out_of_range);
+}
+
+TEST_F(ValueExtractorTest, ExtractColumnStringViewOutOfRange) {
+    ParseCSV("a,b\n1,2\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_THROW(extractor.extract_column_string_view(99), std::out_of_range);
+}
+
+TEST_F(ValueExtractorTest, ExtractColumnStringOutOfRange) {
+    ParseCSV("a,b\n1,2\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_THROW(extractor.extract_column_string(99), std::out_of_range);
+}
+
+TEST_F(ValueExtractorTest, GetHeaderNoHeader) {
+    ParseCSV("1,2\n3,4\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    extractor.set_has_header(false);
+    EXPECT_THROW(extractor.get_header(), std::runtime_error);
+}
+
+TEST_F(ValueExtractorTest, GetString) {
+    ParseCSV("name\n\"Hello\"\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_EQ(extractor.get_string(0, 0), "Hello");
+}
+
+TEST_F(ValueExtractorTest, GetStringWithEscapedQuotes) {
+    ParseCSV("name\n\"He said \"\"Hi\"\"\"\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_EQ(extractor.get_string(0, 0), "He said \"Hi\"");
+}
+
+TEST_F(ValueExtractorTest, ExtractColumnStringView) {
+    ParseCSV("name\nAlice\nBob\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    auto names = extractor.extract_column_string_view(0);
+    EXPECT_EQ(names.size(), 2);
+    EXPECT_EQ(names[0], "Alice");
+    EXPECT_EQ(names[1], "Bob");
+}
+
+TEST_F(ValueExtractorTest, ExtractColumnString) {
+    ParseCSV("name\n\"Alice\"\n\"Bob\"\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    auto names = extractor.extract_column_string(0);
+    EXPECT_EQ(names.size(), 2);
+    EXPECT_EQ(names[0], "Alice");
+    EXPECT_EQ(names[1], "Bob");
+}
+
+TEST_F(ValueExtractorTest, GetFieldBounds) {
+    ParseCSV("a,b\n1,2\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    size_t start, end;
+    EXPECT_TRUE(extractor.get_field_bounds(0, 0, start, end));
+}
+
+TEST_F(ValueExtractorTest, GetFieldBoundsOutOfRange) {
+    ParseCSV("a,b\n1,2\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    size_t start, end;
+    EXPECT_FALSE(extractor.get_field_bounds(99, 0, start, end));
+    EXPECT_FALSE(extractor.get_field_bounds(0, 99, start, end));
+}
+
+TEST_F(ValueExtractorTest, ExtractDoubleColumn) {
+    ParseCSV("val\n1.5\n2.5\n3.5\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    auto vals = extractor.extract_column<double>(0);
+    EXPECT_EQ(vals.size(), 3);
+    EXPECT_NEAR(*vals[0], 1.5, 0.01);
+    EXPECT_NEAR(*vals[1], 2.5, 0.01);
+    EXPECT_NEAR(*vals[2], 3.5, 0.01);
+}
+
+TEST_F(ValueExtractorTest, ExtractBoolColumn) {
+    ParseCSV("val\ntrue\nfalse\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    auto vals = extractor.extract_column<bool>(0);
+    EXPECT_EQ(vals.size(), 2);
+    EXPECT_TRUE(*vals[0]);
+    EXPECT_FALSE(*vals[1]);
+}
+
+TEST_F(ValueExtractorTest, ExtractDoubleColumnOr) {
+    ParseCSV("val\n1.5\nNA\n3.5\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    auto vals = extractor.extract_column_or<double>(0, -1.0);
+    EXPECT_EQ(vals.size(), 3);
+    EXPECT_NEAR(vals[0], 1.5, 0.01);
+    EXPECT_NEAR(vals[1], -1.0, 0.01);  // NA replaced with default
+    EXPECT_NEAR(vals[2], 3.5, 0.01);
+}
+
+TEST_F(ValueExtractorTest, GetDouble) {
+    ParseCSV("val\n3.14\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_NEAR(extractor.get<double>(0, 0).get(), 3.14, 0.01);
+}
+
+TEST_F(ValueExtractorTest, GetBool) {
+    ParseCSV("val\ntrue\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_TRUE(extractor.get<bool>(0, 0).get());
+}
+
+TEST_F(ValueExtractorTest, SetConfig) {
+    ParseCSV("val\nMISSING\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+
+    // Initially "MISSING" is not recognized as NA
+    EXPECT_FALSE(extractor.get<int64_t>(0, 0).is_na());
+
+    // Update config to include MISSING as NA value
+    ExtractionConfig new_config;
+    new_config.na_values = {"MISSING"};
+    extractor.set_config(new_config);
+
+    EXPECT_TRUE(extractor.get<int64_t>(0, 0).is_na());
+}
+
+TEST_F(ValueExtractorTest, Config) {
+    ParseCSV("val\n1\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    const auto& config = extractor.config();
+    EXPECT_TRUE(config.trim_whitespace);
+}
+
+TEST_F(ValueExtractorTest, RowIteratorMethods) {
+    ParseCSV("name,age\nAlice,30\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    auto it = begin(extractor);
+    auto row = *it;
+    EXPECT_EQ(row.num_columns(), 2);
+    EXPECT_EQ(row.get_string_view(0), "Alice");
+    EXPECT_EQ(row.get_string(0), "Alice");
+    EXPECT_EQ(row.get<int64_t>(1).get(), 30);
+}
+
+TEST_F(ValueExtractorTest, QuotedHeaderWithCRLF) {
+    ParseCSV("\"name\",\"age\"\r\nAlice,30\r\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    auto headers = extractor.get_header();
+    EXPECT_EQ(headers.size(), 2);
+    EXPECT_EQ(headers[0], "name");
+    EXPECT_EQ(headers[1], "age");
+}
+
+TEST_F(ValueExtractorTest, EmptyCSV) {
+    ParseCSV("\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_EQ(extractor.num_rows(), 0);
+}
+
+TEST_F(ValueExtractorTest, SingleColumn) {
+    ParseCSV("val\n1\n2\n3\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_EQ(extractor.num_columns(), 1);
+    EXPECT_EQ(extractor.num_rows(), 3);
+}
+
+TEST_F(ValueExtractorTest, HasHeader) {
+    ParseCSV("a,b\n1,2\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_TRUE(extractor.has_header());
+    extractor.set_has_header(false);
+    EXPECT_FALSE(extractor.has_header());
+}
+
+TEST_F(ValueExtractorTest, SetHasHeaderSameValue) {
+    ParseCSV("a,b\n1,2\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    size_t initial_rows = extractor.num_rows();
+    extractor.set_has_header(true);  // Same value as default
+    EXPECT_EQ(extractor.num_rows(), initial_rows);  // Should not change
+}
+
+TEST_F(ValueExtractorTest, GetInt32) {
+    ParseCSV("val\n42\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_EQ(extractor.get<int32_t>(0, 0).get(), 42);
+}
+
+TEST_F(ValueExtractorTest, UnescapeFieldNoQuotes) {
+    ParseCSV("name\nHello\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_EQ(extractor.get_string(0, 0), "Hello");
+}
+
+TEST_F(ValueExtractorTest, UnescapeFieldEmptyQuotedString) {
+    // Test empty quoted field
+    ParseCSV("name\n\"\"\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    std::string result = extractor.get_string(0, 0);
+    EXPECT_EQ(result, "");
 }
 
 int main(int argc, char** argv) {
