@@ -64,12 +64,24 @@ struct ColumnTypeStats {
     size_t non_empty = total_count - empty_count;
     if (non_empty == 0) return FieldType::EMPTY;
 
+    // Check each type independently - highest specific count that meets threshold wins
+    // Priority order: BOOLEAN > INTEGER > FLOAT > DATE > STRING
+
+    // Check if booleans dominate
     if (static_cast<double>(boolean_count) / non_empty >= threshold)
       return FieldType::BOOLEAN;
-    if (static_cast<double>(integer_count + boolean_count) / non_empty >= threshold)
+
+    // Check if integers dominate (integers can include booleans like 0/1)
+    // But only if booleans don't already dominate
+    if (static_cast<double>(integer_count) / non_empty >= threshold)
       return FieldType::INTEGER;
-    if (static_cast<double>(float_count + integer_count + boolean_count) / non_empty >= threshold)
+
+    // Check if floats dominate (floats include integers which are valid floats)
+    // Use cumulative count: floats + integers (not booleans, as "true" is not a float)
+    if (static_cast<double>(float_count + integer_count) / non_empty >= threshold)
       return FieldType::FLOAT;
+
+    // Check if dates dominate
     if (static_cast<double>(date_count) / non_empty >= threshold)
       return FieldType::DATE;
 
@@ -153,23 +165,49 @@ public:
 
     if (!is_digit(data[i])) return false;
 
-    bool has_digit = false;
-    while (i < length) {
-      if (is_digit(data[i])) {
-        has_digit = true;
+    if (!options.allow_thousands_sep) {
+      // Simple case: just digits
+      while (i < length) {
+        if (!is_digit(data[i])) return false;
         ++i;
-      } else if (options.allow_thousands_sep &&
-                 data[i] == static_cast<uint8_t>(options.thousands_sep)) {
-        if (i + 3 >= length) return false;
-        if (!is_digit(data[i + 1]) || !is_digit(data[i + 2]) || !is_digit(data[i + 3]))
-          return false;
-        ++i;
-      } else {
-        return false;
       }
+      return true;
     }
 
-    return has_digit;
+    // With thousands separator: validate proper grouping
+    // First group can be 1-3 digits, subsequent groups must be exactly 3 digits
+    size_t first_group_digits = 0;
+
+    // Count first group (1-3 digits before first separator or end)
+    while (i < length && is_digit(data[i])) {
+      ++first_group_digits;
+      ++i;
+    }
+
+    if (first_group_digits == 0) return false;
+
+    // If no separator found, it's valid
+    if (i >= length) return true;
+
+    // First group must be 1-3 digits if followed by separator
+    if (first_group_digits > 3) return false;
+
+    // Process remaining groups (must be exactly 3 digits each)
+    while (i < length) {
+      if (data[i] != static_cast<uint8_t>(options.thousands_sep)) {
+        return false;  // Invalid character
+      }
+      ++i;  // Skip separator
+
+      // Must have exactly 3 digits after separator
+      if (i + 3 > length) return false;
+      if (!is_digit(data[i]) || !is_digit(data[i + 1]) || !is_digit(data[i + 2])) {
+        return false;
+      }
+      i += 3;
+    }
+
+    return true;
   }
 
   static bool is_float(const uint8_t* data, size_t length,
@@ -235,6 +273,24 @@ private:
 
   really_inline static uint8_t to_lower(uint8_t c) {
     return (c >= 'A' && c <= 'Z') ? (c + 32) : c;
+  }
+
+  static bool is_leap_year(int year) {
+    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+  }
+
+  static int days_in_month(int year, int month) {
+    static const int days[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month < 1 || month > 12) return 0;
+    if (month == 2 && is_leap_year(year)) return 29;
+    return days[month];
+  }
+
+  static bool is_valid_date(int year, int month, int day) {
+    if (year < 1000 || year > 9999) return false;
+    if (month < 1 || month > 12) return false;
+    if (day < 1 || day > days_in_month(year, month)) return false;
+    return true;
   }
 
   static bool is_bool_string(const uint8_t* data, size_t length) {
@@ -309,9 +365,7 @@ private:
     int month = (data[5] - '0') * 10 + (data[6] - '0');
     int day = (data[8] - '0') * 10 + (data[9] - '0');
 
-    return year >= 1000 && year <= 9999 &&
-           month >= 1 && month <= 12 &&
-           day >= 1 && day <= 31;
+    return is_valid_date(year, month, day);
   }
 
   static bool is_date_us(const uint8_t* data, size_t length) {
@@ -330,9 +384,7 @@ private:
     int year = (data[6] - '0') * 1000 + (data[7] - '0') * 100 +
                (data[8] - '0') * 10 + (data[9] - '0');
 
-    return year >= 1000 && year <= 9999 &&
-           month >= 1 && month <= 12 &&
-           day >= 1 && day <= 31;
+    return is_valid_date(year, month, day);
   }
 
   static bool is_date_eu(const uint8_t* data, size_t length) {
@@ -351,9 +403,7 @@ private:
     int year = (data[6] - '0') * 1000 + (data[7] - '0') * 100 +
                (data[8] - '0') * 10 + (data[9] - '0');
 
-    return year >= 1000 && year <= 9999 &&
-           month >= 1 && month <= 12 &&
-           day >= 1 && day <= 31;
+    return is_valid_date(year, month, day);
   }
 
   static bool is_date_compact(const uint8_t* data, size_t length) {
@@ -366,9 +416,7 @@ private:
     int month = (data[4] - '0') * 10 + (data[5] - '0');
     int day = (data[6] - '0') * 10 + (data[7] - '0');
 
-    return year >= 1000 && year <= 9999 &&
-           month >= 1 && month <= 12 &&
-           day >= 1 && day <= 31;
+    return is_valid_date(year, month, day);
   }
 };
 

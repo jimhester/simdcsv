@@ -61,6 +61,26 @@ TEST_F(TypeDetectorTest, IntegerWithThousandsSeparator) {
     EXPECT_EQ(TypeDetector::detect_field("1,000,000", options), FieldType::INTEGER);
 }
 
+// Bug fix tests for thousands separator validation
+TEST_F(TypeDetectorTest, ThousandsSeparatorValidGrouping) {
+    options.allow_thousands_sep = true;
+    // Valid: first group 1-3 digits, subsequent groups exactly 3 digits
+    EXPECT_EQ(TypeDetector::detect_field("1,000", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("12,000", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("123,000", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("1,234,567", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, ThousandsSeparatorInvalidGrouping) {
+    options.allow_thousands_sep = true;
+    // Invalid: first group > 3 digits with separator
+    EXPECT_NE(TypeDetector::detect_field("1234,567", options), FieldType::INTEGER);
+    // Invalid: group after separator not exactly 3 digits
+    EXPECT_NE(TypeDetector::detect_field("1,00", options), FieldType::INTEGER);
+    EXPECT_NE(TypeDetector::detect_field("1,0000", options), FieldType::INTEGER);
+    EXPECT_NE(TypeDetector::detect_field("1,23,456", options), FieldType::INTEGER);
+}
+
 TEST_F(TypeDetectorTest, FloatSimple) {
     EXPECT_EQ(TypeDetector::detect_field("3.14", options), FieldType::FLOAT);
 }
@@ -97,8 +117,59 @@ TEST_F(TypeDetectorTest, DateCompact) {
     EXPECT_EQ(TypeDetector::detect_field("20240115", options), FieldType::DATE);
 }
 
-TEST_F(TypeDetectorTest, DateInvalid) {
+TEST_F(TypeDetectorTest, DateInvalidMonth) {
     EXPECT_NE(TypeDetector::detect_field("2024-13-15", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("2024-00-15", options), FieldType::DATE);
+}
+
+// Bug fix tests for date validation
+TEST_F(TypeDetectorTest, DateInvalidFebruary30) {
+    // February 30 should never be valid
+    EXPECT_NE(TypeDetector::detect_field("2024-02-30", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("2023-02-30", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateInvalidFebruary29NonLeapYear) {
+    // February 29 invalid in non-leap years
+    EXPECT_NE(TypeDetector::detect_field("2023-02-29", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("2100-02-29", options), FieldType::DATE); // Century not divisible by 400
+}
+
+TEST_F(TypeDetectorTest, DateValidFebruary29LeapYear) {
+    // February 29 valid in leap years
+    EXPECT_EQ(TypeDetector::detect_field("2024-02-29", options), FieldType::DATE);
+    EXPECT_EQ(TypeDetector::detect_field("2000-02-29", options), FieldType::DATE); // Century divisible by 400
+}
+
+TEST_F(TypeDetectorTest, DateInvalidApril31) {
+    // April has only 30 days
+    EXPECT_NE(TypeDetector::detect_field("2024-04-31", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateInvalidJune31) {
+    // June has only 30 days
+    EXPECT_NE(TypeDetector::detect_field("2024-06-31", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateInvalidSeptember31) {
+    // September has only 30 days
+    EXPECT_NE(TypeDetector::detect_field("2024-09-31", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateInvalidNovember31) {
+    // November has only 30 days
+    EXPECT_NE(TypeDetector::detect_field("2024-11-31", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateValidMonthsWith31Days) {
+    // Months with 31 days should accept day 31
+    EXPECT_EQ(TypeDetector::detect_field("2024-01-31", options), FieldType::DATE);
+    EXPECT_EQ(TypeDetector::detect_field("2024-03-31", options), FieldType::DATE);
+    EXPECT_EQ(TypeDetector::detect_field("2024-05-31", options), FieldType::DATE);
+    EXPECT_EQ(TypeDetector::detect_field("2024-07-31", options), FieldType::DATE);
+    EXPECT_EQ(TypeDetector::detect_field("2024-08-31", options), FieldType::DATE);
+    EXPECT_EQ(TypeDetector::detect_field("2024-10-31", options), FieldType::DATE);
+    EXPECT_EQ(TypeDetector::detect_field("2024-12-31", options), FieldType::DATE);
 }
 
 TEST_F(TypeDetectorTest, StringSimple) {
@@ -129,6 +200,36 @@ TEST_F(ColumnTypeStatsTest, AddTypes) {
 TEST_F(ColumnTypeStatsTest, DominantType) {
     for (int i = 0; i < 100; ++i) stats.add(FieldType::INTEGER);
     EXPECT_EQ(stats.dominant_type(), FieldType::INTEGER);
+}
+
+// Bug fix tests for type priority/hierarchy
+TEST_F(ColumnTypeStatsTest, DominantTypePriorityBooleanOverInteger) {
+    // 95% booleans should return BOOLEAN, not INTEGER
+    for (int i = 0; i < 95; ++i) stats.add(FieldType::BOOLEAN);
+    for (int i = 0; i < 5; ++i) stats.add(FieldType::STRING);
+    EXPECT_EQ(stats.dominant_type(), FieldType::BOOLEAN);
+}
+
+TEST_F(ColumnTypeStatsTest, DominantTypePriorityIntegerOverFloat) {
+    // 95% integers should return INTEGER, not FLOAT
+    for (int i = 0; i < 95; ++i) stats.add(FieldType::INTEGER);
+    for (int i = 0; i < 5; ++i) stats.add(FieldType::STRING);
+    EXPECT_EQ(stats.dominant_type(), FieldType::INTEGER);
+}
+
+TEST_F(ColumnTypeStatsTest, DominantTypeMixedNumericFloatWins) {
+    // Mix of floats and integers should return FLOAT
+    for (int i = 0; i < 50; ++i) stats.add(FieldType::FLOAT);
+    for (int i = 0; i < 45; ++i) stats.add(FieldType::INTEGER);
+    for (int i = 0; i < 5; ++i) stats.add(FieldType::STRING);
+    EXPECT_EQ(stats.dominant_type(), FieldType::FLOAT);
+}
+
+TEST_F(ColumnTypeStatsTest, DominantTypeDateNotNumeric) {
+    // Dates should not be confused with numerics
+    for (int i = 0; i < 95; ++i) stats.add(FieldType::DATE);
+    for (int i = 0; i < 5; ++i) stats.add(FieldType::STRING);
+    EXPECT_EQ(stats.dominant_type(), FieldType::DATE);
 }
 
 class ColumnTypeInferenceTest : public ::testing::Test {
