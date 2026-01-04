@@ -45,7 +45,6 @@ struct TypeDetectionOptions {
   bool allow_thousands_sep = false;
   char thousands_sep = ',';
   char decimal_point = '.';
-  size_t sample_size = 0;
   double confidence_threshold = 0.9;
 
   static TypeDetectionOptions defaults() { return TypeDetectionOptions(); }
@@ -251,6 +250,21 @@ public:
     return has_digit && (has_decimal || has_exponent) && i == length;
   }
 
+  /**
+   * Detect if a field contains a date value.
+   *
+   * Supports the following formats:
+   * - ISO: YYYY-MM-DD or YYYY/MM/DD
+   * - US: MM/DD/YYYY or MM-DD-YYYY
+   * - EU: DD/MM/YYYY or DD-MM-YYYY
+   * - Compact: YYYYMMDD
+   *
+   * Note: For dates like "01/02/2024", there is ambiguity between US format
+   * (January 2nd) and EU format (February 1st). The current implementation
+   * checks US format first, so ambiguous dates will be interpreted as US format.
+   * If your data uses EU format exclusively, you may need to handle this at
+   * a higher level (e.g., by specifying locale preferences).
+   */
   static bool is_date(const uint8_t* data, size_t length) {
     if (length < 8) return false;
 
@@ -420,6 +434,17 @@ private:
   }
 };
 
+/**
+ * BatchTypeDetector provides batch processing for type detection.
+ *
+ * Note: Despite creating simd_input structures, this class currently uses
+ * scalar loops for actual digit classification. The SIMD infrastructure is
+ * in place for future optimization using Highway intrinsics. For now, this
+ * class primarily serves as a batch API wrapper around TypeDetector.
+ *
+ * TODO: Implement actual SIMD digit classification using Highway's
+ * comparison operations (similar to cmp_mask_against_input pattern).
+ */
 class SIMDTypeDetector {
 public:
   static uint64_t classify_digits(const uint8_t* data, size_t length) {
@@ -560,9 +585,15 @@ private:
   TypeDetectionOptions options_;
 };
 
+/**
+ * TypeHints allows users to override auto-detected types for specific columns.
+ *
+ * Note: Uses linear search O(n) for column lookups. For CSVs with typical
+ * column counts (<100), this is sufficient. For very wide CSVs, consider
+ * using std::unordered_map instead.
+ */
 struct TypeHints {
   std::vector<std::pair<std::string, FieldType>> column_types;
-  bool exclusive = true;
 
   void add(const std::string& column, FieldType type) {
     column_types.emplace_back(column, type);
