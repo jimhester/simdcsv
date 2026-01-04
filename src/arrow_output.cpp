@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <stdexcept>
 
 namespace simdcsv {
 
@@ -65,16 +66,20 @@ bool iequals(std::string_view a, std::string_view b) {
 
 ArrowConverter::ArrowConverter() : options_(), has_user_schema_(false) {}
 ArrowConverter::ArrowConverter(const ArrowConvertOptions& options) : options_(options), has_user_schema_(false) {
-    // Clamp type_inference_rows to the maximum allowed value
+    // Validate type_inference_rows does not exceed the maximum allowed value
     if (options_.type_inference_rows > ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS) {
-        options_.type_inference_rows = ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS;
+        throw std::invalid_argument(
+            "type_inference_rows (" + std::to_string(options_.type_inference_rows) +
+            ") exceeds maximum allowed (" + std::to_string(ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS) + ")");
     }
 }
 ArrowConverter::ArrowConverter(const std::vector<ColumnSpec>& columns, const ArrowConvertOptions& options)
     : options_(options), columns_(columns), has_user_schema_(true) {
-    // Clamp type_inference_rows to the maximum allowed value
+    // Validate type_inference_rows does not exceed the maximum allowed value
     if (options_.type_inference_rows > ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS) {
-        options_.type_inference_rows = ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS;
+        throw std::invalid_argument(
+            "type_inference_rows (" + std::to_string(options_.type_inference_rows) +
+            ") exceeds maximum allowed (" + std::to_string(ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS) + ")");
     }
 }
 

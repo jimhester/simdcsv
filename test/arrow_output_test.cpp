@@ -292,13 +292,18 @@ TEST_F(ArrowOutputTest, DefaultMaxColumns) {
     EXPECT_EQ(opts.max_columns, 10000U);
 }
 
-TEST_F(ArrowOutputTest, TypeInferenceRowsClampedToMax) {
+TEST_F(ArrowOutputTest, TypeInferenceRowsExceedsMax) {
     ArrowConvertOptions opts;
-    opts.type_inference_rows = SIZE_MAX;  // Try to set an extreme value
-    ArrowConverter converter(opts);
-    // The converter should clamp this to MAX_TYPE_INFERENCE_ROWS internally
-    // We can't directly test the internal state, but we verify the option exists
-    EXPECT_EQ(ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS, 100000U);
+    opts.type_inference_rows = ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS + 1;
+    // Constructor should throw when type_inference_rows exceeds maximum
+    EXPECT_THROW(ArrowConverter converter(opts), std::invalid_argument);
+}
+
+TEST_F(ArrowOutputTest, TypeInferenceRowsAtMax) {
+    ArrowConvertOptions opts;
+    opts.type_inference_rows = ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS;
+    // Should not throw when exactly at maximum
+    EXPECT_NO_THROW(ArrowConverter converter(opts));
 }
 
 TEST_F(ArrowOutputTest, TypeInferenceRowsNormalValue) {
