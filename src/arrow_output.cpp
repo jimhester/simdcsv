@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <stdexcept>
 
 namespace simdcsv {
 
@@ -65,9 +66,23 @@ bool iequals(std::string_view a, std::string_view b) {
 }  // anonymous namespace
 
 ArrowConverter::ArrowConverter() : options_(), has_user_schema_(false) {}
-ArrowConverter::ArrowConverter(const ArrowConvertOptions& options) : options_(options), has_user_schema_(false) {}
+ArrowConverter::ArrowConverter(const ArrowConvertOptions& options) : options_(options), has_user_schema_(false) {
+    // Validate type_inference_rows does not exceed the maximum allowed value
+    if (options_.type_inference_rows > ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS) {
+        throw std::invalid_argument(
+            "type_inference_rows (" + std::to_string(options_.type_inference_rows) +
+            ") exceeds maximum allowed (" + std::to_string(ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS) + ")");
+    }
+}
 ArrowConverter::ArrowConverter(const std::vector<ColumnSpec>& columns, const ArrowConvertOptions& options)
-    : options_(options), columns_(columns), has_user_schema_(true) {}
+    : options_(options), columns_(columns), has_user_schema_(true) {
+    // Validate type_inference_rows does not exceed the maximum allowed value
+    if (options_.type_inference_rows > ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS) {
+        throw std::invalid_argument(
+            "type_inference_rows (" + std::to_string(options_.type_inference_rows) +
+            ") exceeds maximum allowed (" + std::to_string(ArrowConvertOptions::MAX_TYPE_INFERENCE_ROWS) + ")");
+    }
+}
 
 bool ArrowConverter::is_null_value(std::string_view value) {
     for (const auto& null_str : options_.null_values) {
@@ -270,6 +285,20 @@ ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const
     auto field_ranges = extract_field_ranges(buf, len, idx, dialect);
     if (field_ranges.empty()) { result.error_message = "No data"; return result; }
     size_t num_columns = field_ranges.size(), num_rows = field_ranges[0].size();
+
+    // Validate column count against security limit
+    if (options_.max_columns > 0 && num_columns > options_.max_columns) {
+        result.error_message = "Column count " + std::to_string(num_columns) +
+            " exceeds maximum allowed " + std::to_string(options_.max_columns);
+        return result;
+    }
+
+    // Validate row count against security limit
+    if (options_.max_rows > 0 && num_rows > options_.max_rows) {
+        result.error_message = "Row count " + std::to_string(num_rows) +
+            " exceeds maximum allowed " + std::to_string(options_.max_rows);
+        return result;
+    }
 
     // Extract column names from header
     std::vector<std::string> column_names;

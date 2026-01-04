@@ -619,6 +619,16 @@ add_custom_command(TARGET simdcsv_benchmark POST_BUILD
     ${CMAKE_CURRENT_BINARY_DIR}/benchmark/data
 )
 
+# Arrow output test (only if Arrow is enabled)
+if(SIMDCSV_ENABLE_ARROW)
+    add_executable(arrow_output_test test/arrow_output_test.cpp)
+    target_link_libraries(arrow_output_test PRIVATE simdcsv_lib GTest::gtest_main pthread)
+    target_include_directories(arrow_output_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_custom_command(TARGET arrow_output_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
+    gtest_discover_tests(arrow_output_test)
+endif()
+
 # Quote mask micro-benchmark (scalar vs CLMul comparison)
 # This is a standalone benchmark for measuring the performance improvement
 # of the PCLMULQDQ/PMULL-based quote mask implementation vs the scalar loop.
