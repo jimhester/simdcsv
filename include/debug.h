@@ -55,6 +55,15 @@ struct PhaseTime {
     }
 };
 
+/**
+ * @class DebugTrace
+ * @brief Provides debug logging, timing, and mask dumping facilities.
+ *
+ * @note Thread Safety: This class is NOT thread-safe. All methods should be
+ *       called from a single thread (typically the main thread). When using
+ *       multi-threaded parsing, ensure debug output calls are synchronized
+ *       or made only from the main thread after parsing completes.
+ */
 class DebugTrace {
 public:
     explicit DebugTrace(const DebugConfig& config = DebugConfig())
