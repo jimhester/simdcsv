@@ -104,7 +104,8 @@ really_inline ExtractResult<IntType> parse_integer(const char* str, size_t len,
         if (negative) {
             constexpr UnsignedType max_negative = static_cast<UnsignedType>(std::numeric_limits<IntType>::max()) + 1;
             if (result > max_negative) return {std::nullopt, "Integer underflow"};
-            return {static_cast<IntType>(-static_cast<IntType>(result)), nullptr};
+            // Safe: negate the unsigned value, then cast. This avoids UB for INT_MIN.
+            return {static_cast<IntType>(-result), nullptr};
         } else {
             if (result > static_cast<UnsignedType>(std::numeric_limits<IntType>::max())) return {std::nullopt, "Integer overflow"};
             return {static_cast<IntType>(result), nullptr};
@@ -133,10 +134,22 @@ really_inline ExtractResult<double> parse_double(const char* str, size_t len,
             return {std::numeric_limits<double>::quiet_NaN(), nullptr};
         }
         if ((ptr[0] == 'I' || ptr[0] == 'i') && (ptr[1] == 'N' || ptr[1] == 'n') && (ptr[2] == 'F' || ptr[2] == 'f')) {
-            if (remaining == 3 || remaining == 8) return {std::numeric_limits<double>::infinity(), nullptr};
+            if (remaining == 3) return {std::numeric_limits<double>::infinity(), nullptr};
+            if (remaining == 8 &&
+                (ptr[3] == 'I' || ptr[3] == 'i') && (ptr[4] == 'N' || ptr[4] == 'n') &&
+                (ptr[5] == 'I' || ptr[5] == 'i') && (ptr[6] == 'T' || ptr[6] == 't') &&
+                (ptr[7] == 'Y' || ptr[7] == 'y')) {
+                return {std::numeric_limits<double>::infinity(), nullptr};
+            }
         }
         if (ptr[0] == '-' && remaining >= 4 && (ptr[1] == 'I' || ptr[1] == 'i') && (ptr[2] == 'N' || ptr[2] == 'n') && (ptr[3] == 'F' || ptr[3] == 'f')) {
-            return {-std::numeric_limits<double>::infinity(), nullptr};
+            if (remaining == 4) return {-std::numeric_limits<double>::infinity(), nullptr};
+            if (remaining == 9 &&
+                (ptr[4] == 'I' || ptr[4] == 'i') && (ptr[5] == 'N' || ptr[5] == 'n') &&
+                (ptr[6] == 'I' || ptr[6] == 'i') && (ptr[7] == 'T' || ptr[7] == 't') &&
+                (ptr[8] == 'Y' || ptr[8] == 'y')) {
+                return {-std::numeric_limits<double>::infinity(), nullptr};
+            }
         }
     }
 

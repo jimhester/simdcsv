@@ -16,8 +16,10 @@ ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const index& idx,
             linear_indexes_.push_back(idx_.indexes[t + (j * idx_.n_threads)]);
     std::sort(linear_indexes_.begin(), linear_indexes_.end());
     size_t first_nl = 0;
-    for (size_t i = 0; i < linear_indexes_.size(); ++i)
+    for (size_t i = 0; i < linear_indexes_.size(); ++i) {
+        if (linear_indexes_[i] >= len_) continue;  // Bounds check
         if (buf_[linear_indexes_[i]] == '\n') { first_nl = i; break; }
+    }
     num_columns_ = first_nl + 1;
     recalculate_num_rows();
 }
@@ -30,8 +32,11 @@ std::string_view ValueExtractor::get_string_view(size_t row, size_t col) const {
 
 std::string_view ValueExtractor::get_string_view_internal(size_t row, size_t col) const {
     size_t field_idx = compute_field_index(row, col);
+    if (field_idx >= linear_indexes_.size()) return std::string_view();  // Bounds check
     size_t start = (field_idx == 0) ? 0 : linear_indexes_[field_idx - 1] + 1;
     size_t end = linear_indexes_[field_idx];
+    if (end > len_) end = len_;  // Bounds check
+    if (start > len_) start = len_;  // Bounds check
     if (end > start && buf_[end - 1] == '\r') --end;
     if (end > start && buf_[start] == static_cast<uint8_t>(dialect_.quote_char))
         if (buf_[end - 1] == static_cast<uint8_t>(dialect_.quote_char)) { ++start; --end; }
@@ -41,8 +46,11 @@ std::string_view ValueExtractor::get_string_view_internal(size_t row, size_t col
 
 std::string ValueExtractor::get_string(size_t row, size_t col) const {
     size_t field_idx = compute_field_index(row, col);
+    if (field_idx >= linear_indexes_.size()) return std::string();  // Bounds check
     size_t start = (field_idx == 0) ? 0 : linear_indexes_[field_idx - 1] + 1;
     size_t end = linear_indexes_[field_idx];
+    if (end > len_) end = len_;  // Bounds check
+    if (start > len_) start = len_;  // Bounds check
     if (end > start && buf_[end - 1] == '\r') --end;
     return unescape_field(std::string_view(reinterpret_cast<const char*>(buf_ + start), end - start));
 }
@@ -83,8 +91,11 @@ std::vector<std::string> ValueExtractor::get_header() const {
     if (!has_header_) throw std::runtime_error("CSV has no header row");
     std::vector<std::string> headers; headers.reserve(num_columns_);
     for (size_t col = 0; col < num_columns_; ++col) {
+        if (col >= linear_indexes_.size()) break;  // Bounds check
         size_t start = (col == 0) ? 0 : linear_indexes_[col - 1] + 1;
         size_t end = linear_indexes_[col];
+        if (end > len_) end = len_;  // Bounds check
+        if (start > len_) start = len_;  // Bounds check
         if (end > start && buf_[end - 1] == '\r') --end;
         headers.push_back(unescape_field(std::string_view(reinterpret_cast<const char*>(buf_ + start), end - start)));
     }

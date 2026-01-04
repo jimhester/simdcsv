@@ -44,6 +44,50 @@ TEST_F(IntegerParsingTest, EmptyIsNA) {
     EXPECT_TRUE(parse_integer<int64_t>("", 0, config_).is_na());
 }
 
+TEST_F(IntegerParsingTest, Int64Max) {
+    EXPECT_EQ(parse_integer<int64_t>("9223372036854775807", 19, config_).get(), INT64_MAX);
+}
+
+TEST_F(IntegerParsingTest, Int64Min) {
+    EXPECT_EQ(parse_integer<int64_t>("-9223372036854775808", 20, config_).get(), INT64_MIN);
+}
+
+TEST_F(IntegerParsingTest, Int64Overflow) {
+    auto result = parse_integer<int64_t>("9223372036854775808", 19, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(IntegerParsingTest, Int64Underflow) {
+    auto result = parse_integer<int64_t>("-9223372036854775809", 20, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(IntegerParsingTest, Int32Max) {
+    EXPECT_EQ(parse_integer<int32_t>("2147483647", 10, config_).get(), INT32_MAX);
+}
+
+TEST_F(IntegerParsingTest, Int32Min) {
+    EXPECT_EQ(parse_integer<int32_t>("-2147483648", 11, config_).get(), INT32_MIN);
+}
+
+TEST_F(IntegerParsingTest, Int32Overflow) {
+    auto result = parse_integer<int32_t>("2147483648", 10, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(IntegerParsingTest, UnsignedNegative) {
+    auto result = parse_integer<uint64_t>("-1", 2, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(IntegerParsingTest, WhitespaceTrimming) {
+    EXPECT_EQ(parse_integer<int64_t>("  42  ", 6, config_).get(), 42);
+}
+
 class DoubleParsingTest : public ::testing::Test {
 protected:
     ExtractionConfig config_ = ExtractionConfig::defaults();
@@ -59,6 +103,62 @@ TEST_F(DoubleParsingTest, ParseScientific) {
 
 TEST_F(DoubleParsingTest, ParseNaN) {
     EXPECT_TRUE(std::isnan(parse_double("NaN", 3, config_).get()));
+}
+
+TEST_F(DoubleParsingTest, ParseNaNCaseInsensitive) {
+    EXPECT_TRUE(std::isnan(parse_double("nan", 3, config_).get()));
+    EXPECT_TRUE(std::isnan(parse_double("NAN", 3, config_).get()));
+}
+
+TEST_F(DoubleParsingTest, ParseInf) {
+    EXPECT_TRUE(std::isinf(parse_double("Inf", 3, config_).get()));
+    EXPECT_GT(parse_double("Inf", 3, config_).get(), 0);
+}
+
+TEST_F(DoubleParsingTest, ParseInfinity) {
+    EXPECT_TRUE(std::isinf(parse_double("Infinity", 8, config_).get()));
+    EXPECT_TRUE(std::isinf(parse_double("INFINITY", 8, config_).get()));
+    EXPECT_TRUE(std::isinf(parse_double("infinity", 8, config_).get()));
+}
+
+TEST_F(DoubleParsingTest, ParseNegativeInf) {
+    EXPECT_TRUE(std::isinf(parse_double("-Inf", 4, config_).get()));
+    EXPECT_LT(parse_double("-Inf", 4, config_).get(), 0);
+}
+
+TEST_F(DoubleParsingTest, ParseNegativeInfinity) {
+    EXPECT_TRUE(std::isinf(parse_double("-Infinity", 9, config_).get()));
+    EXPECT_LT(parse_double("-Infinity", 9, config_).get(), 0);
+}
+
+TEST_F(DoubleParsingTest, InvalidInfinityVariant) {
+    // "INFxxxxx" should not be parsed as infinity
+    auto result = parse_double("INFxxxxx", 8, config_);
+    EXPECT_FALSE(result.ok());
+}
+
+TEST_F(DoubleParsingTest, MalformedScientificNoExponentDigits) {
+    auto result = parse_double("1e", 2, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(DoubleParsingTest, MalformedScientificJustSign) {
+    auto result = parse_double("1e-", 3, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(DoubleParsingTest, TrailingCharacters) {
+    auto result = parse_double("3.14abc", 7, config_);
+    EXPECT_FALSE(result.ok());
+    EXPECT_NE(result.error, nullptr);
+}
+
+TEST_F(DoubleParsingTest, NegativeZero) {
+    double result = parse_double("-0.0", 4, config_).get();
+    EXPECT_EQ(result, -0.0);
+    EXPECT_TRUE(std::signbit(result));
 }
 
 class BoolParsingTest : public ::testing::Test {
@@ -134,6 +234,39 @@ TEST_F(ValueExtractorTest, RowIterator) {
         count++;
     }
     EXPECT_EQ(count, 2);
+}
+
+TEST_F(ValueExtractorTest, QuotedField) {
+    ParseCSV("name,value\n\"Hello\",42\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_EQ(extractor.get_string_view(0, 0), "Hello");
+    EXPECT_EQ(extractor.get<int64_t>(0, 1).get(), 42);
+}
+
+TEST_F(ValueExtractorTest, CRLFLineEndings) {
+    ParseCSV("a,b\r\n1,2\r\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    EXPECT_EQ(extractor.get<int64_t>(0, 0).get(), 1);
+    EXPECT_EQ(extractor.get<int64_t>(0, 1).get(), 2);
+}
+
+TEST_F(ValueExtractorTest, GetHeader) {
+    ParseCSV("name,age\nAlice,30\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    auto headers = extractor.get_header();
+    EXPECT_EQ(headers.size(), 2);
+    EXPECT_EQ(headers[0], "name");
+    EXPECT_EQ(headers[1], "age");
+}
+
+TEST_F(ValueExtractorTest, ExtractColumnOr) {
+    ParseCSV("val\n1\nNA\n3\n");
+    ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+    auto vals = extractor.extract_column_or<int64_t>(0, -1);
+    EXPECT_EQ(vals.size(), 3);
+    EXPECT_EQ(vals[0], 1);
+    EXPECT_EQ(vals[1], -1);  // NA replaced with default
+    EXPECT_EQ(vals[2], 3);
 }
 
 int main(int argc, char** argv) {
