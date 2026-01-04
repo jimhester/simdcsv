@@ -8,6 +8,7 @@
 #include "simd_number_parsing.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <unordered_map>
 #include <cctype>
@@ -311,6 +312,7 @@ double DialectDetector::compute_pattern_score(
 
     // Count fields in each row
     for (const auto& [start, end] : rows) {
+        assert(end >= start && "Invalid row range: end must be >= start");
         auto fields = extract_fields(dialect, buf + start, end - start);
         row_field_counts.push_back(fields.size());
     }
@@ -361,6 +363,7 @@ double DialectDetector::compute_type_score(
 
     for (size_t i = start_row; i < rows.size(); ++i) {
         const auto& [start, end] = rows[i];
+        assert(end >= start && "Invalid row range: end must be >= start");
         auto fields = extract_fields(dialect, buf + start, end - start);
 
         for (const auto& field : fields) {

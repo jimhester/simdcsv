@@ -1,6 +1,7 @@
 #include "value_extraction.h"
 #include "two_pass.h"
 #include <algorithm>
+#include <cassert>
 #include <stdexcept>
 
 namespace simdcsv {
@@ -41,6 +42,7 @@ std::string_view ValueExtractor::get_string_view_internal(size_t row, size_t col
     if (end > start && buf_[start] == static_cast<uint8_t>(dialect_.quote_char))
         if (buf_[end - 1] == static_cast<uint8_t>(dialect_.quote_char)) { ++start; --end; }
     if (end < start) end = start;
+    assert(end >= start && "Invalid range: end must be >= start");
     return std::string_view(reinterpret_cast<const char*>(buf_ + start), end - start);
 }
 
@@ -52,6 +54,8 @@ std::string ValueExtractor::get_string(size_t row, size_t col) const {
     if (end > len_) end = len_;  // Bounds check
     if (start > len_) start = len_;  // Bounds check
     if (end > start && buf_[end - 1] == '\r') --end;
+    if (end < start) end = start;  // Normalize range
+    assert(end >= start && "Invalid range: end must be >= start");
     return unescape_field(std::string_view(reinterpret_cast<const char*>(buf_ + start), end - start));
 }
 
@@ -97,6 +101,8 @@ std::vector<std::string> ValueExtractor::get_header() const {
         if (end > len_) end = len_;  // Bounds check
         if (start > len_) start = len_;  // Bounds check
         if (end > start && buf_[end - 1] == '\r') --end;
+        if (end < start) end = start;  // Normalize range
+        assert(end >= start && "Invalid range: end must be >= start");
         headers.push_back(unescape_field(std::string_view(reinterpret_cast<const char*>(buf_ + start), end - start)));
     }
     return headers;

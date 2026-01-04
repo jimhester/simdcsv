@@ -25,6 +25,7 @@
 #ifndef SIMDCSV_BRANCHLESS_STATE_MACHINE_H
 #define SIMDCSV_BRANCHLESS_STATE_MACHINE_H
 
+#include <cassert>
 #include <cstdint>
 #include <cstddef>
 #include "common_defs.h"
@@ -470,6 +471,7 @@ inline uint64_t second_pass_simd_branchless(
     size_t thread_id,
     int n_threads
 ) {
+    assert(end >= start && "Invalid range: end must be >= start");
     size_t len = end - start;
     size_t pos = 0;
     uint64_t idx = thread_id;

@@ -23,6 +23,7 @@
  */
 
 #include <unistd.h>  // for getopt
+#include <cassert>
 #include <cstdint>
 #include <future>
 #include <limits>
@@ -282,6 +283,7 @@ class two_pass {
   static stats first_pass_simd(const uint8_t* buf, size_t start, size_t end,
                                char quote_char = '"') {
     stats out;
+    assert(end >= start && "Invalid range: end must be >= start");
     size_t len = end - start;
     size_t idx = 0;
     bool needs_even = out.first_even_nl == null_pos;
@@ -449,6 +451,7 @@ class two_pass {
                                    index* out, size_t thread_id,
                                    char delimiter = ',', char quote_char = '"') {
     bool is_quoted = false;
+    assert(end >= start && "Invalid range: end must be >= start");
     size_t len = end - start;
     uint64_t idx = 0;
     size_t n_indexes = 0;
