@@ -355,6 +355,31 @@ add_custom_command(TARGET dialect_detection_test POST_BUILD
 # Register dialect detection tests with CTest
 gtest_discover_tests(dialect_detection_test)
 
+# Type detection test executable
+add_executable(type_detection_test
+    test/type_detection_test.cpp
+)
+
+target_link_libraries(type_detection_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(type_detection_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for type detection tests
+add_custom_command(TARGET type_detection_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register type detection tests with CTest
+gtest_discover_tests(type_detection_test)
+
 # C API test executable
 add_executable(c_api_test
     test/c_api_test.cpp
