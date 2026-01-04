@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
+#include <cerrno>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -50,6 +51,18 @@ const char* column_type_to_string(ColumnType type) {
     }
 }
 
+namespace {
+// Case-insensitive string comparison for ASCII
+bool iequals(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i]))) return false;
+    }
+    return true;
+}
+}  // anonymous namespace
+
 ArrowConverter::ArrowConverter() : options_(), has_user_schema_(false) {}
 ArrowConverter::ArrowConverter(const ArrowConvertOptions& options) : options_(options), has_user_schema_(false) {}
 ArrowConverter::ArrowConverter(const std::vector<ColumnSpec>& columns, const ArrowConvertOptions& options)
@@ -63,18 +76,12 @@ bool ArrowConverter::is_null_value(std::string_view value) {
 }
 
 std::optional<bool> ArrowConverter::parse_boolean(std::string_view value) {
-    std::string lower;
-    lower.reserve(value.size());
-    for (char c : value) lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    // Use case-insensitive comparison without allocating temporary strings
     for (const auto& v : options_.true_values) {
-        std::string lv; lv.reserve(v.size());
-        for (char c : v) lv.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-        if (lower == lv) return true;
+        if (iequals(value, v)) return true;
     }
     for (const auto& v : options_.false_values) {
-        std::string lv; lv.reserve(v.size());
-        for (char c : v) lv.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-        if (lower == lv) return false;
+        if (iequals(value, v)) return false;
     }
     return std::nullopt;
 }
@@ -103,8 +110,10 @@ std::optional<double> ArrowConverter::parse_double(std::string_view value) {
     if (trimmed == "nan" || trimmed == "NaN") return std::numeric_limits<double>::quiet_NaN();
     char* endptr;
     std::string temp(trimmed);
+    errno = 0;  // Reset errno before call
     double result = std::strtod(temp.c_str(), &endptr);
-    if (endptr == temp.c_str() + temp.size()) return result;
+    // Check for parsing success and overflow/underflow (ERANGE)
+    if (endptr == temp.c_str() + temp.size() && errno != ERANGE) return result;
     return std::nullopt;
 }
 
@@ -136,9 +145,12 @@ std::vector<std::vector<ArrowConverter::FieldRange>> ArrowConverter::extract_fie
     std::vector<uint64_t> all_positions;
     all_positions.reserve(total_seps);
     for (uint8_t t = 0; t < idx.n_threads; ++t)
-        for (size_t i = 0; i < idx.n_indexes[t]; ++i)
-            all_positions.push_back(idx.indexes[t + i * idx.n_threads]);
+        for (size_t i = 0; i < idx.n_indexes[t]; ++i) {
+            uint64_t pos = idx.indexes[t + i * idx.n_threads];
+            if (pos < len) all_positions.push_back(pos);  // Bounds check to prevent buffer overrun
+        }
     std::sort(all_positions.begin(), all_positions.end());
+    if (all_positions.empty()) return columns;  // No valid positions after bounds filtering
     size_t num_columns = 0;
     for (size_t i = 0; i < all_positions.size(); ++i) {
         num_columns++;
@@ -261,8 +273,10 @@ ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const
     if (total_seps > 0) {
         std::vector<uint64_t> all_positions;
         for (uint8_t t = 0; t < idx.n_threads; ++t)
-            for (size_t i = 0; i < idx.n_indexes[t]; ++i)
-                all_positions.push_back(idx.indexes[t + i * idx.n_threads]);
+            for (size_t i = 0; i < idx.n_indexes[t]; ++i) {
+                uint64_t pos = idx.indexes[t + i * idx.n_threads];
+                if (pos < len) all_positions.push_back(pos);  // Bounds check
+            }
         std::sort(all_positions.begin(), all_positions.end());
         size_t fs = 0;
         for (size_t i = 0; i < all_positions.size() && column_names.size() < num_columns; ++i) {
