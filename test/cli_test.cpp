@@ -3,6 +3,11 @@
  *
  * Tests the scsv command-line tool by spawning the process with various
  * arguments and validating exit codes and output.
+ *
+ * SECURITY NOTE: The CliRunner class uses popen() with shell execution.
+ * All test file paths MUST come from trusted test fixtures only.
+ * The runWithFileStdin() method uses file redirection with paths that are
+ * hardcoded in the test file - never use with user-provided input.
  */
 
 #include <gtest/gtest.h>
