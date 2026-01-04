@@ -397,6 +397,11 @@ double DialectDetector::compute_type_score(
     //
     // Trade-off: For numeric-heavy CSVs, we avoid calling infer_cell_type()
     // for most fields. For mixed-type CSVs, performance is similar to scalar.
+    //
+    // Note: We re-call could_be_integer/could_be_float to identify which
+    // specific fields to skip. This is a trade-off: avoiding storing a
+    // per-field type marker array vs. re-validating numeric fields.
+    // For most CSV files, numeric fields are quick to validate.
     if (other_count > 0) {
         for (size_t i = 0; i < total_cells; ++i) {
             const uint8_t* data = field_ptrs[i];
