@@ -183,8 +183,27 @@ main() {
         mkdir -p "$WORKTREE_BASE"
         WORKTREE_PATH="${WORKTREE_BASE}/${BRANCH_NAME}"
 
+        # Check if directory already exists (but not registered as worktree)
+        if [[ -d "$WORKTREE_PATH" ]]; then
+            # Check if it's a valid git directory on the correct branch
+            if git -C "$WORKTREE_PATH" rev-parse --git-dir &>/dev/null; then
+                local current_branch
+                current_branch=$(git -C "$WORKTREE_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+                if [[ "$current_branch" == "$BRANCH_NAME" ]]; then
+                    echo "Using existing directory (not registered as worktree): $WORKTREE_PATH"
+                else
+                    echo "Error: Directory exists but is on branch '$current_branch', expected '$BRANCH_NAME'"
+                    echo "Path: $WORKTREE_PATH"
+                    echo "Please remove or rename the directory and try again."
+                    exit 1
+                fi
+            else
+                echo "Error: Directory exists but is not a valid git directory: $WORKTREE_PATH"
+                echo "Please remove or rename the directory and try again."
+                exit 1
+            fi
         # Check if branch exists (locally or remotely)
-        if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}" 2>/dev/null; then
+        elif git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}" 2>/dev/null; then
             echo "Creating worktree for existing branch..."
             git worktree add "$WORKTREE_PATH" "$BRANCH_NAME"
         elif git show-ref --verify --quiet "refs/remotes/origin/${BRANCH_NAME}" 2>/dev/null; then
