@@ -147,10 +147,7 @@ protected:
     }
 };
 
-// NOTE: first_pass_naive has a bug (missing ++i in the while loop).
-// This test is skipped because calling first_pass_naive would hang.
-// The function appears to be unused dead code - consider removing it.
-TEST_F(FirstPassTest, DISABLED_FirstPassNaive) {
+TEST_F(FirstPassTest, FirstPassNaive) {
     std::string content = "a,b,c\n1,2,3\n4,5,6\n";
     auto buf = makeBuffer(content);
 
@@ -162,8 +159,7 @@ TEST_F(FirstPassTest, DISABLED_FirstPassNaive) {
     EXPECT_EQ(stats.n_quotes, 0);  // Naive doesn't count quotes
 }
 
-// NOTE: first_pass_naive has a bug (missing ++i in the while loop).
-TEST_F(FirstPassTest, DISABLED_FirstPassNaiveNoNewline) {
+TEST_F(FirstPassTest, FirstPassNaiveNoNewline) {
     std::string content = "a,b,c";  // No newline
     auto buf = makeBuffer(content);
 
