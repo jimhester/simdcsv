@@ -19,6 +19,7 @@ CTestTestfile.cmake
 Makefile
 *.cmake
 Testing/
+logs/
 
 # Dependency files
 *.d

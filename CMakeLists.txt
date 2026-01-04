@@ -157,6 +157,8 @@ add_library(simdcsv_lib STATIC
     src/io_util.cpp
     src/error.cpp
     src/dialect.cpp
+    src/simdcsv_c.cpp
+    src/value_extraction.cpp
     src/streaming.cpp
 )
 
@@ -353,6 +355,124 @@ add_custom_command(TARGET dialect_detection_test POST_BUILD
 
 # Register dialect detection tests with CTest
 gtest_discover_tests(dialect_detection_test)
+
+# Type detection test executable
+add_executable(type_detection_test
+    test/type_detection_test.cpp
+)
+
+target_link_libraries(type_detection_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(type_detection_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for type detection tests
+add_custom_command(TARGET type_detection_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register type detection tests with CTest
+gtest_discover_tests(type_detection_test)
+
+# C API test executable
+add_executable(c_api_test
+    test/c_api_test.cpp
+)
+
+target_link_libraries(c_api_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(c_api_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for C API tests
+add_custom_command(TARGET c_api_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register C API tests with CTest
+gtest_discover_tests(c_api_test)
+
+# Debug mode test executable
+add_executable(debug_test
+    test/debug_test.cpp
+)
+
+target_link_libraries(debug_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(debug_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Register debug tests with CTest
+gtest_discover_tests(debug_test)
+
+# Simplified API test executable
+add_executable(api_test
+    test/api_test.cpp
+)
+
+target_link_libraries(api_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(api_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for API tests
+add_custom_command(TARGET api_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register API tests with CTest
+gtest_discover_tests(api_test)
+
+# Value extraction test executable
+add_executable(value_extraction_test
+    test/value_extraction_test.cpp
+)
+
+target_link_libraries(value_extraction_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(value_extraction_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for value extraction tests
+add_custom_command(TARGET value_extraction_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register value extraction tests with CTest
+gtest_discover_tests(value_extraction_test)
 
 # Streaming parser test executable
 add_executable(streaming_test
