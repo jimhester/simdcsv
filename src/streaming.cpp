@@ -150,7 +150,9 @@ struct StreamParser::Impl {
                 ParseError err(ErrorCode::IO_ERROR, ErrorSeverity::ERROR,
                               row_count + 1, current_field_bounds.size() + 1,
                               total_bytes, "Field exceeds maximum size");
-                error_callback(err);
+                if (!error_callback(err)) {
+                    stopped = true;
+                }
             }
             errors.add_error(ErrorCode::IO_ERROR, ErrorSeverity::ERROR,
                             row_count + 1, current_field_bounds.size() + 1,
@@ -314,6 +316,16 @@ struct StreamParser::Impl {
                 } else if (c == static_cast<uint8_t>(quote)) {
                     // Quote in unquoted field - error but continue
                     if (errors.mode() != ErrorMode::BEST_EFFORT) {
+                        if (error_callback) {
+                            ParseError err(ErrorCode::QUOTE_IN_UNQUOTED_FIELD,
+                                          ErrorSeverity::ERROR,
+                                          row_count + 1, current_field_bounds.size() + 1,
+                                          total_bytes + (pos - buffer_start),
+                                          "Quote character in unquoted field");
+                            if (!error_callback(err)) {
+                                stopped = true;
+                            }
+                        }
                         errors.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD,
                                         ErrorSeverity::ERROR,
                                         row_count + 1, current_field_bounds.size() + 1,
@@ -360,6 +372,16 @@ struct StreamParser::Impl {
                 } else {
                     // Invalid character after closing quote
                     if (errors.mode() != ErrorMode::BEST_EFFORT) {
+                        if (error_callback) {
+                            ParseError err(ErrorCode::INVALID_QUOTE_ESCAPE,
+                                          ErrorSeverity::ERROR,
+                                          row_count + 1, current_field_bounds.size() + 1,
+                                          total_bytes + (pos - buffer_start),
+                                          "Invalid character after closing quote");
+                            if (!error_callback(err)) {
+                                stopped = true;
+                            }
+                        }
                         errors.add_error(ErrorCode::INVALID_QUOTE_ESCAPE,
                                         ErrorSeverity::ERROR,
                                         row_count + 1, current_field_bounds.size() + 1,
@@ -412,6 +434,13 @@ struct StreamParser::Impl {
                 partial_buffer.clear();
                 current_field_bounds.clear();
                 return StreamStatus::ERROR;
+            }
+
+            // Check if error callback requested stop
+            if (stopped) {
+                partial_buffer.clear();
+                current_field_bounds.clear();
+                return StreamStatus::OK;
             }
         }
 

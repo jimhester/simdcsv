@@ -1846,3 +1846,206 @@ TEST(StreamingTest, StrictErrorModeStopsOnError) {
     EXPECT_EQ(status, StreamStatus::ERROR);
     EXPECT_TRUE(parser.errors().has_errors());
 }
+
+//-----------------------------------------------------------------------------
+// Error Callback Invocation Tests
+//-----------------------------------------------------------------------------
+
+TEST(StreamingTest, InvalidQuoteEscapeErrorCallbackInvoked) {
+    // "hello"world triggers INVALID_QUOTE_ESCAPE when 'w' follows closing quote
+    std::string csv = "\"hello\"world,test\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+
+    bool error_callback_invoked = false;
+    ErrorCode received_code = ErrorCode::NONE;
+    parser.set_error_handler([&error_callback_invoked, &received_code](const ParseError& err) {
+        error_callback_invoked = true;
+        received_code = err.code;
+        return true;  // Continue parsing
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    EXPECT_TRUE(error_callback_invoked);
+    EXPECT_EQ(received_code, ErrorCode::INVALID_QUOTE_ESCAPE);
+}
+
+TEST(StreamingTest, QuoteInUnquotedFieldErrorCallbackInvoked) {
+    // hello"world triggers QUOTE_IN_UNQUOTED_FIELD
+    std::string csv = "hello\"world,test\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+
+    bool error_callback_invoked = false;
+    ErrorCode received_code = ErrorCode::NONE;
+    parser.set_error_handler([&error_callback_invoked, &received_code](const ParseError& err) {
+        error_callback_invoked = true;
+        received_code = err.code;
+        return true;  // Continue parsing
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    EXPECT_TRUE(error_callback_invoked);
+    EXPECT_EQ(received_code, ErrorCode::QUOTE_IN_UNQUOTED_FIELD);
+}
+
+TEST(StreamingTest, ErrorCallbackReceivesCorrectLocation) {
+    // Verify that error callback receives accurate line/column/offset info
+    std::string csv = "a,b\nhello\"world,test\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+
+    size_t error_line = 0;
+    size_t error_column = 0;
+    parser.set_error_handler([&error_line, &error_column](const ParseError& err) {
+        error_line = err.line;
+        error_column = err.column;
+        return true;
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    // Error should be on line 2 (second row), column 1 (first field)
+    EXPECT_EQ(error_line, 2);
+    EXPECT_EQ(error_column, 1);
+}
+
+TEST(StreamingTest, ErrorCallbackReturnFalseHaltsParsing) {
+    // Test that returning false from error callback halts parsing
+    std::string csv = "a\"b,c\nd,e,f\ng,h,i\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+
+    int error_count = 0;
+    parser.set_error_handler([&error_count](const ParseError& err) {
+        (void)err;
+        ++error_count;
+        return false;  // Request halt on first error
+    });
+
+    int row_count = 0;
+    parser.set_row_handler([&row_count](const Row& row) {
+        (void)row;
+        ++row_count;
+        return true;
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    // Error callback was invoked once
+    EXPECT_EQ(error_count, 1);
+    // Parsing halts immediately after the error callback returns false.
+    // The stopped flag is checked after processing each character, so the
+    // row with the error is NOT emitted since we stop before reaching the newline.
+    EXPECT_EQ(row_count, 0);
+}
+
+TEST(StreamingTest, MultipleErrorsInvokeCallbackMultipleTimes) {
+    // CSV with multiple errors
+    std::string csv = "a\"b,c\n\"d\"e,f\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+
+    int error_count = 0;
+    std::vector<ErrorCode> error_codes;
+    parser.set_error_handler([&error_count, &error_codes](const ParseError& err) {
+        ++error_count;
+        error_codes.push_back(err.code);
+        return true;  // Continue parsing
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    // Should have at least 2 errors
+    EXPECT_GE(error_count, 2);
+    // First error: quote in unquoted field (a"b)
+    EXPECT_EQ(error_codes[0], ErrorCode::QUOTE_IN_UNQUOTED_FIELD);
+    // Second error: invalid quote escape ("d"e - 'e' after closing quote)
+    EXPECT_EQ(error_codes[1], ErrorCode::INVALID_QUOTE_ESCAPE);
+}
+
+TEST(StreamingTest, ErrorCallbackNotInvokedInBestEffortMode) {
+    // In BEST_EFFORT mode, errors should not invoke callback
+    std::string csv = "hello\"world,test\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::BEST_EFFORT;
+
+    StreamParser parser(config);
+
+    bool error_callback_invoked = false;
+    parser.set_error_handler([&error_callback_invoked](const ParseError& err) {
+        (void)err;
+        error_callback_invoked = true;
+        return true;
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    // Error callback should NOT be invoked in BEST_EFFORT mode
+    EXPECT_FALSE(error_callback_invoked);
+}
+
+TEST(StreamingTest, MaxFieldSizeErrorCallbackReturnFalseHaltsParsing) {
+    // Test that max field size error callback return value is respected
+    std::string big_field(1000, 'x');
+    std::string csv = big_field + ",test\nnormal,data\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.max_field_size = 100;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+
+    int error_count = 0;
+    parser.set_error_handler([&error_count](const ParseError& err) {
+        (void)err;
+        ++error_count;
+        return false;  // Request halt
+    });
+
+    int row_count = 0;
+    parser.set_row_handler([&row_count](const Row& row) {
+        (void)row;
+        ++row_count;
+        return true;
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    // Error callback was invoked once for the oversized field
+    EXPECT_EQ(error_count, 1);
+    // Parsing should have halted, so second row is not processed
+    EXPECT_EQ(row_count, 0);
+}
