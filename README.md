@@ -44,38 +44,58 @@ cmake --build build
 cd build && ctest --output-on-failure
 ```
 
-## Usage
+## Quick Start
+
+Include the single header `<simdcsv.h>` to access the full public API:
 
 ```cpp
-#include "two_pass.h"
-#include "io_util.h"
-#include "mem_util.h"
-#include "error.h"
+#include <simdcsv.h>
+#include <iostream>
 
 int main() {
-    // Load CSV file into SIMD-aligned buffer with padding
-    auto corpus = get_corpus("data.csv", 64);
-    const uint8_t* buf = corpus.data();
-    size_t len = corpus.size();
+    // Load file with automatic aligned memory management
+    simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
 
-    // Initialize parser
-    simdcsv::two_pass parser;
-    auto idx = parser.init(len, 4);  // 4 threads
-
-    // Parse with error handling
+    // Parse with automatic dialect detection
+    simdcsv::Parser parser;
     simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
-    parser.parse_with_errors(buf, idx, len, errors);
+    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+
+    if (result.success()) {
+        std::cout << "Parsed " << result.num_columns() << " columns\n";
+        std::cout << "Detected delimiter: '" << result.dialect.delimiter << "'\n";
+    }
 
     if (errors.has_errors()) {
         std::cerr << errors.summary() << std::endl;
     }
 
-    // Free the aligned buffer
-    aligned_free((void*)buf);
-
     return 0;
 }
 ```
+
+## CMake Integration
+
+Add simdcsv to your project using CMake's FetchContent:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(simdcsv
+  GIT_REPOSITORY https://github.com/jimhester/simdcsv.git
+  GIT_TAG main)
+FetchContent_MakeAvailable(simdcsv)
+
+target_link_libraries(your_target PRIVATE simdcsv_lib)
+```
+
+## API Overview
+
+| Header | Description |
+|--------|-------------|
+| `<simdcsv.h>` | **Main header** - includes everything, provides simplified API |
+| `<two_pass.h>` | Low-level parser with full control |
+| `<error.h>` | Error types, codes, and ErrorCollector |
+| `<dialect.h>` | Dialect configuration and detection |
 
 ## Learning more
 
