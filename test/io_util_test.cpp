@@ -158,6 +158,17 @@ TEST_F(IOUtilTest, AllocatePaddedBuffer_LargeAllocation) {
     aligned_free(buffer);
 }
 
+TEST_F(IOUtilTest, AllocatePaddedBuffer_IntegerOverflow) {
+    // Try to trigger integer overflow: length + padding > SIZE_MAX
+    size_t length = SIZE_MAX - 10;
+    size_t padding = 64;
+
+    // Should return nullptr instead of allocating a tiny buffer due to overflow
+    uint8_t* buffer = allocate_padded_buffer(length, padding);
+    EXPECT_EQ(buffer, nullptr) << "Should fail gracefully on integer overflow";
+    // No need to free nullptr
+}
+
 TEST_F(IOUtilTest, AllocatePaddedBuffer_VariousSizes) {
     std::vector<std::pair<size_t, size_t>> sizes = {
         {1, 1},
