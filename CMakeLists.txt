@@ -704,6 +704,14 @@ if(SIMDCSV_ENABLE_ARROW)
     add_custom_command(TARGET arrow_output_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
     gtest_discover_tests(arrow_output_test)
+
+    # Arrow file-based tests (loading real CSV files)
+    add_executable(arrow_file_test test/arrow_file_test.cpp)
+    target_link_libraries(arrow_file_test PRIVATE simdcsv_lib GTest::gtest_main pthread)
+    target_include_directories(arrow_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_custom_command(TARGET arrow_file_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
+    gtest_discover_tests(arrow_file_test)
 endif()
 
 # Quote mask micro-benchmark (scalar vs CLMul comparison)
