@@ -17,6 +17,18 @@
 namespace simdcsv {
 
 // ============================================================================
+// Constants for dialect scoring
+// ============================================================================
+
+/// Score boost for dialects matching detected escape patterns (e.g., \" or "")
+/// Applied when there's a clear escape pattern signal in the data
+constexpr double ESCAPE_PATTERN_MATCH_BOOST = 1.2;
+
+/// Smaller boost for double-quote escaping when explicitly detected
+/// Used to slightly prefer RFC 4180 style when evidence is present
+constexpr double DOUBLE_QUOTE_ESCAPE_BOOST = 1.1;
+
+// ============================================================================
 // Dialect
 // ============================================================================
 
@@ -257,24 +269,26 @@ DialectCandidate DialectDetector::score_dialect(
 
     // Boost score based on escape pattern match
     // This helps distinguish dialects that produce similar field counts
-    // but use different escape mechanisms
+    // but use different escape mechanisms.
+    // Note: When both \" and "" patterns are present, returns 0 (ambiguous),
+    // and no boost is applied - the tie-breakers will decide.
     if (dialect.quote_char != '\0') {
         char esc_to_check = dialect.double_quote ? '\0' : dialect.escape_char;
         if (esc_to_check != '\0') {
             int escape_signal = detect_escape_pattern(buf, len, dialect.quote_char, esc_to_check);
             if (escape_signal > 0 && !dialect.double_quote) {
                 // Backslash escapes detected and this dialect uses backslash escaping
-                candidate.consistency_score *= 1.2;  // 20% boost
+                candidate.consistency_score *= ESCAPE_PATTERN_MATCH_BOOST;
             } else if (escape_signal < 0 && dialect.double_quote) {
                 // Double-quote escapes detected and this dialect uses double-quote
-                candidate.consistency_score *= 1.2;  // 20% boost
+                candidate.consistency_score *= ESCAPE_PATTERN_MATCH_BOOST;
             }
         } else if (dialect.double_quote) {
             // Check if double-quote escapes are present
             int escape_signal = detect_escape_pattern(buf, len, dialect.quote_char, dialect.quote_char);
             if (escape_signal < 0) {
                 // Double-quote escapes detected
-                candidate.consistency_score *= 1.1;  // 10% boost for matching
+                candidate.consistency_score *= DOUBLE_QUOTE_ESCAPE_BOOST;
             }
         }
     }
@@ -455,10 +469,11 @@ std::vector<std::pair<size_t, size_t>> DialectDetector::find_rows(
         uint8_t c = buf[i];
 
         // Handle escape character (backslash or other)
+        // When we see an escape char, we skip both it and the next character.
+        // Note: ++i here plus the for-loop's ++i after continue = skip 2 chars total
         if (!dialect.double_quote && dialect.escape_char != '\0' &&
             c == static_cast<uint8_t>(dialect.escape_char) && i + 1 < len) {
-            // Skip the escaped character
-            ++i;
+            ++i;  // Move to escaped char; for-loop ++i will move past it
             continue;
         }
 
@@ -522,10 +537,11 @@ std::vector<std::string_view> DialectDetector::extract_fields(
         char c = data[i];
 
         // Handle escape character (backslash or other)
+        // When we see an escape char, we skip both it and the next character.
+        // Note: ++i here plus the for-loop's ++i after continue = skip 2 chars total
         if (!dialect.double_quote && dialect.escape_char != '\0' &&
             c == dialect.escape_char && i + 1 < row_len) {
-            // Skip the escaped character
-            ++i;
+            ++i;  // Move to escaped char; for-loop ++i will move past it
             continue;
         }
 

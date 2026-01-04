@@ -693,3 +693,62 @@ TEST_F(DialectDetectionTest, NoEscapeNeeded) {
     // Should default to double-quote style when no escapes are present
     EXPECT_TRUE(result.dialect.double_quote);
 }
+
+TEST_F(DialectDetectionTest, MixedEscapeStyles) {
+    // CSV with both \" and "" patterns - should be ambiguous
+    // The tie-breaker should prefer RFC 4180 (double_quote = true)
+    const std::string csv_data =
+        "Name,Value\n"
+        "\"John \\\"Boss\\\" Smith\",100\n"
+        "\"Jane \"\"Doe\"\" Jones\",200\n"
+        "\"Bob\",300\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    // When mixed, tie-breakers prefer RFC 4180
+    EXPECT_TRUE(result.dialect.double_quote);
+}
+
+TEST_F(DialectDetectionTest, EscapeInMiddleOfField) {
+    // Test escape character appearing in the middle of field content
+    const std::string csv_data =
+        "Name,Description\n"
+        "\"Test\",\"Hello \\\"World\\\" Here\"\n"
+        "\"Item\",\"Normal\"\n"
+        "\"Other\",\"Text\"\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.dialect.escape_char, '\\');
+    EXPECT_FALSE(result.dialect.double_quote);
+}
+
+TEST_F(DialectDetectionTest, ConsecutiveEscapes) {
+    // Test multiple consecutive escape sequences
+    // Each row has backslash-escaped quotes to ensure clear signal
+    const std::string csv_data =
+        "A,B\n"
+        "\"First \\\"One\\\" here\",1\n"
+        "\"Second \\\"Two\\\" here\",2\n"
+        "\"Third \\\"Three\\\" here\",3\n"
+        "\"Fourth \\\"Four\\\" here\",4\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.escape_char, '\\');
+    EXPECT_FALSE(result.dialect.double_quote);
+}
