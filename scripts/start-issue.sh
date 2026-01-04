@@ -258,8 +258,12 @@ Repeat until the PR is ready to merge:
 
 ### Phase 4: Merge
 Once CI passes and there are no blocking reviews:
-1. Merge the PR using \`gh pr merge --squash --delete-branch\`
+1. Merge the PR using \`gh pr merge --squash\` (do NOT use --delete-branch, it fails with worktrees)
 2. Confirm the merge succeeded
+3. Clean up the worktree: navigate to the main repo and run:
+   - \`git worktree remove <worktree-path>\` (removes this worktree)
+   - \`git branch -d <branch-name>\` (deletes the local branch)
+   - The remote branch is automatically deleted by GitHub after merge
 
 ## Phase 5: Follow up issues
 If there are any un-addressed issues identified from the PR review or implementation, please open new issues to track them.
