@@ -92,24 +92,17 @@ size_t simdcsv_buffer_length(const simdcsv_buffer_t* buffer);
 void simdcsv_buffer_destroy(simdcsv_buffer_t* buffer);
 
 /* Dialect Configuration */
-simdcsv_dialect_t* simdcsv_dialect_csv(void);
-simdcsv_dialect_t* simdcsv_dialect_tsv(void);
-simdcsv_dialect_t* simdcsv_dialect_semicolon(void);
-simdcsv_dialect_t* simdcsv_dialect_pipe(void);
 simdcsv_dialect_t* simdcsv_dialect_create(char delimiter, char quote_char,
                                            char escape_char, bool double_quote);
 char simdcsv_dialect_delimiter(const simdcsv_dialect_t* dialect);
 char simdcsv_dialect_quote_char(const simdcsv_dialect_t* dialect);
 char simdcsv_dialect_escape_char(const simdcsv_dialect_t* dialect);
 bool simdcsv_dialect_double_quote(const simdcsv_dialect_t* dialect);
-simdcsv_error_t simdcsv_dialect_validate(const simdcsv_dialect_t* dialect);
-size_t simdcsv_dialect_to_string(const simdcsv_dialect_t* dialect, char* buffer, size_t buffer_size);
 void simdcsv_dialect_destroy(simdcsv_dialect_t* dialect);
 
 /* Error Collector */
 simdcsv_error_collector_t* simdcsv_error_collector_create(simdcsv_error_mode_t mode, size_t max_errors);
 simdcsv_error_mode_t simdcsv_error_collector_mode(const simdcsv_error_collector_t* collector);
-void simdcsv_error_collector_set_mode(simdcsv_error_collector_t* collector, simdcsv_error_mode_t mode);
 bool simdcsv_error_collector_has_errors(const simdcsv_error_collector_t* collector);
 bool simdcsv_error_collector_has_fatal(const simdcsv_error_collector_t* collector);
 size_t simdcsv_error_collector_count(const simdcsv_error_collector_t* collector);
@@ -128,9 +121,7 @@ void simdcsv_index_destroy(simdcsv_index_t* index);
 
 /* Parser */
 simdcsv_parser_t* simdcsv_parser_create(void);
-simdcsv_error_t simdcsv_parse(simdcsv_parser_t* parser, const simdcsv_buffer_t* buffer, simdcsv_index_t* index, const simdcsv_dialect_t* dialect);
-simdcsv_error_t simdcsv_parse_with_errors(simdcsv_parser_t* parser, const simdcsv_buffer_t* buffer, simdcsv_index_t* index, simdcsv_error_collector_t* errors, const simdcsv_dialect_t* dialect);
-simdcsv_error_t simdcsv_parse_two_pass_with_errors(simdcsv_parser_t* parser, const simdcsv_buffer_t* buffer, simdcsv_index_t* index, simdcsv_error_collector_t* errors, const simdcsv_dialect_t* dialect);
+simdcsv_error_t simdcsv_parse(simdcsv_parser_t* parser, const simdcsv_buffer_t* buffer, simdcsv_index_t* index, simdcsv_error_collector_t* errors, const simdcsv_dialect_t* dialect);
 void simdcsv_parser_destroy(simdcsv_parser_t* parser);
 
 /* Dialect Detection */

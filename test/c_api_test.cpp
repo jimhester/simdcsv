@@ -114,16 +114,17 @@ TEST_F(CAPITest, BufferLoadFileNull) {
 
 // Dialect Tests
 TEST_F(CAPITest, DialectCSV) {
-    simdcsv_dialect_t* d = simdcsv_dialect_csv();
+    // Use simdcsv_dialect_create for CSV: delimiter=',', quote='"', escape='"', double_quote=true
+    simdcsv_dialect_t* d = simdcsv_dialect_create(',', '"', '"', true);
     ASSERT_NE(d, nullptr);
     EXPECT_EQ(simdcsv_dialect_delimiter(d), ',');
     EXPECT_EQ(simdcsv_dialect_quote_char(d), '"');
-    EXPECT_EQ(simdcsv_dialect_validate(d), SIMDCSV_OK);
     simdcsv_dialect_destroy(d);
 }
 
 TEST_F(CAPITest, DialectTSV) {
-    simdcsv_dialect_t* d = simdcsv_dialect_tsv();
+    // Use simdcsv_dialect_create for TSV: delimiter='\t', quote='"', escape='"', double_quote=true
+    simdcsv_dialect_t* d = simdcsv_dialect_create('\t', '"', '"', true);
     ASSERT_NE(d, nullptr);
     EXPECT_EQ(simdcsv_dialect_delimiter(d), '\t');
     simdcsv_dialect_destroy(d);
@@ -138,7 +139,8 @@ TEST_F(CAPITest, DialectCustom) {
 }
 
 TEST_F(CAPITest, DialectSemicolon) {
-    simdcsv_dialect_t* d = simdcsv_dialect_semicolon();
+    // Use simdcsv_dialect_create for semicolon: delimiter=';', quote='"', escape='"', double_quote=true
+    simdcsv_dialect_t* d = simdcsv_dialect_create(';', '"', '"', true);
     ASSERT_NE(d, nullptr);
     EXPECT_EQ(simdcsv_dialect_delimiter(d), ';');
     EXPECT_EQ(simdcsv_dialect_quote_char(d), '"');
@@ -148,7 +150,8 @@ TEST_F(CAPITest, DialectSemicolon) {
 }
 
 TEST_F(CAPITest, DialectPipe) {
-    simdcsv_dialect_t* d = simdcsv_dialect_pipe();
+    // Use simdcsv_dialect_create for pipe: delimiter='|', quote='"', escape='"', double_quote=true
+    simdcsv_dialect_t* d = simdcsv_dialect_create('|', '"', '"', true);
     ASSERT_NE(d, nullptr);
     EXPECT_EQ(simdcsv_dialect_delimiter(d), '|');
     EXPECT_EQ(simdcsv_dialect_quote_char(d), '"');
@@ -166,53 +169,11 @@ TEST_F(CAPITest, DialectEscapeAndDoubleQuote) {
     simdcsv_dialect_destroy(d);
 }
 
-TEST_F(CAPITest, DialectToString) {
-    simdcsv_dialect_t* d = simdcsv_dialect_csv();
-    ASSERT_NE(d, nullptr);
-
-    // Test with null buffer - should return required size
-    size_t required = simdcsv_dialect_to_string(d, nullptr, 0);
-    EXPECT_GT(required, 0u);
-
-    // Test with sufficient buffer
-    char buffer[256];
-    size_t len = simdcsv_dialect_to_string(d, buffer, sizeof(buffer));
-    EXPECT_GT(len, 0u);
-    EXPECT_GT(strlen(buffer), 0u);
-
-    // Test with small buffer (should truncate)
-    char small_buffer[5];
-    len = simdcsv_dialect_to_string(d, small_buffer, sizeof(small_buffer));
-    EXPECT_GT(len, sizeof(small_buffer)); // Original length should be larger
-    EXPECT_EQ(strlen(small_buffer), sizeof(small_buffer) - 1);
-
-    simdcsv_dialect_destroy(d);
-}
-
-TEST_F(CAPITest, DialectToStringNull) {
-    EXPECT_EQ(simdcsv_dialect_to_string(nullptr, nullptr, 0), 0u);
-}
-
-TEST_F(CAPITest, DialectValidateInvalid) {
-    // Test dialect with null delimiter
-    simdcsv_dialect_t* d = simdcsv_dialect_create('\0', '"', '"', true);
-    ASSERT_NE(d, nullptr);
-    EXPECT_EQ(simdcsv_dialect_validate(d), SIMDCSV_ERROR_INVALID_ARGUMENT);
-    simdcsv_dialect_destroy(d);
-
-    // Test dialect where delimiter equals quote char
-    d = simdcsv_dialect_create(',', ',', '"', true);
-    ASSERT_NE(d, nullptr);
-    EXPECT_EQ(simdcsv_dialect_validate(d), SIMDCSV_ERROR_INVALID_ARGUMENT);
-    simdcsv_dialect_destroy(d);
-}
-
 TEST_F(CAPITest, DialectNullHandling) {
     EXPECT_EQ(simdcsv_dialect_delimiter(nullptr), '\0');
     EXPECT_EQ(simdcsv_dialect_quote_char(nullptr), '\0');
     EXPECT_EQ(simdcsv_dialect_escape_char(nullptr), '\0');
     EXPECT_FALSE(simdcsv_dialect_double_quote(nullptr));
-    EXPECT_EQ(simdcsv_dialect_validate(nullptr), SIMDCSV_ERROR_NULL_POINTER);
     simdcsv_dialect_destroy(nullptr);
 }
 
@@ -226,18 +187,17 @@ TEST_F(CAPITest, ErrorCollectorCreate) {
     simdcsv_error_collector_destroy(c);
 }
 
-TEST_F(CAPITest, ErrorCollectorSetMode) {
-    simdcsv_error_collector_t* c = simdcsv_error_collector_create(SIMDCSV_MODE_STRICT, 100);
-    ASSERT_NE(c, nullptr);
-    EXPECT_EQ(simdcsv_error_collector_mode(c), SIMDCSV_MODE_STRICT);
+TEST_F(CAPITest, ErrorCollectorModes) {
+    // Test that different modes can be set at creation time
+    simdcsv_error_collector_t* strict = simdcsv_error_collector_create(SIMDCSV_MODE_STRICT, 100);
+    ASSERT_NE(strict, nullptr);
+    EXPECT_EQ(simdcsv_error_collector_mode(strict), SIMDCSV_MODE_STRICT);
+    simdcsv_error_collector_destroy(strict);
 
-    simdcsv_error_collector_set_mode(c, SIMDCSV_MODE_BEST_EFFORT);
-    EXPECT_EQ(simdcsv_error_collector_mode(c), SIMDCSV_MODE_BEST_EFFORT);
-
-    // Test set_mode with null (should be no-op)
-    simdcsv_error_collector_set_mode(nullptr, SIMDCSV_MODE_PERMISSIVE);
-
-    simdcsv_error_collector_destroy(c);
+    simdcsv_error_collector_t* best_effort = simdcsv_error_collector_create(SIMDCSV_MODE_BEST_EFFORT, 100);
+    ASSERT_NE(best_effort, nullptr);
+    EXPECT_EQ(simdcsv_error_collector_mode(best_effort), SIMDCSV_MODE_BEST_EFFORT);
+    simdcsv_error_collector_destroy(best_effort);
 }
 
 TEST_F(CAPITest, ErrorCollectorClear) {
@@ -303,7 +263,7 @@ TEST_F(CAPITest, IndexColumnsAndTotalCount) {
     ASSERT_NE(parser, nullptr);
     ASSERT_NE(index, nullptr);
 
-    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, nullptr);
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, nullptr, nullptr);
     EXPECT_EQ(err, SIMDCSV_OK);
 
     // Test columns accessor
@@ -359,7 +319,7 @@ TEST_F(CAPITest, ParseSimpleCSV) {
     ASSERT_NE(parser, nullptr);
     ASSERT_NE(index, nullptr);
 
-    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, nullptr);
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, nullptr, nullptr);
     EXPECT_EQ(err, SIMDCSV_OK);
     EXPECT_GT(simdcsv_index_count(index, 0), 0u);
 
@@ -377,7 +337,7 @@ TEST_F(CAPITest, ParseWithErrors) {
     simdcsv_index_t* index = simdcsv_index_create(len, 1);
     simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
 
-    simdcsv_error_t err = simdcsv_parse_with_errors(parser, buffer, index, errors, nullptr);
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
     EXPECT_EQ(err, SIMDCSV_OK);
     EXPECT_FALSE(simdcsv_error_collector_has_fatal(errors));
 
@@ -393,33 +353,16 @@ TEST_F(CAPITest, ParseNullPointers) {
     simdcsv_parser_t* parser = simdcsv_parser_create();
     simdcsv_index_t* index = simdcsv_index_create(100, 1);
 
-    EXPECT_EQ(simdcsv_parse(nullptr, buffer, index, nullptr), SIMDCSV_ERROR_NULL_POINTER);
-    EXPECT_EQ(simdcsv_parse(parser, nullptr, index, nullptr), SIMDCSV_ERROR_NULL_POINTER);
-    EXPECT_EQ(simdcsv_parse(parser, buffer, nullptr, nullptr), SIMDCSV_ERROR_NULL_POINTER);
+    EXPECT_EQ(simdcsv_parse(nullptr, buffer, index, nullptr, nullptr), SIMDCSV_ERROR_NULL_POINTER);
+    EXPECT_EQ(simdcsv_parse(parser, nullptr, index, nullptr, nullptr), SIMDCSV_ERROR_NULL_POINTER);
+    EXPECT_EQ(simdcsv_parse(parser, buffer, nullptr, nullptr, nullptr), SIMDCSV_ERROR_NULL_POINTER);
 
     simdcsv_index_destroy(index);
     simdcsv_parser_destroy(parser);
     simdcsv_buffer_destroy(buffer);
 }
 
-TEST_F(CAPITest, ParseWithErrorsNullPointers) {
-    const uint8_t data[] = "a,b,c\n";
-    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, sizeof(data) - 1);
-    simdcsv_parser_t* parser = simdcsv_parser_create();
-    simdcsv_index_t* index = simdcsv_index_create(100, 1);
-    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 100);
-
-    EXPECT_EQ(simdcsv_parse_with_errors(nullptr, buffer, index, errors, nullptr), SIMDCSV_ERROR_NULL_POINTER);
-    EXPECT_EQ(simdcsv_parse_with_errors(parser, nullptr, index, errors, nullptr), SIMDCSV_ERROR_NULL_POINTER);
-    EXPECT_EQ(simdcsv_parse_with_errors(parser, buffer, nullptr, errors, nullptr), SIMDCSV_ERROR_NULL_POINTER);
-
-    simdcsv_error_collector_destroy(errors);
-    simdcsv_index_destroy(index);
-    simdcsv_parser_destroy(parser);
-    simdcsv_buffer_destroy(buffer);
-}
-
-TEST_F(CAPITest, ParseWithErrorsNullErrorCollector) {
+TEST_F(CAPITest, ParseNullErrorCollector) {
     // Test that null error collector is handled gracefully (falls back to non-error parse)
     const uint8_t data[] = "a,b,c\n1,2,3\n";
     size_t len = sizeof(data) - 1;
@@ -428,7 +371,7 @@ TEST_F(CAPITest, ParseWithErrorsNullErrorCollector) {
     simdcsv_parser_t* parser = simdcsv_parser_create();
     simdcsv_index_t* index = simdcsv_index_create(len, 1);
 
-    simdcsv_error_t err = simdcsv_parse_with_errors(parser, buffer, index, nullptr, nullptr);
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, nullptr, nullptr);
     EXPECT_EQ(err, SIMDCSV_OK);
 
     simdcsv_index_destroy(index);
@@ -436,7 +379,7 @@ TEST_F(CAPITest, ParseWithErrorsNullErrorCollector) {
     simdcsv_buffer_destroy(buffer);
 }
 
-TEST_F(CAPITest, ParseTwoPassWithErrors) {
+TEST_F(CAPITest, ParseWithDialect) {
     const uint8_t data[] = "a,b,c\n1,2,3\n4,5,6\n";
     size_t len = sizeof(data) - 1;
 
@@ -444,49 +387,16 @@ TEST_F(CAPITest, ParseTwoPassWithErrors) {
     simdcsv_parser_t* parser = simdcsv_parser_create();
     simdcsv_index_t* index = simdcsv_index_create(len, 1);
     simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 100);
-    simdcsv_dialect_t* dialect = simdcsv_dialect_csv();
+    // CSV dialect: delimiter=',', quote='"', escape='"', double_quote=true
+    simdcsv_dialect_t* dialect = simdcsv_dialect_create(',', '"', '"', true);
 
-    simdcsv_error_t err = simdcsv_parse_two_pass_with_errors(parser, buffer, index, errors, dialect);
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, dialect);
     EXPECT_EQ(err, SIMDCSV_OK);
     EXPECT_GT(simdcsv_index_count(index, 0), 0u);
     EXPECT_FALSE(simdcsv_error_collector_has_fatal(errors));
 
     simdcsv_dialect_destroy(dialect);
     simdcsv_error_collector_destroy(errors);
-    simdcsv_index_destroy(index);
-    simdcsv_parser_destroy(parser);
-    simdcsv_buffer_destroy(buffer);
-}
-
-TEST_F(CAPITest, ParseTwoPassWithErrorsNullPointers) {
-    const uint8_t data[] = "a,b,c\n";
-    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, sizeof(data) - 1);
-    simdcsv_parser_t* parser = simdcsv_parser_create();
-    simdcsv_index_t* index = simdcsv_index_create(100, 1);
-    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 100);
-
-    EXPECT_EQ(simdcsv_parse_two_pass_with_errors(nullptr, buffer, index, errors, nullptr), SIMDCSV_ERROR_NULL_POINTER);
-    EXPECT_EQ(simdcsv_parse_two_pass_with_errors(parser, nullptr, index, errors, nullptr), SIMDCSV_ERROR_NULL_POINTER);
-    EXPECT_EQ(simdcsv_parse_two_pass_with_errors(parser, buffer, nullptr, errors, nullptr), SIMDCSV_ERROR_NULL_POINTER);
-
-    simdcsv_error_collector_destroy(errors);
-    simdcsv_index_destroy(index);
-    simdcsv_parser_destroy(parser);
-    simdcsv_buffer_destroy(buffer);
-}
-
-TEST_F(CAPITest, ParseTwoPassWithErrorsNullErrorCollector) {
-    // Test that null error collector falls back to non-error two-pass parse
-    const uint8_t data[] = "a,b,c\n1,2,3\n";
-    size_t len = sizeof(data) - 1;
-
-    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
-    simdcsv_parser_t* parser = simdcsv_parser_create();
-    simdcsv_index_t* index = simdcsv_index_create(len, 1);
-
-    simdcsv_error_t err = simdcsv_parse_two_pass_with_errors(parser, buffer, index, nullptr, nullptr);
-    EXPECT_EQ(err, SIMDCSV_OK);
-
     simdcsv_index_destroy(index);
     simdcsv_parser_destroy(parser);
     simdcsv_buffer_destroy(buffer);
@@ -646,17 +556,18 @@ TEST_F(CAPITest, ParseAutoNullErrorCollector) {
     simdcsv_buffer_destroy(buffer);
 }
 
-TEST_F(CAPITest, ParseWithDialect) {
-    // Test parse with explicit dialect
+TEST_F(CAPITest, ParseTSVWithDialect) {
+    // Test parse with explicit TSV dialect
     const uint8_t data[] = "a\tb\tc\n1\t2\t3\n";
     size_t len = sizeof(data) - 1;
 
     simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
     simdcsv_parser_t* parser = simdcsv_parser_create();
     simdcsv_index_t* index = simdcsv_index_create(len, 1);
-    simdcsv_dialect_t* dialect = simdcsv_dialect_tsv();
+    // TSV dialect: delimiter='\t', quote='"', escape='"', double_quote=true
+    simdcsv_dialect_t* dialect = simdcsv_dialect_create('\t', '"', '"', true);
 
-    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, dialect);
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, nullptr, dialect);
     EXPECT_EQ(err, SIMDCSV_OK);
     EXPECT_GT(simdcsv_index_count(index, 0), 0u);
 
@@ -685,7 +596,7 @@ TEST_F(CAPITest, FullWorkflowFromFile) {
     simdcsv_index_t* index = simdcsv_index_create(simdcsv_buffer_length(buffer), 1);
     simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
 
-    simdcsv_error_t err = simdcsv_parse_with_errors(parser, buffer, index, errors, nullptr);
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
     EXPECT_EQ(err, SIMDCSV_OK);
     EXPECT_GT(simdcsv_index_count(index, 0), 0u);
     EXPECT_FALSE(simdcsv_error_collector_has_fatal(errors));
