@@ -204,9 +204,24 @@ std::vector<ColumnType> ArrowConverter::infer_types(const uint8_t* buf, size_t l
             if (ct == ColumnType::NULL_TYPE) continue;
             if (strongest == ColumnType::NULL_TYPE) strongest = ct;
             else if (strongest != ct) {
+                // Type promotion rules:
+                // - INT64 + DOUBLE -> DOUBLE (standard numeric promotion)
+                // - BOOLEAN + INT64 -> INT64 (boolean values 0/1 are valid ints)
+                // - BOOLEAN + DOUBLE -> DOUBLE (boolean values 0/1 are valid doubles)
+                // - Any other mismatch -> STRING
                 if ((strongest == ColumnType::INT64 && ct == ColumnType::DOUBLE) ||
-                    (strongest == ColumnType::DOUBLE && ct == ColumnType::INT64)) strongest = ColumnType::DOUBLE;
-                else { strongest = ColumnType::STRING; break; }
+                    (strongest == ColumnType::DOUBLE && ct == ColumnType::INT64)) {
+                    strongest = ColumnType::DOUBLE;
+                } else if ((strongest == ColumnType::BOOLEAN && ct == ColumnType::INT64) ||
+                           (strongest == ColumnType::INT64 && ct == ColumnType::BOOLEAN)) {
+                    strongest = ColumnType::INT64;
+                } else if ((strongest == ColumnType::BOOLEAN && ct == ColumnType::DOUBLE) ||
+                           (strongest == ColumnType::DOUBLE && ct == ColumnType::BOOLEAN)) {
+                    strongest = ColumnType::DOUBLE;
+                } else {
+                    strongest = ColumnType::STRING;
+                    break;
+                }
             }
         }
         types[col] = (strongest == ColumnType::NULL_TYPE) ? ColumnType::STRING : strongest;
