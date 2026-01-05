@@ -826,3 +826,241 @@ TEST_F(CliTest, Latin1Encoding) {
   auto result = CliRunner::run("head " + testDataPath("encoding/latin1.csv"));
   EXPECT_EQ(result.exit_code, 0);
 }
+
+// =============================================================================
+// Tail Command Tests
+// =============================================================================
+
+TEST_F(CliTest, TailDefault) {
+  auto result = CliRunner::run("tail " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output header and last rows
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  // simple.csv has 3 data rows, default is 10, so all 3 should appear
+  EXPECT_TRUE(result.output.find("1,2,3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("4,5,6") != std::string::npos);
+  EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
+}
+
+TEST_F(CliTest, TailWithNumRows) {
+  auto result = CliRunner::run("tail -n 2 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output header + last 2 data rows
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  // First data row should NOT be present
+  EXPECT_TRUE(result.output.find("1,2,3") == std::string::npos);
+  // Last 2 data rows should be present
+  EXPECT_TRUE(result.output.find("4,5,6") != std::string::npos);
+  EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
+}
+
+TEST_F(CliTest, TailWithNumRowsOne) {
+  auto result = CliRunner::run("tail -n 1 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output header + last data row only
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("1,2,3") == std::string::npos);
+  EXPECT_TRUE(result.output.find("4,5,6") == std::string::npos);
+  EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
+}
+
+TEST_F(CliTest, TailMoreRowsThanExist) {
+  // Request more rows than exist - should return all data rows
+  auto result = CliRunner::run("tail -n 100 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("1,2,3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
+}
+
+TEST_F(CliTest, TailZeroRows) {
+  auto result = CliRunner::run("tail -n 0 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output only the header
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("1,2,3") == std::string::npos);
+}
+
+TEST_F(CliTest, TailEmptyFile) {
+  auto result = CliRunner::run("tail " + testDataPath("edge_cases/empty_file.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, TailNoHeader) {
+  auto result = CliRunner::run("tail -n 2 -H " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output last 2 rows without treating first as header
+  // So we get rows "4,5,6" and "7,8,9" (last 2 of 4 total rows)
+  EXPECT_TRUE(result.output.find("4,5,6") != std::string::npos);
+  EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
+  // Header "A,B,C" should NOT be in output since we're not treating it as header
+  EXPECT_TRUE(result.output.find("A,B,C") == std::string::npos);
+}
+
+TEST_F(CliTest, TailManyRows) {
+  // Test with file that has 20 data rows
+  auto result = CliRunner::run("tail -n 5 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should have header
+  EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos);
+  // Should have last 5 rows (IDs 16-20)
+  EXPECT_TRUE(result.output.find("16,") != std::string::npos);
+  EXPECT_TRUE(result.output.find("20,") != std::string::npos);
+  // Should NOT have earlier rows (IDs 1-15)
+  EXPECT_TRUE(result.output.find("15,") == std::string::npos);
+}
+
+TEST_F(CliTest, TailFromStdin) {
+  auto result = CliRunner::runWithFileStdin("tail -n 2 -", testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
+}
+
+TEST_F(CliTest, TailWithTabDelimiter) {
+  auto result = CliRunner::run("tail -d tab " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("\t") != std::string::npos);
+}
+
+// =============================================================================
+// Sample Command Tests
+// =============================================================================
+
+TEST_F(CliTest, SampleDefault) {
+  auto result = CliRunner::run("sample " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output header
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+}
+
+TEST_F(CliTest, SampleWithNumRows) {
+  auto result = CliRunner::run("sample -n 2 -s 42 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output header + 2 data rows
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  // Verify we got exactly 2 data rows by counting occurrences of data patterns
+  // simple.csv has rows: 1,2,3 and 4,5,6 and 7,8,9
+  // With seed 42, sample should select specific rows from the 3 available
+  int data_rows = 0;
+  if (result.output.find("1,2,3") != std::string::npos) data_rows++;
+  if (result.output.find("4,5,6") != std::string::npos) data_rows++;
+  if (result.output.find("7,8,9") != std::string::npos) data_rows++;
+  EXPECT_EQ(data_rows, 2);  // We requested 2 rows
+}
+
+TEST_F(CliTest, SampleMoreRowsThanExist) {
+  // Request more samples than exist - should return all data rows
+  auto result = CliRunner::run("sample -n 100 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("1,2,3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("4,5,6") != std::string::npos);
+  EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
+}
+
+TEST_F(CliTest, SampleZeroRows) {
+  auto result = CliRunner::run("sample -n 0 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output only the header
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  // Should NOT contain any data rows
+  EXPECT_TRUE(result.output.find("1,2,3") == std::string::npos);
+  EXPECT_TRUE(result.output.find("4,5,6") == std::string::npos);
+  EXPECT_TRUE(result.output.find("7,8,9") == std::string::npos);
+}
+
+TEST_F(CliTest, SampleEmptyFile) {
+  auto result = CliRunner::run("sample " + testDataPath("edge_cases/empty_file.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, SampleReproducibleWithSeed) {
+  // Same seed should produce same sample
+  auto result1 = CliRunner::run("sample -n 5 -s 42 " + testDataPath("basic/many_rows.csv"));
+  auto result2 = CliRunner::run("sample -n 5 -s 42 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result1.exit_code, 0);
+  EXPECT_EQ(result2.exit_code, 0);
+  EXPECT_EQ(result1.output, result2.output);
+}
+
+TEST_F(CliTest, SampleDifferentSeeds) {
+  // Different seeds should likely produce different samples (not guaranteed but highly probable)
+  auto result1 = CliRunner::run("sample -n 5 -s 1 " + testDataPath("basic/many_rows.csv"));
+  auto result2 = CliRunner::run("sample -n 5 -s 999 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result1.exit_code, 0);
+  EXPECT_EQ(result2.exit_code, 0);
+  // Both should have header
+  EXPECT_TRUE(result1.output.find("ID,Value,Label") != std::string::npos);
+  EXPECT_TRUE(result2.output.find("ID,Value,Label") != std::string::npos);
+}
+
+TEST_F(CliTest, SampleNoHeader) {
+  auto result = CliRunner::run("sample -n 2 -H -s 42 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output 2 rows without header treatment
+  // With -H, all 4 rows (including "A,B,C") are treated as data
+  // Verify we got exactly 2 data rows
+  int data_rows = 0;
+  if (result.output.find("A,B,C") != std::string::npos) data_rows++;
+  if (result.output.find("1,2,3") != std::string::npos) data_rows++;
+  if (result.output.find("4,5,6") != std::string::npos) data_rows++;
+  if (result.output.find("7,8,9") != std::string::npos) data_rows++;
+  EXPECT_EQ(data_rows, 2);
+}
+
+TEST_F(CliTest, SampleManyRows) {
+  // Sample from file with 20 data rows
+  auto result = CliRunner::run("sample -n 5 -s 42 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should have header
+  EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos);
+  // Count data rows by looking for unique patterns at start of line
+  // Each data row has format like "1,100,A" or "20,2000,T"
+  // Use patterns that are unique to each row to avoid false matches
+  int data_rows = 0;
+  if (result.output.find("1,100,A") != std::string::npos) data_rows++;
+  if (result.output.find("2,200,B") != std::string::npos) data_rows++;
+  if (result.output.find("3,300,C") != std::string::npos) data_rows++;
+  if (result.output.find("4,400,D") != std::string::npos) data_rows++;
+  if (result.output.find("5,500,E") != std::string::npos) data_rows++;
+  if (result.output.find("6,600,F") != std::string::npos) data_rows++;
+  if (result.output.find("7,700,G") != std::string::npos) data_rows++;
+  if (result.output.find("8,800,H") != std::string::npos) data_rows++;
+  if (result.output.find("9,900,I") != std::string::npos) data_rows++;
+  if (result.output.find("10,1000,J") != std::string::npos) data_rows++;
+  if (result.output.find("11,1100,K") != std::string::npos) data_rows++;
+  if (result.output.find("12,1200,L") != std::string::npos) data_rows++;
+  if (result.output.find("13,1300,M") != std::string::npos) data_rows++;
+  if (result.output.find("14,1400,N") != std::string::npos) data_rows++;
+  if (result.output.find("15,1500,O") != std::string::npos) data_rows++;
+  if (result.output.find("16,1600,P") != std::string::npos) data_rows++;
+  if (result.output.find("17,1700,Q") != std::string::npos) data_rows++;
+  if (result.output.find("18,1800,R") != std::string::npos) data_rows++;
+  if (result.output.find("19,1900,S") != std::string::npos) data_rows++;
+  if (result.output.find("20,2000,T") != std::string::npos) data_rows++;
+  EXPECT_EQ(data_rows, 5);  // We requested 5 rows
+}
+
+TEST_F(CliTest, SampleFromStdin) {
+  auto result = CliRunner::runWithFileStdin("sample -n 2 -s 42 -", testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+}
+
+TEST_F(CliTest, SampleWithTabDelimiter) {
+  auto result = CliRunner::run("sample -d tab " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("\t") != std::string::npos);
+}
+
+TEST_F(CliTest, SampleInvalidSeed) {
+  auto result = CliRunner::run("sample -s abc " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Invalid seed") != std::string::npos);
+}
+
+TEST_F(CliTest, SampleNegativeSeed) {
+  auto result = CliRunner::run("sample -s -5 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}

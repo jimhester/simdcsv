@@ -15,6 +15,7 @@
 #include <future>
 #include <iomanip>
 #include <iostream>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -153,6 +154,8 @@ void printUsage(const char* prog) {
   cerr << "Commands:\n";
   cerr << "  count         Count the number of rows\n";
   cerr << "  head          Display the first N rows (default: " << DEFAULT_NUM_ROWS << ")\n";
+  cerr << "  tail          Display the last N rows (default: " << DEFAULT_NUM_ROWS << ")\n";
+  cerr << "  sample        Display N random rows from throughout the file\n";
   cerr << "  select        Select specific columns by name or index\n";
   cerr << "  info          Display information about the CSV file\n";
   cerr << "  pretty        Pretty-print the CSV with aligned columns\n";
@@ -161,7 +164,8 @@ void printUsage(const char* prog) {
   cerr << "  csvfile       Path to CSV file, or '-' to read from stdin.\n";
   cerr << "                If omitted, reads from stdin.\n";
   cerr << "\nOptions:\n";
-  cerr << "  -n <num>      Number of rows (for head/pretty)\n";
+  cerr << "  -n <num>      Number of rows (for head/tail/sample/pretty)\n";
+  cerr << "  -s <seed>     Random seed for reproducible sampling (for sample)\n";
   cerr << "  -c <cols>     Comma-separated column names or indices (for select)\n";
   cerr << "  -H            No header row in input\n";
   cerr << "  -t <threads>  Number of threads (default: auto, max: " << MAX_THREADS << ")\n";
@@ -178,6 +182,9 @@ void printUsage(const char* prog) {
   cerr << "\nExamples:\n";
   cerr << "  " << prog << " count data.csv\n";
   cerr << "  " << prog << " head -n 5 data.csv\n";
+  cerr << "  " << prog << " tail -n 5 data.csv\n";
+  cerr << "  " << prog << " sample -n 100 data.csv\n";
+  cerr << "  " << prog << " sample -n 100 -s 42 data.csv  # reproducible\n";
   cerr << "  " << prog << " select -c name,age data.csv\n";
   cerr << "  " << prog << " select -c 0,2,4 data.csv\n";
   cerr << "  " << prog << " info data.csv\n";
@@ -508,6 +515,138 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
       }
     }
     cout << '\n';
+  }
+
+  aligned_free((void*)data.data());
+  return 0;
+}
+
+// Helper function to output a row with proper quoting
+static void outputRow(const std::vector<std::string>& row, const simdcsv::Dialect& dialect) {
+  for (size_t i = 0; i < row.size(); ++i) {
+    if (i > 0) cout << dialect.delimiter;
+    bool needs_quote =
+        row[i].find(dialect.delimiter) != string::npos ||
+        row[i].find(dialect.quote_char) != string::npos ||
+        row[i].find('\n') != string::npos;
+    if (needs_quote) {
+      cout << dialect.quote_char;
+      for (char c : row[i]) {
+        if (c == dialect.quote_char) cout << dialect.quote_char;
+        cout << c;
+      }
+      cout << dialect.quote_char;
+    } else {
+      cout << row[i];
+    }
+  }
+  cout << '\n';
+}
+
+// Command: tail
+int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_header,
+            const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+            bool auto_detect = false) {
+  std::basic_string_view<uint8_t> data;
+  simdcsv::index idx;
+
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
+
+  CsvIterator iter(data.data(), idx);
+  auto all_rows = iter.getRows();
+
+  if (all_rows.empty()) {
+    aligned_free((void*)data.data());
+    return 0;
+  }
+
+  // Determine the range of rows to output
+  size_t start_row = 0;
+  size_t header_offset = has_header ? 1 : 0;
+  size_t data_rows = all_rows.size() > header_offset ? all_rows.size() - header_offset : 0;
+
+  if (num_rows < data_rows) {
+    start_row = header_offset + (data_rows - num_rows);
+  } else {
+    start_row = header_offset;
+  }
+
+  // Output header first if present
+  if (has_header && !all_rows.empty()) {
+    outputRow(all_rows[0], dialect);
+  }
+
+  // Output the tail rows
+  for (size_t i = start_row; i < all_rows.size(); ++i) {
+    outputRow(all_rows[i], dialect);
+  }
+
+  aligned_free((void*)data.data());
+  return 0;
+}
+
+// Command: sample
+int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_header,
+              const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+              bool auto_detect = false, unsigned int seed = 0) {
+  std::basic_string_view<uint8_t> data;
+  simdcsv::index idx;
+
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
+
+  CsvIterator iter(data.data(), idx);
+  auto all_rows = iter.getRows();
+
+  if (all_rows.empty()) {
+    aligned_free((void*)data.data());
+    return 0;
+  }
+
+  // Output header first if present
+  if (has_header && !all_rows.empty()) {
+    outputRow(all_rows[0], dialect);
+  }
+
+  // Collect data row indices (skip header if present)
+  size_t header_offset = has_header ? 1 : 0;
+  size_t data_rows = all_rows.size() > header_offset ? all_rows.size() - header_offset : 0;
+
+  if (data_rows == 0) {
+    aligned_free((void*)data.data());
+    return 0;
+  }
+
+  // Use reservoir sampling for efficiency when sampling
+  std::vector<size_t> sample_indices;
+
+  if (num_rows >= data_rows) {
+    // If requesting more samples than available, output all data rows
+    for (size_t i = header_offset; i < all_rows.size(); ++i) {
+      sample_indices.push_back(i);
+    }
+  } else {
+    // Reservoir sampling algorithm
+    std::mt19937 rng(seed ? seed : std::random_device{}());
+
+    for (size_t i = 0; i < data_rows; ++i) {
+      if (i < num_rows) {
+        sample_indices.push_back(header_offset + i);
+      } else {
+        std::uniform_int_distribution<size_t> dist(0, i);
+        size_t j = dist(rng);
+        if (j < num_rows) {
+          sample_indices[j] = header_offset + i;
+        }
+      }
+    }
+
+    // Sort sample indices to maintain original row order in output
+    std::sort(sample_indices.begin(), sample_indices.end());
+  }
+
+  // Output the sampled rows
+  for (size_t idx : sample_indices) {
+    outputRow(all_rows[idx], dialect);
   }
 
   aligned_free((void*)data.data());
@@ -868,12 +1007,13 @@ int main(int argc, char* argv[]) {
   bool auto_detect = true;  // Auto-detect by default
   bool delimiter_specified = false;  // Track if user specified delimiter
   bool json_output = false;  // JSON output for dialect command
+  unsigned int random_seed = 0;  // Random seed for sample command (0 = use random_device)
   string columns;
   string delimiter_str = "comma";
   char quote_char = '"';
 
   int c;
-  while ((c = getopt(argc, argv, "n:c:Ht:d:q:jhv")) != -1) {
+  while ((c = getopt(argc, argv, "n:c:Ht:d:q:s:jhv")) != -1) {
     switch (c) {
       case 'n': {
         char* endptr;
@@ -915,6 +1055,16 @@ int main(int argc, char* argv[]) {
           return 1;
         }
         break;
+      case 's': {
+        char* endptr;
+        long val = strtol(optarg, &endptr, 10);
+        if (*endptr != '\0' || val < 0) {
+          cerr << "Error: Invalid seed value '" << optarg << "'\n";
+          return 1;
+        }
+        random_seed = static_cast<unsigned int>(val);
+        break;
+      }
       case 'j':
         json_output = true;
         break;
@@ -942,6 +1092,10 @@ int main(int argc, char* argv[]) {
     return cmdCount(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "head") {
     return cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect);
+  } else if (command == "tail") {
+    return cmdTail(filename, n_threads, num_rows, has_header, dialect, auto_detect);
+  } else if (command == "sample") {
+    return cmdSample(filename, n_threads, num_rows, has_header, dialect, auto_detect, random_seed);
   } else if (command == "select") {
     if (columns.empty()) {
       cerr << "Error: -c option required for select command\n";
