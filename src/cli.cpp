@@ -868,6 +868,28 @@ static std::string formatLineEnding(simdcsv::Dialect::LineEnding le) {
   }
 }
 
+// Helper: escape a character for JSON string output
+// Handles all JSON control characters per RFC 8259
+static std::string escapeJsonChar(char c) {
+  switch (c) {
+    case '"': return "\\\"";
+    case '\\': return "\\\\";
+    case '\b': return "\\b";
+    case '\f': return "\\f";
+    case '\n': return "\\n";
+    case '\r': return "\\r";
+    case '\t': return "\\t";
+    default:
+      // Escape other control characters (0x00-0x1F) as \uXXXX
+      if (static_cast<unsigned char>(c) < 0x20) {
+        char buf[7];
+        snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+        return std::string(buf);
+      }
+      return std::string(1, c);
+  }
+}
+
 // Command: dialect - detect and output CSV dialect in human-readable or JSON format
 int cmdDialect(const char* filename, bool json_output) {
   std::basic_string_view<uint8_t> data;
@@ -905,26 +927,10 @@ int cmdDialect(const char* filename, bool json_output) {
   if (json_output) {
     // JSON output for programmatic use
     cout << "{\n";
-    cout << "  \"delimiter\": \"";
-    if (d.delimiter == '\t') {
-      cout << "\\t";
-    } else if (d.delimiter == '"') {
-      cout << "\\\"";
-    } else if (d.delimiter == '\\') {
-      cout << "\\\\";
-    } else {
-      cout << d.delimiter;
-    }
-    cout << "\",\n";
+    cout << "  \"delimiter\": \"" << escapeJsonChar(d.delimiter) << "\",\n";
     cout << "  \"quote\": \"";
-    if (d.quote_char == '\0') {
-      cout << "";
-    } else if (d.quote_char == '"') {
-      cout << "\\\"";
-    } else if (d.quote_char == '\\') {
-      cout << "\\\\";
-    } else {
-      cout << d.quote_char;
+    if (d.quote_char != '\0') {
+      cout << escapeJsonChar(d.quote_char);
     }
     cout << "\",\n";
     cout << "  \"escape\": \"" << (d.double_quote ? "double" : "backslash") << "\",\n";

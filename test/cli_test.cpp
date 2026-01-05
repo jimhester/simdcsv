@@ -1064,3 +1064,37 @@ TEST_F(CliTest, SampleNegativeSeed) {
   auto result = CliRunner::run("sample -s -5 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
 }
+
+// =============================================================================
+// Dialect JSON Escaping Tests
+// =============================================================================
+
+TEST_F(CliTest, DialectJsonEscapesTab) {
+  // Tab delimiter should be escaped as \t in JSON output
+  auto result = CliRunner::run("dialect -j " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should contain properly escaped tab
+  EXPECT_TRUE(result.output.find("\"delimiter\": \"\\t\"") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectJsonEscapesDoubleQuote) {
+  // Double quote should be escaped as \" in JSON output
+  auto result = CliRunner::run("dialect -j " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Quote character should be escaped (double quote is the default)
+  EXPECT_TRUE(result.output.find("\"quote\": \"\\\"\"") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectJsonValidStructure) {
+  // Verify JSON output is well-formed
+  auto result = CliRunner::run("dialect -j " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Check for required JSON fields
+  EXPECT_TRUE(result.output.find("\"delimiter\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"quote\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"escape\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"line_ending\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"has_header\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"columns\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"confidence\":") != std::string::npos);
+}
