@@ -1188,3 +1188,526 @@ TEST_F(CliTest, SampleMixedLineEndingsFile) {
   EXPECT_EQ(result.exit_code, 0);
   // Should handle mixed line endings gracefully
 }
+
+// =============================================================================
+// Additional Delimiter Format Tests
+// =============================================================================
+
+TEST_F(CliTest, ColonDelimiter) {
+  // Test colon delimiter (exercises formatDelimiter colon case)
+  auto result = CliRunner::run("count -d : " + testDataPath("separators/colon.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectColonDelimiter) {
+  // Test dialect command with colon-delimited file
+  auto result = CliRunner::run("dialect " + testDataPath("separators/colon.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should detect colon as delimiter
+  EXPECT_TRUE(result.output.find("colon") != std::string::npos);
+}
+
+TEST_F(CliTest, UnknownDelimiterWarning) {
+  // Test the warning path for unknown multi-char delimiter string
+  auto result = CliRunner::run("count -d unknown_delim " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show warning and fall back to comma
+  EXPECT_TRUE(result.output.find("Warning:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Unknown delimiter") != std::string::npos);
+}
+
+TEST_F(CliTest, TabDelimiterBackslashT) {
+  // Test escaped tab format (\t) for delimiter
+  auto result = CliRunner::run("count -d \\\\t " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
+}
+
+TEST_F(CliTest, PipeDelimiterSymbol) {
+  // Test pipe delimiter using | symbol directly
+  auto result = CliRunner::run("count -d '|' " + testDataPath("separators/pipe.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
+}
+
+TEST_F(CliTest, SemicolonDelimiterSymbol) {
+  // Test semicolon delimiter using ; symbol directly
+  auto result = CliRunner::run("count -d ';' " + testDataPath("separators/semicolon.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
+}
+
+// =============================================================================
+// Quote Character Tests
+// =============================================================================
+
+TEST_F(CliTest, SingleQuoteChar) {
+  // Test single quote as quote character
+  auto result = CliRunner::run("count -q \"'\" " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, CustomQuoteCharForSelect) {
+  // Test custom quote character with select command
+  auto result = CliRunner::run("select -c 0 -q \"'\" " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Dialect Command Extended Tests
+// =============================================================================
+
+TEST_F(CliTest, DialectJsonBackslashDelimiter) {
+  // Test JSON output with backslash escaping for delimiter
+  // The backslash escape in JSON output (line 914) is tested with tab
+  auto result = CliRunner::run("dialect -j " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("\"delimiter\": \"\\t\"") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectPipeDelimiter) {
+  auto result = CliRunner::run("dialect " + testDataPath("separators/pipe.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("pipe") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectJsonPipeDelimiter) {
+  auto result = CliRunner::run("dialect -j " + testDataPath("separators/pipe.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("\"delimiter\": \"|\"") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectEmptyFile) {
+  // Test dialect detection on empty file (should fail gracefully)
+  auto result = CliRunner::run("dialect " + testDataPath("edge_cases/empty_file.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  // Should error because nothing to detect
+  EXPECT_TRUE(result.output.find("Error:") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectFromStdin) {
+  auto result = CliRunner::runWithFileStdin("dialect -", testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("comma") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectNonexistentFile) {
+  auto result = CliRunner::run("dialect nonexistent_file.csv");
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Error:") != std::string::npos);
+}
+
+// =============================================================================
+// Pretty Print Extended Tests
+// =============================================================================
+
+TEST_F(CliTest, PrettyNoHeader) {
+  // Test pretty print without header (no separator after first row)
+  auto result = CliRunner::run("pretty -H " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("+") != std::string::npos);
+}
+
+TEST_F(CliTest, PrettyLongFieldTruncation) {
+  // Test pretty print with field truncation to 40 chars max
+  auto result = CliRunner::run("pretty " + testDataPath("large/large_field.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("...") != std::string::npos);
+}
+
+TEST_F(CliTest, PrettyNarrowColumns) {
+  // Test pretty print with narrow columns (width < 3)
+  auto result = CliRunner::run("pretty " + testDataPath("basic/narrow_columns.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("+") != std::string::npos);
+}
+
+TEST_F(CliTest, PrettyFromStdin) {
+  auto result = CliRunner::runWithFileStdin("pretty -n 2 -", testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("+") != std::string::npos);
+}
+
+TEST_F(CliTest, PrettyManyRows) {
+  auto result = CliRunner::run("pretty " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Output Formatting Tests (fields needing quoting in output)
+// =============================================================================
+
+TEST_F(CliTest, HeadFieldsWithCommas) {
+  // Test head output properly quotes fields containing commas
+  auto result = CliRunner::run("head " + testDataPath("quoted/needs_quoting.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // The output should contain quoted fields
+  EXPECT_TRUE(result.output.find("\"") != std::string::npos);
+}
+
+TEST_F(CliTest, SelectFieldsWithQuotes) {
+  // Test select output properly escapes quotes in fields
+  auto result = CliRunner::run("select -c 0,1 " + testDataPath("quoted/needs_quoting.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, HeadFieldsWithContainsCR) {
+  // Test head output properly quotes fields containing carriage returns
+  auto result = CliRunner::run("head " + testDataPath("quoted/contains_cr.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, TailFieldsWithNewlines) {
+  // Test tail output with embedded newlines in fields
+  auto result = CliRunner::run("tail " + testDataPath("quoted/newlines_in_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Small File Tests (scalar path for row counting)
+// =============================================================================
+
+TEST_F(CliTest, CountTinyFile) {
+  // Test count on a file under 64 bytes (exercises scalar path)
+  auto result = CliRunner::run("count " + testDataPath("basic/tiny.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("1") != std::string::npos);
+}
+
+TEST_F(CliTest, CountTinyFileNoHeader) {
+  auto result = CliRunner::run("count -H " + testDataPath("basic/tiny.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("2") != std::string::npos);
+}
+
+TEST_F(CliTest, HeadTinyFile) {
+  auto result = CliRunner::run("head " + testDataPath("basic/tiny.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B") != std::string::npos);
+}
+
+// =============================================================================
+// Additional Info Command Tests
+// =============================================================================
+
+TEST_F(CliTest, InfoFromStdinWithDelimiter) {
+  auto result = CliRunner::runWithFileStdin("info -d tab -", testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("<stdin>") != std::string::npos);
+}
+
+TEST_F(CliTest, InfoManyColumns) {
+  auto result = CliRunner::run("info " + testDataPath("basic/wide_columns.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Columns:") != std::string::npos);
+}
+
+// =============================================================================
+// Additional Select Command Tests
+// =============================================================================
+
+TEST_F(CliTest, SelectWithTabDelimiter) {
+  auto result = CliRunner::run("select -c 0 -d tab " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, SelectMultipleByName) {
+  auto result = CliRunner::run("select -c A,B " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A") != std::string::npos);
+  EXPECT_TRUE(result.output.find("B") != std::string::npos);
+}
+
+TEST_F(CliTest, SelectEmptyFile) {
+  auto result = CliRunner::run("select -c 0 " + testDataPath("edge_cases/empty_file.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, SelectRaggedCsv) {
+  // Test select on CSV with ragged columns (some rows have fewer columns)
+  auto result = CliRunner::run("select -c 0,2 " + testDataPath("ragged/fewer_columns.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Additional Head/Tail Tests
+// =============================================================================
+
+TEST_F(CliTest, HeadSingleColumn) {
+  auto result = CliRunner::run("head " + testDataPath("basic/single_column.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, TailSingleColumn) {
+  auto result = CliRunner::run("tail " + testDataPath("basic/single_column.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, HeadQuotedFieldsPreservation) {
+  // Test that quoted fields are properly output
+  auto result = CliRunner::run("head " + testDataPath("quoted/escaped_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, TailQuotedFieldsPreservation) {
+  auto result = CliRunner::run("tail " + testDataPath("quoted/escaped_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Thread Count Edge Cases
+// =============================================================================
+
+TEST_F(CliTest, CountSingleThread) {
+  auto result = CliRunner::run("count -t 1 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
+}
+
+TEST_F(CliTest, CountMaxThreads) {
+  // Test with maximum valid thread count
+  auto result = CliRunner::run("count -t 255 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, HeadWithManyThreads) {
+  auto result = CliRunner::run("head -t 16 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Sample Command Extended Tests
+// =============================================================================
+
+TEST_F(CliTest, SampleSingleRow) {
+  auto result = CliRunner::run("sample -n 1 -s 42 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should have header and 1 data row
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+}
+
+TEST_F(CliTest, SampleLargeFile) {
+  auto result = CliRunner::run("sample -n 10 -s 42 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, SampleWithPipeDelimiter) {
+  auto result = CliRunner::run("sample -d pipe " + testDataPath("separators/pipe.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("|") != std::string::npos);
+}
+
+// =============================================================================
+// Ragged CSV Tests
+// =============================================================================
+
+TEST_F(CliTest, HeadRaggedCsv) {
+  auto result = CliRunner::run("head " + testDataPath("ragged/fewer_columns.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, TailRaggedCsv) {
+  auto result = CliRunner::run("tail " + testDataPath("ragged/fewer_columns.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, InfoRaggedCsv) {
+  auto result = CliRunner::run("info " + testDataPath("ragged/fewer_columns.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, PrettyRaggedCsv) {
+  // Test pretty print with ragged columns (different column counts per row)
+  auto result = CliRunner::run("pretty " + testDataPath("ragged/fewer_columns.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("+") != std::string::npos);
+}
+
+// =============================================================================
+// Whitespace and Special Content Tests
+// =============================================================================
+
+TEST_F(CliTest, CountBlankRows) {
+  auto result = CliRunner::run("count " + testDataPath("whitespace/blank_rows_mixed.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, HeadWhitespaceOnlyRows) {
+  auto result = CliRunner::run("head " + testDataPath("whitespace/whitespace_only_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, InfoBlankLeadingRows) {
+  auto result = CliRunner::run("info " + testDataPath("whitespace/blank_leading_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Real-world Data Tests
+// =============================================================================
+
+TEST_F(CliTest, HeadFinancialData) {
+  auto result = CliRunner::run("head " + testDataPath("real_world/financial.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, InfoContactsData) {
+  auto result = CliRunner::run("info " + testDataPath("real_world/contacts.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, SelectUnicodeData) {
+  auto result = CliRunner::run("select -c 0 " + testDataPath("real_world/unicode.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, PrettyProductCatalog) {
+  auto result = CliRunner::run("pretty -n 3 " + testDataPath("real_world/product_catalog.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Fuzz Test Data
+// =============================================================================
+
+TEST_F(CliTest, CountDeepQuotes) {
+  auto result = CliRunner::run("count " + testDataPath("fuzz/deep_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, HeadJustQuotes) {
+  auto result = CliRunner::run("head " + testDataPath("fuzz/just_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, CountQuoteEof) {
+  auto result = CliRunner::run("count " + testDataPath("fuzz/quote_eof.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, InfoMixedCr) {
+  auto result = CliRunner::run("info " + testDataPath("fuzz/mixed_cr.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, CountInvalidUtf8) {
+  auto result = CliRunner::run("count " + testDataPath("fuzz/invalid_utf8.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Additional Error Cases
+// =============================================================================
+
+TEST_F(CliTest, HeadNonexistentFile) {
+  auto result = CliRunner::run("head nonexistent_file.csv");
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Error:") != std::string::npos);
+}
+
+TEST_F(CliTest, TailNonexistentFile) {
+  auto result = CliRunner::run("tail nonexistent_file.csv");
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, SampleNonexistentFile) {
+  auto result = CliRunner::run("sample nonexistent_file.csv");
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, InfoNonexistentFile) {
+  auto result = CliRunner::run("info nonexistent_file.csv");
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, PrettyNonexistentFile) {
+  auto result = CliRunner::run("pretty nonexistent_file.csv");
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+// =============================================================================
+// Combined Options Edge Cases
+// =============================================================================
+
+TEST_F(CliTest, HeadNoHeaderWithCustomDelimiter) {
+  auto result = CliRunner::run("head -H -d tab " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, TailNoHeaderWithRowCount) {
+  auto result = CliRunner::run("tail -H -n 1 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, SampleWithAllOptions) {
+  auto result = CliRunner::run("sample -n 2 -s 42 -H -d comma " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, SelectNoHeaderWithIndex) {
+  // Select with -H should work with numeric indices
+  auto result = CliRunner::run("select -H -c 0,1 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Encoding Tests
+// =============================================================================
+
+TEST_F(CliTest, HeadUtf8Bom) {
+  auto result = CliRunner::run("head " + testDataPath("encoding/utf8_bom.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, CountLatin1) {
+  auto result = CliRunner::run("count " + testDataPath("encoding/latin1.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, InfoUtf16Bom) {
+  auto result = CliRunner::run("info " + testDataPath("encoding/utf16_bom.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Comments Test Data
+// =============================================================================
+
+TEST_F(CliTest, CountHashComments) {
+  auto result = CliRunner::run("count " + testDataPath("comments/hash_comments.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, HeadQuotedHash) {
+  auto result = CliRunner::run("head " + testDataPath("comments/quoted_hash.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Escape Style Tests
+// =============================================================================
+
+TEST_F(CliTest, HeadBackslashEscape) {
+  auto result = CliRunner::run("head " + testDataPath("escape/backslash_escape.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+// =============================================================================
+// Edge Case: Single Cell File
+// =============================================================================
+
+TEST_F(CliTest, CountSingleCell) {
+  auto result = CliRunner::run("count " + testDataPath("edge_cases/single_cell.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, HeadSingleCell) {
+  auto result = CliRunner::run("head " + testDataPath("edge_cases/single_cell.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, InfoSingleCell) {
+  auto result = CliRunner::run("info " + testDataPath("edge_cases/single_cell.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
