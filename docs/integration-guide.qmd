@@ -320,12 +320,14 @@ cmake -B build \
 
 simdcsv supports the following platforms and SIMD instruction sets:
 
-| Platform | Architecture | SIMD Support |
-|----------|--------------|--------------|
-| Linux | x86-64 | SSE4.2, AVX2 |
-| Linux | ARM64 | NEON |
-| macOS | x86-64 | SSE4.2, AVX2 |
-| macOS | ARM64 (Apple Silicon) | NEON |
+| Platform | Architecture | SIMD Support | CI Tested |
+|----------|--------------|--------------|-----------|
+| Linux | x86-64 | SSE4.2, AVX2 | Yes |
+| Linux | ARM64 | NEON | Yes |
+| macOS | x86-64 | SSE4.2, AVX2 | Yes |
+| macOS | ARM64 (Apple Silicon) | NEON | Yes |
+
+Windows is not currently tested in CI but may work with appropriate compiler setup.
 
 The library uses [Google Highway](https://github.com/google/highway) for portable SIMD abstraction, which automatically selects the best available instruction set at runtime.
 
