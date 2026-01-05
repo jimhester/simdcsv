@@ -136,27 +136,29 @@ benchmark_file() {
     local scsv_1t_throughput=$(echo "scale=2; $file_size / 1024 / 1024 / ($scsv_1t / 1000)" | bc)
     echo "| scsv | 1 | $scsv_1t | $scsv_1t_throughput |"
 
-    # scsv with specific thread counts (save 4-thread result for analysis)
-    local scsv_4t=$scsv_1t  # fallback if 4 threads unavailable
+    # scsv with auto-detect (default mode, no -t flag)
+    local scsv_auto=$(run_benchmark "$SCSV count $test_file")
+    local scsv_auto_throughput=$(echo "scale=2; $file_size / 1024 / 1024 / ($scsv_auto / 1000)" | bc)
+    echo "| scsv | auto | $scsv_auto | $scsv_auto_throughput |"
+
+    # scsv with specific thread counts
     for threads in 2 4 8; do
         if [ "$threads" -le "$CPU_CORES" ]; then
             local scsv_nt=$(run_benchmark "$SCSV count -t $threads $test_file")
             local scsv_nt_throughput=$(echo "scale=2; $file_size / 1024 / 1024 / ($scsv_nt / 1000)" | bc)
             echo "| scsv | $threads | $scsv_nt | $scsv_nt_throughput |"
-            if [ "$threads" -eq 4 ]; then
-                scsv_4t=$scsv_nt
-            fi
         fi
     done
 
     echo ""
     echo "Analysis:"
     echo "  zsv single -> parallel speedup: $(echo "scale=2; $zsv_1t / $zsv_parallel" | bc)x"
-    echo "  scsv single -> 4 threads speedup: $(echo "scale=2; $scsv_1t / $scsv_4t" | bc)x"
+    echo "  scsv single -> auto speedup: $(echo "scale=2; $scsv_1t / $scsv_auto" | bc)x"
     echo "  zsv (1t) vs scsv (1t): zsv is $(echo "scale=2; $scsv_1t / $zsv_1t" | bc)x faster"
+    echo "  zsv (parallel) vs scsv (auto): $(echo "scale=2; $zsv_parallel / $scsv_auto" | bc)x (>1 means scsv faster)"
 
     # Store results for final summary
-    echo "$size_mb,$zsv_1t,$zsv_parallel,$scsv_1t" >> "$TEMP_DIR/results.csv"
+    echo "$size_mb,$zsv_1t,$zsv_parallel,$scsv_1t,$scsv_auto" >> "$TEMP_DIR/results.csv"
 }
 
 # Main benchmark
@@ -172,7 +174,7 @@ echo ""
 echo -e "${BLUE}Running benchmarks...${NC}"
 
 # Initialize results file
-echo "size_mb,zsv_1t,zsv_parallel,scsv_1t" > "$TEMP_DIR/results.csv"
+echo "size_mb,zsv_1t,zsv_parallel,scsv_1t,scsv_auto" > "$TEMP_DIR/results.csv"
 
 # Run benchmarks for each size
 for size in 10 50 100; do
