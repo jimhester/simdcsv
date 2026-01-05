@@ -901,6 +901,7 @@ int cmdDialect(const char* filename, bool json_output) {
   }
 
   const auto& d = result.dialect;
+  const auto& bom = result.bom_info;
 
   if (json_output) {
     // JSON output for programmatic use
@@ -929,6 +930,9 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "\",\n";
     cout << "  \"escape\": \"" << (d.double_quote ? "double" : "backslash") << "\",\n";
     cout << "  \"line_ending\": \"" << formatLineEnding(d.line_ending) << "\",\n";
+    cout << "  \"encoding\": \"" << simdcsv::encoding_to_string(bom.encoding) << "\",\n";
+    cout << "  \"has_bom\": " << (bom.has_bom() ? "true" : "false") << ",\n";
+    cout << "  \"bom_size\": " << bom.bom_size << ",\n";
     cout << "  \"has_header\": " << (result.has_header ? "true" : "false") << ",\n";
     cout << "  \"columns\": " << result.detected_columns << ",\n";
     cout << "  \"confidence\": " << result.confidence << "\n";
@@ -940,6 +944,11 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "  Quote:        " << formatQuoteChar(d.quote_char) << "\n";
     cout << "  Escape:       " << (d.double_quote ? "double-quote (\"\")" : "backslash (\\)") << "\n";
     cout << "  Line ending:  " << formatLineEnding(d.line_ending) << "\n";
+    cout << "  Encoding:     " << simdcsv::encoding_to_string(bom.encoding);
+    if (bom.has_bom()) {
+      cout << " (BOM detected, " << bom.bom_size << " bytes)";
+    }
+    cout << "\n";
     cout << "  Has header:   " << (result.has_header ? "yes" : "no") << "\n";
     cout << "  Columns:      " << result.detected_columns << "\n";
     cout << "  Confidence:   " << static_cast<int>(result.confidence * 100) << "%\n";

@@ -19,6 +19,78 @@
 namespace simdcsv {
 
 // ============================================================================
+// BOM Detection
+// ============================================================================
+
+BOMInfo detect_bom(const uint8_t* buf, size_t len) {
+    BOMInfo info;
+
+    if (buf == nullptr || len == 0) {
+        return info;
+    }
+
+    // Check for UTF-32 BOMs first (4 bytes) since UTF-32 LE starts with FF FE
+    // which would also match UTF-16 LE if we checked that first
+    if (len >= 4) {
+        // UTF-32 BE: 00 00 FE FF
+        if (buf[0] == 0x00 && buf[1] == 0x00 &&
+            buf[2] == 0xFE && buf[3] == 0xFF) {
+            info.encoding = Encoding::UTF32_BE;
+            info.bom_size = 4;
+            return info;
+        }
+        // UTF-32 LE: FF FE 00 00
+        if (buf[0] == 0xFF && buf[1] == 0xFE &&
+            buf[2] == 0x00 && buf[3] == 0x00) {
+            info.encoding = Encoding::UTF32_LE;
+            info.bom_size = 4;
+            return info;
+        }
+    }
+
+    // Check for UTF-8 BOM (3 bytes)
+    if (len >= 3) {
+        if (buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF) {
+            info.encoding = Encoding::UTF8_BOM;
+            info.bom_size = 3;
+            return info;
+        }
+    }
+
+    // Check for UTF-16 BOMs (2 bytes)
+    if (len >= 2) {
+        // UTF-16 BE: FE FF
+        if (buf[0] == 0xFE && buf[1] == 0xFF) {
+            info.encoding = Encoding::UTF16_BE;
+            info.bom_size = 2;
+            return info;
+        }
+        // UTF-16 LE: FF FE
+        if (buf[0] == 0xFF && buf[1] == 0xFE) {
+            info.encoding = Encoding::UTF16_LE;
+            info.bom_size = 2;
+            return info;
+        }
+    }
+
+    // No BOM detected
+    return info;
+}
+
+const char* encoding_to_string(Encoding encoding) {
+    switch (encoding) {
+        case Encoding::UNKNOWN:   return "unknown";
+        case Encoding::UTF8:      return "UTF-8";
+        case Encoding::UTF8_BOM:  return "UTF-8 (BOM)";
+        case Encoding::UTF16_LE:  return "UTF-16 LE";
+        case Encoding::UTF16_BE:  return "UTF-16 BE";
+        case Encoding::UTF32_LE:  return "UTF-32 LE";
+        case Encoding::UTF32_BE:  return "UTF-32 BE";
+        default:                  return "unknown";
+    }
+}
+
+// ============================================================================
 // Constants for dialect scoring
 // ============================================================================
 
@@ -87,18 +159,39 @@ DetectionResult DialectDetector::detect(const uint8_t* buf, size_t len) const {
         return result;
     }
 
+    // Detect BOM first
+    result.bom_info = detect_bom(buf, len);
+
+    // Skip past BOM for dialect detection
+    const uint8_t* detect_buf = buf + result.bom_info.bom_size;
+    size_t detect_len = len - result.bom_info.bom_size;
+
+    // Check if encoding requires conversion (UTF-16/UTF-32)
+    if (result.bom_info.requires_conversion()) {
+        result.warning = "File uses " + std::string(encoding_to_string(result.bom_info.encoding)) +
+                         " encoding which requires conversion to UTF-8 for parsing";
+        // Still try to return some info even if we can't fully parse
+        return result;
+    }
+
     // Limit to sample size
-    size_t sample_len = std::min(len, options_.sample_size);
+    size_t sample_len = std::min(detect_len, options_.sample_size);
+
+    // Handle case where all content was BOM
+    if (sample_len == 0) {
+        result.warning = "File contains only BOM, no data";
+        return result;
+    }
 
     // Detect line ending style
-    result.dialect.line_ending = detect_line_ending(buf, sample_len);
+    result.dialect.line_ending = detect_line_ending(detect_buf, sample_len);
 
     // Generate all candidate dialects
     auto candidates = generate_candidates();
 
-    // Score each candidate
+    // Score each candidate (use buffer after BOM)
     for (const auto& dialect : candidates) {
-        auto candidate = score_dialect(dialect, buf, sample_len);
+        auto candidate = score_dialect(dialect, detect_buf, sample_len);
         result.candidates.push_back(candidate);
     }
 
@@ -109,15 +202,15 @@ DetectionResult DialectDetector::detect(const uint8_t* buf, size_t len) const {
     if (!result.candidates.empty() && result.candidates[0].consistency_score > 0) {
         const auto& best = result.candidates[0];
         result.dialect = best.dialect;
-        result.dialect.line_ending = detect_line_ending(buf, sample_len);
+        result.dialect.line_ending = detect_line_ending(detect_buf, sample_len);
         result.confidence = best.consistency_score;
         result.detected_columns = best.num_columns;
 
-        // Detect header
-        result.has_header = detect_header(result.dialect, buf, sample_len);
+        // Detect header (use buffer after BOM)
+        result.has_header = detect_header(result.dialect, detect_buf, sample_len);
 
-        // Count rows analyzed
-        auto rows = find_rows(result.dialect, buf, sample_len);
+        // Count rows analyzed (use buffer after BOM)
+        auto rows = find_rows(result.dialect, detect_buf, sample_len);
         result.rows_analyzed = rows.size();
 
         // Check for ambiguous cases (multiple candidates with similar scores)

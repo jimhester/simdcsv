@@ -1911,3 +1911,210 @@ TEST_F(DialectDetectionTest, ScoreLowPatternHighType) {
     // May or may not succeed depending on score thresholds
     EXPECT_EQ(result.dialect.delimiter, ',');
 }
+
+// ============================================================================
+// BOM Detection Tests
+// ============================================================================
+
+TEST_F(DialectDetectionTest, DetectBOM_NoBOM) {
+    // Regular CSV without BOM
+    const std::string csv_data = "name,value\nAlice,100\nBob,200\n";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.bom_info.encoding, simdcsv::Encoding::UNKNOWN);
+    EXPECT_EQ(result.bom_info.bom_size, 0);
+    EXPECT_FALSE(result.bom_info.has_bom());
+}
+
+TEST_F(DialectDetectionTest, DetectBOM_UTF8) {
+    // UTF-8 BOM: EF BB BF
+    const uint8_t csv_data[] = {
+        0xEF, 0xBB, 0xBF,  // BOM
+        'n', 'a', 'm', 'e', ',', 'v', 'a', 'l', 'u', 'e', '\n',
+        'A', 'l', 'i', 'c', 'e', ',', '1', '0', '0', '\n',
+        'B', 'o', 'b', ',', '2', '0', '0', '\n'
+    };
+    auto result = detector.detect(csv_data, sizeof(csv_data));
+
+    EXPECT_TRUE(result.success()) << "Detection should succeed for UTF-8 BOM CSV";
+    EXPECT_EQ(result.bom_info.encoding, simdcsv::Encoding::UTF8_BOM);
+    EXPECT_EQ(result.bom_info.bom_size, 3);
+    EXPECT_TRUE(result.bom_info.has_bom());
+    EXPECT_FALSE(result.bom_info.requires_conversion());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.detected_columns, 2);
+}
+
+TEST_F(DialectDetectionTest, DetectBOM_UTF8File) {
+    std::string path = getTestDataPath("encoding", "utf8_bom.csv");
+    auto result = detector.detect_file(path);
+
+    EXPECT_TRUE(result.success()) << "Detection should succeed for UTF-8 BOM file";
+    EXPECT_EQ(result.bom_info.encoding, simdcsv::Encoding::UTF8_BOM);
+    EXPECT_EQ(result.bom_info.bom_size, 3);
+    EXPECT_TRUE(result.bom_info.has_bom());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.detected_columns, 2);
+}
+
+TEST_F(DialectDetectionTest, DetectBOM_UTF16LE) {
+    // UTF-16 LE BOM: FF FE
+    const uint8_t csv_data[] = {
+        0xFF, 0xFE,  // BOM
+        'n', 0x00, 'a', 0x00, 'm', 0x00, 'e', 0x00
+    };
+    auto result = detector.detect(csv_data, sizeof(csv_data));
+
+    EXPECT_EQ(result.bom_info.encoding, simdcsv::Encoding::UTF16_LE);
+    EXPECT_EQ(result.bom_info.bom_size, 2);
+    EXPECT_TRUE(result.bom_info.has_bom());
+    EXPECT_TRUE(result.bom_info.requires_conversion());
+    // Should warn about encoding requiring conversion
+    EXPECT_FALSE(result.warning.empty());
+}
+
+TEST_F(DialectDetectionTest, DetectBOM_UTF16BE) {
+    // UTF-16 BE BOM: FE FF
+    const uint8_t csv_data[] = {
+        0xFE, 0xFF,  // BOM
+        0x00, 'n', 0x00, 'a', 0x00, 'm', 0x00, 'e'
+    };
+    auto result = detector.detect(csv_data, sizeof(csv_data));
+
+    EXPECT_EQ(result.bom_info.encoding, simdcsv::Encoding::UTF16_BE);
+    EXPECT_EQ(result.bom_info.bom_size, 2);
+    EXPECT_TRUE(result.bom_info.has_bom());
+    EXPECT_TRUE(result.bom_info.requires_conversion());
+}
+
+TEST_F(DialectDetectionTest, DetectBOM_UTF32LE) {
+    // UTF-32 LE BOM: FF FE 00 00
+    const uint8_t csv_data[] = {
+        0xFF, 0xFE, 0x00, 0x00,  // BOM
+        'n', 0x00, 0x00, 0x00
+    };
+    auto result = detector.detect(csv_data, sizeof(csv_data));
+
+    EXPECT_EQ(result.bom_info.encoding, simdcsv::Encoding::UTF32_LE);
+    EXPECT_EQ(result.bom_info.bom_size, 4);
+    EXPECT_TRUE(result.bom_info.has_bom());
+    EXPECT_TRUE(result.bom_info.requires_conversion());
+}
+
+TEST_F(DialectDetectionTest, DetectBOM_UTF32BE) {
+    // UTF-32 BE BOM: 00 00 FE FF
+    const uint8_t csv_data[] = {
+        0x00, 0x00, 0xFE, 0xFF,  // BOM
+        0x00, 0x00, 0x00, 'n'
+    };
+    auto result = detector.detect(csv_data, sizeof(csv_data));
+
+    EXPECT_EQ(result.bom_info.encoding, simdcsv::Encoding::UTF32_BE);
+    EXPECT_EQ(result.bom_info.bom_size, 4);
+    EXPECT_TRUE(result.bom_info.has_bom());
+    EXPECT_TRUE(result.bom_info.requires_conversion());
+}
+
+TEST_F(DialectDetectionTest, DetectBOM_Function) {
+    // Test the standalone detect_bom function
+
+    // UTF-8 BOM
+    const uint8_t utf8_bom[] = {0xEF, 0xBB, 0xBF, 'x'};
+    auto bom = simdcsv::detect_bom(utf8_bom, sizeof(utf8_bom));
+    EXPECT_EQ(bom.encoding, simdcsv::Encoding::UTF8_BOM);
+    EXPECT_EQ(bom.bom_size, 3);
+
+    // UTF-16 LE BOM
+    const uint8_t utf16le_bom[] = {0xFF, 0xFE, 'x', 0x00};
+    bom = simdcsv::detect_bom(utf16le_bom, sizeof(utf16le_bom));
+    EXPECT_EQ(bom.encoding, simdcsv::Encoding::UTF16_LE);
+    EXPECT_EQ(bom.bom_size, 2);
+
+    // UTF-16 BE BOM
+    const uint8_t utf16be_bom[] = {0xFE, 0xFF, 0x00, 'x'};
+    bom = simdcsv::detect_bom(utf16be_bom, sizeof(utf16be_bom));
+    EXPECT_EQ(bom.encoding, simdcsv::Encoding::UTF16_BE);
+    EXPECT_EQ(bom.bom_size, 2);
+
+    // UTF-32 LE BOM
+    const uint8_t utf32le_bom[] = {0xFF, 0xFE, 0x00, 0x00, 'x', 0x00, 0x00, 0x00};
+    bom = simdcsv::detect_bom(utf32le_bom, sizeof(utf32le_bom));
+    EXPECT_EQ(bom.encoding, simdcsv::Encoding::UTF32_LE);
+    EXPECT_EQ(bom.bom_size, 4);
+
+    // UTF-32 BE BOM
+    const uint8_t utf32be_bom[] = {0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 'x'};
+    bom = simdcsv::detect_bom(utf32be_bom, sizeof(utf32be_bom));
+    EXPECT_EQ(bom.encoding, simdcsv::Encoding::UTF32_BE);
+    EXPECT_EQ(bom.bom_size, 4);
+
+    // No BOM
+    const uint8_t no_bom[] = {'n', 'a', 'm', 'e'};
+    bom = simdcsv::detect_bom(no_bom, sizeof(no_bom));
+    EXPECT_EQ(bom.encoding, simdcsv::Encoding::UNKNOWN);
+    EXPECT_EQ(bom.bom_size, 0);
+}
+
+TEST_F(DialectDetectionTest, DetectBOM_NullAndEmpty) {
+    // Null buffer
+    auto bom = simdcsv::detect_bom(nullptr, 100);
+    EXPECT_EQ(bom.encoding, simdcsv::Encoding::UNKNOWN);
+    EXPECT_EQ(bom.bom_size, 0);
+
+    // Zero length
+    const uint8_t data[] = {0xEF, 0xBB, 0xBF};
+    bom = simdcsv::detect_bom(data, 0);
+    EXPECT_EQ(bom.encoding, simdcsv::Encoding::UNKNOWN);
+    EXPECT_EQ(bom.bom_size, 0);
+}
+
+TEST_F(DialectDetectionTest, DetectBOM_PartialBOM) {
+    // Only first byte of UTF-8 BOM
+    const uint8_t partial1[] = {0xEF};
+    auto bom = simdcsv::detect_bom(partial1, sizeof(partial1));
+    EXPECT_EQ(bom.encoding, simdcsv::Encoding::UNKNOWN);
+
+    // First two bytes of UTF-8 BOM
+    const uint8_t partial2[] = {0xEF, 0xBB};
+    bom = simdcsv::detect_bom(partial2, sizeof(partial2));
+    EXPECT_EQ(bom.encoding, simdcsv::Encoding::UNKNOWN);
+}
+
+TEST_F(DialectDetectionTest, EncodingToString) {
+    EXPECT_STREQ(simdcsv::encoding_to_string(simdcsv::Encoding::UNKNOWN), "unknown");
+    EXPECT_STREQ(simdcsv::encoding_to_string(simdcsv::Encoding::UTF8), "UTF-8");
+    EXPECT_STREQ(simdcsv::encoding_to_string(simdcsv::Encoding::UTF8_BOM), "UTF-8 (BOM)");
+    EXPECT_STREQ(simdcsv::encoding_to_string(simdcsv::Encoding::UTF16_LE), "UTF-16 LE");
+    EXPECT_STREQ(simdcsv::encoding_to_string(simdcsv::Encoding::UTF16_BE), "UTF-16 BE");
+    EXPECT_STREQ(simdcsv::encoding_to_string(simdcsv::Encoding::UTF32_LE), "UTF-32 LE");
+    EXPECT_STREQ(simdcsv::encoding_to_string(simdcsv::Encoding::UTF32_BE), "UTF-32 BE");
+}
+
+TEST_F(DialectDetectionTest, BOMInfo_RequiresConversion) {
+    simdcsv::BOMInfo info;
+
+    info.encoding = simdcsv::Encoding::UNKNOWN;
+    EXPECT_FALSE(info.requires_conversion());
+
+    info.encoding = simdcsv::Encoding::UTF8;
+    EXPECT_FALSE(info.requires_conversion());
+
+    info.encoding = simdcsv::Encoding::UTF8_BOM;
+    EXPECT_FALSE(info.requires_conversion());
+
+    info.encoding = simdcsv::Encoding::UTF16_LE;
+    EXPECT_TRUE(info.requires_conversion());
+
+    info.encoding = simdcsv::Encoding::UTF16_BE;
+    EXPECT_TRUE(info.requires_conversion());
+
+    info.encoding = simdcsv::Encoding::UTF32_LE;
+    EXPECT_TRUE(info.requires_conversion());
+
+    info.encoding = simdcsv::Encoding::UTF32_BE;
+    EXPECT_TRUE(info.requires_conversion());
+}

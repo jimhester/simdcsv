@@ -24,6 +24,51 @@
 namespace simdcsv {
 
 /**
+ * @brief Detected file encoding based on BOM or analysis.
+ */
+enum class Encoding {
+    UNKNOWN,       ///< No BOM detected, encoding unknown (assumed UTF-8/ASCII)
+    UTF8,          ///< UTF-8 (with or without BOM)
+    UTF8_BOM,      ///< UTF-8 with BOM (EF BB BF)
+    UTF16_LE,      ///< UTF-16 Little Endian (FF FE)
+    UTF16_BE,      ///< UTF-16 Big Endian (FE FF)
+    UTF32_LE,      ///< UTF-32 Little Endian (FF FE 00 00)
+    UTF32_BE       ///< UTF-32 Big Endian (00 00 FE FF)
+};
+
+/**
+ * @brief BOM (Byte Order Mark) information.
+ */
+struct BOMInfo {
+    Encoding encoding = Encoding::UNKNOWN;
+    size_t bom_size = 0;  ///< Size of BOM in bytes (0 if no BOM)
+
+    /// Returns true if a BOM was detected
+    bool has_bom() const { return bom_size > 0; }
+
+    /// Returns true if encoding requires conversion (non-UTF-8)
+    bool requires_conversion() const {
+        return encoding == Encoding::UTF16_LE ||
+               encoding == Encoding::UTF16_BE ||
+               encoding == Encoding::UTF32_LE ||
+               encoding == Encoding::UTF32_BE;
+    }
+};
+
+/**
+ * @brief Detect BOM from the start of a buffer.
+ * @param buf Pointer to buffer start
+ * @param len Length of buffer
+ * @return BOMInfo with detected encoding and BOM size
+ */
+BOMInfo detect_bom(const uint8_t* buf, size_t len);
+
+/**
+ * @brief Convert encoding enum to human-readable string.
+ */
+const char* encoding_to_string(Encoding encoding);
+
+/**
  * @brief CSV dialect configuration.
  *
  * Holds the parameters that define how a CSV file is formatted:
@@ -179,6 +224,9 @@ struct DetectionResult {
     size_t detected_columns = 0;      ///< Number of columns detected
     size_t rows_analyzed = 0;         ///< Number of rows analyzed
     std::string warning;              ///< Any warnings during detection
+
+    /// BOM/encoding detection results
+    BOMInfo bom_info;                 ///< Detected BOM and encoding
 
     /// All tested candidates, sorted by score (best first)
     std::vector<DialectCandidate> candidates;
