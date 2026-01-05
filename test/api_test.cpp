@@ -318,3 +318,34 @@ TEST_F(UnifiedAPITest, CustomDetectionOptions) {
     EXPECT_TRUE(result.success());
     EXPECT_EQ(result.dialect.delimiter, ':');
 }
+
+// Test: Custom detection options with error collection
+TEST_F(UnifiedAPITest, CustomDetectionOptionsWithErrors) {
+    auto [data, len] = make_buffer("a:b:c\n1:2:3\n4:5\n");  // Inconsistent field count
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    simdcsv::ParseOptions opts;
+    opts.detection_options.delimiters = {':', ','};  // Only check colon and comma
+    opts.errors = &errors;
+
+    auto result = parser.parse(buffer.data(), buffer.size(), opts);
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ':');
+    EXPECT_TRUE(errors.has_errors());  // Should detect field count mismatch
+}
+
+// Test: Explicit dialect skips detection (performance optimization)
+TEST_F(UnifiedAPITest, ExplicitDialectSkipsDetection) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               {.dialect = simdcsv::Dialect::csv()});
+    EXPECT_TRUE(result.success());
+    // Detection should not run when dialect is explicit
+    EXPECT_EQ(result.detection.confidence, 0.0);
+    EXPECT_EQ(result.detection.rows_analyzed, 0);
+}

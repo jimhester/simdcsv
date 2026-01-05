@@ -1147,9 +1147,10 @@ class two_pass {
    * @see parse() For parsing without auto-detection.
    */
   bool parse_auto(const uint8_t* buf, index& out, size_t len,
-                  ErrorCollector& errors, DetectionResult* detected = nullptr) {
+                  ErrorCollector& errors, DetectionResult* detected = nullptr,
+                  const DetectionOptions& detection_options = DetectionOptions()) {
     // Perform dialect detection
-    DialectDetector detector;
+    DialectDetector detector(detection_options);
     DetectionResult result = detector.detect(buf, len);
 
     // Store detection result if requested

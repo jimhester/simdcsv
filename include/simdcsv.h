@@ -311,12 +311,16 @@ public:
             if (options.errors != nullptr) {
                 // Auto-detect + error collection
                 result.successful = parser_.parse_auto(
-                    buf, result.idx, len, *options.errors, &result.detection);
+                    buf, result.idx, len, *options.errors, &result.detection,
+                    options.detection_options);
                 result.dialect = result.detection.dialect;
             } else {
                 // Auto-detect + fast path: detect first, then parse
                 DialectDetector detector(options.detection_options);
                 result.detection = detector.detect(buf, len);
+                // If detection failed, fall back to standard CSV
+                // Note: The fast path throws on parse errors, so this fallback
+                // behavior is documented but may lead to unexpected errors
                 result.dialect = result.detection.success()
                     ? result.detection.dialect : Dialect::csv();
                 result.successful = parser_.parse(buf, result.idx, len, result.dialect);
