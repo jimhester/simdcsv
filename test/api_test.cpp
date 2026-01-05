@@ -113,3 +113,239 @@ TEST_F(SimplifiedAPITest, CustomDialect) {
     auto result = parser.parse(buffer.data(), buffer.size(), custom);
     EXPECT_TRUE(result.success());
 }
+
+// ============================================================================
+// Tests for the unified ParseOptions API
+// ============================================================================
+
+class UnifiedAPITest : public ::testing::Test {
+protected:
+    static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
+        size_t len = content.size();
+        uint8_t* buf = allocate_padded_buffer(len, 64);
+        std::memcpy(buf, content.data(), len);
+        return {buf, len};
+    }
+};
+
+// Test: Default options (auto-detect dialect, fast path)
+TEST_F(UnifiedAPITest, DefaultOptions) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    // Default: auto-detect dialect, throw on errors
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_GT(result.total_indexes(), 0);
+}
+
+// Test: Auto-detect semicolon-separated data
+TEST_F(UnifiedAPITest, AutoDetectSemicolon) {
+    auto [data, len] = make_buffer("name;age;city\nJohn;25;NYC\nJane;30;LA\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ';');
+}
+
+// Test: Auto-detect tab-separated data
+TEST_F(UnifiedAPITest, AutoDetectTSV) {
+    auto [data, len] = make_buffer("name\tage\tcity\nJohn\t25\tNYC\nJane\t30\tLA\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, '\t');
+}
+
+// Test: Explicit dialect via ParseOptions
+TEST_F(UnifiedAPITest, ExplicitDialect) {
+    auto [data, len] = make_buffer("a;b;c\n1;2;3\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ParseOptions opts;
+    opts.dialect = simdcsv::Dialect::semicolon();
+
+    auto result = parser.parse(buffer.data(), buffer.size(), opts);
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ';');
+}
+
+// Test: Explicit dialect using factory method
+TEST_F(UnifiedAPITest, ExplicitDialectFactory) {
+    auto [data, len] = make_buffer("a\tb\tc\n1\t2\t3\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               simdcsv::ParseOptions::with_dialect(simdcsv::Dialect::tsv()));
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, '\t');
+}
+
+// Test: Error collection via ParseOptions
+TEST_F(UnifiedAPITest, ErrorCollection) {
+    // CSV with inconsistent field count (row 3 has only 2 fields)
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    simdcsv::ParseOptions opts;
+    opts.errors = &errors;
+
+    auto result = parser.parse(buffer.data(), buffer.size(), opts);
+    EXPECT_TRUE(result.success());  // Parsing succeeds in permissive mode
+    EXPECT_TRUE(errors.has_errors());
+}
+
+// Test: Error collection using factory method
+TEST_F(UnifiedAPITest, ErrorCollectionFactory) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               simdcsv::ParseOptions::with_errors(errors));
+    EXPECT_TRUE(result.success());
+    EXPECT_TRUE(errors.has_errors());
+}
+
+// Test: Explicit dialect + error collection
+TEST_F(UnifiedAPITest, ExplicitDialectWithErrors) {
+    auto [data, len] = make_buffer("a;b;c\n1;2;3\n4;5\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    simdcsv::ParseOptions opts;
+    opts.dialect = simdcsv::Dialect::semicolon();
+    opts.errors = &errors;
+
+    auto result = parser.parse(buffer.data(), buffer.size(), opts);
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ';');
+    EXPECT_TRUE(errors.has_errors());
+}
+
+// Test: Explicit dialect + error collection using factory
+TEST_F(UnifiedAPITest, ExplicitDialectWithErrorsFactory) {
+    auto [data, len] = make_buffer("a\tb\tc\n1\t2\t3\n4\t5\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    auto result = parser.parse(buffer.data(), buffer.size(),
+        simdcsv::ParseOptions::with_dialect_and_errors(simdcsv::Dialect::tsv(), errors));
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, '\t');
+    EXPECT_TRUE(errors.has_errors());
+}
+
+// Test: Detection result is populated
+TEST_F(UnifiedAPITest, DetectionResultPopulated) {
+    auto [data, len] = make_buffer("name|age|city\nJohn|25|NYC\nJane|30|LA\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, '|');
+    // Detection result should be populated when auto-detecting
+    EXPECT_TRUE(result.detection.success());
+    EXPECT_EQ(result.detection.dialect.delimiter, '|');
+}
+
+// Test: Legacy parse(buf, len, dialect) still works
+TEST_F(UnifiedAPITest, LegacyParseWithDialect) {
+    auto [data, len] = make_buffer("a;b;c\n1;2;3\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(), simdcsv::Dialect::semicolon());
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ';');
+}
+
+// Test: Legacy parse_with_errors still works
+TEST_F(UnifiedAPITest, LegacyParseWithErrors) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    auto result = parser.parse_with_errors(buffer.data(), buffer.size(), errors);
+    EXPECT_TRUE(result.success());
+    EXPECT_TRUE(errors.has_errors());
+}
+
+// Test: Legacy parse_auto still works
+TEST_F(UnifiedAPITest, LegacyParseAuto) {
+    auto [data, len] = make_buffer("name;age;city\nJohn;25;NYC\nJane;30;LA\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ';');
+}
+
+// Test: ParseOptions defaults factory
+TEST_F(UnifiedAPITest, ParseOptionsDefaults) {
+    auto opts = simdcsv::ParseOptions::defaults();
+    EXPECT_FALSE(opts.dialect.has_value());
+    EXPECT_EQ(opts.errors, nullptr);
+}
+
+// Test: Custom detection options
+TEST_F(UnifiedAPITest, CustomDetectionOptions) {
+    auto [data, len] = make_buffer("a:b:c\n1:2:3\n4:5:6\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ParseOptions opts;
+    opts.detection_options.delimiters = {':', ','};  // Only check colon and comma
+
+    auto result = parser.parse(buffer.data(), buffer.size(), opts);
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ':');
+}
+
+// Test: Custom detection options with error collection
+TEST_F(UnifiedAPITest, CustomDetectionOptionsWithErrors) {
+    auto [data, len] = make_buffer("a:b:c\n1:2:3\n4:5\n");  // Inconsistent field count
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    simdcsv::ParseOptions opts;
+    opts.detection_options.delimiters = {':', ','};  // Only check colon and comma
+    opts.errors = &errors;
+
+    auto result = parser.parse(buffer.data(), buffer.size(), opts);
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ':');
+    EXPECT_TRUE(errors.has_errors());  // Should detect field count mismatch
+}
+
+// Test: Explicit dialect skips detection (performance optimization)
+TEST_F(UnifiedAPITest, ExplicitDialectSkipsDetection) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               {.dialect = simdcsv::Dialect::csv()});
+    EXPECT_TRUE(result.success());
+    // Detection should not run when dialect is explicit
+    EXPECT_EQ(result.detection.confidence, 0.0);
+    EXPECT_EQ(result.detection.rows_analyzed, 0);
+}

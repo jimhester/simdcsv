@@ -21,7 +21,117 @@
 #include "io_util.h"
 #include "mem_util.h"
 
+#include <optional>
+
 namespace simdcsv {
+
+/**
+ * @brief Configuration options for parsing.
+ *
+ * ParseOptions provides a unified way to configure CSV parsing, combining
+ * dialect selection and error handling into a single structure. This enables
+ * a single parse() method to handle all use cases.
+ *
+ * Key behaviors:
+ * - **Dialect**: If dialect is nullopt (default), the dialect is auto-detected
+ *   from the data. Set an explicit dialect (e.g., Dialect::csv()) to skip detection.
+ * - **Error collection**: If errors is nullptr (default), parsing uses the fast
+ *   path and throws on errors. Provide an ErrorCollector for error-tolerant parsing.
+ * - **Detection options**: Only used when dialect is nullopt and auto-detection runs.
+ *
+ * @example
+ * @code
+ * Parser parser;
+ *
+ * // Auto-detect dialect, throw on errors (fast path)
+ * auto result = parser.parse(buf, len);
+ *
+ * // Auto-detect dialect, collect errors
+ * ErrorCollector errors(ErrorMode::PERMISSIVE);
+ * auto result = parser.parse(buf, len, {.errors = &errors});
+ *
+ * // Explicit CSV dialect, throw on errors
+ * auto result = parser.parse(buf, len, {.dialect = Dialect::csv()});
+ *
+ * // Explicit dialect with error collection
+ * auto result = parser.parse(buf, len, {
+ *     .dialect = Dialect::tsv(),
+ *     .errors = &errors
+ * });
+ * @endcode
+ *
+ * @see Parser::parse() for the unified parsing method
+ * @see Dialect for dialect configuration options
+ * @see ErrorCollector for error handling configuration
+ */
+struct ParseOptions {
+    /**
+     * @brief Dialect configuration for parsing.
+     *
+     * If nullopt (default), the dialect is auto-detected from the data using
+     * the CleverCSV-inspired algorithm. Set to an explicit dialect to skip
+     * detection and use the specified format.
+     *
+     * Common explicit dialects:
+     * - Dialect::csv() - Standard comma-separated values
+     * - Dialect::tsv() - Tab-separated values
+     * - Dialect::semicolon() - Semicolon-separated (European style)
+     * - Dialect::pipe() - Pipe-separated
+     */
+    std::optional<Dialect> dialect = std::nullopt;
+
+    /**
+     * @brief Error collector for error-tolerant parsing.
+     *
+     * If nullptr (default), parsing uses the fast path that throws on errors.
+     * Provide an ErrorCollector pointer to enable error collection mode, where
+     * errors are accumulated and parsing continues based on the collector's mode.
+     *
+     * @note The ErrorCollector must remain valid for the duration of parsing.
+     */
+    ErrorCollector* errors = nullptr;
+
+    /**
+     * @brief Options for dialect auto-detection.
+     *
+     * Only used when dialect is nullopt and auto-detection runs.
+     * Allows customizing detection sample size, candidate delimiters, etc.
+     */
+    DetectionOptions detection_options = DetectionOptions();
+
+    /**
+     * @brief Factory for default options (auto-detect dialect, fast path).
+     */
+    static ParseOptions defaults() { return ParseOptions{}; }
+
+    /**
+     * @brief Factory for options with explicit dialect.
+     */
+    static ParseOptions with_dialect(const Dialect& d) {
+        ParseOptions opts;
+        opts.dialect = d;
+        return opts;
+    }
+
+    /**
+     * @brief Factory for options with error collection.
+     */
+    static ParseOptions with_errors(ErrorCollector& e) {
+        ParseOptions opts;
+        opts.errors = &e;
+        return opts;
+    }
+
+    /**
+     * @brief Factory for options with both dialect and error collection.
+     */
+    static ParseOptions with_dialect_and_errors(const Dialect& d, ErrorCollector& e) {
+        ParseOptions opts;
+        opts.dialect = d;
+        opts.errors = &e;
+        return opts;
+    }
+};
 
 /**
  * @brief RAII wrapper for SIMD-aligned file buffers.
@@ -296,93 +406,130 @@ public:
         : num_threads_(num_threads > 0 ? num_threads : 1) {}
 
     /**
-     * @brief Parse CSV data with a specified dialect.
+     * @brief Unified parse method with configurable options.
      *
-     * @param buf Pointer to CSV data. Must remain valid during parsing.
-     *            Should have at least 32 bytes of padding for SIMD safety.
-     * @param len Length of the CSV data in bytes.
-     * @param dialect The dialect to use (default: standard CSV).
-     * @return Result containing the parsed index and status.
+     * This is the primary parsing method that handles all use cases through
+     * the ParseOptions structure. It unifies the previous parse(), parse_with_errors(),
+     * and parse_auto() methods into a single entry point.
      *
-     * @throws std::runtime_error On parsing errors (e.g., malformed quotes).
+     * Behavior based on options:
+     * - **dialect = nullopt** (default): Auto-detect dialect from data
+     * - **dialect = Dialect::xxx()**: Use the specified dialect
+     * - **errors = nullptr** (default): Fast path, throws on errors
+     * - **errors = &collector**: Collect errors, continue parsing based on mode
+     *
+     * @param buf Pointer to the CSV data buffer. Must remain valid during parsing.
+     *            Should have at least 64 bytes of padding beyond len for SIMD safety.
+     * @param len Length of the CSV data in bytes (excluding any padding).
+     * @param options Configuration options for parsing (default: auto-detect, fast path).
+     *
+     * @return Result containing the parsed index, dialect used, and detection info.
+     *
+     * @throws std::runtime_error On parsing errors when options.errors is nullptr.
      *
      * @example
      * @code
-     * simdcsv::Parser parser(4);
-     * auto result = parser.parse(buffer.data(), buffer.size());
+     * Parser parser;
      *
-     * // Parse TSV file
-     * auto result = parser.parse(buffer.data(), buffer.size(),
-     *                            simdcsv::Dialect::tsv());
+     * // Auto-detect dialect, throw on errors (simplest usage)
+     * auto result = parser.parse(buf, len);
+     *
+     * // Auto-detect with error collection
+     * ErrorCollector errors(ErrorMode::PERMISSIVE);
+     * auto result = parser.parse(buf, len, {.errors = &errors});
+     *
+     * // Explicit CSV dialect
+     * auto result = parser.parse(buf, len, {.dialect = Dialect::csv()});
+     *
+     * // Explicit TSV dialect with error collection
+     * auto result = parser.parse(buf, len, ParseOptions::with_dialect_and_errors(
+     *     Dialect::tsv(), errors));
      * @endcode
+     *
+     * @see ParseOptions for configuration details
      */
     Result parse(const uint8_t* buf, size_t len,
-                 const Dialect& dialect = Dialect::csv()) {
+                 const ParseOptions& options = ParseOptions{}) {
         Result result;
-        result.dialect = dialect;
         result.idx = parser_.init(len, num_threads_);
-        result.successful = parser_.parse(buf, result.idx, len, dialect);
+
+        if (options.dialect.has_value()) {
+            // Explicit dialect provided
+            result.dialect = options.dialect.value();
+
+            if (options.errors != nullptr) {
+                // Explicit dialect + error collection
+                result.successful = parser_.parse_with_errors(
+                    buf, result.idx, len, *options.errors, result.dialect);
+            } else {
+                // Explicit dialect + fast path (throws on error)
+                result.successful = parser_.parse(buf, result.idx, len, result.dialect);
+            }
+        } else {
+            // Auto-detect dialect
+            if (options.errors != nullptr) {
+                // Auto-detect + error collection
+                result.successful = parser_.parse_auto(
+                    buf, result.idx, len, *options.errors, &result.detection,
+                    options.detection_options);
+                result.dialect = result.detection.dialect;
+            } else {
+                // Auto-detect + fast path: detect first, then parse
+                DialectDetector detector(options.detection_options);
+                result.detection = detector.detect(buf, len);
+                // If detection failed, fall back to standard CSV
+                // Note: The fast path throws on parse errors, so this fallback
+                // behavior is documented but may lead to unexpected errors
+                result.dialect = result.detection.success()
+                    ? result.detection.dialect : Dialect::csv();
+                result.successful = parser_.parse(buf, result.idx, len, result.dialect);
+            }
+        }
+
         return result;
     }
 
+    // =========================================================================
+    // Legacy methods - Provided for backward compatibility.
+    // These delegate to the unified parse() method above.
+    // =========================================================================
+
     /**
-     * @brief Parse CSV data with error collection.
+     * @brief Parse with explicit dialect (legacy method).
      *
-     * Unlike parse(), this method collects errors instead of throwing and
-     * allows parsing to continue past recoverable errors based on the
-     * ErrorCollector's mode.
+     * @deprecated Use parse(buf, len, {.dialect = dialect}) instead.
      *
-     * @param buf Pointer to CSV data. Must remain valid during parsing.
-     * @param len Length of the CSV data in bytes.
-     * @param errors ErrorCollector to accumulate parsing errors.
-     * @param dialect The dialect to use (default: standard CSV).
-     * @return Result containing the parsed index and status.
+     * This method is provided for backward compatibility. New code should use
+     * the unified parse() method with ParseOptions.
+     */
+    Result parse(const uint8_t* buf, size_t len, const Dialect& dialect) {
+        return parse(buf, len, ParseOptions::with_dialect(dialect));
+    }
+
+    /**
+     * @brief Parse with error collection (legacy method).
      *
-     * @see ErrorMode For different error handling strategies.
+     * @deprecated Use parse(buf, len, {.dialect = dialect, .errors = &errors}) instead.
+     *
+     * This method is provided for backward compatibility. New code should use
+     * the unified parse() method with ParseOptions.
      */
     Result parse_with_errors(const uint8_t* buf, size_t len,
                              ErrorCollector& errors,
                              const Dialect& dialect = Dialect::csv()) {
-        Result result;
-        result.dialect = dialect;
-        result.idx = parser_.init(len, num_threads_);
-        result.successful = parser_.parse_with_errors(buf, result.idx, len, errors, dialect);
-        return result;
+        return parse(buf, len, ParseOptions::with_dialect_and_errors(dialect, errors));
     }
 
     /**
-     * @brief Parse CSV data with automatic dialect detection.
+     * @brief Parse with auto-detection and error collection (legacy method).
      *
-     * Detects the CSV dialect (delimiter, quote character, etc.) and then
-     * parses using the detected settings. The detected dialect is stored
-     * in the Result.
+     * @deprecated Use parse(buf, len, {.errors = &errors}) instead.
      *
-     * @param buf Pointer to CSV data. Must remain valid during parsing.
-     * @param len Length of the CSV data in bytes.
-     * @param errors ErrorCollector to accumulate parsing errors.
-     * @return Result containing the parsed index, detected dialect, and status.
-     *
-     * @example
-     * @code
-     * simdcsv::Parser parser(4);
-     * simdcsv::ErrorCollector errors;
-     *
-     * auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
-     *
-     * if (result.success()) {
-     *     std::cout << "Detected: " << result.dialect.to_string() << "\n";
-     *     std::cout << "Confidence: " << result.detection.confidence << "\n";
-     * }
-     * @endcode
-     *
-     * @see DialectDetector For standalone dialect detection.
+     * This method is provided for backward compatibility. New code should use
+     * the unified parse() method with ParseOptions.
      */
     Result parse_auto(const uint8_t* buf, size_t len, ErrorCollector& errors) {
-        Result result;
-        result.idx = parser_.init(len, num_threads_);
-        result.successful = parser_.parse_auto(buf, result.idx, len, errors, &result.detection);
-        result.dialect = result.detection.dialect;
-        return result;
+        return parse(buf, len, ParseOptions::with_errors(errors));
     }
 
     /**
