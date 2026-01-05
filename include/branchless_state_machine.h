@@ -395,7 +395,7 @@ really_inline size_t process_block_simd_branchless(
 
     // Compute quote mask: positions that are inside quotes
     // Uses XOR prefix sum to track quote parity
-    uint64_t inside_quote = find_quote_mask2(in, quotes, prev_quote_state);
+    uint64_t inside_quote = find_quote_mask2(quotes, prev_quote_state);
 
     // Field separators are delimiters/newlines that are NOT inside quotes
     uint64_t field_seps = (delimiters | newlines) & ~inside_quote & valid_mask;
