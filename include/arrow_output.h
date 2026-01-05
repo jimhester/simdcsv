@@ -106,8 +106,10 @@ private:
      * @param end Ending byte offset of the field (exclusive)
      * @param dialect CSV dialect settings
      * @return A string_view of the field contents, with quotes stripped if present.
-     *         Returns empty string_view if start >= end.
+     *         Returns empty string_view with valid data pointer (buf+start) if start >= end.
      * @pre end >= start (asserted in debug builds to catch corrupted index data)
+     * @note The returned string_view always has a valid (non-null) data pointer,
+     *       even when empty. This avoids undefined behavior when converting to std::string.
      */
     std::string_view extract_field(const uint8_t* buf, size_t start, size_t end, const Dialect& dialect);
     ColumnType infer_cell_type(std::string_view cell);

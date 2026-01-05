@@ -146,7 +146,11 @@ std::string_view ArrowConverter::extract_field(const uint8_t* buf, size_t start,
     // If end < start with unsigned types, subtraction would underflow causing
     // buffer over-reads and undefined behavior.
     assert(end >= start && "Invalid field range: end must be >= start");
-    if (start >= end) return std::string_view();
+    // Return an empty string_view with a valid data pointer (not nullptr).
+    // Using std::string_view() returns a view with data()==nullptr, which causes
+    // undefined behavior when constructing std::string from it on some platforms
+    // (notably macOS). By using buf+start, we ensure data() is always valid.
+    if (start >= end) return std::string_view(reinterpret_cast<const char*>(buf + start), 0);
     const char* field_start = reinterpret_cast<const char*>(buf + start);
     size_t len = end - start;
     if (len >= 2 && field_start[0] == dialect.quote_char && field_start[len-1] == dialect.quote_char) {
