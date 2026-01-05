@@ -833,7 +833,11 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
     cout << '|';
     for (size_t i = 0; i < num_cols; ++i) {
       string val = (i < row.size()) ? row[i] : "";
-      // Truncate if too long (note: may split multi-byte UTF-8 sequences)
+      // KNOWN LIMITATION (issue #240): Truncation operates on bytes, not
+      // Unicode code points. Multi-byte UTF-8 sequences (emoji, CJK, etc.)
+      // may be split, resulting in potentially invalid UTF-8 output.
+      // TODO: Implement UTF-8-aware truncation that respects code point
+      // boundaries for proper Unicode handling.
       if (val.size() > widths[i] && widths[i] >= 3) {
         val = val.substr(0, widths[i] - 3) + "...";
       } else if (val.size() > widths[i]) {

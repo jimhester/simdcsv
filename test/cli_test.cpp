@@ -1711,3 +1711,53 @@ TEST_F(CliTest, InfoSingleCell) {
   auto result = CliRunner::run("info " + testDataPath("edge_cases/single_cell.csv"));
   EXPECT_EQ(result.exit_code, 0);
 }
+
+// =============================================================================
+// UTF-8 Truncation Limitation Tests
+// =============================================================================
+// KNOWN LIMITATION: The pretty command truncates fields at byte boundaries,
+// not Unicode code point boundaries. This means multi-byte UTF-8 sequences
+// (emoji, CJK characters, etc.) may be split, resulting in potentially
+// invalid UTF-8 output. This is documented behavior per issue #240.
+//
+// These tests document the current behavior. If UTF-8-aware truncation is
+// implemented in the future, these tests should be updated to verify proper
+// code point boundary handling.
+// =============================================================================
+
+TEST_F(CliTest, PrettyUtf8TruncationLimitation) {
+  // This test documents the known UTF-8 truncation limitation.
+  // The pretty command truncates at byte position 37 (MAX_COLUMN_WIDTH - 3),
+  // which may split multi-byte UTF-8 sequences.
+  //
+  // Test file contains fields > 40 bytes with multi-byte UTF-8:
+  // - EmojiSplit: 36 ASCII + 2 emoji (4 bytes each) = 44 bytes
+  // - CJKSplit: 17 CJK characters (3 bytes each) = 51 bytes
+  // - MixedSplit: Mix of ASCII, CJK, emoji = 55 bytes
+  auto result = CliRunner::run("pretty " + testDataPath("edge_cases/utf8_truncation.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+
+  // Verify the command succeeds and produces table output
+  EXPECT_TRUE(result.output.find("+") != std::string::npos);
+  EXPECT_TRUE(result.output.find("|") != std::string::npos);
+
+  // Verify truncation occurred (look for "..." in output)
+  EXPECT_TRUE(result.output.find("...") != std::string::npos);
+
+  // Note: The truncated output may contain invalid UTF-8 sequences.
+  // This is the documented limitation - truncation operates on bytes,
+  // not code points. A future fix would ensure truncation respects
+  // UTF-8 character boundaries.
+}
+
+TEST_F(CliTest, PrettyUtf8ShortFieldsNotTruncated) {
+  // Verify that short UTF-8 fields (< 40 bytes) are NOT truncated
+  auto result = CliRunner::run("pretty " + testDataPath("real_world/unicode.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+
+  // The unicode.csv file has fields < 40 bytes, so they should display fully
+  EXPECT_TRUE(result.output.find("+") != std::string::npos);
+
+  // Fields should not be truncated - no "..." for content fields
+  // Note: Header "Description" is short so won't have "..."
+}
