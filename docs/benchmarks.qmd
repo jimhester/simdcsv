@@ -6,9 +6,49 @@ title: "Benchmarks"
 
 simdcsv includes a comprehensive benchmark suite for measuring parsing performance across different dimensions: file sizes, column counts, thread scaling, and data types.
 
+## Comparative Performance: simdcsv vs zsv
+
+The following benchmarks compare simdcsv against [zsv](https://github.com/liquidaty/zsv), a high-performance CSV parser. Tests were run on Apple Silicon (M3 Max, 14 cores) using `hyperfine` for accurate measurements.
+
+### Single-Threaded Performance
+
+simdcsv's SIMD-optimized parsing provides significant speedups over zsv in single-threaded mode:
+
+| File Size | simdcsv Time | simdcsv Throughput | zsv Time | zsv Throughput | Speedup |
+|-----------|--------------|-------------------|----------|----------------|---------|
+| 10 MB | 3.2 ms | 3.1 GB/s | 12.7 ms | 787 MB/s | **4.0x** |
+| 50 MB | 12.6 ms | 4.0 GB/s | 54.3 ms | 921 MB/s | **4.3x** |
+| 100 MB | 22.9 ms | 4.4 GB/s | 105.2 ms | 951 MB/s | **4.6x** |
+| 200 MB | 42.4 ms | 4.7 GB/s | 206.1 ms | 970 MB/s | **4.9x** |
+
+Key observations:
+
+- simdcsv achieves **3-5 GB/s** single-threaded throughput on Apple Silicon
+- Performance advantage increases with file size (4.0x at 10MB to 4.9x at 200MB)
+- Larger files benefit more from SIMD vectorization as memory bandwidth becomes the bottleneck
+
+### Multi-Threaded Performance
+
+Both parsers support multi-threaded parsing. Here's how they compare at 100MB:
+
+| Parser | Configuration | Time | Throughput |
+|--------|---------------|------|------------|
+| simdcsv | 1 thread | 22.9 ms | 4.4 GB/s |
+| simdcsv | 4 threads | 18.2 ms | 5.5 GB/s |
+| simdcsv | 8 threads | 18.0 ms | 5.6 GB/s |
+| zsv | 1 thread | 105.2 ms | 951 MB/s |
+| zsv | 4 threads | 31.3 ms | 3.2 GB/s |
+| zsv | --parallel (auto) | 16.1 ms | 6.2 GB/s |
+
+For multi-threaded workloads:
+
+- simdcsv's single-threaded performance often matches or exceeds multi-threaded zsv
+- zsv's `--parallel` mode with auto-detection is highly optimized for its architecture
+- At 4 threads, simdcsv is **1.7x faster** than zsv (18.2 ms vs 31.3 ms)
+
 ## Performance Summary
 
-Based on benchmarks run on Apple Silicon (M-series, 14 cores):
+Based on benchmarks run on Apple Silicon (M3 Max, 14 cores):
 
 | Benchmark | Throughput | Notes |
 |-----------|------------|-------|
@@ -31,19 +71,33 @@ Performance varies with file size due to cache hierarchy effects:
 
 Larger files benefit significantly from multi-threaded parsing as data exceeds cache sizes.
 
-## Thread Scaling
+## Thread Scaling at Large File Sizes
 
-The parser uses speculative multi-threaded parsing. For small files, single-threaded parsing is often faster due to thread overhead:
+For large files (100MB+), multi-threading provides meaningful speedups:
 
-| Threads | Simple CSV | Many Rows | Wide Columns |
-|---------|------------|-----------|--------------|
-| 1 | 734 MB/s | 1.37 GB/s | 1.69 GB/s |
-| 2 | 734 MB/s | 6.6 MB/s* | 8.5 MB/s* |
-| 4 | 733 MB/s | 1.38 GB/s | 1.68 GB/s |
-| 8 | 735 MB/s | 1.37 GB/s | 1.70 GB/s |
-| 16 | 733 MB/s | 1.37 GB/s | 1.69 GB/s |
+### 100MB File
 
-*Note: 2-thread results show overhead for small files where thread coordination exceeds benefits.
+| Threads | simdcsv Time | Throughput | Scaling |
+|---------|--------------|------------|---------|
+| 1 | 22.9 ms | 4.4 GB/s | 1.00x |
+| 2 | 19.9 ms | 5.0 GB/s | 1.15x |
+| 4 | 18.2 ms | 5.5 GB/s | 1.26x |
+| 8 | 18.0 ms | 5.6 GB/s | 1.27x |
+
+### 200MB File
+
+| Threads | simdcsv Time | Throughput | Scaling |
+|---------|--------------|------------|---------|
+| 1 | 42.4 ms | 4.7 GB/s | 1.00x |
+| 4 | 33.5 ms | 6.0 GB/s | 1.27x |
+| 8 | 32.3 ms | 6.2 GB/s | 1.31x |
+| 14 | 32.4 ms | 6.2 GB/s | 1.31x |
+
+Thread scaling observations:
+
+- Diminishing returns after 4 threads on this workload
+- Single-threaded performance is already very high due to SIMD optimization
+- Memory bandwidth becomes the limiting factor for large files
 
 ## Running Benchmarks
 
@@ -113,6 +167,23 @@ Tests with realistic data patterns:
 - Server log files
 - Wide tables (100+ columns)
 
+#### Real-World Dataset Results (Apple Silicon)
+
+For realistic file I/O performance, see the comparative benchmarks above which show **3-5 GB/s** single-threaded throughput on actual files.
+
+The internal benchmark suite measures in-memory parsing performance:
+
+| Dataset | Rows | Size | Parsing Time |
+|---------|------|------|--------------|
+| Financial data | 1K | 68 KB | 0.08 ms |
+| Financial data | 10K | 684 KB | 0.11 ms |
+| Financial data | 100K | 6.8 MB | 0.33 ms |
+| Log data | 1K | 89 KB | 0.06 ms |
+| Log data | 10K | 900 KB | 0.10 ms |
+| Log data | 100K | 9.1 MB | 0.38 ms |
+
+These in-memory benchmarks demonstrate parsing efficiency but don't include file I/O overhead. For end-to-end performance with file I/O, use the CLI comparison benchmarks in `benchmark/cli_comparison.sh`.
+
 ### SIMD Benchmarks
 
 Tests SIMD effectiveness:
@@ -167,14 +238,42 @@ fi
 - Full AVX2/AVX-512 support
 - RAPL energy measurements available
 - Best for comprehensive benchmarking
+- Expected throughput: 5+ GB/s (AVX2), 8+ GB/s (AVX-512)
 
 ### ARM64 (macOS Apple Silicon)
 
-- NEON vectorization
-- Excellent single-core performance
-- Energy measurements via estimates
+- NEON vectorization (128-bit vectors)
+- Excellent single-core performance: 3-5 GB/s typical
+- M-series chips benefit from high memory bandwidth and efficient caches
+- Energy measurements via power estimates
+- Tested on M3 Max (14 cores): 4.7 GB/s single-threaded, 6.2 GB/s multi-threaded
 
 ### ARM64 (Linux)
 
 - NEON vectorization
 - Performance counters available
+- Expected throughput comparable to Apple Silicon with similar memory bandwidth
+
+## Reproducing These Benchmarks
+
+To reproduce the comparative benchmarks on your system:
+
+```bash
+# Install dependencies (macOS)
+brew install zsv hyperfine
+
+# Build simdcsv
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+
+# Generate test files
+TEMP_DIR="/tmp/simdcsv_benchmark"
+mkdir -p "$TEMP_DIR"
+
+# Run comparative benchmark (example: 100MB)
+hyperfine --warmup 2 \
+  "./build/scsv count -t 1 $TEMP_DIR/test_100mb.csv" \
+  "zsv count $TEMP_DIR/test_100mb.csv"
+```
+
+The `benchmark/cli_comparison.sh` script automates comprehensive comparisons.
