@@ -149,6 +149,12 @@ jobs:
           exit 1
         fi
 
+    - name: Smoke test scsv binary
+      run: |
+        echo "Running smoke test: scsv --help"
+        ./build/scsv --help
+        echo "✓ scsv binary runs successfully"
+
     - name: Verify test executables are NOT built
       run: |
         echo "Verifying test executables are not present..."
