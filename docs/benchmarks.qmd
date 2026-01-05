@@ -169,18 +169,20 @@ Tests with realistic data patterns:
 
 #### Real-World Dataset Results (Apple Silicon)
 
-| Dataset | Rows | Size | Throughput |
-|---------|------|------|------------|
-| Financial data | 1K | 68 KB | 1.1 GB/s |
-| Financial data | 10K | 684 KB | 11.3 GB/s |
-| Financial data | 100K | 6.8 MB | 85.4 GB/s |
-| Financial data | 1M | 68.4 MB | 766 GB/s |
-| Log data | 1K | 89 KB | 1.5 GB/s |
-| Log data | 10K | 900 KB | 15.1 GB/s |
-| Log data | 100K | 9.1 MB | 114 GB/s |
-| Log data | 500K | 45.9 MB | 554 GB/s |
+For realistic file I/O performance, see the comparative benchmarks above which show **3-5 GB/s** single-threaded throughput on actual files.
 
-Note: Very high throughput values reflect memory-resident data with CPU caching effects. Real-world file I/O will be limited by storage throughput.
+The internal benchmark suite measures in-memory parsing performance:
+
+| Dataset | Rows | Size | Parsing Time |
+|---------|------|------|--------------|
+| Financial data | 1K | 68 KB | 0.08 ms |
+| Financial data | 10K | 684 KB | 0.11 ms |
+| Financial data | 100K | 6.8 MB | 0.33 ms |
+| Log data | 1K | 89 KB | 0.06 ms |
+| Log data | 10K | 900 KB | 0.10 ms |
+| Log data | 100K | 9.1 MB | 0.38 ms |
+
+These in-memory benchmarks demonstrate parsing efficiency but don't include file I/O overhead. For end-to-end performance with file I/O, use the CLI comparison benchmarks in `benchmark/cli_comparison.sh`.
 
 ### SIMD Benchmarks
 
