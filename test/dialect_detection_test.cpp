@@ -8,6 +8,76 @@
 // ============================================================================
 // DIALECT DETECTION TESTS
 // ============================================================================
+//
+// Branch Coverage Strategy
+// ------------------------
+// These tests provide comprehensive coverage of the dialect detection system,
+// organized into logical sections that exercise all major code paths:
+//
+// 1. DELIMITER DETECTION (5 tests)
+//    Tests detection of comma, semicolon, tab, pipe delimiters.
+//    Exercises: generate_candidates(), score_dialect(), compute_pattern_score()
+//
+// 2. EMBEDDED SEPARATOR HANDLING (1 test)
+//    Ensures quoted delimiters don't fool detection.
+//    Exercises: find_rows(), extract_fields() quote-aware parsing
+//
+// 3. QUOTE CHARACTER DETECTION (1 test)
+//    Tests double-quote recognition.
+//    Exercises: quote_char candidate scoring in score_dialect()
+//
+// 4. HEADER DETECTION (2 tests)
+//    Tests header presence/absence detection.
+//    Exercises: detect_header() string vs typed data heuristics
+//
+// 5. LINE ENDING DETECTION (3 tests)
+//    Tests LF, CRLF, CR recognition.
+//    Exercises: detect_line_ending() for all three styles
+//
+// 6. CELL TYPE INFERENCE (8 tests)
+//    Tests type recognition: integer, float, boolean, date, time, datetime,
+//    empty, string.
+//    Exercises: infer_cell_type() for each CellType enum value
+//
+// 7. TYPE SCORE VALIDATION (6 tests)
+//    Tests type_score numerical thresholds for typed data.
+//    Exercises: compute_type_score() with homogeneous type data
+//
+// 8. DIALECT FACTORIES & UTILITIES (3 tests)
+//    Tests factory methods, equality, to_string().
+//    Exercises: Dialect struct methods
+//
+// 9. EDGE CASES (5 tests)
+//    Tests empty file, single cell, non-existent file, null buffer, zero length.
+//    Exercises: error handling and boundary conditions
+//
+// 10. BUFFER DETECTION (2 tests)
+//     Tests in-memory detection (vs file-based).
+//     Exercises: detect() buffer overloads
+//
+// 11. CUSTOM DETECTION OPTIONS (1 test)
+//     Tests custom delimiter sets.
+//     Exercises: DetectionOptions handling
+//
+// 12. REAL-WORLD FILES (2 tests)
+//     Tests detection on realistic data (financial, contacts).
+//     Exercises: end-to-end detection quality
+//
+// 13. PARSER INTEGRATION (8 tests)
+//     Tests parse_auto, parse with explicit dialect, parse_two_pass variants.
+//     Exercises: two_pass parser dialect integration
+//
+// 14. DIALECT VALIDATION (4 tests)
+//     Tests valid/invalid dialect configurations.
+//     Exercises: is_valid(), validate() boundary checks
+//
+// 15. ESCAPE SEQUENCE DETECTION (8 tests)
+//     Tests backslash vs double-quote escape detection.
+//     Exercises: escape_char scoring and double_quote inference
+//
+// Total: 128 tests covering delimiter, quote, escape, header, line ending,
+// type inference, scoring, validation, and parser integration paths.
+// ============================================================================
 
 class DialectDetectionTest : public ::testing::Test {
 protected:
@@ -751,4 +821,1181 @@ TEST_F(DialectDetectionTest, ConsecutiveEscapes) {
     EXPECT_TRUE(result.success());
     EXPECT_EQ(result.dialect.escape_char, '\\');
     EXPECT_FALSE(result.dialect.double_quote);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Delimiter Detection
+// ============================================================================
+
+TEST_F(DialectDetectionTest, DetectColonDelimiter) {
+    // Test colon delimiter detection
+    const std::string csv_data = "a:b:c\n1:2:3\n4:5:6\n7:8:9\n";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ':');
+    EXPECT_EQ(result.detected_columns, 3);
+}
+
+TEST_F(DialectDetectionTest, AmbiguousDelimiterSimilarScores) {
+    // Create data where multiple delimiters could work, testing the ambiguity warning
+    // Use data that scores similarly for multiple delimiters
+    const std::string csv_data = "a,b;c\n1,2;3\n4,5;6\n7,8;9\n";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // Detection should succeed - the tie-breaking rules will choose one delimiter
+    // The data is ambiguous (both comma and semicolon give consistent 2-column results)
+    // so a warning may be present. Either way, detection should work.
+    EXPECT_TRUE(result.success());
+}
+
+TEST_F(DialectDetectionTest, SingleColumnData) {
+    // Single column CSV - each delimiter gives 1 column
+    const std::string csv_data = "value\n100\n200\n300\n";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // Should still detect something, likely comma with 1 column
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.detected_columns, 1);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Quote Character Detection
+// ============================================================================
+
+TEST_F(DialectDetectionTest, DetectSingleQuoteCharacter) {
+    // CSV with single quotes containing embedded commas
+    // The embedded delimiters force single quote detection since double quotes
+    // would produce inconsistent column counts
+    const std::string csv_data =
+        "name,value\n"
+        "'Alice, Jr.',100\n"
+        "'Bob, Sr.',200\n"
+        "'Charlie, III',300\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.dialect.quote_char, '\'');
+}
+
+TEST_F(DialectDetectionTest, SingleQuoteWithEmbeddedComma) {
+    // Single quotes with embedded delimiter
+    const std::string csv_data =
+        "name,description\n"
+        "'Alice','Hello, World'\n"
+        "'Bob','Test, data'\n"
+        "'Charlie','More, commas'\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.dialect.quote_char, '\'');
+    EXPECT_EQ(result.detected_columns, 2);
+}
+
+TEST_F(DialectDetectionTest, NoQuoteCharacter) {
+    // Simple data without any quotes - tests that detection works without quote evidence
+    const std::string csv_data = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.detected_columns, 3);
+    // Quote char defaults to double quote per RFC 4180 preference, even without evidence
+    EXPECT_EQ(result.dialect.quote_char, '"');
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Line Ending Detection
+// ============================================================================
+
+TEST_F(DialectDetectionTest, DetectMixedLineEndings) {
+    // Create data with mixed line endings (LF and CRLF)
+    const std::string csv_data = "a,b,c\n1,2,3\r\n4,5,6\n7,8,9\r\n";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::MIXED);
+}
+
+TEST_F(DialectDetectionTest, DetectMixedLineEndingsWithCR) {
+    // Mixed with CR (old Mac) and LF
+    const std::string csv_data = "a,b,c\r1,2,3\n4,5,6\r7,8,9\n";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::MIXED);
+}
+
+TEST_F(DialectDetectionTest, DetectUnknownLineEnding) {
+    // Data with no newlines at all
+    const std::string csv_data = "a,b,c";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // May not have enough rows, but should detect UNKNOWN line ending
+    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::UNKNOWN);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Header Detection
+// ============================================================================
+
+TEST_F(DialectDetectionTest, HeaderDetectionAllStrings) {
+    // Both header and data are all strings
+    const std::string csv_data =
+        "name,city,country\n"
+        "Alice,Paris,France\n"
+        "Bob,London,UK\n"
+        "Charlie,Berlin,Germany\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    // All strings in both header and data - header detection uses special logic
+    EXPECT_TRUE(result.has_header);
+}
+
+TEST_F(DialectDetectionTest, HeaderDetectionNumericData) {
+    // String header with numeric data
+    const std::string csv_data =
+        "id,value,count\n"
+        "1,100,10\n"
+        "2,200,20\n"
+        "3,300,30\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_TRUE(result.has_header);
+}
+
+TEST_F(DialectDetectionTest, HeaderDetectionNumericHeader) {
+    // Numeric header and numeric data - should not detect header
+    const std::string csv_data =
+        "1,2,3\n"
+        "4,5,6\n"
+        "7,8,9\n"
+        "10,11,12\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_FALSE(result.has_header);
+}
+
+TEST_F(DialectDetectionTest, HeaderDetectionEmptyFirstRow) {
+    // Empty first row should not crash
+    const std::string csv_data =
+        ",,\n"
+        "1,2,3\n"
+        "4,5,6\n"
+        "7,8,9\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+}
+
+TEST_F(DialectDetectionTest, HeaderDetectionSingleRow) {
+    // Only one row - can't detect header
+    const std::string csv_data = "name,value,count\n";
+
+    simdcsv::DetectionOptions opts;
+    opts.min_rows = 1;  // Allow single row
+    simdcsv::DialectDetector single_row_detector(opts);
+
+    auto result = single_row_detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // With only one row, header detection returns false (needs at least 2 rows)
+    EXPECT_FALSE(result.has_header);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Field Consistency / Ragged Rows
+// ============================================================================
+
+TEST_F(DialectDetectionTest, RaggedRowsDifferentFieldCounts) {
+    // Rows with inconsistent field counts
+    const std::string csv_data =
+        "a,b,c\n"
+        "1,2,3\n"
+        "4,5\n"
+        "6,7,8,9\n"
+        "10,11,12\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // Should still detect, using modal field count
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    // Modal count is 3 (appears 3 times: rows 1, 2, 5)
+    EXPECT_EQ(result.detected_columns, 3);
+}
+
+TEST_F(DialectDetectionTest, AllDifferentFieldCounts) {
+    // Every row has different field count - tests handling of highly inconsistent data
+    const std::string csv_data =
+        "a\n"
+        "b,c\n"
+        "d,e,f\n"
+        "g,h,i,j\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // Detection may or may not succeed with highly inconsistent data
+    // The pattern score will be 0.25 (1/4 rows match modal count)
+    // Verify delimiter is detected as comma regardless of success
+    EXPECT_EQ(result.dialect.delimiter, ',');
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Dialect::to_string()
+// ============================================================================
+
+TEST_F(DialectDetectionTest, DialectToStringTab) {
+    simdcsv::Dialect tsv = simdcsv::Dialect::tsv();
+    std::string str = tsv.to_string();
+
+    EXPECT_NE(str.find("'\\t'"), std::string::npos) << "Should contain tab representation";
+}
+
+TEST_F(DialectDetectionTest, DialectToStringSemicolon) {
+    simdcsv::Dialect semi = simdcsv::Dialect::semicolon();
+    std::string str = semi.to_string();
+
+    EXPECT_NE(str.find("';'"), std::string::npos) << "Should contain semicolon";
+}
+
+TEST_F(DialectDetectionTest, DialectToStringPipe) {
+    simdcsv::Dialect pipe = simdcsv::Dialect::pipe();
+    std::string str = pipe.to_string();
+
+    EXPECT_NE(str.find("'|'"), std::string::npos) << "Should contain pipe";
+}
+
+TEST_F(DialectDetectionTest, DialectToStringColon) {
+    simdcsv::Dialect colon;
+    colon.delimiter = ':';
+    colon.quote_char = '"';
+    std::string str = colon.to_string();
+
+    EXPECT_NE(str.find("':'"), std::string::npos) << "Should contain colon";
+}
+
+TEST_F(DialectDetectionTest, DialectToStringSingleQuote) {
+    simdcsv::Dialect d;
+    d.delimiter = ',';
+    d.quote_char = '\'';
+    std::string str = d.to_string();
+
+    EXPECT_NE(str.find("\"'\""), std::string::npos) << "Should contain single quote repr";
+}
+
+TEST_F(DialectDetectionTest, DialectToStringNoQuote) {
+    simdcsv::Dialect d;
+    d.delimiter = ',';
+    d.quote_char = '\0';
+    std::string str = d.to_string();
+
+    EXPECT_NE(str.find("none"), std::string::npos) << "Should contain 'none' for no quote";
+}
+
+TEST_F(DialectDetectionTest, DialectToStringBackslashEscape) {
+    simdcsv::Dialect d;
+    d.delimiter = ',';
+    d.quote_char = '"';
+    d.escape_char = '\\';
+    d.double_quote = false;
+    std::string str = d.to_string();
+
+    EXPECT_NE(str.find("backslash"), std::string::npos) << "Should contain 'backslash'";
+}
+
+TEST_F(DialectDetectionTest, DialectToStringDoubleQuoteEscape) {
+    simdcsv::Dialect d;
+    d.delimiter = ',';
+    d.quote_char = '"';
+    d.double_quote = true;
+    std::string str = d.to_string();
+
+    EXPECT_NE(str.find("double"), std::string::npos) << "Should contain 'double'";
+}
+
+TEST_F(DialectDetectionTest, DialectToStringOtherEscape) {
+    simdcsv::Dialect d;
+    d.delimiter = ',';
+    d.quote_char = '"';
+    d.escape_char = '~';
+    d.double_quote = false;
+    std::string str = d.to_string();
+
+    EXPECT_NE(str.find("'~'"), std::string::npos) << "Should contain escape char";
+}
+
+TEST_F(DialectDetectionTest, DialectToStringOtherDelimiter) {
+    // Test an unusual delimiter character
+    simdcsv::Dialect d;
+    d.delimiter = '#';
+    d.quote_char = '"';
+    std::string str = d.to_string();
+
+    EXPECT_NE(str.find("'#'"), std::string::npos) << "Should contain hash";
+}
+
+TEST_F(DialectDetectionTest, DialectToStringOtherQuote) {
+    // Test an unusual quote character
+    simdcsv::Dialect d;
+    d.delimiter = ',';
+    d.quote_char = '`';
+    std::string str = d.to_string();
+
+    EXPECT_NE(str.find("'`'"), std::string::npos) << "Should contain backtick";
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Detection Warnings
+// ============================================================================
+
+TEST_F(DialectDetectionTest, WarningForAmbiguousDialect) {
+    // Create data that produces similar scores for multiple dialects
+    // Multiple quote/escape combinations will score similarly
+    const std::string csv_data =
+        "a,b\n"
+        "1,2\n"
+        "3,4\n"
+        "5,6\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // Detection should succeed with this basic CSV
+    EXPECT_TRUE(result.success());
+
+    // Verify that candidates were generated and scored
+    // The exact warning depends on score distributions, but we verify:
+    // 1. Multiple candidates exist (different quote/escape combinations)
+    // 2. The best candidate has a reasonable score
+    EXPECT_GT(result.candidates.size(), 1u);
+    EXPECT_GT(result.candidates[0].consistency_score, 0.5);
+}
+
+TEST_F(DialectDetectionTest, NoValidDialectWarning) {
+    // Data that doesn't form valid CSV structure
+    const std::string csv_data = "x\ny\n";  // Only 2 rows, may not meet min_rows
+
+    simdcsv::DetectionOptions opts;
+    opts.min_rows = 5;  // Require more rows than we have
+    simdcsv::DialectDetector strict_detector(opts);
+
+    auto result = strict_detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_FALSE(result.success());
+    EXPECT_NE(result.warning.find("Could not detect"), std::string::npos);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Type Score Edge Cases
+// ============================================================================
+
+TEST_F(DialectDetectionTest, TypeScoreAllEmpty) {
+    // Data with all empty cells
+    const std::string csv_data =
+        "a,b,c\n"
+        ",,\n"
+        ",,\n"
+        ",,\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // Should still detect delimiter
+    EXPECT_EQ(result.dialect.delimiter, ',');
+}
+
+TEST_F(DialectDetectionTest, TypeScoreAllDates) {
+    // Data with date values
+    const std::string csv_data =
+        "date1,date2,date3\n"
+        "2024-01-15,2024-02-20,2024-03-25\n"
+        "2024-04-10,2024-05-15,2024-06-20\n"
+        "2024-07-05,2024-08-10,2024-09-15\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_TRUE(result.has_header);
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GT(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>0.8) for all-date data";
+}
+
+TEST_F(DialectDetectionTest, TypeScoreAllTimes) {
+    // Data with time values
+    const std::string csv_data =
+        "time1,time2,time3\n"
+        "10:30,11:45,12:00\n"
+        "14:30:00,15:45:30,16:00:00\n"
+        "20:00,21:30,22:45\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GT(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>0.8) for all-time data";
+}
+
+TEST_F(DialectDetectionTest, TypeScoreDateTimes) {
+    // Data with datetime values
+    const std::string csv_data =
+        "created,updated\n"
+        "2024-01-15T10:30:00,2024-01-16T11:45:00\n"
+        "2024-02-20T14:30:00Z,2024-02-21T15:45:00Z\n"
+        "2024-03-25 20:00:00,2024-03-26 21:30:00\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_TRUE(result.has_header);
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GT(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>0.8) for all-datetime data";
+}
+
+TEST_F(DialectDetectionTest, TypeScoreBooleansAndIntegers) {
+    // Mixed booleans and integers
+    const std::string csv_data =
+        "id,active,count\n"
+        "1,true,100\n"
+        "2,false,200\n"
+        "3,TRUE,300\n"
+        "4,FALSE,400\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_TRUE(result.has_header);
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GT(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>0.8) for boolean+integer data";
+}
+
+TEST_F(DialectDetectionTest, TypeScoreFloatsWithExponents) {
+    // Floats with scientific notation
+    const std::string csv_data =
+        "value1,value2,value3\n"
+        "1.5e10,2.5E-5,3.14\n"
+        "-1.23e4,+4.56E7,0.001\n"
+        "1e10,2E20,.5\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GT(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>0.8) for all-float data";
+}
+
+TEST_F(DialectDetectionTest, TypeScoreMixedTypes) {
+    // Mixed string, integer, float, boolean, date
+    const std::string csv_data =
+        "name,age,score,active,birthdate\n"
+        "Alice,30,95.5,true,1994-05-15\n"
+        "Bob,25,88.0,false,1999-08-20\n"
+        "Charlie,35,92.3,True,1989-12-10\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.detected_columns, 5);
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GE(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>=0.8) for mixed typed data";
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - infer_cell_type Edge Cases
+// ============================================================================
+
+TEST_F(DialectDetectionTest, InferCellTypeWhitespace) {
+    using CellType = simdcsv::DialectDetector::CellType;
+
+    // Whitespace-padded values
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("  123  "), CellType::INTEGER);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("\t3.14\t"), CellType::FLOAT);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("  true  "), CellType::BOOLEAN);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("\n"), CellType::EMPTY);
+}
+
+TEST_F(DialectDetectionTest, InferCellTypeDateFormats) {
+    using CellType = simdcsv::DialectDetector::CellType;
+
+    // Various date formats
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-12-31"), CellType::DATE);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024/12/31"), CellType::DATE);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("31-12-2024"), CellType::DATE);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("31/12/2024"), CellType::DATE);
+
+    // Invalid date-like strings
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-1-5"), CellType::STRING);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("24-12-31"), CellType::STRING);
+}
+
+TEST_F(DialectDetectionTest, InferCellTypeTimeFormats) {
+    using CellType = simdcsv::DialectDetector::CellType;
+
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("00:00"), CellType::TIME);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("23:59"), CellType::TIME);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("00:00:00"), CellType::TIME);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("23:59:59"), CellType::TIME);
+
+    // Invalid time formats
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1:30"), CellType::STRING);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("12:3"), CellType::STRING);
+}
+
+TEST_F(DialectDetectionTest, InferCellTypeDateTimeFormats) {
+    using CellType = simdcsv::DialectDetector::CellType;
+
+    // ISO 8601 datetime
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15T00:00:00"), CellType::DATETIME);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15T23:59:59"), CellType::DATETIME);
+
+    // With timezone
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15T10:30:00+05:00"), CellType::DATETIME);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15T10:30:00-08:00"), CellType::DATETIME);
+
+    // Space separator
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15 10:30:00"), CellType::DATETIME);
+}
+
+TEST_F(DialectDetectionTest, InferCellTypeIntegerEdgeCases) {
+    using CellType = simdcsv::DialectDetector::CellType;
+
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("+0"), CellType::INTEGER);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("-0"), CellType::INTEGER);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("0000"), CellType::INTEGER);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("999999999"), CellType::INTEGER);
+
+    // Not integers
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("+"), CellType::STRING);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("-"), CellType::STRING);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("+-1"), CellType::STRING);
+}
+
+TEST_F(DialectDetectionTest, InferCellTypeFloatEdgeCases) {
+    using CellType = simdcsv::DialectDetector::CellType;
+
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("0.0"), CellType::FLOAT);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type(".0"), CellType::FLOAT);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("0."), CellType::FLOAT);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("+.5"), CellType::FLOAT);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("-.5"), CellType::FLOAT);
+
+    // Exponent edge cases
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1e0"), CellType::FLOAT);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1E+0"), CellType::FLOAT);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1E-0"), CellType::FLOAT);
+
+    // Invalid floats
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1e"), CellType::STRING);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1E+"), CellType::STRING);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("."), CellType::STRING);
+    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("..5"), CellType::STRING);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - cell_type_to_string
+// ============================================================================
+
+TEST_F(DialectDetectionTest, CellTypeToString) {
+    using CellType = simdcsv::DialectDetector::CellType;
+
+    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::EMPTY), "EMPTY");
+    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::INTEGER), "INTEGER");
+    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::FLOAT), "FLOAT");
+    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::DATE), "DATE");
+    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::DATETIME), "DATETIME");
+    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::TIME), "TIME");
+    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::BOOLEAN), "BOOLEAN");
+    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::STRING), "STRING");
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Dialect Validation Edge Cases
+// ============================================================================
+
+TEST_F(DialectDetectionTest, DialectValidation_CarriageReturnDelimiter) {
+    simdcsv::Dialect invalid;
+    invalid.delimiter = '\r';
+    invalid.quote_char = '"';
+    EXPECT_FALSE(invalid.is_valid()) << "CR delimiter should be invalid";
+
+    EXPECT_THROW(invalid.validate(), std::invalid_argument);
+}
+
+TEST_F(DialectDetectionTest, DialectValidation_CarriageReturnQuote) {
+    simdcsv::Dialect invalid;
+    invalid.delimiter = ',';
+    invalid.quote_char = '\r';
+    EXPECT_FALSE(invalid.is_valid()) << "CR quote should be invalid";
+
+    EXPECT_THROW(invalid.validate(), std::invalid_argument);
+}
+
+TEST_F(DialectDetectionTest, DialectValidation_ControlCharDelimiter) {
+    simdcsv::Dialect invalid;
+    invalid.delimiter = '\x01';  // Control character
+    invalid.quote_char = '"';
+    EXPECT_FALSE(invalid.is_valid()) << "Control char delimiter should be invalid";
+}
+
+TEST_F(DialectDetectionTest, DialectValidation_ControlCharQuote) {
+    simdcsv::Dialect invalid;
+    invalid.delimiter = ',';
+    invalid.quote_char = '\x1F';  // Control character
+    EXPECT_FALSE(invalid.is_valid()) << "Control char quote should be invalid";
+}
+
+TEST_F(DialectDetectionTest, DialectValidation_HighByteDelimiter) {
+    simdcsv::Dialect invalid;
+    invalid.delimiter = static_cast<char>(200);  // > 126
+    invalid.quote_char = '"';
+    EXPECT_FALSE(invalid.is_valid()) << "High-byte delimiter should be invalid";
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Pattern Score Edge Cases
+// ============================================================================
+
+TEST_F(DialectDetectionTest, PatternScoreTooFewRows) {
+    // Less than min_rows (default 3)
+    const std::string csv_data = "a,b,c\n1,2,3\n";
+
+    simdcsv::DetectionOptions opts;
+    opts.min_rows = 5;
+    simdcsv::DialectDetector strict_detector(opts);
+
+    auto result = strict_detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // Should fail or have low confidence
+    EXPECT_FALSE(result.success());
+}
+
+TEST_F(DialectDetectionTest, PatternScoreEmptyRows) {
+    // Rows that are empty
+    const std::string csv_data =
+        "a,b,c\n"
+        "\n"
+        "1,2,3\n"
+        "\n"
+        "4,5,6\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // Should handle empty rows gracefully
+    EXPECT_EQ(result.dialect.delimiter, ',');
+}
+
+TEST_F(DialectDetectionTest, PatternScoreMaxRows) {
+    // Create data with many rows to test max_rows limit
+    std::string csv_data = "a,b,c\n";
+    for (int i = 0; i < 150; i++) {
+        csv_data += std::to_string(i) + ",x,y\n";
+    }
+
+    simdcsv::DetectionOptions opts;
+    opts.max_rows = 50;
+    simdcsv::DialectDetector limited_detector(opts);
+
+    auto result = limited_detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_LE(result.rows_analyzed, 50u);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Extract Fields Edge Cases
+// ============================================================================
+
+TEST_F(DialectDetectionTest, ExtractFieldsEmptyRow) {
+    const std::string csv_data =
+        "a,b,c\n"
+        "1,2,3\n"
+        "4,5,6\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+}
+
+TEST_F(DialectDetectionTest, ExtractFieldsQuotedEmpty) {
+    // Fields that are quoted but empty
+    const std::string csv_data =
+        "a,b,c\n"
+        "\"\",\"\",\"\"\n"
+        "1,2,3\n"
+        "4,5,6\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.detected_columns, 3);
+}
+
+TEST_F(DialectDetectionTest, ExtractFieldsTrailingDelimiter) {
+    // Row ending with delimiter
+    const std::string csv_data =
+        "a,b,c,\n"
+        "1,2,3,\n"
+        "4,5,6,\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.detected_columns, 4);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Candidate Ordering
+// ============================================================================
+
+TEST_F(DialectDetectionTest, CandidateTieBreakColumns) {
+    // Test that more columns wins in tie-break
+    simdcsv::DialectCandidate c1, c2;
+    c1.consistency_score = 0.8;
+    c1.num_columns = 5;
+    c1.dialect.quote_char = '"';
+    c1.dialect.double_quote = true;
+    c1.dialect.delimiter = ',';
+
+    c2.consistency_score = 0.8;
+    c2.num_columns = 3;
+    c2.dialect.quote_char = '"';
+    c2.dialect.double_quote = true;
+    c2.dialect.delimiter = ',';
+
+    EXPECT_TRUE(c1 < c2);  // c1 has more columns, should be "better" (comes first)
+}
+
+TEST_F(DialectDetectionTest, CandidateTieBreakQuoteChar) {
+    // Test that double quote wins in tie-break
+    simdcsv::DialectCandidate c1, c2;
+    c1.consistency_score = 0.8;
+    c1.num_columns = 3;
+    c1.dialect.quote_char = '"';
+    c1.dialect.double_quote = true;
+    c1.dialect.delimiter = ',';
+
+    c2.consistency_score = 0.8;
+    c2.num_columns = 3;
+    c2.dialect.quote_char = '\'';
+    c2.dialect.double_quote = true;
+    c2.dialect.delimiter = ',';
+
+    EXPECT_TRUE(c1 < c2);  // c1 has standard quote, should be "better"
+}
+
+TEST_F(DialectDetectionTest, CandidateTieBreakDoubleQuote) {
+    // Test that double_quote=true wins in tie-break
+    simdcsv::DialectCandidate c1, c2;
+    c1.consistency_score = 0.8;
+    c1.num_columns = 3;
+    c1.dialect.quote_char = '"';
+    c1.dialect.double_quote = true;
+    c1.dialect.delimiter = ',';
+
+    c2.consistency_score = 0.8;
+    c2.num_columns = 3;
+    c2.dialect.quote_char = '"';
+    c2.dialect.double_quote = false;
+    c2.dialect.delimiter = ',';
+
+    EXPECT_TRUE(c1 < c2);
+}
+
+TEST_F(DialectDetectionTest, CandidateTieBreakDelimiter) {
+    // Test that comma delimiter wins in tie-break
+    simdcsv::DialectCandidate c1, c2;
+    c1.consistency_score = 0.8;
+    c1.num_columns = 3;
+    c1.dialect.quote_char = '"';
+    c1.dialect.double_quote = true;
+    c1.dialect.delimiter = ',';
+
+    c2.consistency_score = 0.8;
+    c2.num_columns = 3;
+    c2.dialect.quote_char = '"';
+    c2.dialect.double_quote = true;
+    c2.dialect.delimiter = ';';
+
+    EXPECT_TRUE(c1 < c2);
+}
+
+TEST_F(DialectDetectionTest, CandidateEqualScores) {
+    // Test completely equal candidates
+    simdcsv::DialectCandidate c1, c2;
+    c1.consistency_score = 0.8;
+    c1.num_columns = 3;
+    c1.dialect.quote_char = '"';
+    c1.dialect.double_quote = true;
+    c1.dialect.delimiter = ',';
+
+    c2.consistency_score = 0.8;
+    c2.num_columns = 3;
+    c2.dialect.quote_char = '"';
+    c2.dialect.double_quote = true;
+    c2.dialect.delimiter = ',';
+
+    EXPECT_FALSE(c1 < c2);
+    EXPECT_FALSE(c2 < c1);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Generate Candidates
+// ============================================================================
+
+TEST_F(DialectDetectionTest, GenerateCandidatesCustomOptions) {
+    simdcsv::DetectionOptions opts;
+    opts.delimiters = {','};
+    opts.quote_chars = {'"'};
+    opts.escape_chars = {};  // No escape chars beyond double-quote
+
+    simdcsv::DialectDetector custom_detector(opts);
+
+    const std::string csv_data = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
+    auto result = custom_detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    // Should have limited candidates
+    EXPECT_LT(result.candidates.size(), 20u);
+}
+
+TEST_F(DialectDetectionTest, GenerateCandidatesMultipleEscapes) {
+    simdcsv::DetectionOptions opts;
+    opts.delimiters = {','};
+    opts.quote_chars = {'"'};
+    opts.escape_chars = {'\\', '~', '^'};
+
+    simdcsv::DialectDetector custom_detector(opts);
+
+    const std::string csv_data = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
+    auto result = custom_detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - CRLF Handling in Rows
+// ============================================================================
+
+TEST_F(DialectDetectionTest, FindRowsCRLFProper) {
+    // Proper CRLF line endings
+    const std::string csv_data = "a,b,c\r\n1,2,3\r\n4,5,6\r\n7,8,9\r\n";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::CRLF);
+    EXPECT_EQ(result.detected_columns, 3);
+}
+
+TEST_F(DialectDetectionTest, FindRowsCROnly) {
+    // CR-only line endings (old Mac)
+    const std::string csv_data = "a,b,c\r1,2,3\r4,5,6\r7,8,9\r";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::CR);
+}
+
+TEST_F(DialectDetectionTest, FindRowsCRAtEndOfBuffer) {
+    // CR at very end of buffer (edge case)
+    const std::string csv_data = "a,b,c\n1,2,3\n4,5,6\r";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+}
+
+TEST_F(DialectDetectionTest, FindRowsNoTrailingNewline) {
+    // No trailing newline
+    const std::string csv_data = "a,b,c\n1,2,3\n4,5,6";
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.detected_columns, 3);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Quoted Fields with Special Characters
+// ============================================================================
+
+TEST_F(DialectDetectionTest, QuotedFieldsWithNewlines) {
+    // Newlines inside quoted fields
+    const std::string csv_data =
+        "name,description\n"
+        "\"Alice\",\"Line 1\nLine 2\"\n"
+        "\"Bob\",\"Single line\"\n"
+        "\"Charlie\",\"More\nlines\nhere\"\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.detected_columns, 2);
+}
+
+TEST_F(DialectDetectionTest, QuotedFieldsWithCRLF) {
+    // CRLF inside quoted fields
+    const std::string csv_data =
+        "name,description\r\n"
+        "\"Alice\",\"Line 1\r\nLine 2\"\r\n"
+        "\"Bob\",\"Single line\"\r\n"
+        "\"Charlie\",\"Normal\"\r\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+}
+
+TEST_F(DialectDetectionTest, QuotedFieldsWithDelimiter) {
+    // Delimiter inside quoted fields
+    const std::string csv_data =
+        "name,description\n"
+        "\"Alice\",\"Hello, World\"\n"
+        "\"Bob\",\"Test, data, here\"\n"
+        "\"Charlie\",\"Normal text\"\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.detected_columns, 2);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Sample Size Limit
+// ============================================================================
+
+TEST_F(DialectDetectionTest, SampleSizeLimit) {
+    // Create data larger than sample size
+    std::string csv_data = "a,b,c\n";
+    for (int i = 0; i < 1000; i++) {
+        csv_data += std::to_string(i) + ",data,value\n";
+    }
+
+    simdcsv::DetectionOptions opts;
+    opts.sample_size = 1024;  // Only sample 1KB
+    simdcsv::DialectDetector limited_detector(opts);
+
+    auto result = limited_detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    // Should detect correctly even with limited sample
+    EXPECT_EQ(result.dialect.delimiter, ',');
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Escape Pattern in find_rows
+// ============================================================================
+
+TEST_F(DialectDetectionTest, EscapeCharInFindRows) {
+    // Backslash escape affecting row boundaries
+    simdcsv::Dialect d;
+    d.delimiter = ',';
+    d.quote_char = '"';
+    d.escape_char = '\\';
+    d.double_quote = false;
+
+    const std::string csv_data =
+        "a,b\n"
+        "\"line with \\\" quote\",1\n"
+        "\"normal\",2\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+}
+
+TEST_F(DialectDetectionTest, DoubleQuoteEscapeInFindRows) {
+    // Double quote escape affecting row boundaries
+    const std::string csv_data =
+        "a,b\n"
+        "\"line with \"\" quote\",1\n"
+        "\"normal\",2\n"
+        "\"another\",3\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    EXPECT_TRUE(result.dialect.double_quote);
+}
+
+// ============================================================================
+// Additional Branch Coverage Tests - Score Calculation Edge Cases
+// ============================================================================
+
+TEST_F(DialectDetectionTest, ScoreHighPatternLowType) {
+    // High pattern score (consistent rows) but low type score (all strings)
+    const std::string csv_data =
+        "name,city,country\n"
+        "Alice,Paris,France\n"
+        "Bob,London,UK\n"
+        "Charlie,Berlin,Germany\n"
+        "David,Madrid,Spain\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success());
+    // Should still detect correctly despite all-string data
+    EXPECT_EQ(result.dialect.delimiter, ',');
+}
+
+TEST_F(DialectDetectionTest, ScoreLowPatternHighType) {
+    // Low pattern score (ragged) but high type score (all typed)
+    const std::string csv_data =
+        "id,value\n"
+        "1,100\n"
+        "2,200,extra\n"
+        "3,300\n"
+        "4,400,more,data\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // May or may not succeed depending on score thresholds
+    EXPECT_EQ(result.dialect.delimiter, ',');
 }

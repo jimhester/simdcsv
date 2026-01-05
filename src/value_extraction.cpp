@@ -33,7 +33,8 @@ std::string_view ValueExtractor::get_string_view(size_t row, size_t col) const {
 
 std::string_view ValueExtractor::get_string_view_internal(size_t row, size_t col) const {
     size_t field_idx = compute_field_index(row, col);
-    if (field_idx >= linear_indexes_.size()) return std::string_view();  // Bounds check
+    // Return empty view with valid pointer to avoid undefined behavior when converting to std::string
+    if (field_idx >= linear_indexes_.size()) return std::string_view(reinterpret_cast<const char*>(buf_), 0);
     size_t start = (field_idx == 0) ? 0 : linear_indexes_[field_idx - 1] + 1;
     size_t end = linear_indexes_[field_idx];
     if (end > len_) end = len_;  // Bounds check

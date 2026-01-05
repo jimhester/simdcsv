@@ -81,12 +81,15 @@ jobs:
       run: |
         cd build
         # Capture coverage using the config file from repo root
-        lcov --config-file ../.lcovrc --capture --directory . --output-file coverage.info --ignore-errors mismatch,unused
+        # Enable branch coverage with --rc branch_coverage=1
+        lcov --config-file ../.lcovrc --rc branch_coverage=1 --capture --directory . --output-file coverage.info --ignore-errors mismatch,unused
         # Remove test, benchmark, and external dependencies from coverage
-        lcov --config-file ../.lcovrc --remove coverage.info '*/test/*' '*/benchmark/*' '*/build/_deps/*' '/usr/*' --output-file coverage.info --ignore-errors unused
+        lcov --config-file ../.lcovrc --rc branch_coverage=1 --remove coverage.info '*/test/*' '*/benchmark/*' '*/build/_deps/*' '/usr/*' --output-file coverage.info --ignore-errors unused
         # Show what files remain in the coverage report
         echo "=== Files in final coverage report ==="
         lcov --list coverage.info
+        echo "=== Coverage Summary (including branch coverage) ==="
+        lcov --rc branch_coverage=1 --summary coverage.info
         echo "=== Verifying no test/benchmark files remain ==="
         if grep -E "^SF:.*/test/|^SF:.*/benchmark/" coverage.info; then
           echo "ERROR: test or benchmark files found in coverage report!"
@@ -146,6 +149,12 @@ jobs:
           exit 1
         fi
 
+    - name: Smoke test scsv binary
+      run: |
+        echo "Running smoke test: scsv --help"
+        ./build/scsv --help
+        echo "✓ scsv binary runs successfully"
+
     - name: Verify test executables are NOT built
       run: |
         echo "Verifying test executables are not present..."
@@ -181,6 +190,88 @@ jobs:
           exit 1
         fi
         echo "✓ No benchmark executables found (as expected)"
+
+  shared-library-build:
+    name: Shared Library Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies (Ubuntu)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+
+    - name: Install dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install cmake
+
+    - name: Configure shared library build
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
+
+    - name: Build
+      run: |
+        cmake --build build --config Release
+
+    - name: Verify shared library exists (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        echo "Checking for shared library (.so)..."
+        if ls build/libsimdcsv_lib.so* 1>/dev/null 2>&1; then
+          echo "✓ Shared library found:"
+          ls -la build/libsimdcsv_lib.so*
+        else
+          echo "✗ Shared library not found!"
+          ls -la build/
+          exit 1
+        fi
+
+    - name: Verify shared library exists (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        echo "Checking for shared library (.dylib)..."
+        if ls build/libsimdcsv_lib.dylib* 1>/dev/null 2>&1; then
+          echo "✓ Shared library found:"
+          ls -la build/libsimdcsv_lib.dylib*
+        else
+          echo "✗ Shared library not found!"
+          ls -la build/
+          exit 1
+        fi
+
+    - name: Verify scsv binary exists and links correctly
+      run: |
+        echo "Checking for scsv binary..."
+        if [ -f build/scsv ]; then
+          echo "✓ scsv binary found:"
+          ls -la build/scsv
+        else
+          echo "✗ scsv binary not found!"
+          exit 1
+        fi
+
+    - name: Test scsv can execute (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        echo "Testing scsv execution with LD_LIBRARY_PATH..."
+        export LD_LIBRARY_PATH="${PWD}/build:${LD_LIBRARY_PATH}"
+        ./build/scsv --help
+
+    - name: Test scsv can execute (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        echo "Testing scsv execution..."
+        ./build/scsv --help
 
   code-quality:
     name: Code Quality Checks

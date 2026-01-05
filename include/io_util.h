@@ -18,6 +18,7 @@
 #define SIMDCSV_JSONIOUTIL_H
 
 #include "common_defs.h"
+#include "encoding.h"
 #include <cstdint>
 #include <exception>
 #include <fstream>
@@ -218,5 +219,74 @@ std::basic_string_view<uint8_t> get_corpus_stdin(size_t padding);
  * @see aligned_free() in mem_util.h for proper deallocation.
  */
 std::basic_string_view<uint8_t>  get_corpus(const std::string& filename, size_t padding);
+
+
+/**
+ * @brief Result of loading a file with encoding detection.
+ *
+ * Contains both the (possibly transcoded) data and information about
+ * the detected encoding. If the file was transcoded (e.g., from UTF-16),
+ * the data will be in UTF-8 format.
+ */
+struct LoadResult {
+    std::basic_string_view<uint8_t> data;  ///< The loaded/transcoded data
+    simdcsv::EncodingResult encoding;       ///< Detected encoding information
+
+    /// Returns true if loading was successful
+    operator bool() const { return data.data() != nullptr; }
+};
+
+
+/**
+ * @brief Loads a file with automatic encoding detection and transcoding.
+ *
+ * This function detects the encoding of a file (via BOM or heuristics),
+ * and automatically transcodes UTF-16 and UTF-32 files to UTF-8. The
+ * returned data is always UTF-8 (or ASCII-compatible) for parsing.
+ *
+ * Encoding detection order:
+ * 1. BOM detection (UTF-8, UTF-16 LE/BE, UTF-32 LE/BE)
+ * 2. Heuristic analysis (null byte patterns, UTF-8 validation)
+ *
+ * @param filename The path to the file to load.
+ * @param padding The number of extra bytes to allocate beyond the data size
+ *                for safe SIMD overreads.
+ *
+ * @return A LoadResult containing the data and encoding information.
+ *
+ * @throws std::runtime_error If the file cannot be opened, read, or transcoded.
+ *
+ * @note The caller is responsible for freeing the underlying buffer using
+ *       aligned_free((void*)result.data.data()). Do NOT use free() or delete.
+ *
+ * @example
+ * @code
+ * auto result = get_corpus_with_encoding("data.csv", 64);
+ * std::cout << "Encoding: " << encoding_to_string(result.encoding.encoding) << "\n";
+ * // ... parse result.data ...
+ * aligned_free((void*)result.data.data());
+ * @endcode
+ */
+LoadResult get_corpus_with_encoding(const std::string& filename, size_t padding);
+
+
+/**
+ * @brief Reads stdin with automatic encoding detection and transcoding.
+ *
+ * Similar to get_corpus_with_encoding(), but reads from stdin instead of
+ * a file. The data is fully buffered, then encoding is detected and
+ * transcoding is performed if necessary.
+ *
+ * @param padding The number of extra bytes to allocate beyond the data size
+ *                for safe SIMD overreads.
+ *
+ * @return A LoadResult containing the data and encoding information.
+ *
+ * @throws std::runtime_error If reading fails or transcoding fails.
+ *
+ * @note The caller is responsible for freeing the underlying buffer using
+ *       aligned_free((void*)result.data.data()). Do NOT use free() or delete.
+ */
+LoadResult get_corpus_stdin_with_encoding(size_t padding);
 
 #endif
