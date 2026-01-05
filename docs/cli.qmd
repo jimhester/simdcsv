@@ -207,7 +207,7 @@ scsv pretty ../test/data/quoted/escaped_quotes.csv
 
 ### Multi-threaded Parsing
 
-Use multiple threads for faster parsing of large files:
+By default, scsv uses all available CPU cores for parallel parsing. You can limit the thread count if needed:
 
 ```{bash}
 scsv count -t 4 ../test/data/real_world/contacts.csv
