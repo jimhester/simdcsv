@@ -743,7 +743,7 @@ static std::string formatLineEnding(simdcsv::Dialect::LineEnding le) {
   }
 }
 
-// Command: dialect - detect and output CSV dialect
+// Command: dialect - detect and output CSV dialect in human-readable or JSON format
 int cmdDialect(const char* filename, bool json_output) {
   std::basic_string_view<uint8_t> data;
 
