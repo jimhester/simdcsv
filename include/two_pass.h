@@ -308,7 +308,7 @@ class two_pass {
           continue;
         }
         if (needs_even) {
-          uint64_t quote_mask2 = find_quote_mask(in, quotes, ~0ULL) & mask;
+          uint64_t quote_mask2 = find_quote_mask(quotes, ~0ULL) & mask;
           uint64_t even_nl = quote_mask2 & nl;
           if (even_nl > 0) {
             out.first_even_nl = start + idx + trailing_zeroes(even_nl);
@@ -316,7 +316,7 @@ class two_pass {
           needs_even = false;
         }
         if (needs_odd) {
-          uint64_t quote_mask = find_quote_mask(in, quotes, 0ULL) & mask;
+          uint64_t quote_mask = find_quote_mask(quotes, 0ULL) & mask;
           uint64_t odd_nl = quote_mask & nl & mask;
           if (odd_nl > 0) {
             out.first_odd_nl = start + idx + trailing_zeroes(odd_nl);
@@ -472,7 +472,7 @@ class two_pass {
 
       uint64_t quotes = cmp_mask_against_input(in, static_cast<uint8_t>(quote_char)) & mask;
 
-      uint64_t quote_mask = find_quote_mask2(in, quotes, prev_iter_inside_quote);
+      uint64_t quote_mask = find_quote_mask2(quotes, prev_iter_inside_quote);
       uint64_t sep = cmp_mask_against_input(in, static_cast<uint8_t>(delimiter));
       uint64_t end_mask = cmp_mask_against_input(in, '\n');
       uint64_t field_sep = (end_mask | sep) & ~quote_mask;

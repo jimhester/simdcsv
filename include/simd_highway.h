@@ -84,8 +84,7 @@ HWY_ATTR really_inline uint64_t cmp_mask_against_input(const simd_input& in, uin
 // Find quote mask using carryless multiplication (PCLMULQDQ on x86, PMULL on ARM).
 // This computes a parallel prefix XOR over quote bit positions in constant time,
 // replacing a O(64) scalar loop with a single SIMD instruction (~28x speedup).
-// Pass by const reference to avoid ABI issues with 64-byte alignment on ARM.
-HWY_ATTR really_inline uint64_t find_quote_mask(const simd_input& in, uint64_t quote_bits,
+HWY_ATTR really_inline uint64_t find_quote_mask(uint64_t quote_bits,
                                                 uint64_t prev_iter_inside_quote) {
   // Use Highway's portable CLMul which maps to:
   // - x86: PCLMULQDQ instruction
@@ -114,7 +113,7 @@ HWY_ATTR really_inline uint64_t find_quote_mask(const simd_input& in, uint64_t q
 
 // Find quote mask with state tracking using carryless multiplication
 // This version updates prev_iter_inside_quote for the next iteration
-HWY_ATTR really_inline uint64_t find_quote_mask2(const simd_input& in, uint64_t quote_bits,
+HWY_ATTR really_inline uint64_t find_quote_mask2(uint64_t quote_bits,
                                                  uint64_t& prev_iter_inside_quote) {
   // Use Highway's portable CLMul which maps to:
   // - x86: PCLMULQDQ instruction

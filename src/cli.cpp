@@ -281,7 +281,7 @@ size_t countRowsSimd(const uint8_t* buf, size_t len) {
     uint64_t newlines = simdcsv::cmp_mask_against_input(in, '\n');
 
     // Build quote mask (1 = inside quote, 0 = outside)
-    uint64_t quote_mask = simdcsv::find_quote_mask2(in, quotes, prev_iter_inside_quote);
+    uint64_t quote_mask = simdcsv::find_quote_mask2(quotes, prev_iter_inside_quote);
 
     // Newlines outside quotes
     uint64_t valid_newlines = newlines & ~quote_mask;
