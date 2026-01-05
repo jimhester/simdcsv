@@ -138,6 +138,46 @@ TEST_F(ArrowOutputTest, BooleanDoublePromotion) {
     EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::DOUBLE);
 }
 
+// Bidirectional type promotion tests (Issue #251)
+// These tests verify that type promotion works correctly regardless of value order.
+TEST_F(ArrowOutputTest, BooleanIntPromotionReverse) {
+    // Integer first, then boolean-like values - should still promote to INT64
+    ArrowConvertOptions opts;
+    opts.infer_types = true;
+    auto result = parseAndConvert("value\n42\n0\n1\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
+TEST_F(ArrowOutputTest, BooleanToIntToDoubleChain) {
+    // Three-way promotion chain: BOOLEAN -> INT64 -> DOUBLE
+    // Values that could be boolean (0, 1), then integer (42), then double (3.14)
+    ArrowConvertOptions opts;
+    opts.infer_types = true;
+    auto result = parseAndConvert("value\n0\n1\n42\n3.14\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::DOUBLE);
+}
+
+TEST_F(ArrowOutputTest, MultipleBooleanWithInt) {
+    // Multiple boolean-like values (0, 1) repeated, then an integer
+    // Should promote to INT64 regardless of boolean repetition count
+    ArrowConvertOptions opts;
+    opts.infer_types = true;
+    auto result = parseAndConvert("value\n0\n1\n0\n1\n42\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
+TEST_F(ArrowOutputTest, DoubleFirstThenBoolean) {
+    // Double value first, then boolean-like values - should be DOUBLE
+    ArrowConvertOptions opts;
+    opts.infer_types = true;
+    auto result = parseAndConvert("value\n3.14\n0\n1\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::DOUBLE);
+}
+
 // Edge case tests
 TEST_F(ArrowOutputTest, SingleColumn) {
     auto result = parseAndConvert("name\nAlice\nBob\n");
