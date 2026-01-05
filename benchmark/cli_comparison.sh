@@ -154,8 +154,8 @@ benchmark_file() {
     echo "Analysis:"
     echo "  zsv single -> parallel speedup: $(echo "scale=2; $zsv_1t / $zsv_parallel" | bc)x"
     echo "  scsv single -> auto speedup: $(echo "scale=2; $scsv_1t / $scsv_auto" | bc)x"
-    echo "  zsv (1t) vs scsv (1t): zsv is $(echo "scale=2; $scsv_1t / $zsv_1t" | bc)x faster"
-    echo "  zsv (parallel) vs scsv (auto): $(echo "scale=2; $zsv_parallel / $scsv_auto" | bc)x (>1 means scsv faster)"
+    echo "  scsv (1t) vs zsv (1t): $(echo "scale=2; $zsv_1t / $scsv_1t" | bc)x (>1 means scsv faster)"
+    echo "  scsv (auto) vs zsv (parallel): $(echo "scale=2; $zsv_parallel / $scsv_auto" | bc)x (>1 means scsv faster)"
 
     # Store results for final summary
     echo "$size_mb,$zsv_1t,$zsv_parallel,$scsv_1t,$scsv_auto" >> "$TEMP_DIR/results.csv"
