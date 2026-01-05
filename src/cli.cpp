@@ -23,6 +23,7 @@
 
 #include "common_defs.h"
 #include "dialect.h"
+#include "encoding.h"
 #include "io_util.h"
 #include "mem_util.h"
 #include "simd_highway.h"
@@ -204,21 +205,37 @@ static bool isStdinInput(const char* filename) {
 
 // Parse a file or stdin - returns true on success
 // Caller is responsible for freeing data with aligned_free()
+// If detected_encoding is provided, the detected encoding will be stored there
 bool parseFile(const char* filename, int n_threads,
                std::basic_string_view<uint8_t>& data, simdcsv::index& idx,
                const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
-               bool auto_detect = false) {
+               bool auto_detect = false,
+               simdcsv::EncodingResult* detected_encoding = nullptr) {
   try {
+    LoadResult load_result;
     if (isStdinInput(filename)) {
-      data = get_corpus_stdin(SIMDCSV_PADDING);
+      load_result = get_corpus_stdin_with_encoding(SIMDCSV_PADDING);
     } else {
-      data = get_corpus(filename, SIMDCSV_PADDING);
+      load_result = get_corpus_with_encoding(filename, SIMDCSV_PADDING);
+    }
+    data = load_result.data;
+
+    // Store detected encoding if caller wants it
+    if (detected_encoding) {
+      *detected_encoding = load_result.encoding;
+    }
+
+    // Report encoding if transcoding occurred
+    if (load_result.encoding.needs_transcoding) {
+      cerr << "Transcoded from "
+           << simdcsv::encoding_to_string(load_result.encoding.encoding)
+           << " to UTF-8" << endl;
     }
   } catch (const std::exception& e) {
     if (isStdinInput(filename)) {
       cerr << "Error: Could not read from stdin: " << e.what() << endl;
     } else {
-      cerr << "Error: Could not load file '" << filename << "'" << endl;
+      cerr << "Error: Could not load file '" << filename << "': " << e.what() << endl;
     }
     return false;
   }
@@ -871,18 +888,22 @@ static std::string formatLineEnding(simdcsv::Dialect::LineEnding le) {
 // Command: dialect - detect and output CSV dialect in human-readable or JSON format
 int cmdDialect(const char* filename, bool json_output) {
   std::basic_string_view<uint8_t> data;
+  simdcsv::EncodingResult enc_result;
 
   try {
+    LoadResult load_result;
     if (isStdinInput(filename)) {
-      data = get_corpus_stdin(SIMDCSV_PADDING);
+      load_result = get_corpus_stdin_with_encoding(SIMDCSV_PADDING);
     } else {
-      data = get_corpus(filename, SIMDCSV_PADDING);
+      load_result = get_corpus_with_encoding(filename, SIMDCSV_PADDING);
     }
+    data = load_result.data;
+    enc_result = load_result.encoding;
   } catch (const std::exception& e) {
     if (isStdinInput(filename)) {
       cerr << "Error: Could not read from stdin: " << e.what() << endl;
     } else {
-      cerr << "Error: Could not load file '" << filename << "'" << endl;
+      cerr << "Error: Could not load file '" << filename << "': " << e.what() << endl;
     }
     return 1;
   }
@@ -929,6 +950,7 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "\",\n";
     cout << "  \"escape\": \"" << (d.double_quote ? "double" : "backslash") << "\",\n";
     cout << "  \"line_ending\": \"" << formatLineEnding(d.line_ending) << "\",\n";
+    cout << "  \"encoding\": \"" << simdcsv::encoding_to_string(enc_result.encoding) << "\",\n";
     cout << "  \"has_header\": " << (result.has_header ? "true" : "false") << ",\n";
     cout << "  \"columns\": " << result.detected_columns << ",\n";
     cout << "  \"confidence\": " << result.confidence << "\n";
@@ -940,6 +962,7 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "  Quote:        " << formatQuoteChar(d.quote_char) << "\n";
     cout << "  Escape:       " << (d.double_quote ? "double-quote (\"\")" : "backslash (\\)") << "\n";
     cout << "  Line ending:  " << formatLineEnding(d.line_ending) << "\n";
+    cout << "  Encoding:     " << simdcsv::encoding_to_string(enc_result.encoding) << "\n";
     cout << "  Has header:   " << (result.has_header ? "yes" : "no") << "\n";
     cout << "  Columns:      " << result.detected_columns << "\n";
     cout << "  Confidence:   " << static_cast<int>(result.confidence * 100) << "%\n";
