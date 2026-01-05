@@ -606,3 +606,378 @@ TEST_F(CAPITest, FullWorkflowFromFile) {
     simdcsv_parser_destroy(parser);
     simdcsv_buffer_destroy(buffer);
 }
+
+// ============================================================================
+// WELL-FORMED CSV NEGATIVE TESTS (No False Positives)
+// ============================================================================
+//
+// These tests verify that well-formed CSV data does NOT trigger errors
+// when parsed with an error collector enabled. This ensures the error
+// detection system doesn't produce false positives.
+
+TEST_F(CAPITest, WellFormedMinimalCSV) {
+    // Minimal valid CSV: single header, single data row
+    const uint8_t data[] = "a,b,c\n1,2,3\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Minimal valid CSV should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for minimal valid CSV";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedQuotedFields) {
+    // Properly quoted fields with embedded content
+    const uint8_t data[] = "name,value\n\"Alice\",\"100\"\n\"Bob\",\"200\"\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Quoted fields should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for properly quoted fields";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedEscapedQuotes) {
+    // Properly escaped quotes using double-quote syntax (RFC 4180)
+    const uint8_t data[] = "text,desc\n\"He said \"\"Hello\"\"\",\"greeting\"\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Escaped quotes should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for properly escaped quotes";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedCRLFLineEndings) {
+    // Consistent CRLF line endings
+    const uint8_t data[] = "a,b,c\r\n1,2,3\r\n4,5,6\r\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "CRLF line endings should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for consistent CRLF line endings";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedLFLineEndings) {
+    // Consistent LF line endings (Unix-style)
+    const uint8_t data[] = "a,b,c\n1,2,3\n4,5,6\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "LF line endings should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for consistent LF line endings";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedDistinctColumns) {
+    // Distinct column names (no duplicates)
+    const uint8_t data[] = "id,name,value,status\n1,Alice,100,active\n2,Bob,200,inactive\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Distinct columns should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for distinct column names";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedEmptyFields) {
+    // Empty fields are valid CSV
+    const uint8_t data[] = "a,b,c\n,,\n1,,3\n,2,\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Empty fields should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for empty fields";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedQuotedEmptyFields) {
+    // Quoted empty fields are valid CSV
+    const uint8_t data[] = "a,b,c\n\"\",\"\",\"\"\n\"x\",\"\",\"z\"\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Quoted empty fields should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for quoted empty fields";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedNewlinesInQuotes) {
+    // Newlines inside quoted fields are valid CSV
+    const uint8_t data[] = "name,address\n\"John\",\"123 Main St\nApt 4\"\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Newlines in quoted fields should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for newlines in quotes";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedDelimitersInQuotes) {
+    // Delimiters (commas) inside quoted fields are valid CSV
+    const uint8_t data[] = "name,values\n\"Smith, John\",\"a,b,c\"\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Delimiters in quoted fields should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for delimiters in quotes";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedTripleQuotesRFC4180) {
+    // Triple quotes """value""" represent a quoted value with embedded quotes (RFC 4180)
+    const uint8_t data[] = "text\n\"\"\"quoted\"\"\"\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Triple quote RFC 4180 syntax should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for valid triple quote syntax";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedNoFinalNewline) {
+    // CSV without final newline is valid
+    const uint8_t data[] = "a,b,c\n1,2,3";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "CSV without final newline should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for missing final newline";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedSingleColumn) {
+    // Single column CSV is valid
+    const uint8_t data[] = "value\n1\n2\n3\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Single column CSV should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for single column";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedWithDialect) {
+    // Well-formed CSV with explicit dialect
+    const uint8_t data[] = "a,b,c\n\"x\",\"y\",\"z\"\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+    simdcsv_dialect_t* dialect = simdcsv_dialect_create(',', '"', '"', true);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, dialect);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Well-formed CSV with dialect should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected with explicit dialect";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_dialect_destroy(dialect);
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedStrictMode) {
+    // Well-formed CSV should pass in strict mode without triggering early exit
+    const uint8_t data[] = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_STRICT, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Well-formed CSV should parse successfully in strict mode";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected in strict mode for valid CSV";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedParseAuto) {
+    // Well-formed CSV with automatic dialect detection
+    const uint8_t data[] = "name,value,count\nalpha,1,100\nbeta,2,200\n";
+    size_t len = sizeof(data) - 1;
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_create(data, len);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(len, 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_detection_result_t* detected = nullptr;
+    simdcsv_error_t err = simdcsv_parse_auto(parser, buffer, index, errors, &detected);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Well-formed CSV should parse successfully with auto detection";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for auto-detected valid CSV";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    if (detected) {
+        EXPECT_TRUE(simdcsv_detection_result_success(detected)) << "Detection should succeed";
+        simdcsv_detection_result_destroy(detected);
+    }
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, WellFormedFromFile) {
+    // Well-formed CSV loaded from file should not trigger errors
+    std::string content = "id,name,value\n1,alpha,100\n2,beta,200\n3,gamma,300\n";
+    std::string filename = createTestFile(content);
+
+    simdcsv_buffer_t* buffer = simdcsv_buffer_load_file(filename.c_str());
+    ASSERT_NE(buffer, nullptr);
+    simdcsv_parser_t* parser = simdcsv_parser_create();
+    simdcsv_index_t* index = simdcsv_index_create(simdcsv_buffer_length(buffer), 1);
+    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 0);
+
+    simdcsv_error_t err = simdcsv_parse(parser, buffer, index, errors, nullptr);
+    EXPECT_EQ(err, SIMDCSV_OK) << "Well-formed CSV from file should parse successfully";
+    EXPECT_FALSE(simdcsv_error_collector_has_errors(errors)) << "No errors expected for valid CSV from file";
+    EXPECT_FALSE(simdcsv_error_collector_has_fatal(errors)) << "No fatal errors expected";
+    EXPECT_EQ(simdcsv_error_collector_count(errors), 0u) << "Error count should be zero";
+
+    simdcsv_error_collector_destroy(errors);
+    simdcsv_index_destroy(index);
+    simdcsv_parser_destroy(parser);
+    simdcsv_buffer_destroy(buffer);
+}
