@@ -4,56 +4,178 @@ title: "Getting Started"
 
 ## Requirements
 
-- CMake 3.14 or higher
-- C++17 compatible compiler (GCC 8+, Clang 7+, or Apple Clang 11+)
-- Git (for fetching dependencies)
+### Minimum Requirements
 
-## Building from Source
+| Component | Minimum Version | Notes |
+|-----------|-----------------|-------|
+| CMake | 3.14+ | Required for FetchContent |
+| C++ Standard | C++17 | `-std=c++17` |
+| Git | Any recent | For fetching dependencies |
 
-### Basic Build
+### Supported Compilers
+
+| Platform | Compiler | Minimum Version |
+|----------|----------|-----------------|
+| Linux | GCC | 8+ |
+| Linux | Clang | 7+ |
+| macOS | Apple Clang | 11+ (Xcode 11+) |
+| macOS | Clang (Homebrew) | 7+ |
+
+### Supported SIMD Architectures
+
+simdcsv uses [Google Highway](https://github.com/google/highway) for portable SIMD acceleration:
+
+- **x86-64**: SSE4.2, AVX2
+- **ARM64**: NEON
+
+The library automatically detects and uses the best available SIMD instruction set at runtime.
+
+## Installation Methods
+
+### Method 1: Build from Source
 
 ```bash
 # Clone the repository
 git clone https://github.com/jimhester/simdcsv.git
 cd simdcsv
 
-# Configure with CMake (Release build)
+# Configure and build (Release mode)
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-
-# Build
 cmake --build build
 ```
 
-### Debug Build
+The build produces:
 
-For development with debug symbols:
+- `build/libsimdcsv_lib.a` - Static library
+- `build/scsv` - Command-line tool
+
+### Method 2: CMake FetchContent (Recommended for Projects)
+
+Add simdcsv as a dependency in your CMakeLists.txt:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(simdcsv
+  GIT_REPOSITORY https://github.com/jimhester/simdcsv.git
+  GIT_TAG main  # or a specific version tag
+)
+FetchContent_MakeAvailable(simdcsv)
+
+target_link_libraries(your_target PRIVATE simdcsv_lib)
+```
+
+### Method 3: Add as Git Submodule
+
+```bash
+git submodule add https://github.com/jimhester/simdcsv.git external/simdcsv
+```
+
+Then in your CMakeLists.txt:
+
+```cmake
+add_subdirectory(external/simdcsv)
+target_link_libraries(your_target PRIVATE simdcsv_lib)
+```
+
+## Build Options
+
+### CMake Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `BUILD_TESTING` | ON | Build test executables |
+| `BUILD_BENCHMARKS` | ON | Build benchmark executables |
+| `BUILD_SHARED_LIBS` | OFF | Build shared library instead of static |
+| `ENABLE_COVERAGE` | OFF | Enable code coverage reporting |
+| `SIMDCSV_ENABLE_ARROW` | OFF | Enable Apache Arrow output integration |
+
+### Build Configurations
+
+#### Release Build (Recommended for Production)
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+#### Debug Build (For Development)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
 
-### Build with Code Coverage
+#### Minimal Release Build (Library and CLI Only)
 
-To generate code coverage reports:
+For the smallest build without tests or benchmarks:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF
+cmake --build build
+```
+
+#### Shared Library Build
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
+cmake --build build
+```
+
+#### Build with Code Coverage
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
 cmake --build build
 ```
 
+## Platform-Specific Instructions
+
+### Linux (Ubuntu/Debian)
+
+```bash
+# Install build dependencies
+sudo apt-get update
+sudo apt-get install -y cmake build-essential git
+
+# Clone and build
+git clone https://github.com/jimhester/simdcsv.git
+cd simdcsv
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+### macOS
+
+```bash
+# Install Xcode Command Line Tools (if not already installed)
+xcode-select --install
+
+# Or install CMake via Homebrew
+brew install cmake
+
+# Clone and build
+git clone https://github.com/jimhester/simdcsv.git
+cd simdcsv
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
 ## Running Tests
 
-The test suite includes 79 tests covering well-formed CSV parsing and error handling:
+The test suite includes comprehensive coverage across multiple test executables:
 
 ```bash
 # Run all tests with CTest
 cd build && ctest --output-on-failure
 
-# Or run specific test binaries
-./build/simdcsv_test           # 42 well-formed CSV tests
-./build/error_handling_test    # 37 error handling tests
+# Run specific test executables
+./build/simdcsv_test           # Well-formed CSV parsing tests
+./build/error_handling_test    # Error handling tests
 ./build/csv_parsing_test       # Integration tests
+./build/dialect_detection_test # Dialect auto-detection tests
+./build/streaming_test         # Streaming parser tests
+./build/c_api_test             # C API tests
+./build/cli_test               # CLI integration tests
 ```
 
 ## Running Benchmarks
@@ -64,25 +186,42 @@ To benchmark parser performance:
 ./build/simdcsv_benchmark
 ```
 
+### Optional External Parser Benchmarks
+
+Compare simdcsv against other CSV parsers:
+
+```bash
+# Enable zsv comparison
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_ZSV_BENCHMARK=ON
+cmake --build build
+
+# Enable DuckDB comparison (longer build time)
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_DUCKDB_BENCHMARK=ON
+cmake --build build
+```
+
 ## Command Line Tool
 
 The build produces an `scsv` command line tool for working with CSV files:
 
 ```bash
 # Count rows in a CSV file
-scsv count data.csv
+./build/scsv count data.csv
 
 # Display first 10 rows
-scsv head data.csv
+./build/scsv head data.csv
 
 # Select specific columns by name or index
-scsv select -c name,age data.csv
+./build/scsv select -c name,age data.csv
 
 # Pretty-print with aligned columns
-scsv pretty data.csv
+./build/scsv pretty data.csv
 
-# Get file info (rows, columns, dialect)
-scsv info data.csv
+# Get file info (rows, columns, detected dialect)
+./build/scsv info data.csv
+
+# Detect CSV dialect (delimiter, quoting, line endings)
+./build/scsv dialect data.csv
 ```
 
 See the [CLI Documentation](cli.qmd) for complete usage information.
@@ -94,27 +233,91 @@ All dependencies are automatically fetched via CMake's FetchContent:
 | Dependency | Version | Purpose |
 |------------|---------|---------|
 | [Google Highway](https://github.com/google/highway) | 1.3.0 | Portable SIMD abstraction |
-| [Google Test](https://github.com/google/googletest) | 1.14.0 | Unit testing framework |
-| [Google Benchmark](https://github.com/google/benchmark) | 1.8.3 | Performance benchmarking |
+| [Google Test](https://github.com/google/googletest) | 1.14.0 | Unit testing (optional) |
+| [Google Benchmark](https://github.com/google/benchmark) | 1.8.3 | Performance benchmarking (optional) |
 
-## Usage Example
+## C++ Library Usage
+
+### Including the Library
+
+Include the main header to access all public functionality:
 
 ```cpp
-#include "two_pass.h"
-#include "io_util.h"
+#include <simdcsv.h>
+```
+
+### Basic Parsing Example
+
+```cpp
+#include <simdcsv.h>
+#include <iostream>
 
 int main() {
-    // Load CSV file with SIMD-aligned padding
-    auto [buf, len] = simdcsv::load_file("data.csv");
+    // Load CSV file into SIMD-aligned buffer
+    simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
+    if (!buffer.valid()) {
+        std::cerr << "Failed to load file\n";
+        return 1;
+    }
 
-    // Initialize parser with thread count
-    simdcsv::two_pass parser;
-    auto idx = parser.init(len, 4);  // 4 threads
+    // Create parser and error collector
+    simdcsv::Parser parser;
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
 
-    // Parse the file
-    parser.parse(buf, idx, len);
+    // Parse with automatic dialect detection
+    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
 
-    // Access field indexes...
+    if (result.success()) {
+        std::cout << "Columns: " << result.num_columns() << "\n";
+        std::cout << "Delimiter: '" << result.dialect.delimiter << "'\n";
+    }
+
+    if (errors.has_errors()) {
+        std::cerr << errors.summary() << "\n";
+    }
+
+    return 0;
+}
+```
+
+### Parsing with Known Dialect
+
+If you know the CSV dialect in advance:
+
+```cpp
+#include <simdcsv.h>
+
+int main() {
+    simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
+
+    simdcsv::Parser parser;
+    simdcsv::Dialect dialect = simdcsv::Dialect::csv();  // Standard CSV
+    // Or: simdcsv::Dialect::tsv() for tab-separated
+    // Or: simdcsv::Dialect::with_delimiter(';') for semicolon-separated
+
+    auto result = parser.parse(buffer.data(), buffer.size(), dialect);
+
+    return result.success() ? 0 : 1;
+}
+```
+
+### Dialect Detection
+
+Detect the dialect of a CSV file without parsing:
+
+```cpp
+#include <simdcsv.h>
+#include <iostream>
+
+int main() {
+    auto detection = simdcsv::detect_dialect_file("data.csv");
+
+    if (detection.success()) {
+        std::cout << "Delimiter: '" << detection.dialect.delimiter << "'\n";
+        std::cout << "Quote char: '" << detection.dialect.quote << "'\n";
+        std::cout << "Confidence: " << (detection.confidence * 100) << "%\n";
+    }
+
     return 0;
 }
 ```
@@ -124,27 +327,99 @@ int main() {
 simdcsv provides three error handling modes for different use cases:
 
 ```cpp
-#include "error.h"
-#include "two_pass.h"
+#include <simdcsv.h>
 
 // Strict mode - stop on first error
-simdcsv::ErrorCollector errors(simdcsv::ErrorMode::STRICT);
+simdcsv::ErrorCollector strict_errors(simdcsv::ErrorMode::STRICT);
 
 // Permissive mode - collect all errors, try to recover
-simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+simdcsv::ErrorCollector permissive_errors(simdcsv::ErrorMode::PERMISSIVE);
 
 // Best-effort mode - ignore errors, parse what's possible
-simdcsv::ErrorCollector errors(simdcsv::ErrorMode::BEST_EFFORT);
-
-// Parse with error collection
-simdcsv::two_pass parser;
-auto idx = parser.init(len, 1);
-parser.parse_with_errors(buf, idx, len, errors);
-
-// Check results
-if (errors.has_errors()) {
-    std::cerr << errors.summary() << std::endl;
-}
+simdcsv::ErrorCollector best_effort(simdcsv::ErrorMode::BEST_EFFORT);
 ```
 
 See [Error Handling](error-handling.qmd) for detailed documentation.
+
+## CMake Integration Guide
+
+### Full Example CMakeLists.txt
+
+```cmake
+cmake_minimum_required(VERSION 3.14)
+project(my_csv_app LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Fetch simdcsv
+include(FetchContent)
+FetchContent_Declare(simdcsv
+  GIT_REPOSITORY https://github.com/jimhester/simdcsv.git
+  GIT_TAG main
+)
+
+# Optionally disable tests/benchmarks to speed up build
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(simdcsv)
+
+# Your application
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE simdcsv_lib)
+```
+
+### Linking to the Library
+
+The library target is `simdcsv_lib`. It exports the include directories automatically:
+
+```cmake
+target_link_libraries(your_target PRIVATE simdcsv_lib)
+```
+
+### Available Headers
+
+After linking, you can include:
+
+| Header | Description |
+|--------|-------------|
+| `<simdcsv.h>` | Main header - includes everything |
+| `<simdcsv_c.h>` | C API header |
+| `<error.h>` | Error types and ErrorCollector |
+| `<dialect.h>` | Dialect detection and types |
+| `<streaming.h>` | Streaming parser for large files |
+
+## Troubleshooting
+
+### Build Fails with "CMake version too old"
+
+Ensure you have CMake 3.14 or newer:
+
+```bash
+cmake --version
+# If too old, update CMake
+```
+
+### Compiler Doesn't Support C++17
+
+Update your compiler or specify a newer version:
+
+```bash
+# Ubuntu: Install newer GCC
+sudo apt-get install g++-10
+cmake -B build -DCMAKE_CXX_COMPILER=g++-10
+```
+
+### SIMD Not Available
+
+The library will automatically fall back to scalar implementations if SIMD instructions aren't available. Performance will be reduced but functionality is preserved.
+
+### Tests Fail with "Test data not found"
+
+Ensure the test data directory exists:
+
+```bash
+ls test/data/
+# Should contain subdirectories: basic, quoted, separators, etc.
+```
