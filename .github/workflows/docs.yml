@@ -29,6 +29,14 @@ jobs:
       - name: Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
+      - name: Setup Python for Jupyter
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Jupyter dependencies
+        run: pip install jupyter nbformat nbclient
+
       - name: Install Doxygen
         run: sudo apt-get update && sudo apt-get install -y doxygen
 
