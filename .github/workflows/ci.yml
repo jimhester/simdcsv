@@ -81,12 +81,15 @@ jobs:
       run: |
         cd build
         # Capture coverage using the config file from repo root
-        lcov --config-file ../.lcovrc --capture --directory . --output-file coverage.info --ignore-errors mismatch,unused
+        # Enable branch coverage with --rc branch_coverage=1
+        lcov --config-file ../.lcovrc --rc branch_coverage=1 --capture --directory . --output-file coverage.info --ignore-errors mismatch,unused
         # Remove test, benchmark, and external dependencies from coverage
-        lcov --config-file ../.lcovrc --remove coverage.info '*/test/*' '*/benchmark/*' '*/build/_deps/*' '/usr/*' --output-file coverage.info --ignore-errors unused
+        lcov --config-file ../.lcovrc --rc branch_coverage=1 --remove coverage.info '*/test/*' '*/benchmark/*' '*/build/_deps/*' '/usr/*' --output-file coverage.info --ignore-errors unused
         # Show what files remain in the coverage report
         echo "=== Files in final coverage report ==="
         lcov --list coverage.info
+        echo "=== Coverage Summary (including branch coverage) ==="
+        lcov --rc branch_coverage=1 --summary coverage.info
         echo "=== Verifying no test/benchmark files remain ==="
         if grep -E "^SF:.*/test/|^SF:.*/benchmark/" coverage.info; then
           echo "ERROR: test or benchmark files found in coverage report!"
