@@ -293,7 +293,8 @@ int main() {
     simdcsv::Parser parser;
     simdcsv::Dialect dialect = simdcsv::Dialect::csv();  // Standard CSV
     // Or: simdcsv::Dialect::tsv() for tab-separated
-    // Or: simdcsv::Dialect::with_delimiter(';') for semicolon-separated
+    // Or: simdcsv::Dialect::semicolon() for semicolon-separated
+    // Or: simdcsv::Dialect::pipe() for pipe-separated
 
     auto result = parser.parse(buffer.data(), buffer.size(), dialect);
 
@@ -314,7 +315,7 @@ int main() {
 
     if (detection.success()) {
         std::cout << "Delimiter: '" << detection.dialect.delimiter << "'\n";
-        std::cout << "Quote char: '" << detection.dialect.quote << "'\n";
+        std::cout << "Quote char: '" << detection.dialect.quote_char << "'\n";
         std::cout << "Confidence: " << (detection.confidence * 100) << "%\n";
     }
 
