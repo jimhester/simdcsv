@@ -1913,10 +1913,11 @@ TEST(GetContextEdgeCaseTest, WithNullByte) {
 }
 
 TEST(GetContextEdgeCaseTest, WithNonPrintable) {
-    std::string content = "ab\x01\x02cd";  // Non-printable characters
-    auto ctx = two_pass::get_context(
-        reinterpret_cast<const uint8_t*>(content.data()),
-        content.size(), 3, 3);
+    // Construct buffer with explicit non-printable characters
+    uint8_t data[10] = {'a', 'b', 0x01, 0x02, 'c', 'd', '\0'};
+    size_t len = 6;
+
+    auto ctx = two_pass::get_context(data, len, 3, 3);
 
     // Non-printable should be shown as ?
     EXPECT_NE(ctx.find("?"), std::string::npos);
