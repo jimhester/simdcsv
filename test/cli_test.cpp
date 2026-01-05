@@ -381,12 +381,38 @@ TEST_F(CliTest, HeadWithTabDelimiter) {
 }
 
 TEST_F(CliTest, AutoDetectDialect) {
-  // Note: count uses optimized row counting that doesn't parse the file,
-  // so we use head command which actually parses and shows auto-detect message
-  auto result = CliRunner::run("head -a " + testDataPath("separators/semicolon.csv"));
+  // Auto-detect is now enabled by default, so we just run head without -d flag
+  // and verify it correctly parses the semicolon-separated file
+  auto result = CliRunner::run("head " + testDataPath("separators/semicolon.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  // Should auto-detect and report the dialect
-  EXPECT_TRUE(result.output.find("Auto-detected") != std::string::npos);
+  // Should auto-detect semicolon delimiter and output using semicolons
+  EXPECT_TRUE(result.output.find(";") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandText) {
+  // Test the dialect command with human-readable output
+  auto result = CliRunner::run("dialect " + testDataPath("separators/semicolon.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("semicolon") != std::string::npos);
+  EXPECT_TRUE(result.output.find("CLI flags:") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandJson) {
+  // Test the dialect command with JSON output
+  auto result = CliRunner::run("dialect -j " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("\"delimiter\": \"\\t\"") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"confidence\":") != std::string::npos);
+}
+
+TEST_F(CliTest, AutoDetectDisabledWithExplicitDelimiter) {
+  // When -d is specified, auto-detect should be disabled
+  // Even for a semicolon file, if we specify comma, it should use comma
+  auto result = CliRunner::run("head -d comma " + testDataPath("separators/semicolon.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Output should NOT have semicolon as delimiter (would be comma)
+  // The file has "A;B;C" as content - if we parse as comma-separated,
+  // the whole line becomes a single field
 }
 
 // =============================================================================
@@ -548,9 +574,11 @@ TEST_F(CliTest, SelectWithMultipleColumns) {
 }
 
 TEST_F(CliTest, InfoWithAutoDetect) {
-  auto result = CliRunner::run("info -a " + testDataPath("separators/semicolon.csv"));
+  // Auto-detect is now enabled by default
+  auto result = CliRunner::run("info " + testDataPath("separators/semicolon.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.output.find("Auto-detected") != std::string::npos);
+  // Should show dialect info with detected semicolon
+  EXPECT_TRUE(result.output.find("Dialect:") != std::string::npos);
 }
 
 // =============================================================================
@@ -725,20 +753,21 @@ TEST_F(CliTest, BufferBoundaryFile) {
 // Invalid Option Combinations Tests
 // =============================================================================
 
-TEST_F(CliTest, AutoDetectWithExplicitDelimiter) {
-  // When -a (auto-detect) is used with explicit -d, auto-detect should take precedence
-  auto result = CliRunner::run("head -a -d semicolon " + testDataPath("basic/simple.csv"));
+TEST_F(CliTest, ExplicitDelimiterDisablesAutoDetect) {
+  // When -d (explicit delimiter) is used, auto-detect should be disabled
+  // For a comma file with -d semicolon, it should treat each line as one field
+  auto result = CliRunner::run("head -d semicolon " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  // Auto-detect should report its finding
-  EXPECT_TRUE(result.output.find("Auto-detected") != std::string::npos);
+  // Should NOT show auto-detect message since -d was specified
+  EXPECT_TRUE(result.output.find("Auto-detected") == std::string::npos);
 }
 
-TEST_F(CliTest, AutoDetectWithExplicitDelimiterOutput) {
-  // Verify the auto-detect correctly identifies comma-delimited file
-  auto result = CliRunner::run("info -a -d semicolon " + testDataPath("basic/simple.csv"));
+TEST_F(CliTest, AutoDetectByDefault) {
+  // Verify auto-detect works by default without -a flag
+  auto result = CliRunner::run("info " + testDataPath("separators/semicolon.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  // Should auto-detect comma, not use semicolon
-  EXPECT_TRUE(result.output.find("delimiter=','") != std::string::npos);
+  // Should auto-detect semicolon
+  EXPECT_TRUE(result.output.find("';'") != std::string::npos);
 }
 
 TEST_F(CliTest, NoHeaderWithColumnNameSelect) {
