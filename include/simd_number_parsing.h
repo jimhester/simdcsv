@@ -1131,7 +1131,7 @@ really_inline ExtractResult<IntType> parse_integer_simd(const char* str, size_t 
 
     // Check max_integer_digits limit (matching scalar parse_integer behavior)
     const char* digit_start = ptr;
-    if (*ptr == '-' || *ptr == '+') ++digit_start;
+    if (ptr < end && (*ptr == '-' || *ptr == '+')) ++digit_start;
     size_t digit_count = end - digit_start;
     if (digit_count > config.max_integer_digits) {
         return {std::nullopt, "Integer too large"};
