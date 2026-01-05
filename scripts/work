@@ -1,14 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-# start-issue.sh - Start Claude Code session(s) for GitHub issue(s)
+# work - Start Claude Code session(s) for GitHub issue(s)
 #
 # By default, spawns each issue in a new iTerm2 tab (macOS only).
 # Use --here to run in the current terminal instead.
 #
-# Usage: ./start-issue.sh <issue> [issue2 ...]      # Each in new tab (default)
-#        ./start-issue.sh --here <issue>            # Run in current terminal
-#        ./start-issue.sh "feature description"    # New feature branch
+# Usage: ./work <issue> [issue2 ...]      # Each in new tab (default)
+#        ./work --here <issue>            # Run in current terminal
+#        ./work "feature description"    # New feature branch
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -69,7 +69,7 @@ spawn_in_new_tab() {
     local escaped_issue escaped_dir escaped_script
     escaped_issue=$(printf '%q' "$issue")
     escaped_dir=$(printf '%q' "$current_dir")
-    escaped_script=$(printf '%q' "${SCRIPT_DIR}/start-issue.sh")
+    escaped_script=$(printf '%q' "${SCRIPT_DIR}/work")
 
     # Build the command to run in the new tab
     local cmd="${escaped_script} --here ${escaped_issue}"
