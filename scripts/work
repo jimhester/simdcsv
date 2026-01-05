@@ -300,13 +300,16 @@ Repeat until the PR is ready to merge:
 4. **Address critical feedback**: Fix any issues marked as "REQUEST_CHANGES" or critical comments. Respond to review comments as you address them.
 5. **Re-request review if needed**: After addressing feedback, re-request review if appropriate
 
-### Phase 4: Merge
+### Phase 4: Merge (from main repo)
 Once CI passes and there are no blocking reviews:
-1. Merge the PR using \`gh pr merge --squash\` (do NOT use --delete-branch, it fails with worktrees)
-2. Confirm the merge succeeded
+1. **FIRST navigate to the main repo directory**: \`cd ${REPO_ROOT}\`
+   - This is CRITICAL: \`gh pr merge\` can invalidate the worktree directory (see https://github.com/cli/cli/issues/3442)
+   - All subsequent commands MUST be run from the main repo directory
+2. Merge the PR using \`gh pr merge <PR-NUMBER> --squash\` (use explicit PR number, do NOT use --delete-branch)
+3. Confirm the merge succeeded
 
 ### Phase 5: Follow-up Issues (REQUIRED)
-**IMPORTANT: Do this BEFORE cleaning up the worktree so you have full context.**
+**IMPORTANT: You should already be in the main repo directory (${REPO_ROOT}) from Phase 4.**
 **After merging, you MUST review for follow-up issues.** This is a critical step that ensures technical debt and improvements are tracked.
 
 **Check these sources for follow-up items:**
@@ -324,7 +327,7 @@ Once CI passes and there are no blocking reviews:
 - Specific problem or improvement
 - Proposed solution if known
 
-**Example command:**
+**Example command (run from main repo directory):**
 \`\`\`bash
 gh issue create --title "Add SIMD support to ValueExtractor" --body "Background: PR #93 added SIMD parsers but ValueExtractor still uses scalar..."
 \`\`\`
@@ -332,9 +335,9 @@ gh issue create --title "Add SIMD support to ValueExtractor" --body "Background:
 **If no follow-up issues are needed, explicitly confirm:** "Reviewed for follow-up issues: none identified."
 
 ### Phase 6: Cleanup
-After creating any follow-up issues, clean up the worktree:
-1. Navigate to the main repo directory (NOT the worktree)
-2. Run: \`git worktree remove <worktree-path>\` (removes this worktree)
+After creating any follow-up issues, clean up the worktree (from main repo directory):
+1. Verify you are in the main repo: \`pwd\` should show ${REPO_ROOT}
+2. Run: \`git worktree remove <worktree-path>\` or \`git worktree remove --force <worktree-path>\` if needed
 3. Run: \`git branch -d <branch-name>\` (deletes the local branch)
 4. The remote branch is automatically deleted by GitHub after merge
 
