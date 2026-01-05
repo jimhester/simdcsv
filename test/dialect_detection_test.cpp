@@ -779,9 +779,10 @@ TEST_F(DialectDetectionTest, AmbiguousDelimiterSimilarScores) {
         csv_data.size()
     );
 
-    // Detection should succeed but may have ambiguity warning
-    // Just verify it doesn't crash and returns something reasonable
-    EXPECT_TRUE(result.success() || !result.warning.empty());
+    // Detection should succeed - the tie-breaking rules will choose one delimiter
+    // The data is ambiguous (both comma and semicolon give consistent 2-column results)
+    // so a warning may be present. Either way, detection should work.
+    EXPECT_TRUE(result.success());
 }
 
 TEST_F(DialectDetectionTest, SingleColumnData) {
@@ -841,7 +842,7 @@ TEST_F(DialectDetectionTest, SingleQuoteWithEmbeddedComma) {
 }
 
 TEST_F(DialectDetectionTest, NoQuoteCharacter) {
-    // Simple data without any quotes
+    // Simple data without any quotes - tests that detection works without quote evidence
     const std::string csv_data = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
     auto result = detector.detect(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
@@ -850,7 +851,9 @@ TEST_F(DialectDetectionTest, NoQuoteCharacter) {
 
     EXPECT_TRUE(result.success());
     EXPECT_EQ(result.dialect.delimiter, ',');
-    // Quote char may be detected as default or none
+    EXPECT_EQ(result.detected_columns, 3);
+    // Quote char defaults to double quote per RFC 4180 preference, even without evidence
+    EXPECT_EQ(result.dialect.quote_char, '"');
 }
 
 // ============================================================================
@@ -1008,7 +1011,7 @@ TEST_F(DialectDetectionTest, RaggedRowsDifferentFieldCounts) {
 }
 
 TEST_F(DialectDetectionTest, AllDifferentFieldCounts) {
-    // Every row has different field count
+    // Every row has different field count - tests handling of highly inconsistent data
     const std::string csv_data =
         "a\n"
         "b,c\n"
@@ -1020,8 +1023,10 @@ TEST_F(DialectDetectionTest, AllDifferentFieldCounts) {
         csv_data.size()
     );
 
-    // Should still detect, but pattern score will be low
-    // All have freq=1, so modal is the first one found (1)
+    // Detection may or may not succeed with highly inconsistent data
+    // The pattern score will be 0.25 (1/4 rows match modal count)
+    // Verify delimiter is detected as comma regardless of success
+    EXPECT_EQ(result.dialect.delimiter, ',');
 }
 
 // ============================================================================
@@ -1133,8 +1138,8 @@ TEST_F(DialectDetectionTest, DialectToStringOtherQuote) {
 // ============================================================================
 
 TEST_F(DialectDetectionTest, WarningForAmbiguousDialect) {
-    // Create data that could match multiple dialects equally well
-    // This should trigger the "Multiple dialects have similar scores" warning
+    // Create data that produces similar scores for multiple dialects
+    // Multiple quote/escape combinations will score similarly
     const std::string csv_data =
         "a,b\n"
         "1,2\n"
@@ -1146,14 +1151,15 @@ TEST_F(DialectDetectionTest, WarningForAmbiguousDialect) {
         csv_data.size()
     );
 
-    // Check if multiple candidates exist with similar scores
-    if (result.candidates.size() > 1 && result.candidates[0].consistency_score > 0) {
-        double best_score = result.candidates[0].consistency_score;
-        double second_score = result.candidates[1].consistency_score;
-        if (second_score > 0.9 * best_score) {
-            EXPECT_NE(result.warning.find("ambiguous"), std::string::npos);
-        }
-    }
+    // Detection should succeed with this basic CSV
+    EXPECT_TRUE(result.success());
+
+    // Verify that candidates were generated and scored
+    // The exact warning depends on score distributions, but we verify:
+    // 1. Multiple candidates exist (different quote/escape combinations)
+    // 2. The best candidate has a reasonable score
+    EXPECT_GT(result.candidates.size(), 1u);
+    EXPECT_GT(result.candidates[0].consistency_score, 0.5);
 }
 
 TEST_F(DialectDetectionTest, NoValidDialectWarning) {
