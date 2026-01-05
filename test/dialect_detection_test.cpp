@@ -8,6 +8,76 @@
 // ============================================================================
 // DIALECT DETECTION TESTS
 // ============================================================================
+//
+// Branch Coverage Strategy
+// ------------------------
+// These tests provide comprehensive coverage of the dialect detection system,
+// organized into logical sections that exercise all major code paths:
+//
+// 1. DELIMITER DETECTION (5 tests)
+//    Tests detection of comma, semicolon, tab, pipe delimiters.
+//    Exercises: generate_candidates(), score_dialect(), compute_pattern_score()
+//
+// 2. EMBEDDED SEPARATOR HANDLING (1 test)
+//    Ensures quoted delimiters don't fool detection.
+//    Exercises: find_rows(), extract_fields() quote-aware parsing
+//
+// 3. QUOTE CHARACTER DETECTION (1 test)
+//    Tests double-quote recognition.
+//    Exercises: quote_char candidate scoring in score_dialect()
+//
+// 4. HEADER DETECTION (2 tests)
+//    Tests header presence/absence detection.
+//    Exercises: detect_header() string vs typed data heuristics
+//
+// 5. LINE ENDING DETECTION (3 tests)
+//    Tests LF, CRLF, CR recognition.
+//    Exercises: detect_line_ending() for all three styles
+//
+// 6. CELL TYPE INFERENCE (8 tests)
+//    Tests type recognition: integer, float, boolean, date, time, datetime,
+//    empty, string.
+//    Exercises: infer_cell_type() for each CellType enum value
+//
+// 7. TYPE SCORE VALIDATION (6 tests)
+//    Tests type_score numerical thresholds for typed data.
+//    Exercises: compute_type_score() with homogeneous type data
+//
+// 8. DIALECT FACTORIES & UTILITIES (3 tests)
+//    Tests factory methods, equality, to_string().
+//    Exercises: Dialect struct methods
+//
+// 9. EDGE CASES (5 tests)
+//    Tests empty file, single cell, non-existent file, null buffer, zero length.
+//    Exercises: error handling and boundary conditions
+//
+// 10. BUFFER DETECTION (2 tests)
+//     Tests in-memory detection (vs file-based).
+//     Exercises: detect() buffer overloads
+//
+// 11. CUSTOM DETECTION OPTIONS (1 test)
+//     Tests custom delimiter sets.
+//     Exercises: DetectionOptions handling
+//
+// 12. REAL-WORLD FILES (2 tests)
+//     Tests detection on realistic data (financial, contacts).
+//     Exercises: end-to-end detection quality
+//
+// 13. PARSER INTEGRATION (8 tests)
+//     Tests parse_auto, parse with explicit dialect, parse_two_pass variants.
+//     Exercises: two_pass parser dialect integration
+//
+// 14. DIALECT VALIDATION (4 tests)
+//     Tests valid/invalid dialect configurations.
+//     Exercises: is_valid(), validate() boundary checks
+//
+// 15. ESCAPE SEQUENCE DETECTION (8 tests)
+//     Tests backslash vs double-quote escape detection.
+//     Exercises: escape_char scoring and double_quote inference
+//
+// Total: 128 tests covering delimiter, quote, escape, header, line ending,
+// type inference, scoring, validation, and parser integration paths.
+// ============================================================================
 
 class DialectDetectionTest : public ::testing::Test {
 protected:
@@ -1215,6 +1285,9 @@ TEST_F(DialectDetectionTest, TypeScoreAllDates) {
 
     EXPECT_TRUE(result.success());
     EXPECT_TRUE(result.has_header);
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GT(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>0.8) for all-date data";
 }
 
 TEST_F(DialectDetectionTest, TypeScoreAllTimes) {
@@ -1231,6 +1304,9 @@ TEST_F(DialectDetectionTest, TypeScoreAllTimes) {
     );
 
     EXPECT_TRUE(result.success());
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GT(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>0.8) for all-time data";
 }
 
 TEST_F(DialectDetectionTest, TypeScoreDateTimes) {
@@ -1248,6 +1324,9 @@ TEST_F(DialectDetectionTest, TypeScoreDateTimes) {
 
     EXPECT_TRUE(result.success());
     EXPECT_TRUE(result.has_header);
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GT(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>0.8) for all-datetime data";
 }
 
 TEST_F(DialectDetectionTest, TypeScoreBooleansAndIntegers) {
@@ -1266,6 +1345,9 @@ TEST_F(DialectDetectionTest, TypeScoreBooleansAndIntegers) {
 
     EXPECT_TRUE(result.success());
     EXPECT_TRUE(result.has_header);
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GT(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>0.8) for boolean+integer data";
 }
 
 TEST_F(DialectDetectionTest, TypeScoreFloatsWithExponents) {
@@ -1282,6 +1364,9 @@ TEST_F(DialectDetectionTest, TypeScoreFloatsWithExponents) {
     );
 
     EXPECT_TRUE(result.success());
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GT(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>0.8) for all-float data";
 }
 
 TEST_F(DialectDetectionTest, TypeScoreMixedTypes) {
@@ -1299,6 +1384,9 @@ TEST_F(DialectDetectionTest, TypeScoreMixedTypes) {
 
     EXPECT_TRUE(result.success());
     EXPECT_EQ(result.detected_columns, 5);
+    ASSERT_FALSE(result.candidates.empty());
+    EXPECT_GE(result.candidates[0].type_score, 0.8)
+        << "type_score should be high (>=0.8) for mixed typed data";
 }
 
 // ============================================================================
