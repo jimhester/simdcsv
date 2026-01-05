@@ -972,14 +972,10 @@ TEST_F(SIMDValueExtractionTest, SIMDRespectsMaxIntegerDigitsDefault) {
     ExtractionConfig default_config = ExtractionConfig::defaults();
     EXPECT_EQ(default_config.max_integer_digits, 20);
 
-    // 20-digit number (within default limit)
-    auto result_ok = parse_integer_simd<uint64_t>("12345678901234567890", 20, default_config);
-    // Note: This value fits in uint64_t (max is ~1.8e19), so it should parse
-    // Actually 12345678901234567890 > UINT64_MAX, so it will overflow
-    // Let's use a smaller value that fits
-    auto result_ok2 = parse_integer_simd<uint64_t>("18446744073709551615", 20, default_config);
-    EXPECT_TRUE(result_ok2.ok());
-    EXPECT_EQ(result_ok2.get(), UINT64_MAX);
+    // 20-digit number within default limit (UINT64_MAX is 20 digits)
+    auto result_ok = parse_integer_simd<uint64_t>("18446744073709551615", 20, default_config);
+    EXPECT_TRUE(result_ok.ok());
+    EXPECT_EQ(result_ok.get(), UINT64_MAX);
 
     // 21-digit number should fail due to max_integer_digits
     auto result_fail = parse_integer_simd<uint64_t>("123456789012345678901", 21, default_config);
