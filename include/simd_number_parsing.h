@@ -1128,6 +1128,14 @@ really_inline ExtractResult<IntType> parse_integer_simd(const char* str, size_t 
         if (sv == na) return {std::nullopt, nullptr};
     }
 
+    // Check max_integer_digits limit (matching scalar parse_integer behavior)
+    const char* digit_start = ptr;
+    if (*ptr == '-' || *ptr == '+') ++digit_start;
+    size_t digit_count = end - digit_start;
+    if (digit_count > config.max_integer_digits) {
+        return {std::nullopt, "Integer too large"};
+    }
+
     // Use SIMD parser for the actual parsing
     if constexpr (std::is_same_v<IntType, int64_t>) {
         auto result = SIMDIntegerParser::parse_int64(ptr, end - ptr, false);  // Already trimmed
