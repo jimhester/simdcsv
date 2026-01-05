@@ -1,6 +1,20 @@
 # Error Handling in simdcsv
 
-This document describes the error handling strategy for simdcsv, including error types, reporting mechanisms, and usage patterns.
+This document describes the error handling framework for simdcsv, including error modes, error types, the ErrorCollector API, recovery behavior, and practical usage examples.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Error Modes](#error-modes)
+- [Error Types](#error-types)
+- [Error Severity Levels](#error-severity-levels)
+- [ErrorCollector API](#errorcollector-api)
+- [ParseError Structure](#parseerror-structure)
+- [Exception-Based Error Handling](#exception-based-error-handling)
+- [Error Recovery Behavior](#error-recovery-behavior)
+- [Code Examples](#code-examples)
+- [Best Practices](#best-practices)
+- [Test Files](#test-files)
 
 ## Overview
 
@@ -8,409 +22,821 @@ simdcsv provides comprehensive error detection and reporting for malformed CSV f
 
 1. **Detect common CSV errors** - Quote escaping, field count mismatches, invalid characters
 2. **Provide precise location information** - Line, column, and byte offset
-3. **Support multiple error modes** - Strict, permissive, and best-effort parsing
+3. **Support three error modes** - Strict, permissive, and best-effort parsing
 4. **Enable both exception and non-exception workflows** - Choose based on your needs
 5. **Collect multiple errors** - See all problems in one pass (permissive mode)
+6. **Support multi-threaded parsing** - Thread-local error collection with merging
+
+## Error Modes
+
+simdcsv supports three error handling modes via the `ErrorMode` enum. Choose the appropriate mode based on your use case:
+
+### STRICT Mode
+
+```cpp
+ErrorCollector errors(ErrorMode::STRICT);
+```
+
+- **Behavior**: Stop parsing on the first error encountered (any severity)
+- **Best for**: Production data processing where any malformation is unacceptable
+- **Use when**: CSV files must be perfectly formatted; you want fail-fast behavior
+- **Recovery**: No recovery attempted; parsing stops immediately
+
+### PERMISSIVE Mode
+
+```cpp
+ErrorCollector errors(ErrorMode::PERMISSIVE);
+```
+
+- **Behavior**: Collect all errors and continue parsing; stop only on FATAL errors
+- **Best for**: Data validation, debugging malformed CSVs, data quality reporting
+- **Use when**: You want to see all problems in a single pass
+- **Recovery**: Attempts recovery for ERROR-level issues; problematic rows may be skipped
+
+### BEST_EFFORT Mode
+
+```cpp
+ErrorCollector errors(ErrorMode::BEST_EFFORT);
+```
+
+- **Behavior**: Parse as much data as possible, ignoring errors entirely
+- **Best for**: Importing messy real-world data where partial success is acceptable
+- **Use when**: You need to extract whatever data is available from imperfect files
+- **Recovery**: Maximum recovery; continues parsing through all errors
+
+### Mode Comparison Table
+
+| Aspect | STRICT | PERMISSIVE | BEST_EFFORT |
+|--------|--------|------------|-------------|
+| Stops on WARNING | Yes | No | No |
+| Stops on ERROR | Yes | No | No |
+| Stops on FATAL | Yes | Yes | No |
+| Collects errors | Yes | Yes | Yes |
+| Data integrity | Highest | Medium | Lowest |
+| Error visibility | First only | All | All |
+
+> **Note:** In STRICT mode, `should_stop()` returns true as soon as any error is recorded, regardless of severity. In BEST_EFFORT mode, the parser continues through all errors tracked by `ErrorCollector`.
 
 ## Error Types
 
-All error types are defined in `include/error.h` as the `ErrorCode` enum:
+simdcsv defines 16 error types in `include/error.h` as the `ErrorCode` enum. Error types marked with **[RESERVED]** are defined for future compatibility but not yet implemented in the current parser.
 
 ### Quote-Related Errors
 
-- **`UNCLOSED_QUOTE`** (FATAL)
-  - Quoted field not closed before EOF or newline
-  - Example: `"unclosed quote,field2`
+| Error Code | Severity | Status | Description |
+|------------|----------|--------|-------------|
+| `UNCLOSED_QUOTE` | FATAL | Implemented | Quoted field not closed before EOF |
+| `INVALID_QUOTE_ESCAPE` | ERROR | Implemented | Invalid quote escape sequence (e.g., `"bad"escape"`) |
+| `QUOTE_IN_UNQUOTED_FIELD` | ERROR | Implemented | Quote appears in middle of unquoted field |
 
-- **`INVALID_QUOTE_ESCAPE`** (ERROR)
-  - Invalid quote escape sequence (quotes must be doubled: `""`)
-  - Example: `"bad"escape"` (should be `"bad""escape"`)
+**Examples:**
 
-- **`QUOTE_IN_UNQUOTED_FIELD`** (ERROR)
-  - Quote appears in the middle of an unquoted field
-  - Example: `field"with"quotes` (should be quoted or escaped)
+```csv
+# UNCLOSED_QUOTE - quote never closed
+"unclosed quote,field2
+
+# INVALID_QUOTE_ESCAPE - should be "bad""escape"
+"bad"escape"
+
+# QUOTE_IN_UNQUOTED_FIELD - quote mid-field
+field"with"quotes
+```
 
 ### Field Structure Errors
 
-- **`INCONSISTENT_FIELD_COUNT`** (ERROR)
-  - Row has different number of fields than header
-  - Example: Header has 3 fields, data row has 2
+| Error Code | Severity | Status | Description |
+|------------|----------|--------|-------------|
+| `INCONSISTENT_FIELD_COUNT` | ERROR | Implemented | Row has different field count than header |
+| `FIELD_TOO_LARGE` | ERROR | [RESERVED] | Field exceeds maximum size limit |
 
-- **`FIELD_TOO_LARGE`** (ERROR)
-  - Field exceeds maximum size limit
-  - Configurable limit (default: 32KB per field)
+**Example:**
+
+```csv
+# Header has 3 fields, row 2 has only 2
+A,B,C
+1,2,3
+4,5
+```
 
 ### Line Ending Errors
 
-- **`MIXED_LINE_ENDINGS`** (WARNING)
-  - File uses inconsistent line endings (CRLF, LF, CR)
-  - Example: Some lines use `\r\n`, others use `\n`
-
-- **`INVALID_LINE_ENDING`** (ERROR)
-  - Invalid line ending sequence
+| Error Code | Severity | Status | Description |
+|------------|----------|--------|-------------|
+| `MIXED_LINE_ENDINGS` | WARNING | Implemented | File uses inconsistent line endings |
+| `INVALID_LINE_ENDING` | ERROR | [RESERVED] | Invalid line ending sequence |
 
 ### Character Encoding Errors
 
-- **`INVALID_UTF8`** (ERROR)
-  - Invalid UTF-8 byte sequence
-  - simdcsv expects valid UTF-8 encoding
-
-- **`NULL_BYTE`** (ERROR)
-  - Unexpected null byte (`\0`) in data
-  - CSV files should not contain null bytes
+| Error Code | Severity | Status | Description |
+|------------|----------|--------|-------------|
+| `INVALID_UTF8` | ERROR | [RESERVED] | Invalid UTF-8 byte sequence |
+| `NULL_BYTE` | ERROR | Implemented | Unexpected null byte in data |
 
 ### Structure Errors
 
-- **`EMPTY_HEADER`** (ERROR)
-  - Header row is empty or missing
+| Error Code | Severity | Status | Description |
+|------------|----------|--------|-------------|
+| `EMPTY_HEADER` | ERROR | Implemented | Header row is empty or missing |
+| `DUPLICATE_COLUMN_NAMES` | WARNING | Implemented | Header contains duplicate column names |
 
-- **`DUPLICATE_COLUMN_NAMES`** (WARNING)
-  - Header contains duplicate column names
-  - Example: `A,B,A,C`
+**Examples:**
 
-### Other Errors
+```csv
+# EMPTY_HEADER - first line is empty
 
-- **`AMBIGUOUS_SEPARATOR`** (ERROR)
-  - Cannot reliably determine field separator
+1,2,3
 
-- **`FILE_TOO_LARGE`** (FATAL)
-  - File exceeds maximum size limit
+# DUPLICATE_COLUMN_NAMES - 'A' appears twice
+A,B,A,C
+1,2,3,4
+```
 
-- **`IO_ERROR`** (FATAL)
-  - File I/O error (read failed, file not found, etc.)
+### Separator Errors
 
-- **`INTERNAL_ERROR`** (FATAL)
-  - Internal parser error (bug in simdcsv)
+| Error Code | Severity | Status | Description |
+|------------|----------|--------|-------------|
+| `AMBIGUOUS_SEPARATOR` | ERROR | [RESERVED] | Cannot reliably determine field separator |
+
+### General Errors
+
+| Error Code | Severity | Status | Description |
+|------------|----------|--------|-------------|
+| `FILE_TOO_LARGE` | FATAL | [RESERVED] | File exceeds maximum size limit |
+| `IO_ERROR` | FATAL | [RESERVED] | File I/O error |
+| `INTERNAL_ERROR` | FATAL | Implemented | Internal parser error (bug in simdcsv) |
 
 ## Error Severity Levels
 
-Errors are classified by severity:
+Errors are classified into three severity levels that determine parser behavior:
 
-- **`WARNING`**: Non-fatal issues that don't prevent parsing
-  - Example: `MIXED_LINE_ENDINGS`, `DUPLICATE_COLUMN_NAMES`
-  - Parser can continue normally
+### WARNING
 
-- **`ERROR`**: Recoverable errors
-  - Example: `INCONSISTENT_FIELD_COUNT`, `QUOTE_IN_UNQUOTED_FIELD`
-  - Parser can skip problematic row and continue (in permissive mode)
+- **Effect on parsing**: Parser continues normally
+- **Effect on `should_stop()`**: Does not trigger stop in any mode
+- **Typical errors**: `MIXED_LINE_ENDINGS`, `DUPLICATE_COLUMN_NAMES`
+- **Data impact**: Data is still usable; warning indicates potential quality issues
 
-- **`FATAL`**: Unrecoverable errors
-  - Example: `UNCLOSED_QUOTE` at EOF, `IO_ERROR`
-  - Parser must stop
+### ERROR
 
-## Error Reporting
+- **Effect on parsing**: Parser may skip affected row and continue (mode-dependent)
+- **Effect on `should_stop()`**: Triggers stop in STRICT mode only
+- **Typical errors**: `INCONSISTENT_FIELD_COUNT`, `QUOTE_IN_UNQUOTED_FIELD`, `EMPTY_HEADER`
+- **Data impact**: Affected row may have incomplete or incorrect data
 
-### ParseError Structure
+### FATAL
 
-Each error is represented by a `ParseError` struct:
+- **Effect on parsing**: Parser cannot continue reliably
+- **Effect on `should_stop()`**: Triggers stop in STRICT and PERMISSIVE modes
+- **Typical errors**: `UNCLOSED_QUOTE` at EOF, `IO_ERROR`, `INTERNAL_ERROR`
+- **Data impact**: Parsing results may be incomplete or corrupted
+
+### Severity Behavior Matrix
+
+| Severity | STRICT stops? | PERMISSIVE stops? | BEST_EFFORT stops? |
+|----------|---------------|-------------------|---------------------|
+| WARNING  | Yes | No | No |
+| ERROR    | Yes | No | No |
+| FATAL    | Yes | Yes | No |
+
+> **Implementation detail:** `should_stop()` in STRICT mode checks if any errors have been collected (`!errors_.empty()`), causing a stop regardless of severity. This means even WARNINGs will halt parsing in STRICT mode.
+
+## ErrorCollector API
+
+The `ErrorCollector` class is the primary interface for error handling in simdcsv. It accumulates errors during parsing and provides methods to query and manage them.
+
+### Construction
+
+```cpp
+// Default: STRICT mode, max 10000 errors
+ErrorCollector errors;
+
+// Specify mode
+ErrorCollector errors(ErrorMode::PERMISSIVE);
+
+// Specify mode and max errors limit
+ErrorCollector errors(ErrorMode::PERMISSIVE, 5000);
+```
+
+The `max_errors` parameter prevents memory exhaustion when parsing malformed files that could generate excessive errors.
+
+### Adding Errors
+
+```cpp
+// Add a ParseError object
+ParseError err(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL,
+               5, 10, 123, "Quote not closed", "\"unclosed");
+errors.add_error(err);
+
+// Convenience overload with individual parameters
+errors.add_error(
+    ErrorCode::INCONSISTENT_FIELD_COUNT,  // code
+    ErrorSeverity::ERROR,                  // severity
+    3,                                     // line (1-indexed)
+    1,                                     // column (1-indexed)
+    45,                                    // byte_offset
+    "Expected 3 fields but found 2",       // message
+    "1,2"                                  // context (optional)
+);
+```
+
+### Querying State
+
+```cpp
+// Check if any errors were recorded
+bool hasErrors = errors.has_errors();
+
+// Check specifically for fatal errors
+bool hasFatal = errors.has_fatal_errors();
+
+// Get total error count
+size_t count = errors.error_count();
+
+// Check if error limit was reached
+bool atLimit = errors.at_error_limit();
+
+// Get current error mode
+ErrorMode mode = errors.mode();
+
+// Check if parsing should stop (depends on mode and error severity)
+bool stop = errors.should_stop();
+```
+
+### Accessing Errors
+
+```cpp
+// Get read-only access to all errors
+const std::vector<ParseError>& allErrors = errors.errors();
+
+// Iterate through errors
+for (const auto& err : errors.errors()) {
+    std::cout << err.to_string() << std::endl;
+}
+
+// Get summary string
+std::string summary = errors.summary();
+// Output: "Total errors: 3 (Warnings: 1, Errors: 2)"
+```
+
+### Managing State
+
+```cpp
+// Clear all errors and reset fatal flag
+errors.clear();
+
+// Change error mode dynamically
+errors.set_mode(ErrorMode::BEST_EFFORT);
+```
+
+### Multi-threaded Support
+
+When using multi-threaded parsing, each thread should use its own `ErrorCollector`. After parsing completes, merge the results:
+
+```cpp
+// Each thread has its own collector
+std::vector<ErrorCollector> thread_errors(num_threads);
+
+// ... parallel parsing ...
+
+// Merge all thread-local errors into a main collector
+ErrorCollector main_errors(ErrorMode::PERMISSIVE);
+main_errors.merge_sorted(thread_errors);
+```
+
+Individual merge operations:
+
+```cpp
+// Merge from another collector (respects max_errors limit)
+main_errors.merge_from(other_collector);
+
+// Sort errors by byte offset (for logical file order)
+main_errors.sort_by_offset();
+```
+
+> **Thread Safety Note**: `ErrorCollector` is NOT thread-safe. Each thread must use its own collector instance during parsing.
+
+## ParseError Structure
+
+Each error is represented by a `ParseError` struct containing complete information about the error location and context:
 
 ```cpp
 struct ParseError {
-    ErrorCode code;          // Error type
-    ErrorSeverity severity;  // WARNING, ERROR, or FATAL
-    size_t line;            // Line number (1-indexed)
-    size_t column;          // Column number (1-indexed)
-    size_t byte_offset;     // Byte offset in file
-    std::string message;    // Human-readable message
-    std::string context;    // Snippet of problematic data
+    ErrorCode code;           // Error type (from ErrorCode enum)
+    ErrorSeverity severity;   // WARNING, ERROR, or FATAL
+
+    // Location information (all 1-indexed for user display)
+    size_t line;              // Line number where error occurred
+    size_t column;            // Column number where error occurred
+    size_t byte_offset;       // Byte offset from start of file
+
+    // Context
+    std::string message;      // Human-readable error description
+    std::string context;      // Snippet of data around the error location
 };
 ```
 
-Example error:
+### Creating ParseErrors
 
 ```cpp
-ParseError {
-    code: UNCLOSED_QUOTE,
-    severity: FATAL,
-    line: 5,
-    column: 10,
-    byte_offset: 123,
-    message: "Quote not closed before end of line",
-    context: "\"unclosed"
-}
+// Full constructor
+ParseError error(
+    ErrorCode::UNCLOSED_QUOTE,    // code
+    ErrorSeverity::FATAL,          // severity
+    5,                             // line
+    10,                            // column
+    123,                           // byte_offset
+    "Quote not closed",            // message
+    "\"unclosed"                   // context (optional)
+);
 ```
 
-### Error String Representation
-
-Errors can be formatted as strings:
+### Converting to String
 
 ```cpp
 ParseError error(...);
 std::cout << error.to_string() << std::endl;
 
 // Output:
-// [FATAL] UNCLOSED_QUOTE at line 5, column 10 (byte 123): Quote not closed before end of line
+// [FATAL] UNCLOSED_QUOTE at line 5, column 10 (byte 123): Quote not closed
 //   Context: "unclosed
 ```
 
-## Error Handling Modes
-
-simdcsv supports three error handling modes via the `ErrorMode` enum:
-
-### STRICT Mode (Default)
+### Utility Functions
 
 ```cpp
-ErrorCollector collector(ErrorMode::STRICT);
+// Convert error code to string name
+const char* name = error_code_to_string(ErrorCode::UNCLOSED_QUOTE);
+// Returns: "UNCLOSED_QUOTE"
+
+// Convert severity to string
+const char* sev = error_severity_to_string(ErrorSeverity::FATAL);
+// Returns: "FATAL"
 ```
 
-- **Stop on first error** (except warnings)
-- Best for: Production data where any error is unacceptable
-- Use when: CSV must be perfectly formatted
+## Error Recovery Behavior
 
-### PERMISSIVE Mode
+This section describes how simdcsv attempts to recover from different error types in PERMISSIVE and BEST_EFFORT modes.
+
+### Quote-Related Error Recovery
+
+| Error | Recovery Strategy |
+|-------|-------------------|
+| `UNCLOSED_QUOTE` | **No recovery possible.** The parser cannot determine where the field ends without a closing quote. In PERMISSIVE mode, this is FATAL and parsing stops. |
+| `INVALID_QUOTE_ESCAPE` | Parser treats the problematic sequence as literal characters and continues to the next field or newline. The field value may be incorrect. |
+| `QUOTE_IN_UNQUOTED_FIELD` | Parser continues reading the field as unquoted, treating quotes as literal characters. The field ends at the next delimiter or newline. |
+
+### Field Structure Error Recovery
+
+| Error | Recovery Strategy |
+|-------|-------------------|
+| `INCONSISTENT_FIELD_COUNT` | Parser records the error and continues to the next row. The affected row is parsed with whatever fields are present. Missing fields appear as empty; extra fields may be ignored. |
+| `FIELD_TOO_LARGE` | [RESERVED] Would truncate the field at the limit and continue. |
+
+### Line Ending Error Recovery
+
+| Error | Recovery Strategy |
+|-------|-------------------|
+| `MIXED_LINE_ENDINGS` | Parser normalizes all line endings during parsing. A warning is recorded but parsing continues normally. Data integrity is not affected. |
+| `INVALID_LINE_ENDING` | [RESERVED] Would treat as literal characters or skip. |
+
+### Structure Error Recovery
+
+| Error | Recovery Strategy |
+|-------|-------------------|
+| `EMPTY_HEADER` | Parser records the error. Subsequent rows may be parsed without column name mapping. Field access by index still works. |
+| `DUPLICATE_COLUMN_NAMES` | Parser records a warning but continues. All columns are accessible; accessing by duplicate name returns the first occurrence. |
+
+### Character Encoding Error Recovery
+
+| Error | Recovery Strategy |
+|-------|-------------------|
+| `NULL_BYTE` | Parser records the error at the null byte location. In recovery mode, the null byte is typically treated as end-of-field or skipped. |
+| `INVALID_UTF8` | [RESERVED] Would replace invalid sequences with replacement character (U+FFFD) or skip. |
+
+### Recovery Example
 
 ```cpp
-ErrorCollector collector(ErrorMode::PERMISSIVE);
-```
-
-- **Collect all errors**, stop only on FATAL
-- Best for: Data validation, debugging malformed CSVs
-- Use when: You want to see all problems in one pass
-
-### BEST_EFFORT Mode
-
-```cpp
-ErrorCollector collector(ErrorMode::BEST_EFFORT);
-```
-
-- **Try to parse regardless of errors**
-- Best for: Importing messy real-world data
-- Use when: You need to extract whatever data you can
-
-## Using the ErrorCollector
-
-### Basic Usage
-
-```cpp
-#include "error.h"
+#include <simdcsv.h>
 
 using namespace simdcsv;
 
-// Create error collector
+// Parse a file with known issues
+FileBuffer buf = load_file("messy_data.csv");
 ErrorCollector errors(ErrorMode::PERMISSIVE);
+Parser parser;
 
-// Add errors during parsing
-errors.add_error(
-    ErrorCode::INCONSISTENT_FIELD_COUNT,
-    ErrorSeverity::ERROR,
-    5,      // line
-    1,      // column
-    120,    // byte offset
-    "Expected 3 fields but found 2",
-    "1,2"   // context
-);
+auto result = parser.parse_auto(buf.data(), buf.size(), errors);
 
-// Check if parsing should stop
-if (errors.should_stop()) {
-    std::cerr << "Fatal error encountered" << std::endl;
-    return;
+// Parsing completed (unless FATAL error occurred)
+if (result.successful) {
+    std::cout << "Parsed " << result.num_rows << " rows" << std::endl;
 }
 
-// After parsing, check for errors
+// Check what issues were found
 if (errors.has_errors()) {
-    std::cout << errors.summary() << std::endl;
+    std::cout << "Encountered " << errors.error_count() << " issues:" << std::endl;
 
-    // Iterate through individual errors
-    for (const auto& error : errors.errors()) {
-        std::cout << error.to_string() << std::endl;
+    for (const auto& err : errors.errors()) {
+        if (err.severity == ErrorSeverity::WARNING) {
+            // Warnings - data is usable
+            std::cout << "[WARN] " << err.message << std::endl;
+        } else if (err.severity == ErrorSeverity::ERROR) {
+            // Errors - specific rows may be affected
+            std::cout << "[ERR] Line " << err.line << ": " << err.message << std::endl;
+        }
     }
 }
-```
-
-### Error Summary
-
-```cpp
-ErrorCollector errors;
-// ... add errors ...
-
-std::cout << errors.summary() << std::endl;
-
-// Output:
-// Total errors: 3 (Warnings: 1, Errors: 2)
-//
-// Details:
-// [WARNING] MIXED_LINE_ENDINGS at line 1, column 1 (byte 10): ...
-// [ERROR] INCONSISTENT_FIELD_COUNT at line 3, column 1 (byte 45): ...
-// [ERROR] QUOTE_IN_UNQUOTED_FIELD at line 7, column 5 (byte 123): ...
-```
-
-### Clearing Errors
-
-```cpp
-errors.clear();  // Reset error collector
 ```
 
 ## Exception-Based Error Handling
 
-For traditional exception-based workflows:
+simdcsv provides `ParseException` for traditional exception-based error handling workflows.
+
+### ParseException Class
 
 ```cpp
-#include "error.h"
+class ParseException : public std::runtime_error {
+public:
+    // Construct from single error
+    explicit ParseException(const ParseError& error);
+
+    // Construct from multiple errors
+    explicit ParseException(const std::vector<ParseError>& errors);
+
+    // Get the first (primary) error
+    const ParseError& error() const;
+
+    // Get all errors
+    const std::vector<ParseError>& errors() const;
+
+    // Inherited: const char* what() const - returns formatted message
+};
+```
+
+### Catching Parse Exceptions
+
+```cpp
+#include <simdcsv.h>
 
 using namespace simdcsv;
 
 try {
-    // Parse CSV
+    // Some operations that may throw ParseException
     auto result = parse_csv(data);
 } catch (const ParseException& e) {
-    // Single error
-    std::cerr << "Parse error: " << e.what() << std::endl;
+    // Get the primary error message
+    std::cerr << "Parse failed: " << e.what() << std::endl;
 
-    // Access detailed error info
-    const ParseError& error = e.error();
-    std::cerr << "At line " << error.line
-              << ", column " << error.column << std::endl;
+    // Access the first error for details
+    const ParseError& primary = e.error();
+    std::cerr << "Location: line " << primary.line
+              << ", column " << primary.column << std::endl;
 
-    // Multiple errors (if thrown with error vector)
+    // If multiple errors, iterate through all
     for (const auto& err : e.errors()) {
-        std::cerr << err.to_string() << std::endl;
+        std::cerr << "  " << err.to_string() << std::endl;
     }
 }
 ```
 
-### Creating ParseException
+### Throwing ParseException
+
+When building custom parsing logic that integrates with simdcsv's error handling:
 
 ```cpp
-// Single error
-ParseError error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL, ...);
+// Throw for a single error
+ParseError error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL,
+                 5, 10, 100, "Quote not closed");
 throw ParseException(error);
 
-// Multiple errors
-std::vector<ParseError> errors;
-// ... collect errors ...
-throw ParseException(errors);
+// Throw for multiple collected errors
+ErrorCollector collector(ErrorMode::PERMISSIVE);
+// ... parsing that collects errors ...
+if (collector.has_fatal_errors()) {
+    throw ParseException(collector.errors());
+}
 ```
 
-## Integration with Parser
+## Code Examples
 
-The error handling system is designed to integrate seamlessly with the CSV parser:
+This section provides complete examples demonstrating common error handling patterns.
+
+### Example 1: STRICT Mode - Production Parsing
+
+Use STRICT mode when CSV files must be perfectly formatted:
 
 ```cpp
-class CSVParser {
-private:
-    ErrorCollector errors_;
+#include <simdcsv.h>
+#include <iostream>
 
-public:
-    CSVParser(ErrorMode mode = ErrorMode::STRICT)
-        : errors_(mode) {}
+using namespace simdcsv;
 
-    ParseResult parse(const std::string& data) {
-        // During parsing, add errors
-        if (/* unclosed quote detected */) {
-            errors_.add_error(
-                ErrorCode::UNCLOSED_QUOTE,
-                ErrorSeverity::FATAL,
-                current_line,
-                current_column,
-                current_offset,
-                "Quote not closed",
-                get_context()
-            );
+bool parse_production_csv(const std::string& filepath) {
+    // Load file
+    FileBuffer buffer = load_file(filepath);
 
-            // Check if we should stop
-            if (errors_.should_stop()) {
-                return handle_error();
-            }
+    // STRICT mode: stop on first error
+    ErrorCollector errors(ErrorMode::STRICT);
+    Parser parser;
+
+    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+
+    if (!result.successful || errors.has_errors()) {
+        // Log the error and reject the file
+        std::cerr << "CSV validation failed: " << filepath << std::endl;
+        for (const auto& err : errors.errors()) {
+            std::cerr << err.to_string() << std::endl;
         }
-
-        // ... continue parsing ...
+        return false;
     }
 
-    const ErrorCollector& errors() const { return errors_; }
-};
+    std::cout << "Successfully parsed " << result.num_rows
+              << " rows, " << result.num_columns << " columns" << std::endl;
+    return true;
+}
 ```
+
+### Example 2: PERMISSIVE Mode - Data Validation Report
+
+Use PERMISSIVE mode to generate a complete validation report:
+
+```cpp
+#include <simdcsv.h>
+#include <iostream>
+#include <fstream>
+
+using namespace simdcsv;
+
+void validate_csv_report(const std::string& filepath, const std::string& report_path) {
+    FileBuffer buffer = load_file(filepath);
+
+    // PERMISSIVE mode: collect all errors
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    Parser parser;
+
+    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+
+    // Write validation report
+    std::ofstream report(report_path);
+    report << "CSV Validation Report\n";
+    report << "=====================\n\n";
+    report << "File: " << filepath << "\n";
+    report << "Rows parsed: " << result.num_rows << "\n";
+    report << "Parse completed: " << (result.successful ? "Yes" : "No") << "\n\n";
+
+    if (errors.has_errors()) {
+        report << errors.summary() << "\n\n";
+
+        // Group errors by type
+        report << "Errors by Line:\n";
+        for (const auto& err : errors.errors()) {
+            report << "  Line " << err.line << ": "
+                   << error_code_to_string(err.code) << " - "
+                   << err.message << "\n";
+        }
+    } else {
+        report << "No errors found. File is valid.\n";
+    }
+}
+```
+
+### Example 3: BEST_EFFORT Mode - Messy Data Import
+
+Use BEST_EFFORT mode to extract whatever data is available:
+
+```cpp
+#include <simdcsv.h>
+#include <iostream>
+
+using namespace simdcsv;
+
+void import_messy_data(const std::string& filepath) {
+    FileBuffer buffer = load_file(filepath);
+
+    // BEST_EFFORT mode: parse what we can
+    ErrorCollector errors(ErrorMode::BEST_EFFORT);
+    Parser parser;
+
+    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+
+    std::cout << "Import Results:\n";
+    std::cout << "  Rows imported: " << result.num_rows << "\n";
+    std::cout << "  Issues encountered: " << errors.error_count() << "\n";
+
+    if (errors.has_errors()) {
+        // Log warnings for monitoring
+        size_t warnings = 0, recoverable = 0;
+        for (const auto& err : errors.errors()) {
+            if (err.severity == ErrorSeverity::WARNING) warnings++;
+            else recoverable++;
+        }
+        std::cout << "  Warnings: " << warnings << "\n";
+        std::cout << "  Recovered errors: " << recoverable << "\n";
+    }
+
+    // Process the imported data (even if imperfect)
+    // ...
+}
+```
+
+### Example 4: Handling Specific Error Types
+
+Filter and handle specific error types differently:
+
+```cpp
+#include <simdcsv.h>
+#include <iostream>
+
+using namespace simdcsv;
+
+void process_with_error_handling(const std::string& filepath) {
+    FileBuffer buffer = load_file(filepath);
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+    Parser parser;
+
+    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+
+    // Handle different error types
+    for (const auto& err : errors.errors()) {
+        switch (err.code) {
+            case ErrorCode::DUPLICATE_COLUMN_NAMES:
+                // Just log and continue - minor issue
+                std::cerr << "Note: Duplicate column '" << err.context
+                          << "' at position " << err.column << std::endl;
+                break;
+
+            case ErrorCode::INCONSISTENT_FIELD_COUNT:
+                // Track which rows have issues for later review
+                std::cerr << "Row " << err.line << " has field count mismatch"
+                          << std::endl;
+                break;
+
+            case ErrorCode::UNCLOSED_QUOTE:
+                // Critical - data may be corrupted after this point
+                std::cerr << "CRITICAL: Unclosed quote at line " << err.line
+                          << " - subsequent data may be unreliable" << std::endl;
+                break;
+
+            case ErrorCode::MIXED_LINE_ENDINGS:
+                // Cosmetic - ignore
+                break;
+
+            default:
+                std::cerr << err.to_string() << std::endl;
+        }
+    }
+}
+```
+
+### Example 5: Multi-threaded Parsing with Error Collection
+
+Collect errors from parallel parsing threads:
+
+```cpp
+#include <simdcsv.h>
+#include <thread>
+#include <vector>
+
+using namespace simdcsv;
+
+void parallel_parse_with_errors(const uint8_t* data, size_t len) {
+    const size_t num_threads = std::thread::hardware_concurrency();
+
+    // Create thread-local error collectors
+    std::vector<ErrorCollector> thread_errors;
+    for (size_t i = 0; i < num_threads; ++i) {
+        thread_errors.emplace_back(ErrorMode::PERMISSIVE);
+    }
+
+    // Initialize parser
+    two_pass parser;
+    auto idx = parser.init(len, num_threads);
+
+    // Parse with multi-threading (each thread uses its own collector)
+    bool success = parser.parse_two_pass_with_errors(data, idx, len,
+                                                      thread_errors[0]);
+
+    // Merge all thread-local errors
+    ErrorCollector all_errors(ErrorMode::PERMISSIVE);
+    all_errors.merge_sorted(thread_errors);
+
+    // Report combined errors
+    if (all_errors.has_errors()) {
+        std::cout << "Combined errors from " << num_threads << " threads:\n";
+        std::cout << all_errors.summary() << std::endl;
+    }
+}
+```
+
+## Best Practices
+
+### For Production Use (STRICT Mode)
+
+1. **Use STRICT mode** for production parsing where data integrity is critical
+2. **Fail fast** - stop processing on first error to avoid propagating bad data
+3. **Log errors** with full context for debugging
+4. **Validate data sources** to catch errors early in the pipeline
+
+```cpp
+ErrorCollector errors(ErrorMode::STRICT);
+Parser parser;
+auto result = parser.parse_auto(data, len, errors);
+
+if (!result.successful || errors.has_errors()) {
+    // Log and reject
+    logger.error("CSV parsing failed: " + errors.summary());
+    return Error::INVALID_CSV;
+}
+
+// Process validated data with confidence
+process_data(result);
+```
+
+### For Data Validation (PERMISSIVE Mode)
+
+1. **Use PERMISSIVE mode** to generate comprehensive validation reports
+2. **Report all issues** to help users identify and fix data problems
+3. **Provide line numbers and context** for easy correction
+4. **Categorize errors** by severity for prioritized fixing
+
+```cpp
+ErrorCollector errors(ErrorMode::PERMISSIVE);
+Parser parser;
+auto result = parser.parse_auto(data, len, errors);
+
+if (errors.has_errors()) {
+    // Generate detailed report
+    std::cout << "Validation found " << errors.error_count() << " issues:\n\n";
+
+    // Separate by severity
+    for (const auto& err : errors.errors()) {
+        if (err.severity == ErrorSeverity::FATAL) {
+            std::cout << "CRITICAL: ";
+        }
+        std::cout << "Line " << err.line << ": " << err.message << "\n";
+    }
+}
+```
+
+### For Data Import (BEST_EFFORT Mode)
+
+1. **Use BEST_EFFORT mode** when you need to extract whatever data is available
+2. **Log warnings** for data quality monitoring and auditing
+3. **Validate extracted data** after parsing to catch logical inconsistencies
+4. **Document data quality** in metadata for downstream consumers
+
+```cpp
+ErrorCollector errors(ErrorMode::BEST_EFFORT);
+Parser parser;
+auto result = parser.parse_auto(messy_data, len, errors);
+
+std::cout << "Imported " << result.num_rows << " rows";
+if (errors.has_errors()) {
+    std::cout << " with " << errors.error_count() << " issues";
+}
+std::cout << std::endl;
+
+// Track quality metrics
+data_quality_log.record(filepath, result.num_rows, errors.error_count());
+```
+
+### General Guidelines
+
+1. **Choose the right mode for your use case** - don't use STRICT when PERMISSIVE would give better user feedback
+2. **Always check for errors** even in BEST_EFFORT mode - errors provide valuable quality information
+3. **Use `summary()` for logging** - it provides a concise overview without dumping every error
+4. **Consider `max_errors` limit** - set appropriately for your data size to prevent memory issues
+5. **Handle multi-threaded parsing correctly** - each thread needs its own collector, merge after parsing
 
 ## Test Files
 
 The test suite includes 16 malformed CSV test files in `test/data/malformed/`:
 
-1. **unclosed_quote.csv** - Quote not closed before newline
-2. **unclosed_quote_eof.csv** - Quote not closed at end of file
-3. **quote_in_unquoted_field.csv** - Quote in middle of unquoted field
-4. **inconsistent_columns.csv** - Rows with varying field counts
-5. **inconsistent_columns_all_rows.csv** - Every row has different count
-6. **invalid_quote_escape.csv** - Malformed quote escape sequence
-7. **empty_header.csv** - Missing or empty header row
-8. **duplicate_column_names.csv** - Duplicate column names in header
-9. **trailing_quote.csv** - Quote after unquoted field data
-10. **quote_not_at_start.csv** - Quote appears mid-field
-11. **multiple_errors.csv** - Multiple error types in one file
-12. **mixed_line_endings.csv** - Inconsistent line ending styles
-13. **null_byte.csv** - Contains null byte character
-14. **triple_quote.csv** - Triple quote sequence (ambiguous)
-15. **unescaped_quote_in_quoted.csv** - Unescaped quote inside quoted field
-16. **quote_after_data.csv** - Quote appears after field data
+| File | Error Type | Description |
+|------|------------|-------------|
+| `unclosed_quote.csv` | `UNCLOSED_QUOTE` | Quote not closed before newline |
+| `unclosed_quote_eof.csv` | `UNCLOSED_QUOTE` | Quote not closed at end of file |
+| `quote_in_unquoted_field.csv` | `QUOTE_IN_UNQUOTED_FIELD` | Quote in middle of unquoted field |
+| `inconsistent_columns.csv` | `INCONSISTENT_FIELD_COUNT` | Some rows have different field counts |
+| `inconsistent_columns_all_rows.csv` | `INCONSISTENT_FIELD_COUNT` | Every row has different count |
+| `invalid_quote_escape.csv` | `INVALID_QUOTE_ESCAPE` | Malformed quote escape sequence |
+| `empty_header.csv` | `EMPTY_HEADER` | Missing or empty header row |
+| `duplicate_column_names.csv` | `DUPLICATE_COLUMN_NAMES` | Duplicate column names in header |
+| `trailing_quote.csv` | `QUOTE_IN_UNQUOTED_FIELD` | Quote after unquoted field data |
+| `quote_not_at_start.csv` | `QUOTE_IN_UNQUOTED_FIELD` | Quote appears mid-field |
+| `multiple_errors.csv` | Multiple | Multiple error types in one file |
+| `mixed_line_endings.csv` | `MIXED_LINE_ENDINGS` | Inconsistent line ending styles |
+| `null_byte.csv` | `NULL_BYTE` | Contains null byte character |
+| `triple_quote.csv` | `INVALID_QUOTE_ESCAPE` | Triple quote sequence (ambiguous) |
+| `unescaped_quote_in_quoted.csv` | `INVALID_QUOTE_ESCAPE` | Unescaped quote inside quoted field |
+| `quote_after_data.csv` | `QUOTE_IN_UNQUOTED_FIELD` | Quote appears after field data |
 
 All test files are validated by `test/error_handling_test.cpp`.
 
-## Best Practices
-
-### For Production Use
-
-1. **Use STRICT mode** for production parsing where data integrity is critical
-2. **Log errors** with full context for debugging
-3. **Provide clear error messages** to users
-4. **Validate data sources** to catch errors early
-
-```cpp
-ErrorCollector errors(ErrorMode::STRICT);
-auto result = parse_csv(data, errors);
-
-if (errors.has_errors()) {
-    logger.error("CSV parsing failed: " + errors.summary());
-    return Error::INVALID_CSV;
-}
-```
-
-### For Data Import/Validation
-
-1. **Use PERMISSIVE mode** to collect all errors
-2. **Report all issues** to help users fix data
-3. **Provide line numbers** for easy correction
-
-```cpp
-ErrorCollector errors(ErrorMode::PERMISSIVE);
-auto result = parse_csv(data, errors);
-
-if (errors.has_errors()) {
-    std::cout << "Found " << errors.error_count() << " issues:\n";
-    std::cout << errors.summary() << std::endl;
-}
-```
-
-### For Messy Real-World Data
-
-1. **Use BEST_EFFORT mode** to extract what you can
-2. **Log warnings** for data quality monitoring
-3. **Validate extracted data** after parsing
-
-```cpp
-ErrorCollector errors(ErrorMode::BEST_EFFORT);
-auto result = parse_csv(messy_data, errors);
-
-// Got some data, but maybe with issues
-std::cout << "Parsed " << result.row_count() << " rows\n";
-if (errors.has_errors()) {
-    std::cout << "With " << errors.error_count() << " warnings\n";
-}
-```
-
-## Future Enhancements
-
-Potential future additions to error handling:
-
-1. **Error recovery suggestions** - "Did you mean to escape this quote?"
-2. **Custom error handlers** - User-defined callbacks for specific error types
-3. **Error filtering** - Ignore specific error types
-4. **Detailed statistics** - Count of each error type
-5. **Error grouping** - Group similar errors together
-6. **Auto-correction hints** - Suggest fixes for common issues
-7. **Performance metrics** - Track parsing speed despite errors
-
 ## See Also
 
-- `include/error.h` - Error handling API
+- `include/error.h` - Error handling API with detailed documentation
+- `include/simdcsv.h` - High-level Parser class with error support
+- `include/two_pass.h` - Core parser with `parse_with_errors()` and `parse_validate()` methods
 - `src/error.cpp` - Error handling implementation
-- `test/error_handling_test.cpp` - Error handling tests
-- `test/data/malformed/` - Malformed CSV test files
-- `docs/literature_review.md` - CSV parsing research
+- `test/error_handling_test.cpp` - Error handling unit tests (37 tests)
+- `test/data/malformed/` - Malformed CSV test files for error detection
