@@ -115,6 +115,29 @@ TEST_F(ArrowOutputTest, BooleanYesNo) {
     EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::BOOL);
 }
 
+// Boolean type promotion tests (Issue #176)
+// These tests explicitly verify type promotion rules when boolean-like values
+// (0, 1) appear alongside other numeric values.
+TEST_F(ArrowOutputTest, BooleanIntPromotion) {
+    // When "0" and "1" (which could be boolean) appear with other integers,
+    // the column should be promoted to INT64
+    ArrowConvertOptions opts;
+    opts.infer_types = true;
+    auto result = parseAndConvert("value\n0\n1\n42\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
+TEST_F(ArrowOutputTest, BooleanDoublePromotion) {
+    // When "0" and "1" (which could be boolean) appear with doubles,
+    // the column should be promoted to DOUBLE
+    ArrowConvertOptions opts;
+    opts.infer_types = true;
+    auto result = parseAndConvert("value\n1\n0\n3.14\n", opts);
+    ASSERT_TRUE(result.ok()) << result.error_message;
+    EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::DOUBLE);
+}
+
 // Edge case tests
 TEST_F(ArrowOutputTest, SingleColumn) {
     auto result = parseAndConvert("name\nAlice\nBob\n");
