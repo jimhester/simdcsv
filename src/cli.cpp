@@ -482,6 +482,29 @@ int cmdCount(const char* filename, int n_threads, bool has_header,
   return 0;
 }
 
+// Helper function to output a row with proper quoting
+static void outputRow(const std::vector<std::string>& row, const simdcsv::Dialect& dialect) {
+  for (size_t i = 0; i < row.size(); ++i) {
+    if (i > 0) cout << dialect.delimiter;
+    bool needs_quote =
+        row[i].find(dialect.delimiter) != string::npos ||
+        row[i].find(dialect.quote_char) != string::npos ||
+        row[i].find('\n') != string::npos ||
+        row[i].find('\r') != string::npos;
+    if (needs_quote) {
+      cout << dialect.quote_char;
+      for (char c : row[i]) {
+        if (c == dialect.quote_char) cout << dialect.quote_char;
+        cout << c;
+      }
+      cout << dialect.quote_char;
+    } else {
+      cout << row[i];
+    }
+  }
+  cout << '\n';
+}
+
 // Command: head
 int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_header,
             const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
@@ -496,51 +519,11 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
   auto rows = iter.getRows(has_header ? num_rows + 1 : num_rows);
 
   for (const auto& row : rows) {
-    for (size_t i = 0; i < row.size(); ++i) {
-      if (i > 0) cout << dialect.delimiter;
-      // Re-quote if field contains special characters
-      bool needs_quote =
-          row[i].find(dialect.delimiter) != string::npos ||
-          row[i].find(dialect.quote_char) != string::npos ||
-          row[i].find('\n') != string::npos;
-      if (needs_quote) {
-        cout << dialect.quote_char;
-        for (char c : row[i]) {
-          if (c == dialect.quote_char) cout << dialect.quote_char;
-          cout << c;
-        }
-        cout << dialect.quote_char;
-      } else {
-        cout << row[i];
-      }
-    }
-    cout << '\n';
+    outputRow(row, dialect);
   }
 
   aligned_free((void*)data.data());
   return 0;
-}
-
-// Helper function to output a row with proper quoting
-static void outputRow(const std::vector<std::string>& row, const simdcsv::Dialect& dialect) {
-  for (size_t i = 0; i < row.size(); ++i) {
-    if (i > 0) cout << dialect.delimiter;
-    bool needs_quote =
-        row[i].find(dialect.delimiter) != string::npos ||
-        row[i].find(dialect.quote_char) != string::npos ||
-        row[i].find('\n') != string::npos;
-    if (needs_quote) {
-      cout << dialect.quote_char;
-      for (char c : row[i]) {
-        if (c == dialect.quote_char) cout << dialect.quote_char;
-        cout << c;
-      }
-      cout << dialect.quote_char;
-    } else {
-      cout << row[i];
-    }
-  }
-  cout << '\n';
 }
 
 // Command: tail
