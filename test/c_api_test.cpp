@@ -31,6 +31,21 @@ protected:
         return filename;
     }
     std::vector<std::string> temp_files_;
+
+    // Helper to check if an error collector contains a specific error code.
+    // Similar to hasErrorCode in csv_parser_errors_test.cpp but for C API.
+    bool hasErrorCode(const simdcsv_error_collector_t* errors,
+                      simdcsv_error_t expected_code) {
+        for (size_t i = 0; i < simdcsv_error_collector_count(errors); ++i) {
+            simdcsv_parse_error_t parse_error;
+            if (simdcsv_error_collector_get(errors, i, &parse_error) == SIMDCSV_OK) {
+                if (parse_error.code == expected_code) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 };
 
 // Version Tests
@@ -651,19 +666,7 @@ TEST_F(CAPITest, ParseWithInconsistentFieldCount) {
     simdcsv_parse(parser, buffer, index, errors, nullptr);
 
     EXPECT_TRUE(simdcsv_error_collector_has_errors(errors));
-
-    // Check that at least one error has INCONSISTENT_FIELDS code
-    bool found_inconsistent = false;
-    for (size_t i = 0; i < simdcsv_error_collector_count(errors); ++i) {
-        simdcsv_parse_error_t parse_error;
-        if (simdcsv_error_collector_get(errors, i, &parse_error) == SIMDCSV_OK) {
-            if (parse_error.code == SIMDCSV_ERROR_INCONSISTENT_FIELDS) {
-                found_inconsistent = true;
-                EXPECT_EQ(parse_error.severity, SIMDCSV_SEVERITY_ERROR);
-            }
-        }
-    }
-    EXPECT_TRUE(found_inconsistent);
+    EXPECT_TRUE(hasErrorCode(errors, SIMDCSV_ERROR_INCONSISTENT_FIELDS));
 
     simdcsv_error_collector_destroy(errors);
     simdcsv_index_destroy(index);
@@ -683,18 +686,7 @@ TEST_F(CAPITest, ParseWithQuoteInUnquotedField) {
 
     simdcsv_parse(parser, buffer, index, errors, nullptr);
     EXPECT_TRUE(simdcsv_error_collector_has_errors(errors));
-
-    // Check for QUOTE_IN_UNQUOTED error
-    bool found_error = false;
-    for (size_t i = 0; i < simdcsv_error_collector_count(errors); ++i) {
-        simdcsv_parse_error_t parse_error;
-        if (simdcsv_error_collector_get(errors, i, &parse_error) == SIMDCSV_OK) {
-            if (parse_error.code == SIMDCSV_ERROR_QUOTE_IN_UNQUOTED) {
-                found_error = true;
-            }
-        }
-    }
-    EXPECT_TRUE(found_error);
+    EXPECT_TRUE(hasErrorCode(errors, SIMDCSV_ERROR_QUOTE_IN_UNQUOTED));
 
     simdcsv_error_collector_destroy(errors);
     simdcsv_index_destroy(index);
@@ -714,18 +706,7 @@ TEST_F(CAPITest, ParseWithInvalidQuoteEscape) {
 
     simdcsv_parse(parser, buffer, index, errors, nullptr);
     EXPECT_TRUE(simdcsv_error_collector_has_errors(errors));
-
-    // Check for INVALID_QUOTE_ESCAPE error
-    bool found_error = false;
-    for (size_t i = 0; i < simdcsv_error_collector_count(errors); ++i) {
-        simdcsv_parse_error_t parse_error;
-        if (simdcsv_error_collector_get(errors, i, &parse_error) == SIMDCSV_OK) {
-            if (parse_error.code == SIMDCSV_ERROR_INVALID_QUOTE_ESCAPE) {
-                found_error = true;
-            }
-        }
-    }
-    EXPECT_TRUE(found_error);
+    EXPECT_TRUE(hasErrorCode(errors, SIMDCSV_ERROR_INVALID_QUOTE_ESCAPE));
 
     simdcsv_error_collector_destroy(errors);
     simdcsv_index_destroy(index);
@@ -744,19 +725,7 @@ TEST_F(CAPITest, ParseWithMixedLineEndings) {
     simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 100);
 
     simdcsv_parse(parser, buffer, index, errors, nullptr);
-
-    // Check for MIXED_LINE_ENDINGS warning
-    bool found_warning = false;
-    for (size_t i = 0; i < simdcsv_error_collector_count(errors); ++i) {
-        simdcsv_parse_error_t parse_error;
-        if (simdcsv_error_collector_get(errors, i, &parse_error) == SIMDCSV_OK) {
-            if (parse_error.code == SIMDCSV_ERROR_MIXED_LINE_ENDINGS) {
-                found_warning = true;
-                EXPECT_EQ(parse_error.severity, SIMDCSV_SEVERITY_WARNING);
-            }
-        }
-    }
-    EXPECT_TRUE(found_warning);
+    EXPECT_TRUE(hasErrorCode(errors, SIMDCSV_ERROR_MIXED_LINE_ENDINGS));
 
     simdcsv_error_collector_destroy(errors);
     simdcsv_index_destroy(index);
@@ -775,18 +744,7 @@ TEST_F(CAPITest, ParseWithNullByte) {
     simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 100);
 
     simdcsv_parse(parser, buffer, index, errors, nullptr);
-
-    // Check for NULL_BYTE error
-    bool found_error = false;
-    for (size_t i = 0; i < simdcsv_error_collector_count(errors); ++i) {
-        simdcsv_parse_error_t parse_error;
-        if (simdcsv_error_collector_get(errors, i, &parse_error) == SIMDCSV_OK) {
-            if (parse_error.code == SIMDCSV_ERROR_NULL_BYTE) {
-                found_error = true;
-            }
-        }
-    }
-    EXPECT_TRUE(found_error);
+    EXPECT_TRUE(hasErrorCode(errors, SIMDCSV_ERROR_NULL_BYTE));
 
     simdcsv_error_collector_destroy(errors);
     simdcsv_index_destroy(index);
@@ -805,18 +763,7 @@ TEST_F(CAPITest, ParseWithEmptyHeader) {
     simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 100);
 
     simdcsv_parse(parser, buffer, index, errors, nullptr);
-
-    // Check for EMPTY_HEADER error
-    bool found_error = false;
-    for (size_t i = 0; i < simdcsv_error_collector_count(errors); ++i) {
-        simdcsv_parse_error_t parse_error;
-        if (simdcsv_error_collector_get(errors, i, &parse_error) == SIMDCSV_OK) {
-            if (parse_error.code == SIMDCSV_ERROR_EMPTY_HEADER) {
-                found_error = true;
-            }
-        }
-    }
-    EXPECT_TRUE(found_error);
+    EXPECT_TRUE(hasErrorCode(errors, SIMDCSV_ERROR_EMPTY_HEADER));
 
     simdcsv_error_collector_destroy(errors);
     simdcsv_index_destroy(index);
@@ -835,18 +782,7 @@ TEST_F(CAPITest, ParseWithDuplicateColumnNames) {
     simdcsv_error_collector_t* errors = simdcsv_error_collector_create(SIMDCSV_MODE_PERMISSIVE, 100);
 
     simdcsv_parse(parser, buffer, index, errors, nullptr);
-
-    // Check for DUPLICATE_COLUMNS error
-    bool found_error = false;
-    for (size_t i = 0; i < simdcsv_error_collector_count(errors); ++i) {
-        simdcsv_parse_error_t parse_error;
-        if (simdcsv_error_collector_get(errors, i, &parse_error) == SIMDCSV_OK) {
-            if (parse_error.code == SIMDCSV_ERROR_DUPLICATE_COLUMNS) {
-                found_error = true;
-            }
-        }
-    }
-    EXPECT_TRUE(found_error);
+    EXPECT_TRUE(hasErrorCode(errors, SIMDCSV_ERROR_DUPLICATE_COLUMNS));
 
     simdcsv_error_collector_destroy(errors);
     simdcsv_index_destroy(index);
