@@ -1684,7 +1684,39 @@ class two_pass {
     out.n_threads = n_threads;
     out.n_indexes = new uint64_t[n_threads];
 
-    out.indexes = new uint64_t[len];
+    // Allocate space for interleaved index storage.
+    //
+    // With multi-threaded parsing, indexes are stored in an interleaved pattern:
+    // thread 0 writes to positions 0, n_threads, 2*n_threads, ...
+    // thread 1 writes to positions 1, n_threads+1, 2*n_threads+1, ...
+    //
+    // For a file with len bytes, the maximum number of separators is len (worst case:
+    // every byte is a separator). In multi-threaded mode, if one thread finds m
+    // separators, it writes to positions thread_id, thread_id + n_threads, ...,
+    // thread_id + (m-1) * n_threads.
+    //
+    // The maximum index accessed is: (n_threads - 1) + (len - 1) * n_threads + 7 * n_threads
+    // (the +7*n_threads is for speculative SIMD writes that always write 8 elements).
+    //
+    // This simplifies to approximately len * n_threads + 8 * n_threads.
+    //
+    // For single-threaded parsing (n_threads == 1), we only need len + 8 elements.
+    // For multi-threaded parsing, we need the full interleaved size.
+    //
+    // See GitHub issues #264 and #265 for details.
+    size_t allocation_size;
+    if (n_threads == 1) {
+      // Single-threaded: simple allocation with padding for speculative writes
+      allocation_size = len + 8;
+    } else {
+      // Multi-threaded: need space for interleaved storage
+      // Maximum index = (len - 1) * n_threads + (n_threads - 1) + 7 * n_threads
+      //               = len * n_threads - n_threads + n_threads - 1 + 7 * n_threads
+      //               = len * n_threads + 7 * n_threads - 1
+      //               < (len + 8) * n_threads
+      allocation_size = (len + 8) * n_threads;
+    }
+    out.indexes = new uint64_t[allocation_size];
     return out;
   }
 };

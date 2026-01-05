@@ -641,6 +641,23 @@ TEST_F(CliTest, MalformedInconsistentColumns) {
   EXPECT_TRUE(result.output.find("Columns:") != std::string::npos);
 }
 
+TEST_F(CliTest, MalformedVariableColumns) {
+  // Regression test for GitHub issue #263: SIGABRT crash on variable column count
+  // File has ~30 rows with column counts varying from 20-26
+  // This previously caused an assertion failure with SIGABRT
+  auto result = CliRunner::run("head -n 5 " + testDataPath("malformed/variable_columns.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should handle variable column counts gracefully without crashing
+  EXPECT_FALSE(result.output.empty());
+}
+
+TEST_F(CliTest, MalformedVariableColumnsExplicitDelimiter) {
+  // Test with explicit delimiter (disables auto-detection)
+  auto result = CliRunner::run("head -d comma -n 5 " + testDataPath("malformed/variable_columns.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_FALSE(result.output.empty());
+}
+
 TEST_F(CliTest, MalformedEmptyHeader) {
   // Header row has empty column names
   auto result = CliRunner::run("head " + testDataPath("malformed/empty_header.csv"));
@@ -1794,4 +1811,41 @@ TEST_F(CliTest, PrettyUtf8ShortFieldsNotTruncated) {
 
   // Fields should not be truncated - no "..." for content fields
   // Note: Header "Description" is short so won't have "..."
+}
+
+// ============================================================================
+// Regression Tests for GitHub Issues
+// ============================================================================
+
+TEST_F(CliTest, RegressionIssue264_ExtremelyWideCsv) {
+  // Regression test for GitHub issue #264: SIGSEGV crash on extremely wide CSV files
+  // The bug was in index buffer allocation for multi-threaded parsing.
+  // Files with very high separator density (many columns) could overflow the
+  // interleaved index buffer because the allocation didn't account for the
+  // stride pattern used in multi-threaded mode.
+  //
+  // The test file has 16384 columns and 74 rows (~868K separators in ~876KB file).
+  // This previously caused a segmentation fault.
+  auto result = CliRunner::run("head -n 5 " + testDataPath("edge_cases/extremely_wide.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should successfully parse and output the first rows
+  EXPECT_FALSE(result.output.empty());
+  // First row should contain the expected header
+  EXPECT_TRUE(result.output.find("BUSINESS PLAN QUARTERLY DATA SUMMARY") != std::string::npos);
+}
+
+TEST_F(CliTest, RegressionIssue264_ExtremelyWideCsvInfo) {
+  // Also verify info command works on extremely wide files
+  auto result = CliRunner::run("info " + testDataPath("edge_cases/extremely_wide.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should report 16384 columns
+  EXPECT_TRUE(result.output.find("Columns: 16384") != std::string::npos);
+}
+
+TEST_F(CliTest, RegressionIssue264_ExtremelyWideCsvCount) {
+  // Verify count command works on extremely wide files
+  auto result = CliRunner::run("count " + testDataPath("edge_cases/extremely_wide.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should return a valid row count
+  EXPECT_FALSE(result.output.empty());
 }
