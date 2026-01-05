@@ -216,7 +216,8 @@ bool parseFile(const char* filename, int n_threads,
   simdcsv::two_pass parser;
   idx = parser.init(data.size(), n_threads);
 
-  if (auto_detect) {
+  // Skip auto-detection for empty files - nothing to detect
+  if (auto_detect && data.size() > 0) {
     simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
     simdcsv::DetectionResult detected;
     parser.parse_auto(data.data(), idx, data.size(), errors, &detected);
