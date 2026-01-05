@@ -18,28 +18,14 @@ The parser achieves high throughput by:
 The core parsing algorithm operates in two passes, inspired by Chang et al.'s speculative distributed CSV parsing approach.
 
 ```{mermaid}
-flowchart TB
-    subgraph "First Pass: Find Safe Split Points"
-        A[Input File] --> B[Divide into N chunks]
-        B --> C[Thread 1: Scan chunk 1]
-        B --> D[Thread 2: Scan chunk 2]
-        B --> E[Thread N: Scan chunk N]
-        C --> F[Find first_even_nl<br/>Find first_odd_nl<br/>Count quotes]
-        D --> F
-        E --> F
-        F --> G[Determine safe boundaries<br/>based on quote parity]
-    end
-
-    subgraph "Second Pass: Build Field Index"
-        G --> H[Thread 1: Parse region 1]
-        G --> I[Thread 2: Parse region 2]
-        G --> J[Thread N: Parse region N]
-        H --> K[State machine identifies<br/>field boundaries]
-        I --> K
-        J --> K
-        K --> L[Interleaved Index Output]
-    end
+%%| fig-width: 6
+flowchart LR
+    A[Input File] --> B[First Pass:<br/>Find Safe Splits]
+    B --> C[Second Pass:<br/>Build Index]
+    C --> D[Field Positions]
 ```
+
+The first pass divides the file into chunks and finds safe split points based on quote parity. The second pass then processes chunks in parallel using a SIMD-accelerated state machine.
 
 ### First Pass: Quote Parity and Safe Division Points
 
@@ -114,33 +100,13 @@ for each 64-byte block:
 
 The parser uses a five-state finite state machine compliant with RFC 4180. State transitions depend on the current state and the character class (DELIMITER, QUOTE, NEWLINE, or OTHER).
 
-```{mermaid}
-stateDiagram-v2
-    [*] --> RECORD_START
-
-    RECORD_START --> FIELD_START: delimiter (,)
-    RECORD_START --> QUOTED_FIELD: quote (")
-    RECORD_START --> RECORD_START: newline (\n)
-    RECORD_START --> UNQUOTED_FIELD: other
-
-    FIELD_START --> FIELD_START: delimiter (,)
-    FIELD_START --> QUOTED_FIELD: quote (")
-    FIELD_START --> RECORD_START: newline (\n)
-    FIELD_START --> UNQUOTED_FIELD: other
-
-    UNQUOTED_FIELD --> FIELD_START: delimiter (,)
-    UNQUOTED_FIELD --> UNQUOTED_FIELD: other
-    UNQUOTED_FIELD --> RECORD_START: newline (\n)
-    UNQUOTED_FIELD --> ERROR: quote (")
-
-    QUOTED_FIELD --> QUOTED_FIELD: delimiter, newline, other
-    QUOTED_FIELD --> QUOTED_END: quote (")
-
-    QUOTED_END --> FIELD_START: delimiter (,)
-    QUOTED_END --> QUOTED_FIELD: quote (") [escaped]
-    QUOTED_END --> RECORD_START: newline (\n)
-    QUOTED_END --> ERROR: other
 ```
+States: RECORD_START → FIELD_START → UNQUOTED_FIELD
+                    ↘            ↘
+               QUOTED_FIELD → QUOTED_END
+```
+
+The state machine has five states compliant with RFC 4180. Transitions are determined by the character class: delimiter (`,`), quote (`"`), newline (`\n`), or other characters.
 
 ### State Descriptions
 
@@ -213,21 +179,11 @@ When parsing in parallel, quoted fields may span chunk boundaries. simdcsv handl
 2. **Cumulative tracking**: Running quote count determines which boundary to use
 3. **Safe division**: Chunks start only at positions where quote state is known
 
-```{mermaid}
-flowchart LR
-    subgraph "Chunk 1"
-        A["...field data..."] --> B["\"quoted\nfield\""]
-    end
-    B --> C["Chunk boundary here?\n❌ Inside quotes!"]
-    subgraph "Chunk 2"
-        D["...continues...\""] --> E["normal,data"]
-    end
-
-    F["First pass finds:\nfirst_even_nl = 85\nfirst_odd_nl = 42\nn_quotes = 3 (odd)"]
-    G["Use first_odd_nl\nfor Chunk 2 start"]
-
-    C -.-> F
-    F --> G
+```
+Chunk 1: ...data,"quoted     Chunk 2: field",normal...
+                  ↑                   ↑
+            (odd quotes)         (even quotes)
+            Use first_odd_nl     Safe to split here
 ```
 
 If a chunk's `first_even_nl` or `first_odd_nl` is invalid (`null_pos`), the parser falls back to single-threaded mode for correctness.
