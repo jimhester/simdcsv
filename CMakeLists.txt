@@ -172,6 +172,7 @@ add_library(simdcsv_lib
     src/io_util.cpp
     src/error.cpp
     src/dialect.cpp
+    src/encoding.cpp
     src/simdcsv_c.cpp
     src/value_extraction.cpp
     src/streaming.cpp
@@ -653,6 +654,31 @@ add_custom_command(TARGET two_pass_coverage_test POST_BUILD
 
 # Register two-pass coverage tests with CTest
 gtest_discover_tests(two_pass_coverage_test)
+
+# Encoding detection and transcoding test executable
+add_executable(encoding_test
+    test/encoding_test.cpp
+)
+
+target_link_libraries(encoding_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(encoding_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for encoding tests
+add_custom_command(TARGET encoding_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register encoding tests with CTest
+gtest_discover_tests(encoding_test)
 
 # Arrow output test (only if Arrow is enabled)
 if(SIMDCSV_ENABLE_ARROW)

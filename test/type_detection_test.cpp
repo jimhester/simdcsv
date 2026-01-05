@@ -176,6 +176,361 @@ TEST_F(TypeDetectorTest, StringSimple) {
     EXPECT_EQ(TypeDetector::detect_field("hello", options), FieldType::STRING);
 }
 
+// ============================================================================
+// Additional Numeric Detection Tests
+// ============================================================================
+
+TEST_F(TypeDetectorTest, IntegerWithPlusSign) {
+    EXPECT_EQ(TypeDetector::detect_field("+42", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("+0", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, IntegerSignOnly) {
+    // Just a sign with no digits should be STRING
+    EXPECT_EQ(TypeDetector::detect_field("+", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("-", options), FieldType::STRING);
+}
+
+TEST_F(TypeDetectorTest, IntegerSignFollowedByNonDigit) {
+    EXPECT_EQ(TypeDetector::detect_field("+a", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("-x", options), FieldType::STRING);
+}
+
+TEST_F(TypeDetectorTest, IntegerZero) {
+    options.bool_as_int = false;  // Disable bool_as_int to test pure integer
+    EXPECT_EQ(TypeDetector::detect_field("0", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("00", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, IntegerLargeNumber) {
+    EXPECT_EQ(TypeDetector::detect_field("999999999999999", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, ThousandsSeparatorNoDigitsAfter) {
+    options.allow_thousands_sep = true;
+    // Separator at end with no following digits
+    EXPECT_NE(TypeDetector::detect_field("1,", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, ThousandsSeparatorInsufficientDigitsAfter) {
+    options.allow_thousands_sep = true;
+    // Only 1 or 2 digits after separator (need exactly 3)
+    EXPECT_NE(TypeDetector::detect_field("1,2", options), FieldType::INTEGER);
+    EXPECT_NE(TypeDetector::detect_field("1,23", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, ThousandsSeparatorNonDigitInGroup) {
+    options.allow_thousands_sep = true;
+    // Non-digit within the 3-digit group after separator
+    EXPECT_NE(TypeDetector::detect_field("1,23x", options), FieldType::INTEGER);
+    EXPECT_NE(TypeDetector::detect_field("1,2x4", options), FieldType::INTEGER);
+    EXPECT_NE(TypeDetector::detect_field("1,x34", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, ThousandsSeparatorWithSign) {
+    options.allow_thousands_sep = true;
+    EXPECT_EQ(TypeDetector::detect_field("-1,000", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("+1,234,567", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, ThousandsSeparatorNoDigitsBeforeSeparator) {
+    options.allow_thousands_sep = true;
+    // No digits before first separator
+    EXPECT_NE(TypeDetector::detect_field(",000", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, ThousandsSeparatorCustomSeparator) {
+    options.allow_thousands_sep = true;
+    options.thousands_sep = ' ';  // European style with space
+    EXPECT_EQ(TypeDetector::detect_field("1 000", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("1 234 567", options), FieldType::INTEGER);
+}
+
+// ============================================================================
+// Additional Float Detection Tests
+// ============================================================================
+
+TEST_F(TypeDetectorTest, FloatWithPlusSign) {
+    EXPECT_EQ(TypeDetector::detect_field("+3.14", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("+0.5", options), FieldType::FLOAT);
+}
+
+TEST_F(TypeDetectorTest, FloatDecimalOnly) {
+    // Decimal point with digits only after
+    EXPECT_EQ(TypeDetector::detect_field(".5", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field(".123", options), FieldType::FLOAT);
+}
+
+TEST_F(TypeDetectorTest, FloatLeadingDecimal) {
+    EXPECT_EQ(TypeDetector::detect_field("0.5", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("-.5", options), FieldType::FLOAT);
+}
+
+TEST_F(TypeDetectorTest, FloatTrailingDecimal) {
+    // Trailing decimal point (e.g., "5.")
+    EXPECT_EQ(TypeDetector::detect_field("5.", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("123.", options), FieldType::FLOAT);
+}
+
+TEST_F(TypeDetectorTest, FloatExponentialUppercase) {
+    EXPECT_EQ(TypeDetector::detect_field("1E10", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("1.5E-10", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("1E+5", options), FieldType::FLOAT);
+}
+
+TEST_F(TypeDetectorTest, FloatExponentialWithSign) {
+    EXPECT_EQ(TypeDetector::detect_field("1e+10", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("1e-10", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("-1e+10", options), FieldType::FLOAT);
+}
+
+TEST_F(TypeDetectorTest, FloatExponentialNoDigitsAfter) {
+    // Exponent marker but no digits following
+    EXPECT_EQ(TypeDetector::detect_field("1e", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("1e+", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("1e-", options), FieldType::STRING);
+}
+
+TEST_F(TypeDetectorTest, FloatExponentialDisabled) {
+    options.allow_exponential = false;
+    EXPECT_EQ(TypeDetector::detect_field("1e10", options), FieldType::STRING);
+    // But regular floats still work
+    EXPECT_EQ(TypeDetector::detect_field("3.14", options), FieldType::FLOAT);
+}
+
+TEST_F(TypeDetectorTest, FloatSpecialValuesCase) {
+    // Case insensitivity for special values
+    EXPECT_EQ(TypeDetector::detect_field("INF", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("Inf", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("NaN", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("NAN", options), FieldType::FLOAT);
+}
+
+TEST_F(TypeDetectorTest, FloatInfinity) {
+    EXPECT_EQ(TypeDetector::detect_field("infinity", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("INFINITY", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("Infinity", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("-infinity", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("+infinity", options), FieldType::FLOAT);
+}
+
+TEST_F(TypeDetectorTest, FloatSignedSpecialValues) {
+    EXPECT_EQ(TypeDetector::detect_field("+inf", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("+nan", options), FieldType::FLOAT);
+    EXPECT_EQ(TypeDetector::detect_field("-nan", options), FieldType::FLOAT);
+}
+
+TEST_F(TypeDetectorTest, FloatCustomDecimalPoint) {
+    options.decimal_point = ',';  // European style
+    EXPECT_EQ(TypeDetector::detect_field("3,14", options), FieldType::FLOAT);
+    // With standard decimal point, should be string (or integer if no comma)
+    EXPECT_NE(TypeDetector::detect_field("3.14", options), FieldType::FLOAT);
+}
+
+TEST_F(TypeDetectorTest, FloatNoDigitsJustDecimal) {
+    // Just a decimal point
+    EXPECT_EQ(TypeDetector::detect_field(".", options), FieldType::STRING);
+}
+
+// ============================================================================
+// Additional Boolean Detection Tests
+// ============================================================================
+
+TEST_F(TypeDetectorTest, BooleanCaseVariations) {
+    // All case variations
+    EXPECT_EQ(TypeDetector::detect_field("True", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("FALSE", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("False", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("YES", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("Yes", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("NO", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("No", options), FieldType::BOOLEAN);
+}
+
+TEST_F(TypeDetectorTest, BooleanSingleChar) {
+    // Single character booleans: t/f/y/n
+    EXPECT_EQ(TypeDetector::detect_field("t", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("f", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("y", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("n", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("T", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("F", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("Y", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("N", options), FieldType::BOOLEAN);
+}
+
+TEST_F(TypeDetectorTest, BooleanOnOff) {
+    // On/Off variations
+    EXPECT_EQ(TypeDetector::detect_field("on", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("ON", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("On", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("off", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("OFF", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("Off", options), FieldType::BOOLEAN);
+}
+
+TEST_F(TypeDetectorTest, BooleanNotBooleans) {
+    // Things that look like booleans but aren't
+    EXPECT_NE(TypeDetector::detect_field("tr", options), FieldType::BOOLEAN);
+    EXPECT_NE(TypeDetector::detect_field("tru", options), FieldType::BOOLEAN);
+    EXPECT_NE(TypeDetector::detect_field("fals", options), FieldType::BOOLEAN);
+    EXPECT_NE(TypeDetector::detect_field("ye", options), FieldType::BOOLEAN);
+    EXPECT_NE(TypeDetector::detect_field("2", options), FieldType::BOOLEAN);  // Only 0/1
+}
+
+TEST_F(TypeDetectorTest, BooleanNumericNotBooleanForOtherDigits) {
+    // Digits other than 0 and 1 should not be boolean (when bool_as_int=true)
+    EXPECT_NE(TypeDetector::detect_field("2", options), FieldType::BOOLEAN);
+    EXPECT_NE(TypeDetector::detect_field("9", options), FieldType::BOOLEAN);
+}
+
+TEST_F(TypeDetectorTest, BooleanEmpty) {
+    // Empty string is not boolean
+    EXPECT_FALSE(TypeDetector::is_boolean(reinterpret_cast<const uint8_t*>(""), 0, options));
+}
+
+// ============================================================================
+// Additional Date Detection Tests
+// ============================================================================
+
+TEST_F(TypeDetectorTest, DateISOWithSlash) {
+    EXPECT_EQ(TypeDetector::detect_field("2024/12/25", options), FieldType::DATE);
+    EXPECT_EQ(TypeDetector::detect_field("1999/01/01", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateUSWithDash) {
+    EXPECT_EQ(TypeDetector::detect_field("12-25-2024", options), FieldType::DATE);
+    EXPECT_EQ(TypeDetector::detect_field("01-01-1999", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateEUWithDash) {
+    EXPECT_EQ(TypeDetector::detect_field("25-12-2024", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateCompactAllMonths) {
+    EXPECT_EQ(TypeDetector::detect_field("20240115", options), FieldType::DATE);  // Jan
+    EXPECT_EQ(TypeDetector::detect_field("20240228", options), FieldType::DATE);  // Feb (non-leap)
+    EXPECT_EQ(TypeDetector::detect_field("20240315", options), FieldType::DATE);  // Mar
+    EXPECT_EQ(TypeDetector::detect_field("20240430", options), FieldType::DATE);  // Apr (30 days)
+    EXPECT_EQ(TypeDetector::detect_field("20240531", options), FieldType::DATE);  // May (31 days)
+    EXPECT_EQ(TypeDetector::detect_field("20241231", options), FieldType::DATE);  // Dec
+}
+
+TEST_F(TypeDetectorTest, DateInvalidDay0) {
+    EXPECT_NE(TypeDetector::detect_field("2024-01-00", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("20240100", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateInvalidDay32) {
+    EXPECT_NE(TypeDetector::detect_field("2024-01-32", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("20240132", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateInvalidYearTooLow) {
+    // Year must be >= 1000
+    EXPECT_NE(TypeDetector::detect_field("0999-01-15", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("0100-01-15", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateMixedSeparators) {
+    // Mixed separators should fail
+    EXPECT_NE(TypeDetector::detect_field("2024-01/15", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("2024/01-15", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateInvalidSeparator) {
+    // Invalid separator characters
+    EXPECT_NE(TypeDetector::detect_field("2024.01.15", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("2024_01_15", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateNonDigitCharacters) {
+    // Non-digit where digit expected
+    EXPECT_NE(TypeDetector::detect_field("202X-01-15", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("2024-0X-15", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("2024-01-1X", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateTooShort) {
+    // Too short to be a date
+    EXPECT_NE(TypeDetector::detect_field("2024-01", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("2024", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("202401", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateWrongLength) {
+    // Wrong length for ISO format
+    EXPECT_NE(TypeDetector::detect_field("2024-1-15", options), FieldType::DATE);
+    EXPECT_NE(TypeDetector::detect_field("2024-01-1", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateLeapYearEdgeCases) {
+    // Leap year rules: divisible by 4, but not by 100 unless also by 400
+    // 2000 is a leap year (divisible by 400)
+    EXPECT_EQ(TypeDetector::detect_field("2000-02-29", options), FieldType::DATE);
+    // 2100 is NOT a leap year (divisible by 100 but not by 400)
+    EXPECT_NE(TypeDetector::detect_field("2100-02-29", options), FieldType::DATE);
+    // 2400 IS a leap year (divisible by 400)
+    EXPECT_EQ(TypeDetector::detect_field("2400-02-29", options), FieldType::DATE);
+    // 1900 was NOT a leap year
+    EXPECT_NE(TypeDetector::detect_field("1900-02-29", options), FieldType::DATE);
+}
+
+TEST_F(TypeDetectorTest, DateMaxDayPerMonth) {
+    // Each month's maximum valid day
+    EXPECT_EQ(TypeDetector::detect_field("2024-01-31", options), FieldType::DATE);  // Jan: 31
+    EXPECT_EQ(TypeDetector::detect_field("2024-02-29", options), FieldType::DATE);  // Feb leap: 29
+    EXPECT_EQ(TypeDetector::detect_field("2024-03-31", options), FieldType::DATE);  // Mar: 31
+    EXPECT_EQ(TypeDetector::detect_field("2024-04-30", options), FieldType::DATE);  // Apr: 30
+    EXPECT_EQ(TypeDetector::detect_field("2024-05-31", options), FieldType::DATE);  // May: 31
+    EXPECT_EQ(TypeDetector::detect_field("2024-06-30", options), FieldType::DATE);  // Jun: 30
+    EXPECT_EQ(TypeDetector::detect_field("2024-07-31", options), FieldType::DATE);  // Jul: 31
+    EXPECT_EQ(TypeDetector::detect_field("2024-08-31", options), FieldType::DATE);  // Aug: 31
+    EXPECT_EQ(TypeDetector::detect_field("2024-09-30", options), FieldType::DATE);  // Sep: 30
+    EXPECT_EQ(TypeDetector::detect_field("2024-10-31", options), FieldType::DATE);  // Oct: 31
+    EXPECT_EQ(TypeDetector::detect_field("2024-11-30", options), FieldType::DATE);  // Nov: 30
+    EXPECT_EQ(TypeDetector::detect_field("2024-12-31", options), FieldType::DATE);  // Dec: 31
+}
+
+// ============================================================================
+// Whitespace and Trimming Tests
+// ============================================================================
+
+TEST_F(TypeDetectorTest, WhitespaceLeading) {
+    EXPECT_EQ(TypeDetector::detect_field("  42", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("\t42", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, WhitespaceTrailing) {
+    EXPECT_EQ(TypeDetector::detect_field("42  ", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("42\t", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, WhitespaceBoth) {
+    EXPECT_EQ(TypeDetector::detect_field("  42  ", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("\t42\t", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("  true  ", options), FieldType::BOOLEAN);
+}
+
+TEST_F(TypeDetectorTest, WhitespaceTrimDisabled) {
+    options.trim_whitespace = false;
+    // With trim disabled, leading/trailing whitespace makes it a string
+    EXPECT_EQ(TypeDetector::detect_field("  42", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("42  ", options), FieldType::STRING);
+}
+
+TEST_F(TypeDetectorTest, WhitespaceNewlineAndCarriageReturn) {
+    // Newlines and carriage returns are also whitespace
+    EXPECT_EQ(TypeDetector::detect_field("\n42\n", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("\r42\r", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("\r\n42\r\n", options), FieldType::INTEGER);
+}
+
+TEST_F(TypeDetectorTest, WhitespaceAllTypes) {
+    // All whitespace chars combined
+    EXPECT_EQ(TypeDetector::detect_field(" \t\r\n", options), FieldType::EMPTY);
+}
+
 TEST_F(TypeDetectorTest, FieldTypeToString) {
     EXPECT_STREQ(field_type_to_string(FieldType::BOOLEAN), "boolean");
     EXPECT_STREQ(field_type_to_string(FieldType::INTEGER), "integer");
@@ -270,6 +625,189 @@ TEST_F(TypeHintsTest, HasHint) {
     hints.add("age", FieldType::INTEGER);
     EXPECT_TRUE(hints.has_hint("age"));
     EXPECT_FALSE(hints.has_hint("unknown"));
+}
+
+// ============================================================================
+// Additional ColumnTypeStats Tests
+// ============================================================================
+
+TEST_F(ColumnTypeStatsTest, AddAllTypes) {
+    stats.add(FieldType::EMPTY);
+    stats.add(FieldType::BOOLEAN);
+    stats.add(FieldType::INTEGER);
+    stats.add(FieldType::FLOAT);
+    stats.add(FieldType::DATE);
+    stats.add(FieldType::STRING);
+
+    EXPECT_EQ(stats.total_count, 6);
+    EXPECT_EQ(stats.empty_count, 1);
+    EXPECT_EQ(stats.boolean_count, 1);
+    EXPECT_EQ(stats.integer_count, 1);
+    EXPECT_EQ(stats.float_count, 1);
+    EXPECT_EQ(stats.date_count, 1);
+    EXPECT_EQ(stats.string_count, 1);
+}
+
+TEST_F(ColumnTypeStatsTest, DominantTypeAllEmpty) {
+    for (int i = 0; i < 100; ++i) stats.add(FieldType::EMPTY);
+    EXPECT_EQ(stats.dominant_type(), FieldType::EMPTY);
+}
+
+TEST_F(ColumnTypeStatsTest, DominantTypeWithCustomThreshold) {
+    // 80% integers
+    for (int i = 0; i < 80; ++i) stats.add(FieldType::INTEGER);
+    for (int i = 0; i < 20; ++i) stats.add(FieldType::STRING);
+
+    // With 0.9 threshold, falls back to STRING
+    EXPECT_EQ(stats.dominant_type(0.9), FieldType::STRING);
+    // With 0.8 threshold, returns INTEGER
+    EXPECT_EQ(stats.dominant_type(0.8), FieldType::INTEGER);
+    // With 0.7 threshold, also returns INTEGER
+    EXPECT_EQ(stats.dominant_type(0.7), FieldType::INTEGER);
+}
+
+TEST_F(ColumnTypeStatsTest, DominantTypeBooleanPriority) {
+    // When booleans dominate, should return BOOLEAN even though
+    // booleans (0/1) could be interpreted as integers
+    for (int i = 0; i < 95; ++i) stats.add(FieldType::BOOLEAN);
+    for (int i = 0; i < 5; ++i) stats.add(FieldType::STRING);
+    EXPECT_EQ(stats.dominant_type(0.9), FieldType::BOOLEAN);
+}
+
+TEST_F(ColumnTypeStatsTest, DominantTypeFloatWithIntegers) {
+    // Mix of floats and integers should infer FLOAT
+    for (int i = 0; i < 45; ++i) stats.add(FieldType::FLOAT);
+    for (int i = 0; i < 50; ++i) stats.add(FieldType::INTEGER);
+    for (int i = 0; i < 5; ++i) stats.add(FieldType::STRING);
+    // 50+45 = 95% numeric (floats + integers) - should be FLOAT
+    EXPECT_EQ(stats.dominant_type(0.9), FieldType::FLOAT);
+}
+
+TEST_F(ColumnTypeStatsTest, DominantTypeDateOverString) {
+    for (int i = 0; i < 95; ++i) stats.add(FieldType::DATE);
+    for (int i = 0; i < 5; ++i) stats.add(FieldType::STRING);
+    EXPECT_EQ(stats.dominant_type(0.9), FieldType::DATE);
+}
+
+TEST_F(ColumnTypeStatsTest, DominantTypeEmptyExcluded) {
+    // Empty values should be excluded from the denominator
+    for (int i = 0; i < 90; ++i) stats.add(FieldType::INTEGER);
+    for (int i = 0; i < 10; ++i) stats.add(FieldType::EMPTY);
+    // 90/90 = 100% integers (empties excluded)
+    EXPECT_EQ(stats.dominant_type(0.9), FieldType::INTEGER);
+}
+
+// ============================================================================
+// Additional ColumnTypeInference Tests
+// ============================================================================
+
+TEST_F(ColumnTypeInferenceTest, Constructor) {
+    ColumnTypeInference inf(5);
+    EXPECT_EQ(inf.num_columns(), 5);
+    EXPECT_EQ(inf.num_rows(), 0);
+}
+
+TEST_F(ColumnTypeInferenceTest, AddField) {
+    inference.add_field(0, reinterpret_cast<const uint8_t*>("123"), 3);
+    inference.add_field(0, reinterpret_cast<const uint8_t*>("456"), 3);
+    auto types = inference.infer_types();
+    EXPECT_EQ(types[0], FieldType::INTEGER);
+}
+
+TEST_F(ColumnTypeInferenceTest, AddFieldGrowsColumns) {
+    inference.add_field(5, reinterpret_cast<const uint8_t*>("test"), 4);
+    EXPECT_EQ(inference.num_columns(), 6);
+}
+
+TEST_F(ColumnTypeInferenceTest, NumRows) {
+    inference.add_row({"a", "b"});
+    inference.add_row({"c", "d"});
+    inference.add_row({"e", "f"});
+    EXPECT_EQ(inference.num_rows(), 3);
+}
+
+TEST_F(ColumnTypeInferenceTest, NumRowsEmpty) {
+    EXPECT_EQ(inference.num_rows(), 0);
+}
+
+TEST_F(ColumnTypeInferenceTest, Reset) {
+    inference.add_row({"123", "456"});
+    inference.reset();
+    // After reset, stats should be zeroed
+    EXPECT_EQ(inference.column_stats(0).total_count, 0);
+    EXPECT_EQ(inference.column_stats(1).total_count, 0);
+}
+
+TEST_F(ColumnTypeInferenceTest, Merge) {
+    ColumnTypeInference other;
+    other.add_row({"123", "true"});
+    other.add_row({"456", "false"});
+
+    inference.add_row({"789", "yes"});
+
+    inference.merge(other);
+
+    EXPECT_EQ(inference.column_stats(0).total_count, 3);
+    EXPECT_EQ(inference.column_stats(1).total_count, 3);
+}
+
+TEST_F(ColumnTypeInferenceTest, MergeGrowsColumns) {
+    ColumnTypeInference other;
+    other.add_row({"a", "b", "c", "d"});
+
+    inference.add_row({"e", "f"});
+
+    inference.merge(other);
+
+    EXPECT_EQ(inference.num_columns(), 4);
+}
+
+TEST_F(ColumnTypeInferenceTest, SetOptions) {
+    TypeDetectionOptions opts;
+    opts.bool_as_int = false;
+    inference.set_options(opts);
+
+    inference.add_row({"0", "1"});
+    auto types = inference.infer_types();
+    // With bool_as_int=false, 0 and 1 should be INTEGER not BOOLEAN
+    EXPECT_EQ(types[0], FieldType::INTEGER);
+    EXPECT_EQ(types[1], FieldType::INTEGER);
+}
+
+TEST_F(ColumnTypeInferenceTest, ColumnStatsAt) {
+    inference.add_row({"123", "true"});
+    const ColumnTypeStats& stats = inference.column_stats(0);
+    EXPECT_EQ(stats.integer_count, 1);
+}
+
+TEST_F(ColumnTypeInferenceTest, AllStats) {
+    inference.add_row({"123", "true", "3.14"});
+    const auto& all = inference.all_stats();
+    EXPECT_EQ(all.size(), 3);
+}
+
+TEST_F(ColumnTypeInferenceTest, InferTypesWithConfidenceThreshold) {
+    TypeDetectionOptions opts;
+    opts.confidence_threshold = 0.5;
+    ColumnTypeInference inf(0, opts);
+
+    // 60% integers, 40% strings
+    for (int i = 0; i < 60; ++i) {
+        inf.add_row({"123"});
+    }
+    for (int i = 0; i < 40; ++i) {
+        inf.add_row({"hello"});
+    }
+
+    auto types = inf.infer_types();
+    // With 0.5 threshold, 60% integers should dominate
+    EXPECT_EQ(types[0], FieldType::INTEGER);
+}
+
+TEST_F(ColumnTypeInferenceTest, AddRowGrowsColumns) {
+    inference.add_row({"a", "b"});
+    inference.add_row({"c", "d", "e", "f"});  // More columns
+    EXPECT_EQ(inference.num_columns(), 4);
 }
 
 class SIMDTypeDetectorTest : public ::testing::Test {
@@ -421,6 +959,192 @@ TEST_F(SIMDTypeDetectorTest, DetectBatch) {
     EXPECT_EQ(results[1], FieldType::FLOAT);
     EXPECT_EQ(results[2], FieldType::BOOLEAN);
     EXPECT_EQ(results[3], FieldType::STRING);
+}
+
+TEST_F(SIMDTypeDetectorTest, DetectBatchEmpty) {
+    FieldType results[1];
+    const uint8_t* field_ptrs[1];
+    size_t lengths[1];
+    SIMDTypeDetector::detect_batch(field_ptrs, lengths, 0, results);
+    // Should handle empty batch without crashing
+}
+
+TEST_F(SIMDTypeDetectorTest, DetectBatchWithOptions) {
+    const char* fields[] = {"1,000", "true"};
+    size_t lengths[] = {5, 4};
+    FieldType results[2];
+    const uint8_t* field_ptrs[2];
+    for (int i = 0; i < 2; ++i) {
+        field_ptrs[i] = reinterpret_cast<const uint8_t*>(fields[i]);
+    }
+
+    TypeDetectionOptions opts;
+    opts.allow_thousands_sep = true;
+
+    SIMDTypeDetector::detect_batch(field_ptrs, lengths, 2, results, opts);
+    EXPECT_EQ(results[0], FieldType::INTEGER);
+    EXPECT_EQ(results[1], FieldType::BOOLEAN);
+}
+
+// ============================================================================
+// Additional String Detection / Fallback Tests
+// ============================================================================
+
+class StringFallbackTest : public ::testing::Test {
+protected:
+    TypeDetectionOptions options;
+    void SetUp() override { options = TypeDetectionOptions::defaults(); }
+};
+
+TEST_F(StringFallbackTest, AlmostInteger) {
+    // Things that look like integers but aren't
+    EXPECT_EQ(TypeDetector::detect_field("123abc", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("abc123", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("1 2 3", options), FieldType::STRING);
+}
+
+TEST_F(StringFallbackTest, AlmostFloat) {
+    // Things that look like floats but aren't
+    EXPECT_EQ(TypeDetector::detect_field("3.14abc", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("3.14.15", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("..5", options), FieldType::STRING);
+}
+
+TEST_F(StringFallbackTest, AlmostDate) {
+    // Things that look like dates but aren't
+    EXPECT_EQ(TypeDetector::detect_field("2024-13-01", options), FieldType::STRING);  // Invalid month
+    EXPECT_EQ(TypeDetector::detect_field("abcd-01-15", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("2024-ab-15", options), FieldType::STRING);
+}
+
+TEST_F(StringFallbackTest, MixedContent) {
+    EXPECT_EQ(TypeDetector::detect_field("Hello, World!", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("test@example.com", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("https://example.com", options), FieldType::STRING);
+}
+
+TEST_F(StringFallbackTest, SpecialCharacters) {
+    EXPECT_EQ(TypeDetector::detect_field("!@#$%", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("<html>", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("{\"key\": \"value\"}", options), FieldType::STRING);
+}
+
+TEST_F(StringFallbackTest, UnicodeContent) {
+    EXPECT_EQ(TypeDetector::detect_field("日本語", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("émoji 🎉", options), FieldType::STRING);
+    EXPECT_EQ(TypeDetector::detect_field("Ñoño", options), FieldType::STRING);
+}
+
+// ============================================================================
+// API Overload Tests (different input types)
+// ============================================================================
+
+class APIOverloadTest : public ::testing::Test {
+protected:
+    TypeDetectionOptions options;
+    void SetUp() override { options = TypeDetectionOptions::defaults(); }
+};
+
+TEST_F(APIOverloadTest, DetectFieldFromUint8Ptr) {
+    const uint8_t data[] = {'1', '2', '3'};
+    EXPECT_EQ(TypeDetector::detect_field(data, 3, options), FieldType::INTEGER);
+}
+
+TEST_F(APIOverloadTest, DetectFieldFromString) {
+    std::string str = "3.14159";
+    EXPECT_EQ(TypeDetector::detect_field(str, options), FieldType::FLOAT);
+}
+
+TEST_F(APIOverloadTest, DetectFieldFromCString) {
+    const char* cstr = "true";
+    EXPECT_EQ(TypeDetector::detect_field(cstr, options), FieldType::BOOLEAN);
+}
+
+TEST_F(APIOverloadTest, DetectFieldFromEmptyString) {
+    std::string str = "";
+    EXPECT_EQ(TypeDetector::detect_field(str, options), FieldType::EMPTY);
+}
+
+TEST_F(APIOverloadTest, DetectFieldFromEmptyCString) {
+    const char* cstr = "";
+    EXPECT_EQ(TypeDetector::detect_field(cstr, options), FieldType::EMPTY);
+}
+
+// ============================================================================
+// Direct is_* method tests
+// ============================================================================
+
+class DirectMethodTest : public ::testing::Test {
+protected:
+    TypeDetectionOptions options;
+    void SetUp() override { options = TypeDetectionOptions::defaults(); }
+};
+
+TEST_F(DirectMethodTest, IsBooleanDirect) {
+    EXPECT_TRUE(TypeDetector::is_boolean(
+        reinterpret_cast<const uint8_t*>("true"), 4, options));
+    EXPECT_FALSE(TypeDetector::is_boolean(
+        reinterpret_cast<const uint8_t*>("123"), 3, options));
+}
+
+TEST_F(DirectMethodTest, IsIntegerDirect) {
+    EXPECT_TRUE(TypeDetector::is_integer(
+        reinterpret_cast<const uint8_t*>("12345"), 5, options));
+    EXPECT_FALSE(TypeDetector::is_integer(
+        reinterpret_cast<const uint8_t*>("12.34"), 5, options));
+}
+
+TEST_F(DirectMethodTest, IsFloatDirect) {
+    EXPECT_TRUE(TypeDetector::is_float(
+        reinterpret_cast<const uint8_t*>("3.14"), 4, options));
+    EXPECT_FALSE(TypeDetector::is_float(
+        reinterpret_cast<const uint8_t*>("hello"), 5, options));
+}
+
+TEST_F(DirectMethodTest, IsDateDirect) {
+    EXPECT_TRUE(TypeDetector::is_date(
+        reinterpret_cast<const uint8_t*>("2024-01-15"), 10));
+    EXPECT_FALSE(TypeDetector::is_date(
+        reinterpret_cast<const uint8_t*>("hello"), 5));
+}
+
+TEST_F(DirectMethodTest, IsIntegerEmpty) {
+    EXPECT_FALSE(TypeDetector::is_integer(
+        reinterpret_cast<const uint8_t*>(""), 0, options));
+}
+
+TEST_F(DirectMethodTest, IsFloatEmpty) {
+    EXPECT_FALSE(TypeDetector::is_float(
+        reinterpret_cast<const uint8_t*>(""), 0, options));
+}
+
+// ============================================================================
+// Edge Cases for Type Priority
+// ============================================================================
+
+class TypePriorityTest : public ::testing::Test {
+protected:
+    TypeDetectionOptions options;
+    void SetUp() override { options = TypeDetectionOptions::defaults(); }
+};
+
+TEST_F(TypePriorityTest, DateBeforeInteger8Digits) {
+    // 8 digit numbers that look like dates should be DATE, not INTEGER
+    EXPECT_EQ(TypeDetector::detect_field("20240115", options), FieldType::DATE);
+    // But invalid dates should fall through to INTEGER
+    EXPECT_EQ(TypeDetector::detect_field("99999999", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("20241315", options), FieldType::INTEGER);  // Invalid month
+}
+
+TEST_F(TypePriorityTest, BooleanBeforeIntegerSingleDigit) {
+    // "0" and "1" are BOOLEAN when bool_as_int is true
+    EXPECT_EQ(TypeDetector::detect_field("0", options), FieldType::BOOLEAN);
+    EXPECT_EQ(TypeDetector::detect_field("1", options), FieldType::BOOLEAN);
+
+    // Other single digits are INTEGER
+    options.bool_as_int = false;
+    EXPECT_EQ(TypeDetector::detect_field("0", options), FieldType::INTEGER);
+    EXPECT_EQ(TypeDetector::detect_field("1", options), FieldType::INTEGER);
 }
 
 int main(int argc, char **argv) {

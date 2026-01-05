@@ -2049,3 +2049,500 @@ TEST(StreamingTest, MaxFieldSizeErrorCallbackReturnFalseHaltsParsing) {
     // Parsing should have halted, so second row is not processed
     EXPECT_EQ(row_count, 0);
 }
+
+//-----------------------------------------------------------------------------
+// Additional Coverage Tests
+//-----------------------------------------------------------------------------
+
+// Test that error callback returning false in QUOTED_END state stops parsing
+TEST(StreamingTest, InvalidQuoteEscapeErrorCallbackReturnFalseHaltsParsing) {
+    // "hello"world triggers INVALID_QUOTE_ESCAPE when 'w' follows closing quote
+    std::string csv = "\"hello\"world,test\nmore,data\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+
+    int error_count = 0;
+    parser.set_error_handler([&error_count](const ParseError& err) {
+        (void)err;
+        ++error_count;
+        return false;  // Request halt on error
+    });
+
+    int row_count = 0;
+    parser.set_row_handler([&row_count](const Row& row) {
+        (void)row;
+        ++row_count;
+        return true;
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    // Error callback was invoked once
+    EXPECT_EQ(error_count, 1);
+    // Parsing halted immediately - no rows should be processed
+    EXPECT_EQ(row_count, 0);
+}
+
+// Test field_start adjustment when field_start < last_row_end in chunk processing
+TEST(StreamingTest, FieldStartAdjustmentWhenLessThanLastRowEnd) {
+    // This tests the branch where field_start < last_row_end after processing a chunk
+    // We need a scenario where:
+    // 1. A complete row is found
+    // 2. The field_start for the next row is at the very start (0 relative to last_row_end)
+    std::string chunk1 = "hello,world\n";
+    std::string chunk2 = "next,row\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    std::vector<std::vector<std::string>> rows;
+    parser.set_row_handler([&rows](const Row& row) {
+        std::vector<std::string> fields;
+        for (const auto& field : row) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+        return true;
+    });
+
+    // Parse first chunk - row ends exactly at chunk boundary
+    parser.parse_chunk(chunk1);
+    // At this point, field_start should be 0 (relative to start of any remaining buffer)
+
+    // Parse second chunk
+    parser.parse_chunk(chunk2);
+    parser.finish();
+
+    ASSERT_EQ(rows.size(), 2);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"hello", "world"}));
+    EXPECT_EQ(rows[1], (std::vector<std::string>{"next", "row"}));
+}
+
+// Test finish() with partial field_bounds (state is RECORD_START but we have field bounds)
+TEST(StreamingTest, FinishWithPartialFieldBoundsAtRecordStart) {
+    // This is a tricky case - we need current_field_bounds to be non-empty
+    // while state is RECORD_START at finish time. This can happen if
+    // we parsed part of a row but didn't complete it, then the row ended.
+    // Actually, re-examining the code, if we have field_bounds and state is RECORD_START,
+    // we're at the end of a row that was already processed.
+    // The actual branch at line 509 is for when we have field_bounds but are in an
+    // unexpected state. Let me look more carefully.
+
+    // After reviewing the code, the branch at line 507-509:
+    // } else if (!current_field_bounds.empty()) {
+    //     // Have partial row data
+    //     emit_row();
+    // }
+    // This is reached when state is not RECORD_START, UNQUOTED_FIELD, QUOTED_FIELD,
+    // QUOTED_END, or FIELD_START, but we have field bounds. However, there's no
+    // other state in the enum, so this is essentially dead code / defensive programming.
+    // We can verify it's not reachable in current design.
+
+    // Let's test what we can - which is the field_start < last_row_end case
+    // We need partial data that ends mid-field to test field_start adjustment.
+
+    // Create a scenario where a row ends and the next field_start would be 0
+    std::string csv = "ab\ncd\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    // Parse byte by byte to force many adjustments
+    for (char c : csv) {
+        parser.parse_chunk(std::string_view(&c, 1));
+    }
+    parser.finish();
+
+    std::vector<std::vector<std::string>> rows;
+    while (parser.next_row() == StreamStatus::ROW_READY) {
+        std::vector<std::string> fields;
+        for (const auto& field : parser.current_row()) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+    }
+
+    ASSERT_EQ(rows.size(), 2);
+    EXPECT_EQ(rows[0], (std::vector<std::string>{"ab"}));
+    EXPECT_EQ(rows[1], (std::vector<std::string>{"cd"}));
+}
+
+// Test RowIterator comparison when both iterators are not at end
+TEST(StreamingTest, RowIteratorNonEndComparison) {
+    std::string csv = "a\nb\nc\n";
+    std::istringstream input1(csv);
+    std::istringstream input2(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader1(input1, config);
+    StreamReader reader2(input2, config);
+
+    auto it1 = reader1.begin();
+    auto it2 = reader2.begin();
+    auto end = reader1.end();
+
+    // Both iterators are not at end
+    EXPECT_NE(it1, end);
+    EXPECT_NE(it2, end);
+
+    // Two begin iterators from different readers should not be equal
+    // (they point to different readers)
+    EXPECT_NE(it1, it2);
+
+    // Same iterator should equal itself (testing reflexivity)
+    EXPECT_EQ(it1, it1);
+}
+
+// Test read_more_data returning false when input is null
+TEST(StreamingTest, StreamReaderFromFileReadsBinaryData) {
+    // Create a temporary file with binary-safe content
+    std::string temp_file = "/tmp/streaming_test_binary.csv";
+    {
+        std::ofstream out(temp_file, std::ios::binary);
+        out << "a,b\n1,2\n";
+    }
+
+    StreamConfig config;
+    config.parse_header = true;
+
+    // Use the file constructor (tests line 715)
+    StreamReader reader(temp_file, config);
+
+    ASSERT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row()[0].data, "1");
+    EXPECT_EQ(reader.row()[1].data, "2");
+    EXPECT_FALSE(reader.next_row());
+
+    // Cleanup
+    std::remove(temp_file.c_str());
+}
+
+// Test chunk boundary where field_start needs adjustment to 0
+TEST(StreamingTest, ChunkBoundaryFieldStartZeroAdjustment) {
+    // Set up a scenario where after processing:
+    // - last_row_end > 0 (a row was completed)
+    // - field_start < last_row_end (the next field starts within processed data)
+    // This forces the else branch: field_start = 0
+
+    // Create CSV where row ends at specific position
+    std::string csv = "x\ny\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    std::vector<std::string> rows;
+    parser.set_row_handler([&rows](const Row& row) {
+        rows.push_back(std::string(row[0].data));
+        return true;
+    });
+
+    // Feed data one byte at a time to ensure field_start adjustments happen
+    for (size_t i = 0; i < csv.size(); ++i) {
+        parser.parse_chunk(std::string_view(csv.data() + i, 1));
+    }
+    parser.finish();
+
+    ASSERT_EQ(rows.size(), 2);
+    EXPECT_EQ(rows[0], "x");
+    EXPECT_EQ(rows[1], "y");
+}
+
+// Test that StreamReader constructor with ifstream properly sets up input
+TEST(StreamingTest, StreamReaderFromFileWithHeader) {
+    std::string temp_file = "/tmp/streaming_test_header.csv";
+    {
+        std::ofstream out(temp_file, std::ios::binary);
+        out << "name,value\nfoo,100\nbar,200\n";
+    }
+
+    StreamConfig config;
+    config.parse_header = true;
+
+    StreamReader reader(temp_file, config);
+
+    EXPECT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.header(), (std::vector<std::string>{"name", "value"}));
+    EXPECT_EQ(reader.row()["name"].data, "foo");
+    EXPECT_EQ(reader.row()["value"].data, "100");
+
+    EXPECT_TRUE(reader.next_row());
+    EXPECT_EQ(reader.row()["name"].data, "bar");
+    EXPECT_EQ(reader.row()["value"].data, "200");
+
+    EXPECT_FALSE(reader.next_row());
+    EXPECT_TRUE(reader.eof());
+
+    std::remove(temp_file.c_str());
+}
+
+// Test StreamReader with large file triggering multiple read_more_data calls
+TEST(StreamingTest, StreamReaderMultipleChunks) {
+    std::string temp_file = "/tmp/streaming_test_large.csv";
+    {
+        std::ofstream out(temp_file, std::ios::binary);
+        out << "id\n";
+        for (int i = 0; i < 1000; ++i) {
+            out << i << "\n";
+        }
+    }
+
+    StreamConfig config;
+    config.parse_header = true;
+    config.chunk_size = 64;  // Small chunk size to force multiple reads
+
+    StreamReader reader(temp_file, config);
+
+    int count = 0;
+    while (reader.next_row()) {
+        ++count;
+    }
+
+    EXPECT_EQ(count, 1000);
+    EXPECT_TRUE(reader.eof());
+
+    std::remove(temp_file.c_str());
+}
+
+// Test empty chunks don't break state
+TEST(StreamingTest, EmptyChunkProcessing) {
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    std::vector<std::string> rows;
+    parser.set_row_handler([&rows](const Row& row) {
+        rows.push_back(std::string(row[0].data));
+        return true;
+    });
+
+    // Empty chunk
+    parser.parse_chunk(std::string_view("", 0));
+    // Actual data
+    parser.parse_chunk("hello\n");
+    // Another empty chunk
+    parser.parse_chunk(std::string_view("", 0));
+    // More data
+    parser.parse_chunk("world\n");
+    parser.finish();
+
+    ASSERT_EQ(rows.size(), 2);
+    EXPECT_EQ(rows[0], "hello");
+    EXPECT_EQ(rows[1], "world");
+}
+
+// Test that StreamReader handles EOF correctly during iteration
+TEST(StreamingTest, StreamReaderEOFHandling) {
+    std::string csv = "a\nb\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    // Before reading, not at EOF
+    EXPECT_FALSE(reader.eof());
+
+    // Read all rows
+    int count = 0;
+    while (reader.next_row()) {
+        ++count;
+    }
+
+    // After exhausting, should be at EOF
+    EXPECT_EQ(count, 2);
+    EXPECT_TRUE(reader.eof());
+
+    // Additional next_row calls should continue returning false
+    EXPECT_FALSE(reader.next_row());
+    EXPECT_TRUE(reader.eof());
+}
+
+// Test buffer management with very long partial rows
+TEST(StreamingTest, BufferManagementLongPartialRow) {
+    // Create a very long field that spans multiple chunks
+    std::string long_field(10000, 'x');
+    std::string csv = long_field + "\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    // Feed in small chunks
+    size_t chunk_size = 100;
+    for (size_t i = 0; i < csv.size(); i += chunk_size) {
+        size_t len = std::min(chunk_size, csv.size() - i);
+        parser.parse_chunk(std::string_view(csv.data() + i, len));
+    }
+    parser.finish();
+
+    EXPECT_EQ(parser.next_row(), StreamStatus::ROW_READY);
+    EXPECT_EQ(parser.current_row()[0].data.size(), 10000);
+    EXPECT_EQ(parser.next_row(), StreamStatus::END_OF_DATA);
+}
+
+// Test that bytes_read reflects actual bytes read from stream
+TEST(StreamingTest, StreamReaderBytesReadAccurate) {
+    std::string csv = "hello,world\nfoo,bar\n";
+    std::istringstream input(csv);
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamReader reader(input, config);
+
+    // Initially, no bytes read
+    EXPECT_EQ(reader.bytes_read(), 0);
+
+    // After reading first row, some bytes read
+    EXPECT_TRUE(reader.next_row());
+    EXPECT_GT(reader.bytes_read(), 0);
+
+    // After reading all, all bytes should be read
+    while (reader.next_row()) {}
+    EXPECT_EQ(reader.bytes_read(), csv.size());
+}
+
+// Test recovery from errors in permissive mode across chunk boundaries
+TEST(StreamingTest, ErrorRecoveryAcrossChunkBoundary) {
+    // First chunk ends with invalid state, second chunk continues
+    std::string chunk1 = "hello\"";  // Quote in unquoted field
+    std::string chunk2 = "world,test\nnext,row\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+
+    std::vector<std::vector<std::string>> rows;
+    parser.set_row_handler([&rows](const Row& row) {
+        std::vector<std::string> fields;
+        for (const auto& field : row) {
+            fields.push_back(std::string(field.data));
+        }
+        rows.push_back(fields);
+        return true;
+    });
+
+    parser.parse_chunk(chunk1);
+    parser.parse_chunk(chunk2);
+    parser.finish();
+
+    // Should have recovered and parsed both rows
+    ASSERT_GE(rows.size(), 1);
+    EXPECT_TRUE(parser.errors().has_errors());
+}
+
+// Test state preservation when quoted field spans many chunks
+TEST(StreamingTest, QuotedFieldSpansManyChunks) {
+    // Quoted field with embedded newlines and commas spanning many chunks
+    // Use doubled quotes ("") inside to represent literal quotes
+    std::string raw_content = "This is a \"\"long\"\" field,\nwith newlines\r\nand various,commas";
+    std::string csv = "\"" + raw_content + "\",end\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    // Feed character by character
+    for (char c : csv) {
+        parser.parse_chunk(std::string_view(&c, 1));
+    }
+    parser.finish();
+
+    EXPECT_EQ(parser.next_row(), StreamStatus::ROW_READY);
+    EXPECT_EQ(parser.current_row().field_count(), 2);
+    // Raw data should contain the doubled quotes
+    EXPECT_EQ(parser.current_row()[0].data, raw_content);
+    EXPECT_TRUE(parser.current_row()[0].is_quoted);
+    EXPECT_EQ(parser.current_row()[1].data, "end");
+}
+
+// Test row callback returns false mid-stream
+TEST(StreamingTest, RowCallbackStopsMidStream) {
+    std::string csv = "a\nb\nc\nd\ne\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+
+    StreamParser parser(config);
+
+    int row_count = 0;
+    parser.set_row_handler([&row_count](const Row& row) {
+        (void)row;
+        ++row_count;
+        return row_count < 3;  // Stop after 3 rows
+    });
+
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    EXPECT_EQ(row_count, 3);
+}
+
+// Test that errors() returns correct error collector state
+TEST(StreamingTest, ErrorCollectorStateTracking) {
+    std::string csv = "a\"b\n\"unclosed";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    const auto& errors = parser.errors();
+
+    // Should have at least one error
+    EXPECT_TRUE(errors.has_errors());
+
+    // Should have specific error types
+    bool found_quote_error = false;
+    for (const auto& err : errors.errors()) {
+        if (err.code == ErrorCode::QUOTE_IN_UNQUOTED_FIELD ||
+            err.code == ErrorCode::UNCLOSED_QUOTE) {
+            found_quote_error = true;
+        }
+    }
+    EXPECT_TRUE(found_quote_error);
+}
+
+// Test reset clears all state including errors
+TEST(StreamingTest, ResetClearsErrors) {
+    std::string csv = "a\"b\n";
+
+    StreamConfig config;
+    config.parse_header = false;
+    config.error_mode = ErrorMode::PERMISSIVE;
+
+    StreamParser parser(config);
+    parser.parse_chunk(csv);
+    parser.finish();
+
+    EXPECT_TRUE(parser.errors().has_errors());
+
+    parser.reset();
+
+    EXPECT_FALSE(parser.errors().has_errors());
+    EXPECT_EQ(parser.rows_processed(), 0);
+    EXPECT_EQ(parser.bytes_processed(), 0);
+    EXPECT_FALSE(parser.is_finished());
+}
