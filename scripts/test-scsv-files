@@ -49,6 +49,17 @@ if [[ -d /tmp/CSV_Wrangling/data/github ]]; then
 $(find /tmp/CSV_Wrangling/data/github -name "*.csv" -type f 2>/dev/null)"
 fi
 
+if [[ -d /tmp/CSV_Wrangling/data/ukdata ]]; then
+    FILES="$FILES
+$(find /tmp/CSV_Wrangling/data/ukdata -name "*.csv" -type f 2>/dev/null)"
+fi
+
+# Include additional corpus if available
+if [[ -d /tmp/csv_corpus ]]; then
+    FILES="$FILES
+$(find /tmp/csv_corpus -name "*.csv" -type f 2>/dev/null)"
+fi
+
 FILE_COUNT=$(echo "$FILES" | grep -c . || echo 0)
 echo "Found $FILE_COUNT CSV files"
 echo ""
