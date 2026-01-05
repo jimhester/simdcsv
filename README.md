@@ -1,7 +1,7 @@
 # simdcsv
 
 <!-- badges: start -->
-[![CI](https://github.com/jimhester/simdcsv/workflows/CI/badge.svg?branch=main)](https://github.com/jimhester/simdcsv/actions?query=branch%3Amain)
+[![CI](https://github.com/jimhester/simdcsv/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jimhester/simdcsv/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/jimhester/simdcsv/branch/main/graph/badge.svg)](https://codecov.io/gh/jimhester/simdcsv)
 <!-- badges: end -->
 
