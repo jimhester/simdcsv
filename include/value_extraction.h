@@ -177,6 +177,7 @@ really_inline ExtractResult<double> parse_double(const char* str, size_t len,
 }
 
 // Forward declare SIMD parsers (defined in simd_number_parsing.h)
+// Default arguments MUST be here (in the first declaration), not in the definitions
 template <typename IntType>
 ExtractResult<IntType> parse_integer_simd(const char* str, size_t len, const ExtractionConfig& config = ExtractionConfig::defaults());
 ExtractResult<double> parse_double_simd(const char* str, size_t len, const ExtractionConfig& config = ExtractionConfig::defaults());

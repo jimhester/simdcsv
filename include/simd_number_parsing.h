@@ -1108,7 +1108,7 @@ using SIMDDateTimeResult = SIMDParseResult<DateTime>;
  */
 template <typename IntType>
 really_inline ExtractResult<IntType> parse_integer_simd(const char* str, size_t len,
-                                                         const ExtractionConfig& config) {
+                                                         const ExtractionConfig& config /* = ExtractionConfig::defaults() declared in value_extraction.h */) {
     static_assert(std::is_integral_v<IntType>, "IntType must be an integral type");
 
     if (len == 0) return {std::nullopt, nullptr};
@@ -1188,7 +1188,7 @@ really_inline ExtractResult<IntType> parse_integer_simd(const char* str, size_t 
  * @return ExtractResult with parsed value or error
  */
 really_inline ExtractResult<double> parse_double_simd(const char* str, size_t len,
-                                                       const ExtractionConfig& config) {
+                                                       const ExtractionConfig& config /* = ExtractionConfig::defaults() declared in value_extraction.h */) {
     if (len == 0) return {std::nullopt, nullptr};
 
     const char* ptr = str;
@@ -1233,7 +1233,7 @@ really_inline ExtractResult<double> parse_double_simd(const char* str, size_t le
  */
 template <typename T>
 really_inline ExtractResult<T> extract_value_simd(const char* str, size_t len,
-                                                   const ExtractionConfig& config) {
+                                                   const ExtractionConfig& config /* = ExtractionConfig::defaults() */) {
     if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, int32_t> ||
                   std::is_same_v<T, uint64_t> || std::is_same_v<T, uint32_t>) {
         return parse_integer_simd<T>(str, len, config);
