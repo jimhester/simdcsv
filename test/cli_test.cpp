@@ -433,7 +433,7 @@ TEST_F(CliTest, InvalidThreadCount) {
 }
 
 TEST_F(CliTest, InvalidThreadCountTooHigh) {
-  auto result = CliRunner::run("count -t 999 " + testDataPath("basic/simple.csv"));
+  auto result = CliRunner::run("count -t 300 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
   EXPECT_TRUE(result.output.find("Thread count") != std::string::npos);
 }
@@ -778,7 +778,7 @@ TEST_F(CliTest, NoHeaderWithColumnNameSelect) {
 }
 
 TEST_F(CliTest, ExcessiveThreadsInvalid) {
-  // More than 256 threads is invalid
+  // More than 255 threads is invalid (limited by uint8_t in index struct)
   auto result = CliRunner::run("count -t 300 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
 }

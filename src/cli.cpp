@@ -17,6 +17,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "common_defs.h"
@@ -29,7 +30,8 @@
 using namespace std;
 
 // Constants
-constexpr int MAX_THREADS = 256;
+// Note: MAX_THREADS is limited to 255 due to uint8_t n_threads in index struct
+constexpr int MAX_THREADS = 255;
 constexpr int MIN_THREADS = 1;
 constexpr size_t MAX_COLUMN_WIDTH = 40;
 constexpr size_t DEFAULT_NUM_ROWS = 10;
@@ -162,7 +164,7 @@ void printUsage(const char* prog) {
   cerr << "  -n <num>      Number of rows (for head/pretty)\n";
   cerr << "  -c <cols>     Comma-separated column names or indices (for select)\n";
   cerr << "  -H            No header row in input\n";
-  cerr << "  -t <threads>  Number of threads (default: 1, max: " << MAX_THREADS << ")\n";
+  cerr << "  -t <threads>  Number of threads (default: auto, max: " << MAX_THREADS << ")\n";
   cerr << "  -d <delim>    Field delimiter (disables auto-detection)\n";
   cerr << "                Values: comma, tab, semicolon, pipe, or single character\n";
   cerr << "  -q <char>     Quote character (default: \")\n";
@@ -857,7 +859,9 @@ int main(int argc, char* argv[]) {
   // Skip command for option parsing
   optind = 2;
 
-  int n_threads = 1;
+  // Auto-detect number of threads based on hardware concurrency
+  unsigned int hw_threads = std::thread::hardware_concurrency();
+  int n_threads = (hw_threads > 0) ? static_cast<int>(std::min(hw_threads, static_cast<unsigned int>(MAX_THREADS))) : 1;
   size_t num_rows = DEFAULT_NUM_ROWS;
   bool has_header = true;
   bool auto_detect = true;  // Auto-detect by default

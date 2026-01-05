@@ -13,6 +13,14 @@ simdcsv is a high-performance CSV parser library using portable SIMD instruction
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 
+# Minimal release build (library and CLI only, no tests/benchmarks)
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF
+cmake --build build
+
+# Build shared library instead of static
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
+cmake --build build
+
 # Run all tests
 cd build && ctest --output-on-failure
 
