@@ -3,7 +3,9 @@ set -euo pipefail
 
 # work - Start Claude Code session(s) for GitHub issue(s)
 #
-# By default, spawns each issue in a new iTerm2 tab (macOS only).
+# By default, spawns each issue in a new terminal tab:
+#   - macOS: Uses iTerm2
+#   - WSL: Uses Windows Terminal
 # Use --here to run in the current terminal instead.
 #
 # Usage: ./work <issue> [issue2 ...]      # Each in new tab (default)
@@ -22,7 +24,7 @@ Usage: $(basename "$0") <issue> [issue2 ...]
        $(basename "$0") --here <issue-url-or-number> [description]
        $(basename "$0") "description of new feature"
 
-By default, spawns each issue in a new iTerm2 tab (macOS only).
+By default, spawns each issue in a new terminal tab (macOS iTerm2 or WSL Windows Terminal).
 
 Examples:
   $(basename "$0") 97 98 99                    # Spawn 3 issues in new tabs
@@ -42,23 +44,68 @@ EOF
     exit 1
 }
 
-# Check prerequisites for spawning
-check_spawn_prerequisites() {
-    if [[ "$(uname)" != "Darwin" ]]; then
-        echo "Error: Spawning new tabs requires macOS (detected: $(uname))"
-        echo "Use --here to run in current terminal instead."
-        exit 1
+# Find Windows Terminal executable in WSL
+find_wt_exe() {
+    # Check if wt.exe is in PATH
+    if command -v wt.exe &>/dev/null; then
+        echo "wt.exe"
+        return 0
     fi
 
-    if ! osascript -e 'tell application "System Events" to (name of processes) contains "iTerm2"' 2>/dev/null | grep -q "true"; then
-        echo "Error: iTerm2 is not running. Please start iTerm2 first."
-        echo "Or use --here to run in current terminal."
+    # Look in common Windows Terminal locations
+    local wt_path
+    for wt_path in /mnt/c/Users/*/AppData/Local/Microsoft/WindowsApps/wt.exe; do
+        if [[ -x "$wt_path" ]]; then
+            echo "$wt_path"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Detect terminal environment
+# Sets SPAWN_METHOD to: "iterm2", "wsl", or ""
+# Sets WT_EXE for WSL method
+detect_spawn_method() {
+    SPAWN_METHOD=""
+    WT_EXE=""
+
+    # Check for macOS + iTerm2
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if osascript -e 'tell application "System Events" to (name of processes) contains "iTerm2"' 2>/dev/null | grep -q "true"; then
+            SPAWN_METHOD="iterm2"
+            return 0
+        fi
+    fi
+
+    # Check for WSL + Windows Terminal
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft /proc/version 2>/dev/null; then
+        WT_EXE=$(find_wt_exe)
+        if [[ -n "$WT_EXE" ]]; then
+            SPAWN_METHOD="wsl"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Check prerequisites for spawning
+check_spawn_prerequisites() {
+    if ! detect_spawn_method; then
+        echo "Error: No supported terminal detected for spawning new tabs."
+        echo "Supported environments:"
+        echo "  - macOS with iTerm2 running"
+        echo "  - WSL with Windows Terminal"
+        echo ""
+        echo "Use --here to run in current terminal instead."
         exit 1
     fi
 }
 
 # Spawn a single issue in a new iTerm2 tab
-spawn_in_new_tab() {
+spawn_in_new_tab_iterm2() {
     local issue="$1"
 
     # Capture current directory
@@ -85,6 +132,50 @@ tell application "iTerm2"
     end tell
 end tell
 EOF
+}
+
+# Spawn a single issue in a new Windows Terminal tab (WSL)
+spawn_in_new_tab_wsl() {
+    local issue="$1"
+
+    # Capture current directory
+    local current_dir
+    current_dir="$(pwd)"
+
+    # Get WSL distro name
+    local distro="${WSL_DISTRO_NAME:-Ubuntu}"
+
+    # Get user's default shell (zsh, bash, etc.)
+    local user_shell
+    user_shell=$(basename "${SHELL:-/bin/bash}")
+
+    # Build the command to run in the new tab
+    # Use single quotes for the outer command to preserve variables
+    local cmd="cd '${current_dir}' && '${SCRIPT_DIR}/work' --here '${issue}'"
+
+    # Use Windows Terminal to create a new tab running WSL
+    # -w 0 = use current window, nt = new tab
+    # -p specifies the profile name (use the distro name)
+    # Use -lic (login + interactive + command) to ensure PATH is set up properly
+    "$WT_EXE" -w 0 nt -p "$distro" -d "$(wslpath -w "$current_dir")" -- "$user_shell" -lic "$cmd"
+}
+
+# Spawn a single issue in a new terminal tab (dispatches based on environment)
+spawn_in_new_tab() {
+    local issue="$1"
+
+    case "$SPAWN_METHOD" in
+        iterm2)
+            spawn_in_new_tab_iterm2 "$issue"
+            ;;
+        wsl)
+            spawn_in_new_tab_wsl "$issue"
+            ;;
+        *)
+            echo "Error: Unknown spawn method: $SPAWN_METHOD"
+            exit 1
+            ;;
+    esac
 
     echo "Spawned new tab for: $issue"
 }
@@ -347,7 +438,7 @@ gh issue create --title "Add SIMD support to ValueExtractor" --label "feature" -
 EOF
 )
 
-    # Set iTerm2 tab/window title
+    # Set terminal tab/window title (works for iTerm2 and Windows Terminal)
     local title=""
     if [[ -n "$ISSUE_NUMBER" ]]; then
         title="Issue #${ISSUE_NUMBER}"
