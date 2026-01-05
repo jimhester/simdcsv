@@ -105,6 +105,83 @@ jobs:
         verbose: true
         token: ${{ secrets.CODECOV_TOKEN }}
 
+  minimal-release-build:
+    name: Minimal Release Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+
+    - name: Configure minimal release build
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF
+
+    - name: Build
+      run: |
+        cmake --build build --config Release
+
+    - name: Verify expected artifacts exist
+      run: |
+        echo "Checking for library..."
+        if ls build/libsimdcsv_lib.* 1>/dev/null 2>&1; then
+          echo "✓ Library found:"
+          ls -la build/libsimdcsv_lib.*
+        else
+          echo "✗ Library not found!"
+          exit 1
+        fi
+
+        echo "Checking for scsv binary..."
+        if [ -f build/scsv ]; then
+          echo "✓ scsv binary found:"
+          ls -la build/scsv
+        else
+          echo "✗ scsv binary not found!"
+          exit 1
+        fi
+
+    - name: Verify test executables are NOT built
+      run: |
+        echo "Verifying test executables are not present..."
+        TEST_EXECUTABLES="simdcsv_test error_handling_test csv_parsing_test csv_parser_errors_test csv_extended_test dialect_detection_test type_detection_test c_api_test debug_test api_test quote_mask_test value_extraction_test streaming_test branchless_test simd_number_parsing_test io_util_test cli_test two_pass_coverage_test"
+
+        FOUND_TESTS=""
+        for test in $TEST_EXECUTABLES; do
+          if [ -f "build/$test" ]; then
+            FOUND_TESTS="$FOUND_TESTS $test"
+          fi
+        done
+
+        if [ -n "$FOUND_TESTS" ]; then
+          echo "✗ Test executables were built but should not have been:$FOUND_TESTS"
+          exit 1
+        fi
+        echo "✓ No test executables found (as expected)"
+
+    - name: Verify benchmark executables are NOT built
+      run: |
+        echo "Verifying benchmark executables are not present..."
+        BENCHMARK_EXECUTABLES="simdcsv_benchmark quote_mask_benchmark"
+
+        FOUND_BENCHMARKS=""
+        for bench in $BENCHMARK_EXECUTABLES; do
+          if [ -f "build/$bench" ]; then
+            FOUND_BENCHMARKS="$FOUND_BENCHMARKS $bench"
+          fi
+        done
+
+        if [ -n "$FOUND_BENCHMARKS" ]; then
+          echo "✗ Benchmark executables were built but should not have been:$FOUND_BENCHMARKS"
+          exit 1
+        fi
+        echo "✓ No benchmark executables found (as expected)"
+
   code-quality:
     name: Code Quality Checks
     runs-on: ubuntu-latest
