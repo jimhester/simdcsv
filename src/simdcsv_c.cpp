@@ -202,56 +202,6 @@ void simdcsv_buffer_destroy(simdcsv_buffer_t* buffer) {
 }
 
 // Dialect Configuration
-simdcsv_dialect_t* simdcsv_dialect_csv(void) {
-    try {
-        auto* d = new (std::nothrow) simdcsv_dialect();
-        if (d) d->dialect = simdcsv::Dialect::csv();
-        return d;
-    } catch (...) {
-        return nullptr;
-    }
-}
-
-simdcsv_dialect_t* simdcsv_dialect_tsv(void) {
-    try {
-        auto* d = new (std::nothrow) simdcsv_dialect();
-        if (d) d->dialect = simdcsv::Dialect::tsv();
-        return d;
-    } catch (...) {
-        return nullptr;
-    }
-}
-
-simdcsv_dialect_t* simdcsv_dialect_semicolon(void) {
-    try {
-        auto* d = new (std::nothrow) simdcsv_dialect();
-        if (d) {
-            d->dialect.delimiter = ';';
-            d->dialect.quote_char = '"';
-            d->dialect.escape_char = '"';
-            d->dialect.double_quote = true;
-        }
-        return d;
-    } catch (...) {
-        return nullptr;
-    }
-}
-
-simdcsv_dialect_t* simdcsv_dialect_pipe(void) {
-    try {
-        auto* d = new (std::nothrow) simdcsv_dialect();
-        if (d) {
-            d->dialect.delimiter = '|';
-            d->dialect.quote_char = '"';
-            d->dialect.escape_char = '"';
-            d->dialect.double_quote = true;
-        }
-        return d;
-    } catch (...) {
-        return nullptr;
-    }
-}
-
 simdcsv_dialect_t* simdcsv_dialect_create(char delimiter, char quote_char,
                                            char escape_char, bool double_quote) {
     try {
@@ -288,28 +238,6 @@ bool simdcsv_dialect_double_quote(const simdcsv_dialect_t* dialect) {
     return dialect->dialect.double_quote;
 }
 
-simdcsv_error_t simdcsv_dialect_validate(const simdcsv_dialect_t* dialect) {
-    if (!dialect) return SIMDCSV_ERROR_NULL_POINTER;
-
-    // Basic validation
-    if (dialect->dialect.delimiter == '\0') return SIMDCSV_ERROR_INVALID_ARGUMENT;
-    if (dialect->dialect.delimiter == dialect->dialect.quote_char) return SIMDCSV_ERROR_INVALID_ARGUMENT;
-
-    return SIMDCSV_OK;
-}
-
-size_t simdcsv_dialect_to_string(const simdcsv_dialect_t* dialect, char* buffer, size_t buffer_size) {
-    if (!dialect) return 0;
-
-    std::string str = dialect->dialect.to_string();
-    if (buffer && buffer_size > 0) {
-        size_t copy_len = std::min(str.size(), buffer_size - 1);
-        std::memcpy(buffer, str.c_str(), copy_len);
-        buffer[copy_len] = '\0';
-    }
-    return str.size();
-}
-
 void simdcsv_dialect_destroy(simdcsv_dialect_t* dialect) {
     delete dialect;
 }
@@ -326,11 +254,6 @@ simdcsv_error_collector_t* simdcsv_error_collector_create(simdcsv_error_mode_t m
 simdcsv_error_mode_t simdcsv_error_collector_mode(const simdcsv_error_collector_t* collector) {
     if (!collector) return SIMDCSV_MODE_STRICT;
     return to_c_mode(collector->collector.mode());
-}
-
-void simdcsv_error_collector_set_mode(simdcsv_error_collector_t* collector, simdcsv_error_mode_t mode) {
-    if (!collector) return;
-    collector->collector.set_mode(to_cpp_mode(mode));
 }
 
 bool simdcsv_error_collector_has_errors(const simdcsv_error_collector_t* collector) {
@@ -434,22 +357,8 @@ simdcsv_parser_t* simdcsv_parser_create(void) {
 }
 
 simdcsv_error_t simdcsv_parse(simdcsv_parser_t* parser, const simdcsv_buffer_t* buffer,
-                               simdcsv_index_t* index, const simdcsv_dialect_t* dialect) {
-    if (!parser || !buffer || !index) return SIMDCSV_ERROR_NULL_POINTER;
-
-    try {
-        simdcsv::Dialect d = dialect ? dialect->dialect : simdcsv::Dialect::csv();
-        index->idx = parser->parser.init(buffer->data.size(), index->num_threads);
-        bool success = parser->parser.parse(buffer->data.data(), index->idx, buffer->data.size(), d);
-        return success ? SIMDCSV_OK : SIMDCSV_ERROR_INTERNAL;
-    } catch (...) {
-        return SIMDCSV_ERROR_INTERNAL;
-    }
-}
-
-simdcsv_error_t simdcsv_parse_with_errors(simdcsv_parser_t* parser, const simdcsv_buffer_t* buffer,
-                                           simdcsv_index_t* index, simdcsv_error_collector_t* errors,
-                                           const simdcsv_dialect_t* dialect) {
+                               simdcsv_index_t* index, simdcsv_error_collector_t* errors,
+                               const simdcsv_dialect_t* dialect) {
     if (!parser || !buffer || !index) return SIMDCSV_ERROR_NULL_POINTER;
 
     try {
@@ -462,38 +371,6 @@ simdcsv_error_t simdcsv_parse_with_errors(simdcsv_parser_t* parser, const simdcs
                                              buffer->data.size(), errors->collector, d);
         } else {
             success = parser->parser.parse(buffer->data.data(), index->idx, buffer->data.size(), d);
-        }
-
-        if (errors && errors->collector.has_fatal_errors()) {
-            const auto& errs = errors->collector.errors();
-            for (const auto& e : errs) {
-                if (e.severity == simdcsv::ErrorSeverity::FATAL) {
-                    return to_c_error(e.code);
-                }
-            }
-        }
-
-        return success ? SIMDCSV_OK : SIMDCSV_ERROR_INTERNAL;
-    } catch (...) {
-        return SIMDCSV_ERROR_INTERNAL;
-    }
-}
-
-simdcsv_error_t simdcsv_parse_two_pass_with_errors(simdcsv_parser_t* parser, const simdcsv_buffer_t* buffer,
-                                                    simdcsv_index_t* index, simdcsv_error_collector_t* errors,
-                                                    const simdcsv_dialect_t* dialect) {
-    if (!parser || !buffer || !index) return SIMDCSV_ERROR_NULL_POINTER;
-
-    try {
-        simdcsv::Dialect d = dialect ? dialect->dialect : simdcsv::Dialect::csv();
-        index->idx = parser->parser.init(buffer->data.size(), index->num_threads);
-
-        bool success;
-        if (errors) {
-            success = parser->parser.parse_two_pass_with_errors(buffer->data.data(), index->idx,
-                                                      buffer->data.size(), errors->collector, d);
-        } else {
-            success = parser->parser.parse_two_pass(buffer->data.data(), index->idx, buffer->data.size(), d);
         }
 
         if (errors && errors->collector.has_fatal_errors()) {
