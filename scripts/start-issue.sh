@@ -304,12 +304,9 @@ Repeat until the PR is ready to merge:
 Once CI passes and there are no blocking reviews:
 1. Merge the PR using \`gh pr merge --squash\` (do NOT use --delete-branch, it fails with worktrees)
 2. Confirm the merge succeeded
-3. Clean up the worktree: navigate to the main repo and run:
-   - \`git worktree remove <worktree-path>\` (removes this worktree)
-   - \`git branch -d <branch-name>\` (deletes the local branch)
-   - The remote branch is automatically deleted by GitHub after merge
 
 ### Phase 5: Follow-up Issues (REQUIRED)
+**IMPORTANT: Do this BEFORE cleaning up the worktree so you have full context.**
 **After merging, you MUST review for follow-up issues.** This is a critical step that ensures technical debt and improvements are tracked.
 
 **Check these sources for follow-up items:**
@@ -333,6 +330,13 @@ gh issue create --title "Add SIMD support to ValueExtractor" --body "Background:
 \`\`\`
 
 **If no follow-up issues are needed, explicitly confirm:** "Reviewed for follow-up issues: none identified."
+
+### Phase 6: Cleanup
+After creating any follow-up issues, clean up the worktree:
+1. Navigate to the main repo directory (NOT the worktree)
+2. Run: \`git worktree remove <worktree-path>\` (removes this worktree)
+3. Run: \`git branch -d <branch-name>\` (deletes the local branch)
+4. The remote branch is automatically deleted by GitHub after merge
 
 ## Guidelines
 - Be thorough but avoid over-engineering
