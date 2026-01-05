@@ -921,6 +921,68 @@ TEST_F(SIMDValueExtractionTest, SIMDEquivalentToScalar) {
     }
 }
 
+// Test that SIMD respects max_integer_digits config (GitHub issue #95)
+TEST_F(SIMDValueExtractionTest, SIMDRespectsMaxIntegerDigits) {
+    ExtractionConfig custom_config;
+    custom_config.max_integer_digits = 10;  // Restrict to 10 digits
+
+    // 10-digit number should parse successfully
+    auto result_ok = parse_integer_simd<int64_t>("1234567890", 10, custom_config);
+    EXPECT_TRUE(result_ok.ok());
+    EXPECT_EQ(result_ok.get(), 1234567890);
+
+    // 12-digit number should fail with "Integer too large"
+    auto result_fail = parse_integer_simd<int64_t>("123456789012", 12, custom_config);
+    EXPECT_FALSE(result_fail.ok());
+    EXPECT_NE(result_fail.error, nullptr);
+    EXPECT_STREQ(result_fail.error, "Integer too large");
+
+    // Verify SIMD behavior matches scalar behavior
+    auto scalar_fail = parse_integer<int64_t>("123456789012", 12, custom_config);
+    EXPECT_FALSE(scalar_fail.ok());
+    EXPECT_STREQ(scalar_fail.error, "Integer too large");
+}
+
+TEST_F(SIMDValueExtractionTest, SIMDRespectsMaxIntegerDigitsWithSign) {
+    ExtractionConfig custom_config;
+    custom_config.max_integer_digits = 10;
+
+    // Negative 10-digit number should parse successfully (sign doesn't count)
+    auto result_ok = parse_integer_simd<int64_t>("-1234567890", 11, custom_config);
+    EXPECT_TRUE(result_ok.ok());
+    EXPECT_EQ(result_ok.get(), -1234567890);
+
+    // Negative 12-digit number should fail
+    auto result_fail = parse_integer_simd<int64_t>("-123456789012", 13, custom_config);
+    EXPECT_FALSE(result_fail.ok());
+    EXPECT_STREQ(result_fail.error, "Integer too large");
+
+    // With + sign
+    auto result_plus_ok = parse_integer_simd<int64_t>("+1234567890", 11, custom_config);
+    EXPECT_TRUE(result_plus_ok.ok());
+    EXPECT_EQ(result_plus_ok.get(), 1234567890);
+
+    auto result_plus_fail = parse_integer_simd<int64_t>("+123456789012", 13, custom_config);
+    EXPECT_FALSE(result_plus_fail.ok());
+    EXPECT_STREQ(result_plus_fail.error, "Integer too large");
+}
+
+TEST_F(SIMDValueExtractionTest, SIMDRespectsMaxIntegerDigitsDefault) {
+    // Default max_integer_digits is 20
+    ExtractionConfig default_config = ExtractionConfig::defaults();
+    EXPECT_EQ(default_config.max_integer_digits, 20);
+
+    // 20-digit number within default limit (UINT64_MAX is 20 digits)
+    auto result_ok = parse_integer_simd<uint64_t>("18446744073709551615", 20, default_config);
+    EXPECT_TRUE(result_ok.ok());
+    EXPECT_EQ(result_ok.get(), UINT64_MAX);
+
+    // 21-digit number should fail due to max_integer_digits
+    auto result_fail = parse_integer_simd<uint64_t>("123456789012345678901", 21, default_config);
+    EXPECT_FALSE(result_fail.ok());
+    EXPECT_STREQ(result_fail.error, "Integer too large");
+}
+
 TEST_F(SIMDValueExtractionTest, SIMDDoubleEquivalentToScalar) {
     std::vector<std::string> test_values = {
         "0", "0.0", "1", "-1", "3.14", "-3.14",

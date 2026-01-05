@@ -1,11 +1,11 @@
 # simdcsv
 
 <!-- badges: start -->
-[![CI](https://github.com/jimhester/simdcsv/workflows/CI/badge.svg?branch=main)](https://github.com/jimhester/simdcsv/actions?query=branch%3Amain)
+[![CI](https://github.com/jimhester/simdcsv/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jimhester/simdcsv/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/jimhester/simdcsv/branch/main/graph/badge.svg)](https://codecov.io/gh/jimhester/simdcsv)
 <!-- badges: end -->
 
-High-performance CSV parser using SIMD instructions, designed for integration with R's [vroom](https://github.com/tidyverse/vroom) package. Uses multi-threaded speculative parsing to process large files in parallel.
+High-performance CSV parser using SIMD instructions. Uses multi-threaded speculative parsing to process large files in parallel.
 
 ## Installation
 

@@ -329,8 +329,10 @@ Once CI passes and there are no blocking reviews:
 
 **Example command (run from main repo directory):**
 \`\`\`bash
-gh issue create --title "Add SIMD support to ValueExtractor" --body "Background: PR #93 added SIMD parsers but ValueExtractor still uses scalar..."
+gh issue create --title "Add SIMD support to ValueExtractor" --label "feature" --label "simd ⚡" --body "Background: PR #93 added SIMD parsers but ValueExtractor still uses scalar..."
 \`\`\`
+
+**Always add appropriate labels** (see CLAUDE.md for full list): bug, feature, documentation, performance 🚀, testing 🧪, cleanup 🧹, api 🔌, c-api 🔧, simd ⚡, arrow 🏹, security 🔒, critical ☠️
 
 **If no follow-up issues are needed, explicitly confirm:** "Reviewed for follow-up issues: none identified."
 

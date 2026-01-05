@@ -133,14 +133,68 @@ struct ParseOptions {
     }
 };
 
+/**
+ * @brief RAII wrapper for SIMD-aligned file buffers.
+ *
+ * FileBuffer provides automatic memory management for buffers loaded with
+ * load_file() or allocated with allocate_padded_buffer(). It ensures proper
+ * cleanup using aligned_free() and supports move semantics for efficient
+ * transfer of ownership.
+ *
+ * The buffer is cache-line aligned (64 bytes) with additional padding for
+ * safe SIMD overreads. This allows SIMD operations to read beyond the actual
+ * data length without bounds checking.
+ *
+ * @note FileBuffer is move-only. Copy operations are deleted to prevent
+ *       accidental double-free or shallow copy issues.
+ *
+ * @example
+ * @code
+ * // Load a file using the convenience function
+ * simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
+ *
+ * if (buffer) {  // Check if valid using operator bool
+ *     std::cout << "Loaded " << buffer.size() << " bytes\n";
+ *
+ *     // Access data
+ *     const uint8_t* data = buffer.data();
+ *
+ *     // Parse with simdcsv
+ *     simdcsv::Parser parser;
+ *     auto result = parser.parse(data, buffer.size());
+ * }
+ * // Memory automatically freed when buffer goes out of scope
+ * @endcode
+ *
+ * @see load_file() To create a FileBuffer from a file path.
+ * @see allocate_padded_buffer() For manual buffer allocation.
+ */
 class FileBuffer {
 public:
+    /// Default constructor. Creates an empty, invalid buffer.
     FileBuffer() : data_(nullptr), size_(0) {}
+    /**
+     * @brief Construct a FileBuffer from raw data.
+     * @param data Pointer to SIMD-aligned buffer (takes ownership).
+     * @param size Size of the data in bytes.
+     * @warning The data pointer must have been allocated with aligned_malloc()
+     *          or allocate_padded_buffer(). The FileBuffer takes ownership.
+     */
     FileBuffer(uint8_t* data, size_t size) : data_(data), size_(size) {}
+
+    /**
+     * @brief Move constructor.
+     * @param other The FileBuffer to move from.
+     */
     FileBuffer(FileBuffer&& other) noexcept : data_(other.data_), size_(other.size_) {
         other.data_ = nullptr;
         other.size_ = 0;
     }
+    /**
+     * @brief Move assignment operator.
+     * @param other The FileBuffer to move from.
+     * @return Reference to this buffer.
+     */
     FileBuffer& operator=(FileBuffer&& other) noexcept {
         if (this != &other) {
             free();
@@ -151,15 +205,30 @@ public:
         }
         return *this;
     }
+
+    // Copy operations deleted to prevent double-free
     FileBuffer(const FileBuffer&) = delete;
     FileBuffer& operator=(const FileBuffer&) = delete;
+
+    /// Destructor. Frees the buffer using aligned_free().
     ~FileBuffer() { free(); }
 
+    /// @return Const pointer to the buffer data.
     const uint8_t* data() const { return data_; }
+
+    /// @return Mutable pointer to the buffer data.
     uint8_t* data() { return data_; }
+
+    /// @return Size of the data in bytes (not including padding).
     size_t size() const { return size_; }
+
+    /// @return true if the buffer contains valid data.
     bool valid() const { return data_ != nullptr; }
+
+    /// @return true if the buffer is empty (size == 0).
     bool empty() const { return size_ == 0; }
+
+    /// @return true if the buffer is valid, enabling `if (buffer)` syntax.
     explicit operator bool() const { return valid(); }
 
     /**
@@ -210,29 +279,114 @@ inline FileBuffer load_file(const std::string& filename, size_t padding = 64) {
     return FileBuffer(const_cast<uint8_t*>(corpus.data()), corpus.size());
 }
 
+/**
+ * @brief Free a buffer returned by get_corpus().
+ *
+ * This is a convenience wrapper around aligned_free() for buffers returned
+ * by the legacy get_corpus() function. For new code, prefer using FileBuffer
+ * with load_file() which provides automatic memory management.
+ *
+ * @param corpus Reference to the string_view to free. After calling,
+ *               the string_view's data pointer will be invalidated.
+ *
+ * @deprecated Prefer using FileBuffer with load_file() for automatic cleanup.
+ *
+ * @see load_file() For automatic memory management.
+ * @see FileBuffer For RAII buffer management.
+ */
 inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
     if (corpus.data()) {
         aligned_free(const_cast<uint8_t*>(corpus.data()));
     }
 }
 
+/**
+ * @brief High-level CSV parser with automatic index management.
+ *
+ * Parser provides a simplified interface over the lower-level two_pass class.
+ * It manages index allocation internally and returns a Result object containing
+ * the parsed index, dialect information, and success status.
+ *
+ * The Parser supports:
+ * - Single-threaded and multi-threaded parsing
+ * - Explicit dialect specification or auto-detection
+ * - Error collection in permissive mode
+ *
+ * @note For maximum performance with manual control, use two_pass directly.
+ *       Parser is designed for convenience and typical use cases.
+ *
+ * @example
+ * @code
+ * #include "simdcsv.h"
+ *
+ * // Load CSV file
+ * simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
+ *
+ * // Create parser with 4 threads
+ * simdcsv::Parser parser(4);
+ *
+ * // Parse with default CSV dialect
+ * auto result = parser.parse(buffer.data(), buffer.size());
+ *
+ * if (result.success()) {
+ *     std::cout << "Parsed " << result.num_columns() << " columns\n";
+ *     std::cout << "Total indexes: " << result.total_indexes() << "\n";
+ * }
+ * @endcode
+ *
+ * @example
+ * @code
+ * // Parse with auto-detection and error collection
+ * simdcsv::Parser parser(4);
+ * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+ *
+ * auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+ *
+ * std::cout << "Detected dialect: " << result.dialect.to_string() << "\n";
+ *
+ * if (errors.has_errors()) {
+ *     for (const auto& err : errors.errors()) {
+ *         std::cerr << err.to_string() << "\n";
+ *     }
+ * }
+ * @endcode
+ *
+ * @see two_pass For lower-level parsing with full control.
+ * @see FileBuffer For loading CSV files.
+ * @see Dialect For dialect configuration options.
+ */
 class Parser {
 public:
+    /**
+     * @brief Result of a parsing operation.
+     *
+     * Contains the parsed index, dialect used (or detected), and success status.
+     * This structure is move-only since the underlying index contains raw pointers.
+     */
     struct Result {
-        index idx;
-        bool successful{false};
-        Dialect dialect;
-        DetectionResult detection;
+        index idx;               ///< The parsed field index.
+        bool successful{false};  ///< Whether parsing completed without fatal errors.
+        Dialect dialect;         ///< The dialect used for parsing.
+        DetectionResult detection;  ///< Detection result (populated by parse_auto).
 
         Result() = default;
         Result(Result&&) = default;
         Result& operator=(Result&&) = default;
-        // Prevent copying - index may contain raw pointers
+
+        // Prevent copying - index contains raw pointers
         Result(const Result&) = delete;
         Result& operator=(const Result&) = delete;
 
+        /// @return true if parsing was successful.
         bool success() const { return successful; }
+
+        /// @return Number of columns detected in the CSV.
         size_t num_columns() const { return idx.columns; }
+
+        /**
+         * @brief Get total number of field separator positions found.
+         * @return Sum of indexes across all parsing threads.
+         */
         size_t total_indexes() const {
             if (!idx.n_indexes) return 0;
             size_t total = 0;
@@ -243,6 +397,11 @@ public:
         }
     };
 
+    /**
+     * @brief Construct a Parser with the specified number of threads.
+     * @param num_threads Number of threads to use for parsing (default: 1).
+     *                    Use std::thread::hardware_concurrency() for CPU count.
+     */
     explicit Parser(size_t num_threads = 1)
         : num_threads_(num_threads > 0 ? num_threads : 1) {}
 
@@ -373,9 +532,15 @@ public:
         return parse(buf, len, ParseOptions::with_errors(errors));
     }
 
+    /**
+     * @brief Set the number of threads for parsing.
+     * @param num_threads Number of threads (minimum 1).
+     */
     void set_num_threads(size_t num_threads) {
         num_threads_ = num_threads > 0 ? num_threads : 1;
     }
+
+    /// @return Current number of threads configured for parsing.
     size_t num_threads() const { return num_threads_; }
 
 private:
@@ -383,12 +548,57 @@ private:
     size_t num_threads_;
 };
 
+/**
+ * @brief Detect CSV dialect from a memory buffer.
+ *
+ * Convenience function that creates a DialectDetector and detects the
+ * dialect from the provided data.
+ *
+ * @param buf Pointer to CSV data.
+ * @param len Length of the data in bytes.
+ * @param options Detection options (sample size, candidates, etc.).
+ * @return DetectionResult with detected dialect and confidence.
+ *
+ * @example
+ * @code
+ * auto result = simdcsv::detect_dialect(buffer.data(), buffer.size());
+ * if (result.success()) {
+ *     std::cout << "Delimiter: '" << result.dialect.delimiter << "'\n";
+ *     std::cout << "Confidence: " << result.confidence << "\n";
+ * }
+ * @endcode
+ *
+ * @see DialectDetector For more control over detection.
+ * @see detect_dialect_file() For detecting from a file path.
+ */
 inline DetectionResult detect_dialect(const uint8_t* buf, size_t len,
                                        const DetectionOptions& options = DetectionOptions()) {
     DialectDetector detector(options);
     return detector.detect(buf, len);
 }
 
+/**
+ * @brief Detect CSV dialect from a file.
+ *
+ * Convenience function that loads a file and detects its dialect.
+ * Only samples the beginning of the file for efficiency.
+ *
+ * @param filename Path to the CSV file.
+ * @param options Detection options (sample size, candidates, etc.).
+ * @return DetectionResult with detected dialect and confidence.
+ *
+ * @example
+ * @code
+ * auto result = simdcsv::detect_dialect_file("data.csv");
+ * if (result.success()) {
+ *     std::cout << "Detected " << result.detected_columns << " columns\n";
+ *     std::cout << "Format: " << result.dialect.to_string() << "\n";
+ * }
+ * @endcode
+ *
+ * @see DialectDetector For more control over detection.
+ * @see detect_dialect() For detecting from an in-memory buffer.
+ */
 inline DetectionResult detect_dialect_file(const std::string& filename,
                                             const DetectionOptions& options = DetectionOptions()) {
     DialectDetector detector(options);

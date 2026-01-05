@@ -92,3 +92,24 @@ Test CSV files are in `test/data/` organized by category:
 - Google Highway 1.3.0 - Portable SIMD
 - Google Test 1.14.0 - Unit testing
 - Google Benchmark 1.8.3 - Performance benchmarking
+
+## Issue Labels
+
+When creating GitHub issues, apply appropriate labels using `gh issue create --label "label-name"`:
+
+| Label | Use for |
+|-------|---------|
+| `bug` | Unexpected problems or unintended behavior |
+| `feature` | Feature requests or enhancements |
+| `documentation` | Documentation improvements or additions |
+| `performance 🚀` | Performance improvements or optimizations |
+| `testing 🧪` | Test coverage or test infrastructure |
+| `cleanup 🧹` | Code cleanup or refactoring |
+| `api 🔌` | Public API changes or additions |
+| `c-api 🔧` | C API wrapper changes |
+| `simd ⚡` | SIMD implementation or optimization |
+| `arrow 🏹` | Apache Arrow integration |
+| `security 🔒` | Security vulnerabilities or hardening |
+| `critical ☠️` | Must fix - security or correctness issues |
+
+Multiple labels can be applied: `gh issue create --label "feature" --label "simd ⚡" ...`
