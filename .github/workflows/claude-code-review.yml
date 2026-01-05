@@ -3,25 +3,13 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
       issues: read
       id-token: write
 
@@ -29,7 +17,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0  # Full history for git blame/log analysis
 
       - name: Run Claude Code Review
         id: claude-review
@@ -40,18 +28,75 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Please review this pull request and provide feedback on:
-            - Code quality and best practices
-            - Potential bugs or issues
-            - Performance considerations
-            - Security concerns
-            - Test coverage
+            Provide a structured code review for this pull request. Follow these steps precisely:
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+            ## Step 1: Eligibility Check
+            Check if the PR (a) is closed, (b) is a draft, (c) doesn't need review (automated/trivial), or (d) already has a code review from Claude. If any are true, stop and explain why.
 
-            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+            ## Step 2: Gather Context
+            - Find all CLAUDE.md files (root and in modified directories)
+            - Get the PR diff and summary of changes
 
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+            ## Step 3: Multi-Perspective Review
+            Analyze the changes from these 5 perspectives, documenting any issues found:
 
+            1. **CLAUDE.md Compliance**: Check if changes follow guidance in CLAUDE.md files
+            2. **Bug Detection**: Shallow scan for obvious bugs in the changed lines only. Focus on significant bugs, not nitpicks.
+            3. **Historical Context**: Use `git blame` and `git log` on modified files to understand context and catch regressions
+            4. **Previous PR Comments**: Check if previous PRs touching these files had relevant comments that apply here
+            5. **Code Comment Compliance**: Ensure changes comply with guidance in code comments
+
+            ## Step 4: Score Each Issue (0-100)
+            For each issue found, assign a confidence score:
+            - 0: False positive, doesn't hold up to scrutiny, or pre-existing issue
+            - 25: Might be real, but could be false positive. Stylistic issues not in CLAUDE.md.
+            - 50: Real issue but minor/nitpick, not very important relative to the PR
+            - 75: Verified real issue that impacts functionality, or directly mentioned in CLAUDE.md
+            - 100: Definitely real, will happen frequently, evidence confirms it
+
+            ## Step 5: Filter and Report
+            Only report issues scoring 80+. If no issues meet this threshold, report "No issues found."
+
+            ## False Positives to Ignore:
+            - Pre-existing issues (not introduced by this PR)
+            - Issues linters/compilers would catch (imports, types, formatting)
+            - General quality issues unless required by CLAUDE.md
+            - Issues silenced by lint ignore comments
+            - Intentional functionality changes related to the PR's purpose
+            - Issues on lines not modified in this PR
+
+            ## Output Format
+            Use `gh pr comment` to post exactly this format:
+
+            ```
+            ### Code review
+
+            Found N issues:
+
+            1. <brief description> (CLAUDE.md says "<quote>" OR bug due to <context>)
+
+            <link to file with full SHA, e.g. https://github.com/owner/repo/blob/abc123def.../path/file.ext#L10-L15>
+
+            ...
+
+            Generated with [Claude Code](https://claude.ai/code)
+
+            <sub>If useful, react with thumbs up. Otherwise, thumbs down.</sub>
+            ```
+
+            Or if no issues:
+            ```
+            ### Code review
+
+            No issues found. Checked for bugs and CLAUDE.md compliance.
+
+            Generated with [Claude Code](https://claude.ai/code)
+            ```
+
+            Important:
+            - Use full git SHA in links (not HEAD or short SHA)
+            - Link format: `#L<start>-L<end>` with 1 line context before/after
+            - Keep output brief, avoid emojis
+            - Do NOT build/typecheck - CI handles that separately
+
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(git blame:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*)"'
