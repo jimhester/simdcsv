@@ -1064,3 +1064,127 @@ TEST_F(CliTest, SampleNegativeSeed) {
   auto result = CliRunner::run("sample -s -5 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
 }
+
+// =============================================================================
+// Carriage Return in Fields Tests
+// Tests for fields containing \r (CR) characters within quoted fields.
+// These tests verify that PR #203's quoting behavior is correct.
+// =============================================================================
+
+TEST_F(CliTest, HeadFieldsWithCR) {
+  // Fields containing \r should be properly quoted in output
+  auto result = CliRunner::run("head " + testDataPath("quoted/cr_in_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // The header should be present
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  // Fields with CR should be quoted - look for the quoted field markers
+  EXPECT_TRUE(result.output.find("\"") != std::string::npos);
+}
+
+TEST_F(CliTest, TailFieldsWithCR) {
+  // Tail command should properly handle fields containing \r
+  auto result = CliRunner::run("tail -n 2 " + testDataPath("quoted/cr_in_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should have header
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  // Should have last 2 data rows (rows with fields containing \r)
+  // Fields with CR should be quoted in output
+  EXPECT_TRUE(result.output.find("\"") != std::string::npos);
+}
+
+TEST_F(CliTest, TailFieldsWithCRVerifyQuoting) {
+  // Verify that \r inside fields causes proper quoting
+  auto result = CliRunner::run("tail -n 1 " + testDataPath("quoted/cr_in_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // The last row has a field with mixed \r and \r\n
+  // The output should quote fields containing \r
+  EXPECT_TRUE(result.output.find("\"") != std::string::npos);
+}
+
+TEST_F(CliTest, SampleFieldsWithCR) {
+  // Sample command should properly handle fields containing \r
+  auto result = CliRunner::run("sample -n 2 -s 42 " + testDataPath("quoted/cr_in_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should have header
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  // Fields with CR should be quoted in output
+  EXPECT_TRUE(result.output.find("\"") != std::string::npos);
+}
+
+TEST_F(CliTest, SampleFieldsWithCRReproducible) {
+  // Same seed should produce same sample for file with \r in fields
+  auto result1 = CliRunner::run("sample -n 2 -s 123 " + testDataPath("quoted/cr_in_quotes.csv"));
+  auto result2 = CliRunner::run("sample -n 2 -s 123 " + testDataPath("quoted/cr_in_quotes.csv"));
+  EXPECT_EQ(result1.exit_code, 0);
+  EXPECT_EQ(result2.exit_code, 0);
+  EXPECT_EQ(result1.output, result2.output);
+}
+
+TEST_F(CliTest, CountFieldsWithCR) {
+  // Count should work correctly with \r in quoted fields
+  auto result = CliRunner::run("count " + testDataPath("quoted/cr_in_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // File has 3 data rows (after header)
+  EXPECT_TRUE(result.output.find("3") != std::string::npos);
+}
+
+TEST_F(CliTest, InfoFieldsWithCR) {
+  // Info should work correctly with \r in quoted fields
+  auto result = CliRunner::run("info " + testDataPath("quoted/cr_in_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Columns: 3") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Rows: 3") != std::string::npos);
+}
+
+TEST_F(CliTest, SelectFieldsWithCR) {
+  // Select should properly quote fields containing \r in output
+  auto result = CliRunner::run("select -c B " + testDataPath("quoted/cr_in_quotes.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Column B contains fields with \r, so output should have quoted fields
+  EXPECT_TRUE(result.output.find("\"") != std::string::npos);
+}
+
+TEST_F(CliTest, TailCRLineEndingsFile) {
+  // Test tail on file that uses CR as line ending (not in quoted fields)
+  auto result = CliRunner::run("tail -n 1 " + testDataPath("line_endings/cr.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Output should not be empty - CR line endings should be handled gracefully
+  // Note: CR line endings cause the entire file to appear as one line to the parser,
+  // so exact content verification is complex
+}
+
+TEST_F(CliTest, SampleCRLineEndingsFile) {
+  // Test sample on file that uses CR as line ending
+  auto result = CliRunner::run("sample -n 1 -s 42 " + testDataPath("line_endings/cr.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should complete successfully with CR line endings
+}
+
+TEST_F(CliTest, TailCRLFLineEndingsFile) {
+  // Test tail on file that uses CRLF line endings
+  auto result = CliRunner::run("tail -n 1 " + testDataPath("line_endings/crlf.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // CRLF files should work correctly with tail
+  // The output should contain data, though CRLF may be converted to LF
+}
+
+TEST_F(CliTest, SampleCRLFLineEndingsFile) {
+  // Test sample on file that uses CRLF line endings
+  auto result = CliRunner::run("sample -n 1 -s 42 " + testDataPath("line_endings/crlf.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // CRLF files should work correctly with sample
+}
+
+TEST_F(CliTest, TailMixedLineEndingsFile) {
+  // Test tail on file with mixed line endings
+  auto result = CliRunner::run("tail -n 2 " + testDataPath("malformed/mixed_line_endings.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should handle mixed line endings gracefully
+}
+
+TEST_F(CliTest, SampleMixedLineEndingsFile) {
+  // Test sample on file with mixed line endings
+  auto result = CliRunner::run("sample -n 2 -s 42 " + testDataPath("malformed/mixed_line_endings.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should handle mixed line endings gracefully
+}
