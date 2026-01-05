@@ -68,14 +68,14 @@ ErrorCollector errors(ErrorMode::BEST_EFFORT);
 
 | Aspect | STRICT | PERMISSIVE | BEST_EFFORT |
 |--------|--------|------------|-------------|
-| Stops on WARNING | No | No | No |
+| Stops on WARNING | Yes | No | No |
 | Stops on ERROR | Yes | No | No |
-| Stops on FATAL | Yes | Yes | No* |
+| Stops on FATAL | Yes | Yes | No |
 | Collects errors | Yes | Yes | Yes |
 | Data integrity | Highest | Medium | Lowest |
 | Error visibility | First only | All | All |
 
-\* BEST_EFFORT will still stop on truly unrecoverable situations (e.g., memory allocation failure).
+> **Note:** In STRICT mode, `should_stop()` returns true as soon as any error is recorded, regardless of severity. In BEST_EFFORT mode, the parser continues through all errors tracked by `ErrorCollector`.
 
 ## Error Types
 
@@ -194,9 +194,11 @@ Errors are classified into three severity levels that determine parser behavior:
 
 | Severity | STRICT stops? | PERMISSIVE stops? | BEST_EFFORT stops? |
 |----------|---------------|-------------------|---------------------|
-| WARNING  | No | No | No |
+| WARNING  | Yes | No | No |
 | ERROR    | Yes | No | No |
 | FATAL    | Yes | Yes | No |
+
+> **Implementation detail:** `should_stop()` in STRICT mode checks if any errors have been collected (`!errors_.empty()`), causing a stop regardless of severity. This means even WARNINGs will halt parsing in STRICT mode.
 
 ## ErrorCollector API
 
