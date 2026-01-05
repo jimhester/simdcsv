@@ -680,6 +680,31 @@ add_custom_command(TARGET encoding_test POST_BUILD
 # Register encoding tests with CTest
 gtest_discover_tests(encoding_test)
 
+# Bounds validation test executable (tests assertions from PR #123)
+add_executable(bounds_validation_test
+    test/bounds_validation_test.cpp
+)
+
+target_link_libraries(bounds_validation_test PRIVATE
+    simdcsv_lib
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(bounds_validation_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for bounds validation tests
+add_custom_command(TARGET bounds_validation_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register bounds validation tests with CTest
+gtest_discover_tests(bounds_validation_test)
+
 # Arrow output test (only if Arrow is enabled)
 if(SIMDCSV_ENABLE_ARROW)
     add_executable(arrow_output_test test/arrow_output_test.cpp)
