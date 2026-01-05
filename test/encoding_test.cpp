@@ -84,6 +84,56 @@ TEST_F(BomDetectionTest, NoBomDefaultsToUtf8) {
     EXPECT_FALSE(result.needs_transcoding);
 }
 
+TEST_F(BomDetectionTest, PartialUtf8BomOneByte) {
+    // Only first byte of UTF-8 BOM (EF BB BF) - should not detect as UTF-8 BOM
+    uint8_t data[] = {0xEF, 'h', 'e', 'l', 'l', 'o'};
+    auto result = detect_encoding(data, sizeof(data));
+    EXPECT_NE(result.encoding, Encoding::UTF8_BOM);
+    EXPECT_EQ(result.bom_length, 0);
+}
+
+TEST_F(BomDetectionTest, PartialUtf8BomTwoBytes) {
+    // First two bytes of UTF-8 BOM (EF BB BF) - should not detect as UTF-8 BOM
+    uint8_t data[] = {0xEF, 0xBB, 'h', 'e', 'l', 'l', 'o'};
+    auto result = detect_encoding(data, sizeof(data));
+    EXPECT_NE(result.encoding, Encoding::UTF8_BOM);
+    EXPECT_EQ(result.bom_length, 0);
+}
+
+TEST_F(BomDetectionTest, PartialUtf16BomOneByte) {
+    // Only first byte of UTF-16 LE BOM (FF FE) - should not detect as UTF-16
+    uint8_t data[] = {0xFF, 'h', 'e', 'l', 'l', 'o'};
+    auto result = detect_encoding(data, sizeof(data));
+    EXPECT_NE(result.encoding, Encoding::UTF16_LE);
+    EXPECT_EQ(result.bom_length, 0);
+}
+
+TEST_F(BomDetectionTest, PartialUtf32BomTwoBytes) {
+    // First two bytes of UTF-32 LE BOM (FF FE 00 00) - matches UTF-16 LE BOM
+    // This is expected behavior: FF FE is a valid UTF-16 LE BOM
+    uint8_t data[] = {0xFF, 0xFE, 'a', 0x00, 'b', 0x00};
+    auto result = detect_encoding(data, sizeof(data));
+    // Should detect as UTF-16 LE, not UTF-32 LE (which requires 4 bytes)
+    EXPECT_EQ(result.encoding, Encoding::UTF16_LE);
+    EXPECT_EQ(result.bom_length, 2);
+}
+
+TEST_F(BomDetectionTest, PartialUtf32BomThreeBytes) {
+    // First three bytes of UTF-32 LE BOM (FF FE 00 00) - still UTF-16 LE
+    uint8_t data[] = {0xFF, 0xFE, 0x00, 'a', 0x00, 'b'};
+    auto result = detect_encoding(data, sizeof(data));
+    // Should detect as UTF-16 LE since FF FE 00 00 pattern not complete
+    EXPECT_EQ(result.encoding, Encoding::UTF16_LE);
+    EXPECT_EQ(result.bom_length, 2);
+}
+
+TEST_F(BomDetectionTest, TinyBufferOneByte) {
+    // Buffer too small to contain any BOM
+    uint8_t data[] = {0xEF};
+    auto result = detect_encoding(data, 1);
+    EXPECT_EQ(result.bom_length, 0);
+}
+
 // ============================================================================
 // Heuristic Detection Tests
 // ============================================================================
