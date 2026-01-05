@@ -336,13 +336,6 @@ gh issue create --title "Add SIMD support to ValueExtractor" --label "feature" -
 
 **If no follow-up issues are needed, explicitly confirm:** "Reviewed for follow-up issues: none identified."
 
-### Phase 6: Cleanup
-After creating any follow-up issues, clean up the worktree (from main repo directory):
-1. Verify you are in the main repo: \`pwd\` should show ${REPO_ROOT}
-2. Run: \`git worktree remove <worktree-path>\` or \`git worktree remove --force <worktree-path>\` if needed
-3. Run: \`git branch -d <branch-name>\` (deletes the local branch)
-4. The remote branch is automatically deleted by GitHub after merge
-
 ## Guidelines
 - Be thorough but avoid over-engineering
 - Write clear commit messages explaining the "why"
