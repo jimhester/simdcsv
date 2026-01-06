@@ -54,7 +54,6 @@
 #include <cstring>  // for memcpy
 #include <unordered_set>
 #include <sstream>
-#include "inttypes.h"
 #include "simd_highway.h"
 #include "error.h"
 #include "dialect.h"
@@ -495,11 +494,6 @@ class two_pass {
   static stats first_pass_speculate(const uint8_t* buf, size_t start, size_t end,
                                     char delimiter = ',', char quote_char = '"') {
     auto is_quoted = get_quotation_state(buf, start, delimiter, quote_char);
-#ifndef LIBVROOM_BENCHMARK_MODE
-    printf("start: %lu\tis_ambigious: %s\tstate: %s\n", start,
-           is_quoted == AMBIGUOUS ? "true" : "false",
-           is_quoted == QUOTED ? "quoted" : "unquoted");
-#endif
 
     for (size_t i = start; i < end; ++i) {
       // Support LF, CRLF, and CR-only line endings
@@ -955,17 +949,9 @@ class two_pass {
     }
 
     auto st = first_pass_fut[0].get();
-#ifndef LIBVROOM_BENCHMARK_MODE
-    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
-           st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef LIBVROOM_BENCHMARK_MODE
-      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
-             st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
       chunk_pos[i] = st.n_quotes == 0 ? st.first_even_nl : st.first_odd_nl;
     }
     chunk_pos[n_threads] = len;
@@ -1034,17 +1020,9 @@ class two_pass {
 
     auto st = first_pass_fut[0].get();
     size_t n_quotes = st.n_quotes;
-#ifndef LIBVROOM_BENCHMARK_MODE
-    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
-           st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef LIBVROOM_BENCHMARK_MODE
-      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
-             st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
       chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
       n_quotes += st.n_quotes;
     }
@@ -1225,17 +1203,9 @@ class two_pass {
 
     auto st = first_pass_fut[0].get();
     size_t n_quotes = st.n_quotes;
-#ifndef LIBVROOM_BENCHMARK_MODE
-    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
-           st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef LIBVROOM_BENCHMARK_MODE
-      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
-             st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
       chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
       n_quotes += st.n_quotes;
     }
@@ -1604,17 +1574,9 @@ class two_pass {
 
     auto st = first_pass_fut[0].get();
     size_t n_quotes = st.n_quotes;
-#ifndef LIBVROOM_BENCHMARK_MODE
-    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
-           st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef LIBVROOM_BENCHMARK_MODE
-      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
-             st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
       chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
       n_quotes += st.n_quotes;
     }
