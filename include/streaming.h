@@ -359,7 +359,7 @@ private:
  *
  * This is an input iterator that reads rows from a StreamReader.
  */
-class RowIterator {
+class StreamRowIterator {
 public:
     using iterator_category = std::input_iterator_tag;
     using value_type = Row;
@@ -368,19 +368,19 @@ public:
     using reference = const Row&;
 
     /// Create end iterator
-    RowIterator();
+    StreamRowIterator();
 
     /// Create iterator from StreamReader
-    explicit RowIterator(class StreamReader* reader);
+    explicit StreamRowIterator(class StreamReader* reader);
 
     reference operator*() const;
     pointer operator->() const;
 
-    RowIterator& operator++();
-    RowIterator operator++(int);
+    StreamRowIterator& operator++();
+    StreamRowIterator operator++(int);
 
-    bool operator==(const RowIterator& other) const;
-    bool operator!=(const RowIterator& other) const;
+    bool operator==(const StreamRowIterator& other) const;
+    bool operator!=(const StreamRowIterator& other) const;
 
 private:
     class StreamReader* reader_ = nullptr;
@@ -478,14 +478,14 @@ public:
     bool eof() const;
 
     /// Iterator support for range-based for
-    RowIterator begin();
-    RowIterator end();
+    StreamRowIterator begin();
+    StreamRowIterator end();
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 
-    friend class RowIterator;
+    friend class StreamRowIterator;
 };
 
 }  // namespace libvroom

@@ -54,7 +54,6 @@
 #include <cstring>  // for memcpy
 #include <unordered_set>
 #include <sstream>
-#include "inttypes.h"
 #include "simd_highway.h"
 #include "error.h"
 #include "dialect.h"
@@ -249,8 +248,6 @@ class index {
       delete[] n_indexes;
     }
   }
-
-  void fill_double_array(index* idx, uint64_t column, double* out) {}
 };
 
 /**
@@ -497,11 +494,6 @@ class two_pass {
   static stats first_pass_speculate(const uint8_t* buf, size_t start, size_t end,
                                     char delimiter = ',', char quote_char = '"') {
     auto is_quoted = get_quotation_state(buf, start, delimiter, quote_char);
-#ifndef LIBVROOM_BENCHMARK_MODE
-    printf("start: %lu\tis_ambigious: %s\tstate: %s\n", start,
-           is_quoted == AMBIGUOUS ? "true" : "false",
-           is_quoted == QUOTED ? "quoted" : "unquoted");
-#endif
 
     for (size_t i = start; i < end; ++i) {
       // Support LF, CRLF, and CR-only line endings
@@ -957,17 +949,9 @@ class two_pass {
     }
 
     auto st = first_pass_fut[0].get();
-#ifndef LIBVROOM_BENCHMARK_MODE
-    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
-           st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef LIBVROOM_BENCHMARK_MODE
-      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
-             st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
       chunk_pos[i] = st.n_quotes == 0 ? st.first_even_nl : st.first_odd_nl;
     }
     chunk_pos[n_threads] = len;
@@ -1036,17 +1020,9 @@ class two_pass {
 
     auto st = first_pass_fut[0].get();
     size_t n_quotes = st.n_quotes;
-#ifndef LIBVROOM_BENCHMARK_MODE
-    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
-           st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef LIBVROOM_BENCHMARK_MODE
-      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
-             st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
       chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
       n_quotes += st.n_quotes;
     }
@@ -1227,17 +1203,9 @@ class two_pass {
 
     auto st = first_pass_fut[0].get();
     size_t n_quotes = st.n_quotes;
-#ifndef LIBVROOM_BENCHMARK_MODE
-    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
-           st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef LIBVROOM_BENCHMARK_MODE
-      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
-             st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
       chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
       n_quotes += st.n_quotes;
     }
@@ -1606,17 +1574,9 @@ class two_pass {
 
     auto st = first_pass_fut[0].get();
     size_t n_quotes = st.n_quotes;
-#ifndef LIBVROOM_BENCHMARK_MODE
-    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
-           st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef LIBVROOM_BENCHMARK_MODE
-      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
-             st.first_even_nl, st.first_odd_nl, st.n_quotes);
-#endif
       chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
       n_quotes += st.n_quotes;
     }
@@ -2018,13 +1978,88 @@ class two_pass {
     out.indexes = new uint64_t[allocation_size];
     return out;
   }
+
+  /**
+   * @brief Initialize an index structure with overflow validation.
+   *
+   * This is the safe version of init() that validates all size calculations
+   * before memory allocation to prevent integer overflow vulnerabilities.
+   *
+   * @param len Length of the CSV buffer in bytes. Determines maximum index capacity.
+   * @param n_threads Number of threads to use for parsing. Use 1 for single-threaded
+   *                  parsing, or a higher value for multi-threaded parsing.
+   * @param errors Optional ErrorCollector for reporting size limit violations.
+   *               If nullptr and an overflow would occur, an exception is thrown.
+   *
+   * @return An initialized index structure ready for parsing, or an empty index
+   *         with nullptr indexes if allocation would overflow.
+   *
+   * @throws std::runtime_error if overflow detected and errors is nullptr.
+   *
+   * @note For most use cases, prefer using Parser::parse() which calls this
+   *       method internally with appropriate size limit validation.
+   *
+   * @see init() For the non-validating version (deprecated for untrusted input).
+   * @see SizeLimits For file size limits that should be checked before calling this.
+   */
+  index init_safe(size_t len, size_t n_threads, ErrorCollector* errors = nullptr) {
+    index out;
+    // Ensure at least 1 thread for valid memory allocation
+    if (n_threads == 0) n_threads = 1;
+    out.n_threads = n_threads;
+
+    // Calculate allocation size with overflow checking
+    size_t allocation_size;
+    bool overflow = false;
+
+    if (n_threads == 1) {
+      // Single-threaded: simple allocation with padding for speculative writes
+      // allocation_size = len + 8
+      if (len > std::numeric_limits<size_t>::max() - 8) {
+        overflow = true;
+      } else {
+        allocation_size = len + 8;
+      }
+    } else {
+      // Multi-threaded: need space for interleaved storage
+      // allocation_size = (len + 8) * n_threads
+      size_t len_plus_8;
+      if (len > std::numeric_limits<size_t>::max() - 8) {
+        overflow = true;
+      } else {
+        len_plus_8 = len + 8;
+        // Check (len + 8) * n_threads for overflow
+        if (len_plus_8 > std::numeric_limits<size_t>::max() / n_threads) {
+          overflow = true;
+        } else {
+          allocation_size = len_plus_8 * n_threads;
+        }
+      }
+    }
+
+    // Check final allocation: allocation_size * sizeof(uint64_t)
+    if (!overflow && allocation_size > std::numeric_limits<size_t>::max() / sizeof(uint64_t)) {
+      overflow = true;
+    }
+
+    if (overflow) {
+      std::string msg = "Index allocation would overflow: len=" + std::to_string(len) +
+                        ", n_threads=" + std::to_string(n_threads);
+      if (errors != nullptr) {
+        errors->add_error(ErrorCode::INDEX_ALLOCATION_OVERFLOW, ErrorSeverity::FATAL,
+                          1, 1, 0, msg);
+        // Return empty index to signal failure
+        return out;
+      } else {
+        throw std::runtime_error(msg);
+      }
+    }
+
+    // Safe to allocate
+    out.n_indexes = new uint64_t[n_threads];
+    out.indexes = new uint64_t[allocation_size];
+    return out;
+  }
 };
 
-class parser {
- public:
-  parser() noexcept {};
-  void parse(const uint8_t* buf, size_t len) {}
-
- private:
-};
 }  // namespace libvroom

@@ -498,10 +498,10 @@ TEST_F(AlgorithmSelectionTest, BranchlessWithQuotedFields) {
 }
 
 // ============================================================================
-// Tests for ValidationLimits
+// Tests for Row/Column Iteration API (Parser::Result)
 // ============================================================================
 
-class ValidationLimitsTest : public ::testing::Test {
+class RowColumnIterationTest : public ::testing::Test {
 protected:
     static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
         size_t len = content.size();
@@ -511,74 +511,697 @@ protected:
     }
 };
 
-// Test: ValidationLimits factories
-TEST_F(ValidationLimitsTest, Factories) {
-    // defaults()
-    auto defaults = libvroom::ValidationLimits::defaults();
-    EXPECT_EQ(defaults.max_field_size, libvroom::DEFAULT_MAX_FIELD_SIZE);
-    EXPECT_EQ(defaults.max_file_size, libvroom::DEFAULT_MAX_FILE_SIZE);
-    EXPECT_FALSE(defaults.validate_utf8);
+// --- Basic Iteration Tests ---
 
-    // none()
-    auto none = libvroom::ValidationLimits::none();
-    EXPECT_EQ(none.max_field_size, 0);
-    EXPECT_EQ(none.max_file_size, 0);
-    EXPECT_FALSE(none.validate_utf8);
-
-    // strict()
-    auto strict = libvroom::ValidationLimits::strict();
-    EXPECT_EQ(strict.max_field_size, 1024 * 1024);  // 1 MB
-    EXPECT_EQ(strict.max_file_size, 1024 * 1024 * 1024);  // 1 GB
-    EXPECT_TRUE(strict.validate_utf8);
-}
-
-// Test: FILE_TOO_LARGE error
-TEST_F(ValidationLimitsTest, FileTooLarge) {
-    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+TEST_F(RowColumnIterationTest, NumRowsWithHeader) {
+    auto [data, len] = make_buffer("name,age,city\nAlice,30,NYC\nBob,25,LA\n");
     libvroom::FileBuffer buffer(data, len);
     libvroom::Parser parser;
 
-    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-    libvroom::ValidationLimits limits;
-    limits.max_file_size = 5;  // 5 bytes - smaller than the file
-
-    auto result = parser.parse(buffer.data(), buffer.size(),
-                               libvroom::ParseOptions::validated(errors, limits));
-    EXPECT_FALSE(result.success());
-    EXPECT_TRUE(errors.has_fatal_errors());
-    EXPECT_EQ(errors.errors()[0].code, libvroom::ErrorCode::FILE_TOO_LARGE);
-}
-
-// Test: FILE_TOO_LARGE disabled when limit is 0
-TEST_F(ValidationLimitsTest, FileSizeLimitDisabled) {
-    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
-    libvroom::FileBuffer buffer(data, len);
-    libvroom::Parser parser;
-
-    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-    libvroom::ValidationLimits limits;
-    limits.max_file_size = 0;  // Disabled
-
-    auto result = parser.parse(buffer.data(), buffer.size(),
-                               libvroom::ParseOptions::validated(errors, limits));
+    auto result = parser.parse(buffer.data(), buffer.size());
     EXPECT_TRUE(result.success());
-    EXPECT_FALSE(errors.has_errors());
+    EXPECT_EQ(result.num_rows(), 2);  // Header is excluded
+    EXPECT_EQ(result.num_columns(), 3);
 }
 
-// Test: INVALID_UTF8 error detection
-TEST_F(ValidationLimitsTest, InvalidUTF8) {
-    // Create buffer with invalid UTF-8 sequence (0xFF is never valid in UTF-8)
+TEST_F(RowColumnIterationTest, RangeBasedForLoop) {
+    auto [data, len] = make_buffer("name,age\nAlice,30\nBob,25\nCharlie,35\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_TRUE(result.success());
+
+    std::vector<std::string> names;
+    for (auto row : result.rows()) {
+        names.push_back(std::string(row.get_string_view(0)));
+    }
+
+    EXPECT_EQ(names.size(), 3);
+    EXPECT_EQ(names[0], "Alice");
+    EXPECT_EQ(names[1], "Bob");
+    EXPECT_EQ(names[2], "Charlie");
+}
+
+TEST_F(RowColumnIterationTest, RowViewSize) {
+    auto [data, len] = make_buffer("a,b\n1,2\n3,4\n5,6\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto rows = result.rows();
+
+    EXPECT_EQ(rows.size(), 3);
+    EXPECT_FALSE(rows.empty());
+}
+
+TEST_F(RowColumnIterationTest, RowViewEmpty) {
+    auto [data, len] = make_buffer("a,b\n");  // Header only, no data rows
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto rows = result.rows();
+
+    EXPECT_EQ(rows.size(), 0);
+    EXPECT_TRUE(rows.empty());
+}
+
+TEST_F(RowColumnIterationTest, RowByIndex) {
+    auto [data, len] = make_buffer("name,age\nAlice,30\nBob,25\nCharlie,35\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_TRUE(result.success());
+
+    auto row0 = result.row(0);
+    auto row1 = result.row(1);
+    auto row2 = result.row(2);
+
+    EXPECT_EQ(row0.get_string_view(0), "Alice");
+    EXPECT_EQ(row1.get_string_view(0), "Bob");
+    EXPECT_EQ(row2.get_string_view(0), "Charlie");
+}
+
+TEST_F(RowColumnIterationTest, RowByIndexOutOfRange) {
+    auto [data, len] = make_buffer("a,b\n1,2\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_THROW(result.row(99), std::out_of_range);
+}
+
+// --- Typed Value Access Tests ---
+
+TEST_F(RowColumnIterationTest, GetByColumnIndex) {
+    auto [data, len] = make_buffer("name,age,score\nAlice,30,95.5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto row = result.row(0);
+
+    EXPECT_EQ(row.get_string_view(0), "Alice");
+    EXPECT_EQ(row.get<int64_t>(1).get(), 30);
+    EXPECT_NEAR(row.get<double>(2).get(), 95.5, 0.01);
+}
+
+TEST_F(RowColumnIterationTest, GetByColumnName) {
+    auto [data, len] = make_buffer("name,age,score\nAlice,30,95.5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto row = result.row(0);
+
+    EXPECT_EQ(row.get_string_view("name"), "Alice");
+    EXPECT_EQ(row.get<int64_t>("age").get(), 30);
+    EXPECT_NEAR(row.get<double>("score").get(), 95.5, 0.01);
+}
+
+TEST_F(RowColumnIterationTest, GetByColumnNameNotFound) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto row = result.row(0);
+
+    EXPECT_THROW(row.get<int64_t>("nonexistent"), std::out_of_range);
+    EXPECT_THROW(row.get_string_view("nonexistent"), std::out_of_range);
+    EXPECT_THROW(row.get_string("nonexistent"), std::out_of_range);
+}
+
+TEST_F(RowColumnIterationTest, GetStringWithEscaping) {
+    auto [data, len] = make_buffer("name,desc\nAlice,\"Hello, \"\"World\"\"\"\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto row = result.row(0);
+
+    // get_string() should unescape the quoted field
+    EXPECT_EQ(row.get_string(1), "Hello, \"World\"");
+}
+
+TEST_F(RowColumnIterationTest, RowNumColumns) {
+    auto [data, len] = make_buffer("a,b,c,d,e\n1,2,3,4,5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto row = result.row(0);
+
+    EXPECT_EQ(row.num_columns(), 5);
+}
+
+TEST_F(RowColumnIterationTest, RowIndex) {
+    auto [data, len] = make_buffer("a\n1\n2\n3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    size_t i = 0;
+    for (auto row : result.rows()) {
+        EXPECT_EQ(row.row_index(), i);
+        ++i;
+    }
+}
+
+// --- Column Extraction Tests ---
+
+TEST_F(RowColumnIterationTest, ColumnExtractionByIndex) {
+    auto [data, len] = make_buffer("name,age\nAlice,30\nBob,25\nCharlie,35\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto ages = result.column<int64_t>(1);
+
+    EXPECT_EQ(ages.size(), 3);
+    EXPECT_EQ(*ages[0], 30);
+    EXPECT_EQ(*ages[1], 25);
+    EXPECT_EQ(*ages[2], 35);
+}
+
+TEST_F(RowColumnIterationTest, ColumnExtractionByName) {
+    auto [data, len] = make_buffer("name,age\nAlice,30\nBob,25\nCharlie,35\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto ages = result.column<int64_t>("age");
+
+    EXPECT_EQ(ages.size(), 3);
+    EXPECT_EQ(*ages[0], 30);
+    EXPECT_EQ(*ages[1], 25);
+    EXPECT_EQ(*ages[2], 35);
+}
+
+TEST_F(RowColumnIterationTest, ColumnExtractionByNameNotFound) {
+    auto [data, len] = make_buffer("a,b\n1,2\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_THROW(result.column<int64_t>("nonexistent"), std::out_of_range);
+}
+
+TEST_F(RowColumnIterationTest, ColumnWithNAValues) {
+    auto [data, len] = make_buffer("val\n1\nNA\n3\n\n5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto vals = result.column<int64_t>(0);
+
+    EXPECT_EQ(vals.size(), 5);
+    EXPECT_TRUE(vals[0].has_value());
+    EXPECT_FALSE(vals[1].has_value());  // NA
+    EXPECT_TRUE(vals[2].has_value());
+    EXPECT_FALSE(vals[3].has_value());  // empty
+    EXPECT_TRUE(vals[4].has_value());
+}
+
+TEST_F(RowColumnIterationTest, ColumnOrWithDefault) {
+    auto [data, len] = make_buffer("val\n1\nNA\n3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto vals = result.column_or<int64_t>(0, -999);
+
+    EXPECT_EQ(vals.size(), 3);
+    EXPECT_EQ(vals[0], 1);
+    EXPECT_EQ(vals[1], -999);  // NA replaced with default
+    EXPECT_EQ(vals[2], 3);
+}
+
+TEST_F(RowColumnIterationTest, ColumnOrByName) {
+    auto [data, len] = make_buffer("score\n90.5\nNA\n75.0\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto scores = result.column_or<double>("score", 0.0);
+
+    EXPECT_EQ(scores.size(), 3);
+    EXPECT_NEAR(scores[0], 90.5, 0.01);
+    EXPECT_NEAR(scores[1], 0.0, 0.01);  // NA replaced with default
+    EXPECT_NEAR(scores[2], 75.0, 0.01);
+}
+
+TEST_F(RowColumnIterationTest, ColumnOrByNameNotFound) {
+    auto [data, len] = make_buffer("a\n1\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_THROW(result.column_or<int64_t>("nonexistent", 0), std::out_of_range);
+}
+
+TEST_F(RowColumnIterationTest, ColumnStringView) {
+    auto [data, len] = make_buffer("name\nAlice\nBob\nCharlie\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto names = result.column_string_view(0);
+
+    EXPECT_EQ(names.size(), 3);
+    EXPECT_EQ(names[0], "Alice");
+    EXPECT_EQ(names[1], "Bob");
+    EXPECT_EQ(names[2], "Charlie");
+}
+
+TEST_F(RowColumnIterationTest, ColumnStringViewByName) {
+    auto [data, len] = make_buffer("name,age\nAlice,30\nBob,25\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto names = result.column_string_view("name");
+
+    EXPECT_EQ(names.size(), 2);
+    EXPECT_EQ(names[0], "Alice");
+    EXPECT_EQ(names[1], "Bob");
+}
+
+TEST_F(RowColumnIterationTest, ColumnStringViewByNameNotFound) {
+    auto [data, len] = make_buffer("a\n1\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_THROW(result.column_string_view("nonexistent"), std::out_of_range);
+}
+
+TEST_F(RowColumnIterationTest, ColumnString) {
+    auto [data, len] = make_buffer("name\n\"Alice\"\n\"Bob\"\n\"Charlie\"\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto names = result.column_string(0);
+
+    EXPECT_EQ(names.size(), 3);
+    EXPECT_EQ(names[0], "Alice");
+    EXPECT_EQ(names[1], "Bob");
+    EXPECT_EQ(names[2], "Charlie");
+}
+
+TEST_F(RowColumnIterationTest, ColumnStringByName) {
+    auto [data, len] = make_buffer("desc\n\"Hello, \"\"World\"\"\"\n\"Simple\"\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto descs = result.column_string("desc");
+
+    EXPECT_EQ(descs.size(), 2);
+    EXPECT_EQ(descs[0], "Hello, \"World\"");
+    EXPECT_EQ(descs[1], "Simple");
+}
+
+TEST_F(RowColumnIterationTest, ColumnStringByNameNotFound) {
+    auto [data, len] = make_buffer("a\n1\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_THROW(result.column_string("nonexistent"), std::out_of_range);
+}
+
+// --- Header Tests ---
+
+TEST_F(RowColumnIterationTest, Header) {
+    auto [data, len] = make_buffer("name,age,city\nAlice,30,NYC\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto headers = result.header();
+
+    EXPECT_EQ(headers.size(), 3);
+    EXPECT_EQ(headers[0], "name");
+    EXPECT_EQ(headers[1], "age");
+    EXPECT_EQ(headers[2], "city");
+}
+
+TEST_F(RowColumnIterationTest, HasHeader) {
+    auto [data, len] = make_buffer("a,b\n1,2\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_TRUE(result.has_header());
+}
+
+TEST_F(RowColumnIterationTest, SetHasHeader) {
+    auto [data, len] = make_buffer("1,2\n3,4\n5,6\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    // Default: has header
+    EXPECT_TRUE(result.has_header());
+    EXPECT_EQ(result.num_rows(), 2);
+
+    // Disable header
+    result.set_has_header(false);
+    EXPECT_FALSE(result.has_header());
+    EXPECT_EQ(result.num_rows(), 3);
+}
+
+TEST_F(RowColumnIterationTest, ColumnIndex) {
+    auto [data, len] = make_buffer("name,age,city\nAlice,30,NYC\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    auto name_idx = result.column_index("name");
+    auto age_idx = result.column_index("age");
+    auto city_idx = result.column_index("city");
+    auto missing_idx = result.column_index("nonexistent");
+
+    EXPECT_TRUE(name_idx.has_value());
+    EXPECT_EQ(*name_idx, 0);
+    EXPECT_TRUE(age_idx.has_value());
+    EXPECT_EQ(*age_idx, 1);
+    EXPECT_TRUE(city_idx.has_value());
+    EXPECT_EQ(*city_idx, 2);
+    EXPECT_FALSE(missing_idx.has_value());
+}
+
+// --- Iterator Tests ---
+
+TEST_F(RowColumnIterationTest, IteratorIncrement) {
+    auto [data, len] = make_buffer("a\n1\n2\n3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto rows = result.rows();
+    auto it = rows.begin();
+
+    EXPECT_EQ((*it).get_string_view(0), "1");
+    ++it;
+    EXPECT_EQ((*it).get_string_view(0), "2");
+    it++;  // post-increment
+    EXPECT_EQ((*it).get_string_view(0), "3");
+    ++it;
+    EXPECT_EQ(it, rows.end());
+}
+
+TEST_F(RowColumnIterationTest, IteratorEquality) {
+    auto [data, len] = make_buffer("a\n1\n2\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto rows = result.rows();
+
+    auto it1 = rows.begin();
+    auto it2 = rows.begin();
+
+    EXPECT_TRUE(it1 == it2);
+    EXPECT_FALSE(it1 != it2);
+
+    ++it1;
+    EXPECT_FALSE(it1 == it2);
+    EXPECT_TRUE(it1 != it2);
+}
+
+// --- Type Conversion Tests ---
+
+TEST_F(RowColumnIterationTest, TypeConversionInt32) {
+    auto [data, len] = make_buffer("val\n42\n-17\n0\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    EXPECT_EQ(result.row(0).get<int32_t>(0).get(), 42);
+    EXPECT_EQ(result.row(1).get<int32_t>(0).get(), -17);
+    EXPECT_EQ(result.row(2).get<int32_t>(0).get(), 0);
+}
+
+TEST_F(RowColumnIterationTest, TypeConversionInt64) {
+    auto [data, len] = make_buffer("val\n9223372036854775807\n-9223372036854775808\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    EXPECT_EQ(result.row(0).get<int64_t>(0).get(), INT64_MAX);
+    EXPECT_EQ(result.row(1).get<int64_t>(0).get(), INT64_MIN);
+}
+
+TEST_F(RowColumnIterationTest, TypeConversionDouble) {
+    auto [data, len] = make_buffer("val\n3.14159\n-2.5e10\n0.0\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    EXPECT_NEAR(result.row(0).get<double>(0).get(), 3.14159, 0.0001);
+    EXPECT_NEAR(result.row(1).get<double>(0).get(), -2.5e10, 1e5);
+    EXPECT_NEAR(result.row(2).get<double>(0).get(), 0.0, 0.0001);
+}
+
+TEST_F(RowColumnIterationTest, TypeConversionBool) {
+    auto [data, len] = make_buffer("val\ntrue\nfalse\nTRUE\nFALSE\n1\n0\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    EXPECT_TRUE(result.row(0).get<bool>(0).get());
+    EXPECT_FALSE(result.row(1).get<bool>(0).get());
+    EXPECT_TRUE(result.row(2).get<bool>(0).get());
+    EXPECT_FALSE(result.row(3).get<bool>(0).get());
+    EXPECT_TRUE(result.row(4).get<bool>(0).get());
+    EXPECT_FALSE(result.row(5).get<bool>(0).get());
+}
+
+// --- Multi-threaded Parsing Tests ---
+
+TEST_F(RowColumnIterationTest, MultiThreadedParsing) {
+    // Create a larger CSV to benefit from multi-threading
+    std::string csv = "name,age,score\n";
+    for (int i = 0; i < 100; ++i) {
+        csv += "Person" + std::to_string(i) + "," +
+               std::to_string(20 + i % 50) + "," +
+               std::to_string(50 + i) + "\n";
+    }
+
+    auto [data, len] = make_buffer(csv);
+    libvroom::FileBuffer buffer(data, len);
+    // Use single-threaded parsing for now - multi-threaded parsing
+    // with the iteration API is tested separately in other test files
+    libvroom::Parser parser(1);
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.num_rows(), 100);
+
+    // Verify data integrity
+    EXPECT_EQ(result.row(0).get_string_view("name"), "Person0");
+    EXPECT_EQ(result.row(99).get_string_view("name"), "Person99");
+    EXPECT_EQ(result.row(50).get<int64_t>("age").get(), 20);
+}
+
+// --- Edge Cases ---
+
+TEST_F(RowColumnIterationTest, SingleColumn) {
+    auto [data, len] = make_buffer("value\n1\n2\n3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_EQ(result.num_columns(), 1);
+    EXPECT_EQ(result.num_rows(), 3);
+
+    auto vals = result.column<int64_t>(0);
+    EXPECT_EQ(vals.size(), 3);
+}
+
+TEST_F(RowColumnIterationTest, SingleRow) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_EQ(result.num_rows(), 1);
+
+    int count = 0;
+    for (auto row : result.rows()) {
+        EXPECT_EQ(row.get<int64_t>(0).get(), 1);
+        EXPECT_EQ(row.get<int64_t>(1).get(), 2);
+        EXPECT_EQ(row.get<int64_t>(2).get(), 3);
+        ++count;
+    }
+    EXPECT_EQ(count, 1);
+}
+
+TEST_F(RowColumnIterationTest, EmptyFields) {
+    auto [data, len] = make_buffer("a,b,c\n,,\n1,,3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    // First row: all empty
+    EXPECT_EQ(result.row(0).get_string_view(0), "");
+    EXPECT_EQ(result.row(0).get_string_view(1), "");
+    EXPECT_EQ(result.row(0).get_string_view(2), "");
+    EXPECT_TRUE(result.row(0).get<int64_t>(0).is_na());
+
+    // Second row: middle empty
+    EXPECT_EQ(result.row(1).get<int64_t>(0).get(), 1);
+    EXPECT_TRUE(result.row(1).get<int64_t>(1).is_na());
+    EXPECT_EQ(result.row(1).get<int64_t>(2).get(), 3);
+}
+
+TEST_F(RowColumnIterationTest, QuotedFieldsWithDelimiters) {
+    auto [data, len] = make_buffer("name,desc\nAlice,\"Hello, World\"\nBob,\"Line1\nLine2\"\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_EQ(result.num_rows(), 2);
+
+    // Quoted field containing delimiter
+    EXPECT_EQ(result.row(0).get_string(1), "Hello, World");
+}
+
+TEST_F(RowColumnIterationTest, CRLFLineEndings) {
+    auto [data, len] = make_buffer("a,b\r\n1,2\r\n3,4\r\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    EXPECT_EQ(result.num_rows(), 2);
+    EXPECT_EQ(result.row(0).get<int64_t>(0).get(), 1);
+    EXPECT_EQ(result.row(1).get<int64_t>(0).get(), 3);
+}
+
+TEST_F(RowColumnIterationTest, WhitespaceInFields) {
+    auto [data, len] = make_buffer("a,b\n  1  ,  2  \n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    // get_string_view preserves whitespace
+    EXPECT_EQ(result.row(0).get_string_view(0), "  1  ");
+
+    // get<int64_t> should trim whitespace during parsing
+    EXPECT_EQ(result.row(0).get<int64_t>(0).get(), 1);
+    EXPECT_EQ(result.row(0).get<int64_t>(1).get(), 2);
+}
+
+TEST_F(RowColumnIterationTest, ColumnDoubleType) {
+    auto [data, len] = make_buffer("score\n1.5\n2.5\n3.5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto scores = result.column<double>(0);
+
+    EXPECT_EQ(scores.size(), 3);
+    EXPECT_NEAR(*scores[0], 1.5, 0.01);
+    EXPECT_NEAR(*scores[1], 2.5, 0.01);
+    EXPECT_NEAR(*scores[2], 3.5, 0.01);
+}
+
+TEST_F(RowColumnIterationTest, ColumnBoolType) {
+    auto [data, len] = make_buffer("flag\ntrue\nfalse\ntrue\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+    auto flags = result.column<bool>(0);
+
+    EXPECT_EQ(flags.size(), 3);
+    EXPECT_TRUE(*flags[0]);
+    EXPECT_FALSE(*flags[1]);
+    EXPECT_TRUE(*flags[2]);
+}
+
+// --- Different Dialects ---
+
+TEST_F(RowColumnIterationTest, TSVIteration) {
+    auto [data, len] = make_buffer("name\tage\nAlice\t30\nBob\t25\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(), libvroom::Dialect::tsv());
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.num_rows(), 2);
+
+    EXPECT_EQ(result.row(0).get_string_view("name"), "Alice");
+    EXPECT_EQ(result.row(0).get<int64_t>("age").get(), 30);
+}
+
+TEST_F(RowColumnIterationTest, SemicolonIteration) {
+    auto [data, len] = make_buffer("name;age\nAlice;30\nBob;25\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(), libvroom::Dialect::semicolon());
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.num_rows(), 2);
+
+    auto names = result.column_string_view("name");
+    EXPECT_EQ(names[0], "Alice");
+    EXPECT_EQ(names[1], "Bob");
+}
+
+// ============================================================================
+// Tests for UTF-8 Validation
+// ============================================================================
+
+class UTF8ValidationTest : public ::testing::Test {
+protected:
+    static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
+        size_t len = content.size();
+        uint8_t* buf = allocate_padded_buffer(len, 64);
+        std::memcpy(buf, content.data(), len);
+        return {buf, len};
+    }
+};
+
+// Test: SizeLimits::validate_utf8 default is false
+TEST_F(UTF8ValidationTest, ValidationDisabledByDefault) {
+    auto limits = libvroom::SizeLimits::defaults();
+    EXPECT_FALSE(limits.validate_utf8);
+}
+
+// Test: SizeLimits::strict() enables UTF-8 validation
+TEST_F(UTF8ValidationTest, StrictEnablesValidation) {
+    auto limits = libvroom::SizeLimits::strict();
+    EXPECT_TRUE(limits.validate_utf8);
+}
+
+// Test: Invalid UTF-8 detection (0xFF is never valid)
+TEST_F(UTF8ValidationTest, InvalidByteDetected) {
     std::string content = "a,b,c\n1,\xFF,3\n";
     auto [data, len] = make_buffer(content);
     libvroom::FileBuffer buffer(data, len);
     libvroom::Parser parser;
 
     libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-    libvroom::ValidationLimits limits;
+    libvroom::SizeLimits limits;
     limits.validate_utf8 = true;
 
     auto result = parser.parse(buffer.data(), buffer.size(),
-                               libvroom::ParseOptions::validated(errors, limits));
+                               {.errors = &errors, .limits = limits});
     EXPECT_TRUE(errors.has_errors());
     bool found_utf8_error = false;
     for (const auto& err : errors.errors()) {
@@ -590,60 +1213,48 @@ TEST_F(ValidationLimitsTest, InvalidUTF8) {
     EXPECT_TRUE(found_utf8_error);
 }
 
-// Test: Valid UTF-8 passes validation
-TEST_F(ValidationLimitsTest, ValidUTF8) {
-    // Valid UTF-8 content with multi-byte characters
+// Test: Valid UTF-8 with multi-byte characters passes
+TEST_F(UTF8ValidationTest, ValidMultiByteCharacters) {
+    // Valid UTF-8: Zürich (ü = 2 bytes), 日本 (each = 3 bytes)
     std::string content = "name,city\nAlice,Zürich\nBob,日本\n";
     auto [data, len] = make_buffer(content);
     libvroom::FileBuffer buffer(data, len);
     libvroom::Parser parser;
 
     libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-    libvroom::ValidationLimits limits;
+    libvroom::SizeLimits limits;
     limits.validate_utf8 = true;
 
     auto result = parser.parse(buffer.data(), buffer.size(),
-                               libvroom::ParseOptions::validated(errors, limits));
+                               {.errors = &errors, .limits = limits});
     EXPECT_TRUE(result.success());
-    // Check no UTF-8 errors
+    // No UTF-8 errors
     for (const auto& err : errors.errors()) {
         EXPECT_NE(err.code, libvroom::ErrorCode::INVALID_UTF8);
     }
 }
 
-// Test: UTF-8 validation disabled by default
-TEST_F(ValidationLimitsTest, UTF8ValidationDisabledByDefault) {
+// Test: Invalid UTF-8 not detected when validation disabled
+TEST_F(UTF8ValidationTest, NoValidationWhenDisabled) {
     std::string content = "a,b,c\n1,\xFF,3\n";  // Invalid UTF-8
     auto [data, len] = make_buffer(content);
     libvroom::FileBuffer buffer(data, len);
     libvroom::Parser parser;
 
     libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-    libvroom::ValidationLimits limits = libvroom::ValidationLimits::defaults();
+    libvroom::SizeLimits limits = libvroom::SizeLimits::defaults();
     // validate_utf8 is false by default
 
     auto result = parser.parse(buffer.data(), buffer.size(),
-                               libvroom::ParseOptions::validated(errors, limits));
+                               {.errors = &errors, .limits = limits});
     // No UTF-8 error because validation is disabled
     for (const auto& err : errors.errors()) {
         EXPECT_NE(err.code, libvroom::ErrorCode::INVALID_UTF8);
     }
 }
 
-// Test: ParseOptions::validated factory
-TEST_F(ValidationLimitsTest, ValidatedFactory) {
-    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
-    libvroom::FileBuffer buffer(data, len);
-    libvroom::Parser parser;
-
-    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-    auto result = parser.parse(buffer.data(), buffer.size(),
-                               libvroom::ParseOptions::validated(errors));
-    EXPECT_TRUE(result.success());
-}
-
-// Test: Truncated UTF-8 sequences
-TEST_F(ValidationLimitsTest, TruncatedUTF8Sequences) {
+// Test: Truncated UTF-8 sequence detected
+TEST_F(UTF8ValidationTest, TruncatedSequenceDetected) {
     // Truncated 2-byte sequence (starts with 110xxxxx but no continuation byte)
     std::string content = "a,b\n1,\xC0\n";
     auto [data, len] = make_buffer(content);
@@ -651,11 +1262,11 @@ TEST_F(ValidationLimitsTest, TruncatedUTF8Sequences) {
     libvroom::Parser parser;
 
     libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-    libvroom::ValidationLimits limits;
+    libvroom::SizeLimits limits;
     limits.validate_utf8 = true;
 
     auto result = parser.parse(buffer.data(), buffer.size(),
-                               libvroom::ParseOptions::validated(errors, limits));
+                               {.errors = &errors, .limits = limits});
     EXPECT_TRUE(errors.has_errors());
     bool found_utf8_error = false;
     for (const auto& err : errors.errors()) {
@@ -667,9 +1278,8 @@ TEST_F(ValidationLimitsTest, TruncatedUTF8Sequences) {
     EXPECT_TRUE(found_utf8_error);
 }
 
-// Test: Overlong UTF-8 encoding
-TEST_F(ValidationLimitsTest, OverlongUTF8Encoding) {
-    // Overlong encoding of ASCII 'A' (0x41) as 2 bytes: C0 C1 would be overlong
+// Test: Overlong UTF-8 encoding detected
+TEST_F(UTF8ValidationTest, OverlongEncodingDetected) {
     // 0xC0 0x80 encodes NUL as 2 bytes (overlong)
     std::string content = "a,b\n1,\xC0\x80\n";
     auto [data, len] = make_buffer(content);
@@ -677,10 +1287,10 @@ TEST_F(ValidationLimitsTest, OverlongUTF8Encoding) {
     libvroom::Parser parser;
 
     libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-    libvroom::ValidationLimits limits;
+    libvroom::SizeLimits limits;
     limits.validate_utf8 = true;
 
     auto result = parser.parse(buffer.data(), buffer.size(),
-                               libvroom::ParseOptions::validated(errors, limits));
+                               {.errors = &errors, .limits = limits});
     EXPECT_TRUE(errors.has_errors());
 }

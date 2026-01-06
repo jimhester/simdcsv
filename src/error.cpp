@@ -18,6 +18,7 @@ const char* error_code_to_string(ErrorCode code) {
         case ErrorCode::DUPLICATE_COLUMN_NAMES: return "DUPLICATE_COLUMN_NAMES";
         case ErrorCode::AMBIGUOUS_SEPARATOR: return "AMBIGUOUS_SEPARATOR";
         case ErrorCode::FILE_TOO_LARGE: return "FILE_TOO_LARGE";
+        case ErrorCode::INDEX_ALLOCATION_OVERFLOW: return "INDEX_ALLOCATION_OVERFLOW";
         case ErrorCode::IO_ERROR: return "IO_ERROR";
         case ErrorCode::INTERNAL_ERROR: return "INTERNAL_ERROR";
         default: return "UNKNOWN";
