@@ -158,7 +158,7 @@ jobs:
             If no issues, write: []
           claude_args: |
             --max-turns 15
-            --allowedTools "Read,Write,Glob,Grep,Bash(git blame:*),Bash(git log:*),Bash(git show:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*)"
+            --allowedTools "Read,Write,Glob,Grep,Bash(git blame:*),Bash(git log:*),Bash(git show:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*)"
       - name: Upload findings
         uses: actions/upload-artifact@v4
         with:
@@ -242,4 +242,4 @@ jobs:
             Generated with [Claude Code](https://claude.ai/code)
           claude_args: |
             --max-turns 5
-            --allowedTools "Read,Glob,Bash(gh pr comment:*),Bash(gh pr view:*)"
+            --allowedTools "Read,Glob,Bash(ls:*),Bash(cat:*),Bash(gh pr comment:*),Bash(gh pr view:*)"
