@@ -15,7 +15,11 @@
 
 #include "simd_number_parsing.h"
 #include "value_extraction.h"
-#include "type_detector.h"
+
+// Type detection is optional
+#ifdef LIBVROOM_ENABLE_TYPE_DETECTION
+#include "libvroom_types.h"
+#endif
 
 using namespace libvroom;
 
@@ -236,8 +240,10 @@ static void BM_SIMDParseScientific(benchmark::State& state) {
 BENCHMARK(BM_SIMDParseScientific);
 
 // =============================================================================
-// Type Validation Benchmarks
+// Type Validation Benchmarks (only if type detection is enabled)
 // =============================================================================
+
+#ifdef LIBVROOM_ENABLE_TYPE_DETECTION
 
 static void BM_ScalarTypeValidation(benchmark::State& state) {
     init_test_data();
@@ -274,6 +280,8 @@ static void BM_ScalarTypeValidation(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * mixed.size());
 }
 BENCHMARK(BM_ScalarTypeValidation);
+
+#endif  // LIBVROOM_ENABLE_TYPE_DETECTION
 
 static void BM_SIMDTypeValidation(benchmark::State& state) {
     init_test_data();
@@ -358,8 +366,10 @@ static void BM_SIMDDigitValidation(benchmark::State& state) {
 BENCHMARK(BM_SIMDDigitValidation);
 
 // =============================================================================
-// SIMDTypeDetector Benchmarks
+// SIMDTypeDetector Benchmarks (only if type detection is enabled)
 // =============================================================================
+
+#ifdef LIBVROOM_ENABLE_TYPE_DETECTION
 
 // Benchmark SIMDTypeDetector::all_digits (SIMD implementation)
 static void BM_SIMDTypeDetector_AllDigits(benchmark::State& state) {
@@ -448,6 +458,8 @@ BENCHMARK(BM_SIMDTypeDetector_AllDigits_FailLate)
     ->Arg(64)
     ->Arg(256)
     ->Arg(1024);
+
+#endif  // LIBVROOM_ENABLE_TYPE_DETECTION
 
 // =============================================================================
 // Column Parsing Benchmarks

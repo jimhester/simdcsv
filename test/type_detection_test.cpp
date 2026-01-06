@@ -3,7 +3,7 @@
 #include <vector>
 #include <cstring>
 
-#include "type_detector.h"
+#include "libvroom_types.h"
 
 using namespace libvroom;
 
