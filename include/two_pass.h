@@ -557,7 +557,7 @@ class two_pass {
       uint64_t quotes = cmp_mask_against_input(in, static_cast<uint8_t>(quote_char)) & mask;
 
       uint64_t quote_mask = find_quote_mask2(quotes, prev_iter_inside_quote);
-      uint64_t sep = cmp_mask_against_input(in, static_cast<uint8_t>(delimiter));
+      uint64_t sep = cmp_mask_against_input(in, static_cast<uint8_t>(delimiter)) & mask;
       // Support LF, CRLF, and CR-only line endings
       uint64_t end_mask = compute_line_ending_mask_simple(in, mask);
       uint64_t field_sep = (end_mask | sep) & ~quote_mask;

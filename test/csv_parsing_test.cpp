@@ -1364,6 +1364,111 @@ TEST_F(CSVParserTest, ParseAlternatingPattern) {
     EXPECT_TRUE(success) << "Parser should handle alternating patterns";
 }
 
+// ============================================================================
+// REGRESSION TEST: Issue #297 - Multi-threaded parsing delimiter masking
+// ============================================================================
+
+// Test that multi-threaded parsing correctly masks delimiters in partial final blocks.
+// Bug: Delimiter detection was not masked with valid_mask, causing garbage bytes
+// beyond valid data to be detected as field separators on some platforms.
+TEST_F(CSVParserTest, MultiThreadedDelimiterMasking) {
+    // Create a CSV that will have partial blocks when parsed with multiple threads.
+    // The data size is chosen so that when divided by n_threads, chunks end
+    // in the middle of a 64-byte SIMD block, requiring proper masking.
+    std::string content;
+    content = "ID,Value,Label\n";
+
+    // Add enough rows to trigger multi-threaded parsing (> 64 bytes per chunk)
+    // but ensure we have partial blocks that test the masking
+    for (int i = 1; i <= 100; ++i) {
+        content += std::to_string(i) + "," + std::to_string(i * 100) + ",Row" + std::to_string(i) + "\n";
+    }
+
+    // Allocate with padding
+    std::vector<uint8_t> data(content.size() + SIMDCSV_PADDING, 0);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    // Get baseline count with single-threaded parsing
+    uint64_t baseline_count;
+    {
+        simdcsv::two_pass parser;
+        simdcsv::index idx = parser.init(content.size(), 1);
+        parser.parse(data.data(), idx, content.size());
+        baseline_count = idx.n_indexes[0];
+    }
+
+    // Now fill padding with commas and test multi-threaded
+    std::memset(data.data() + content.size(), ',', SIMDCSV_PADDING);
+
+    // Multi-threaded parsing should find the SAME count as single-threaded,
+    // not extra garbage delimiters from the padding
+    for (int n_threads = 2; n_threads <= 4; ++n_threads) {
+        simdcsv::two_pass parser;
+        simdcsv::index idx = parser.init(content.size(), n_threads);
+
+        bool success = parser.parse(data.data(), idx, content.size());
+        EXPECT_TRUE(success) << "Multi-threaded parsing should succeed with " << n_threads << " threads";
+
+        uint64_t total_indexes = 0;
+        for (int t = 0; t < idx.n_threads; ++t) {
+            total_indexes += idx.n_indexes[t];
+        }
+
+        // The multi-threaded count should match single-threaded baseline
+        // Note: Multi-threaded may find n_threads-1 extra separators at chunk boundaries
+        // due to how chunks are split at newlines (pre-existing behavior)
+        EXPECT_LE(total_indexes, baseline_count + n_threads)
+            << "With " << n_threads << " threads and comma-filled padding, "
+            << "should not find excessive extra garbage delimiters";
+    }
+}
+
+// Test with comma-filled padding to verify garbage is not detected as separators
+TEST_F(CSVParserTest, MultiThreadedChunkBoundaryPartialBlock) {
+    // Create CSV with a specific size to test chunk boundary handling
+    std::string content = "a,b,c\n";
+
+    // Generate rows until we have ~1000 bytes (will be split into ~250 byte chunks with 4 threads)
+    while (content.size() < 1000) {
+        content += "x,y,z\n";
+    }
+
+    // Get single-threaded baseline first with zero padding
+    std::vector<uint8_t> data(content.size() + SIMDCSV_PADDING, 0);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    uint64_t baseline_count;
+    {
+        simdcsv::two_pass parser;
+        simdcsv::index idx = parser.init(content.size(), 1);
+        parser.parse(data.data(), idx, content.size());
+        baseline_count = idx.n_indexes[0];
+    }
+
+    // Now fill padding with commas to test masking
+    std::memset(data.data() + content.size(), ',', SIMDCSV_PADDING);
+
+    // Test multi-threaded: should not detect garbage commas in padding
+    for (int n_threads = 2; n_threads <= 8; ++n_threads) {
+        simdcsv::two_pass parser;
+        simdcsv::index idx = parser.init(content.size(), n_threads);
+
+        bool success = parser.parse(data.data(), idx, content.size());
+        EXPECT_TRUE(success) << "Parser should succeed with " << n_threads << " threads";
+
+        // Count separators
+        uint64_t total_indexes = 0;
+        for (int t = 0; t < idx.n_threads; ++t) {
+            total_indexes += idx.n_indexes[t];
+        }
+
+        // Should not have excessive extra separators from garbage
+        EXPECT_LE(total_indexes, baseline_count + n_threads)
+            << "Thread count " << n_threads << " with comma-filled padding "
+            << "should not find excessive garbage separators";
+    }
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
