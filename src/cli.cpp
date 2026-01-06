@@ -1140,6 +1140,10 @@ int main(int argc, char* argv[]) {
   // Ensure all output is flushed before exit.
   // This fixes flaky test failures on macOS where popen() may not capture
   // all output if the process exits before buffers are flushed.
+  // Use both C++ stream flush and C stdio flush to handle all buffering layers.
   std::cout.flush();
+  std::cerr.flush();
+  fflush(stdout);
+  fflush(stderr);
   return result;
 }
