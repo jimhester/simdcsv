@@ -14,16 +14,6 @@ This project is authored by Jim Hester, the original author of [vroom](https://g
 2. Avoid confusion with abandoned simdjson-adjacent projects (e.g., geofflangdale/simdcsv)
 3. Use conventional `lib*` naming for C/C++ libraries
 
-## Naming and Authorship
-
-This project is authored by Jim Hester, the original author of [vroom](https://github.com/tidyverse/vroom). The project is planned to be renamed to **libvroom** to:
-
-1. Clearly indicate its relationship to vroom as the native SIMD parsing engine
-2. Avoid confusion with abandoned simdjson-adjacent projects (e.g., geofflangdale/simdcsv)
-3. Use conventional `lib*` naming for C/C++ libraries
-
-Until the rename is complete, the codebase uses "simdcsv" naming internally.
-
 ## Build Commands
 
 ```bash
@@ -55,55 +45,44 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
 cmake --build build
 ```
 
-## Architecture
+## Language Server
 
-### Two-Pass Parsing Algorithm
+clangd is available for code intelligence (go-to-definition, find references, diagnostics). To enable it in a fresh checkout or worktree:
 
-The core algorithm in `include/two_pass.h` uses speculative multi-threaded parsing:
+```bash
+cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+ln -sf build/compile_commands.json .
+```
 
-1. **First Pass** (`first_pass_simd`): Scans for line boundaries while tracking quote parity. Finds the first newline at an even quote count (safe split point) and first newline at odd quote count.
-
-2. **Speculative Chunking**: File is divided into chunks based on quote parity analysis. Multiple threads speculatively parse chunks, assuming quotation state at chunk boundaries.
-
-3. **Second Pass** (`find_indexes_simd`): SIMD-based field indexing using a state machine (RECORD_START, FIELD_START, UNQUOTED_FIELD, QUOTED_FIELD, QUOTED_END). Processes 64 bytes at a time via Highway intrinsics.
-
-### Key Components
+## Key Files
 
 | File | Purpose |
 |------|---------|
+| `include/libvroom.h` | **Main public API** - Parser class, unified interface |
+| `include/libvroom_c.h` | C API wrapper for FFI bindings |
 | `include/two_pass.h` | Core two-pass parsing algorithm with multi-threading |
-| `include/simd_highway.h` | Portable SIMD operations using Google Highway |
-| `include/error.h` | Error codes, severity levels, ErrorCollector class |
-| `include/io_util.h` | File loading with SIMD-aligned padding (32+ bytes) |
-| `include/mem_util.h` | Aligned memory allocation for SIMD |
-| `src/cli.cpp` | User-friendly CSV tool (vroom) |
+| `include/dialect.h` | CSV dialect detection (delimiter, quoting, line endings) |
+| `include/error.h` | Error codes, ErrorCollector, three error modes |
+| `include/streaming.h` | Streaming parser for large files |
+| `include/simd_highway.h` | Portable SIMD operations (Highway) |
+| `src/cli.cpp` | CLI tool (`vroom count/head/select/pretty/info`) |
 
-### Error Handling Framework
+## Architecture
 
-The parser supports three error modes (see `include/error.h`):
-- **STRICT**: Stop on first error
-- **PERMISSIVE**: Collect all errors, try to recover
-- **BEST_EFFORT**: Ignore errors, parse what's possible
+Two-pass speculative parsing algorithm (see `include/two_pass.h`):
+1. **First pass**: Scan for line boundaries tracking quote parity to find safe split points
+2. **Speculative chunking**: Divide file for parallel processing based on quote analysis
+3. **Second pass**: SIMD field indexing (64 bytes/iteration) with state machine
 
-16 error types with severity levels (WARNING, ERROR, FATAL) covering quotes, field structure, line endings, encoding, and I/O issues.
+SIMD via Google Highway 1.3.0: x86-64 (SSE4.2, AVX2), ARM (NEON), scalar fallback.
 
-### SIMD Implementation
+## Documentation
 
-Uses Google Highway 1.3.0 for portable SIMD abstraction:
-- x86-64: SSE4.2, AVX2
-- ARM: NEON
-- 64-byte processing lanes with scalar fallback for remainders
-
-## Test Data Organization
-
-Test CSV files are in `test/data/` organized by category:
-- `basic/` - Simple CSV files
-- `quoted/` - Quoted fields and escapes
-- `separators/` - Different delimiter types
-- `edge_cases/` - Empty fields, whitespace
-- `line_endings/` - CRLF, LF, CR variations
-- `real_world/` - Financial, contacts, unicode data
-- `malformed/` - 16+ files for error detection testing
+| Topic | Location |
+|-------|----------|
+| Error handling (modes, types, recovery) | `docs/error_handling.md` |
+| Test data organization | `test/README.md` |
+| CI workflows | `.github/workflows/README.md` |
 
 ## Dependencies (fetched via CMake FetchContent)
 
@@ -113,21 +92,4 @@ Test CSV files are in `test/data/` organized by category:
 
 ## Issue Labels
 
-When creating GitHub issues, apply appropriate labels using `gh issue create --label "label-name"`:
-
-| Label | Use for |
-|-------|---------|
-| `bug` | Unexpected problems or unintended behavior |
-| `feature` | Feature requests or enhancements |
-| `documentation` | Documentation improvements or additions |
-| `performance 🚀` | Performance improvements or optimizations |
-| `testing 🧪` | Test coverage or test infrastructure |
-| `cleanup 🧹` | Code cleanup or refactoring |
-| `api 🔌` | Public API changes or additions |
-| `c-api 🔧` | C API wrapper changes |
-| `simd ⚡` | SIMD implementation or optimization |
-| `arrow 🏹` | Apache Arrow integration |
-| `security 🔒` | Security vulnerabilities or hardening |
-| `critical ☠️` | Must fix - security or correctness issues |
-
-Multiple labels can be applied: `gh issue create --label "feature" --label "simd ⚡" ...`
+Use `gh issue create --label "label"` with: `bug`, `feature`, `documentation`, `performance 🚀`, `testing 🧪`, `cleanup 🧹`, `api 🔌`, `c-api 🔧`, `simd ⚡`, `arrow 🏹`, `security 🔒`, `critical ☠️`
