@@ -17,6 +17,7 @@ option(ENABLE_COVERAGE "Enable code coverage reporting" OFF)
 # Sanitizer options
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 
 # Compiler flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -38,7 +39,7 @@ if(ENABLE_COVERAGE)
 endif()
 
 # Sanitizer flags
-if(ENABLE_ASAN OR ENABLE_UBSAN)
+if(ENABLE_ASAN OR ENABLE_UBSAN OR ENABLE_TSAN)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         # Common sanitizer flags
         add_compile_options(-fno-omit-frame-pointer -g)
@@ -53,6 +54,12 @@ if(ENABLE_ASAN OR ENABLE_UBSAN)
             message(STATUS "UndefinedBehaviorSanitizer enabled")
             add_compile_options(-fsanitize=undefined)
             add_link_options(-fsanitize=undefined)
+        endif()
+
+        if(ENABLE_TSAN)
+            message(STATUS "ThreadSanitizer enabled")
+            add_compile_options(-fsanitize=thread)
+            add_link_options(-fsanitize=thread)
         endif()
     else()
         message(WARNING "Sanitizers not supported for compiler: ${CMAKE_CXX_COMPILER_ID}")
@@ -773,6 +780,31 @@ add_custom_command(TARGET integration_test POST_BUILD
 
 # Register integration tests with CTest
 gtest_discover_tests(integration_test)
+
+# Concurrency and thread safety test executable
+add_executable(concurrency_test
+    test/concurrency_test.cpp
+)
+
+target_link_libraries(concurrency_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(concurrency_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for concurrency tests
+add_custom_command(TARGET concurrency_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register concurrency tests with CTest
+gtest_discover_tests(concurrency_test)
 
 # Arrow output test (only if Arrow is enabled)
 if(LIBVROOM_ENABLE_ARROW)
