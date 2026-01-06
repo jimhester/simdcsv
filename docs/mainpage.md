@@ -4,7 +4,7 @@ High-performance CSV parser using SIMD instructions.
 
 ## Quick Start
 
-The simplest way to use simdcsv is with the high-level `Parser` and `FileBuffer` classes:
+The simplest way to use simdcsv is with the `Parser` class and `FileBuffer`:
 
 ```cpp
 #include "simdcsv.h"
@@ -15,9 +15,8 @@ simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
 // Create parser with 4 threads
 simdcsv::Parser parser(4);
 
-// Parse with auto-detection of dialect
-simdcsv::ErrorCollector errors;
-auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+// Parse with auto-detection (default behavior)
+auto result = parser.parse(buffer.data(), buffer.size());
 
 if (result.success()) {
     std::cout << "Detected: " << result.dialect.to_string() << "\n";
@@ -26,46 +25,53 @@ if (result.success()) {
 // Memory automatically freed when buffer goes out of scope
 ```
 
-### Low-Level API
-
-For maximum performance and control, use the `two_pass` class directly:
+### Common Patterns
 
 ```cpp
-#include "two_pass.h"
-#include "io_util.h"
-#include "mem_util.h"
+// 1. Auto-detect dialect, throw on errors (default - fastest)
+auto result = parser.parse(buf, len);
 
-// Load CSV file with SIMD-aligned padding
-auto corpus = get_corpus("data.csv", 64);
+// 2. Auto-detect dialect, collect errors
+ErrorCollector errors(ErrorMode::PERMISSIVE);
+auto result = parser.parse(buf, len, {.errors = &errors});
 
-// Create parser and parse
-simdcsv::two_pass parser;
-auto idx = parser.init(corpus.size(), 4);  // 4 threads
-parser.parse(corpus.data(), idx, corpus.size());
+// 3. Explicit dialect, throw on errors
+auto result = parser.parse(buf, len, {.dialect = Dialect::csv()});
 
-// Field positions are now in idx.indexes
-// Don't forget to free the buffer
-aligned_free((void*)corpus.data());
+// 4. Explicit dialect with error collection
+auto result = parser.parse(buf, len, {
+    .dialect = Dialect::tsv(),
+    .errors = &errors
+});
+
+// 5. Maximum performance with branchless algorithm
+auto result = parser.parse(buf, len, ParseOptions::branchless());
 ```
 
 ---
 
 ## Core API
 
-### High-Level Classes (Recommended)
+### Primary Classes
 
 | Class | Description |
 |-------|-------------|
-| @ref simdcsv::Parser | Simplified parser with automatic index management. |
+| @ref simdcsv::Parser | **Main parser class** - unified API for all parsing needs. |
 | @ref simdcsv::FileBuffer | RAII wrapper for file buffers with automatic cleanup. |
+| @ref simdcsv::ParseOptions | Configuration for parsing (dialect, errors, algorithm). |
 
-### Low-Level Classes
+### Supporting Classes
 
 | Class | Description |
 |-------|-------------|
-| @ref simdcsv::two_pass | Core CSV parser with full control over parsing. |
 | @ref simdcsv::index | Result structure containing parsed field positions. |
 | @ref simdcsv::ErrorCollector | Collects and manages parse errors. |
+
+### Internal Classes (Deprecated for Direct Use)
+
+| Class | Description |
+|-------|-------------|
+| @ref simdcsv::two_pass | Low-level parser implementation. Use `Parser` instead. |
 
 ### Dialect Detection
 
@@ -80,12 +86,12 @@ aligned_free((void*)corpus.data());
 
 | Method | Description |
 |--------|-------------|
-| @ref simdcsv::Parser::parse "Parser::parse()" | Parse with specified dialect. |
-| @ref simdcsv::Parser::parse_auto "Parser::parse_auto()" | Parse with auto-detected dialect. |
-| @ref simdcsv::Parser::parse_with_errors "Parser::parse_with_errors()" | Parse with error collection. |
-| @ref simdcsv::two_pass::init "two_pass::init()" | Initialize an index for parsing. |
-| @ref simdcsv::two_pass::parse "two_pass::parse()" | Parse CSV data (fast, throws on error). |
-| @ref simdcsv::two_pass::parse_with_errors "two_pass::parse_with_errors()" | Parse with detailed error collection. |
+| @ref simdcsv::Parser::parse "Parser::parse()" | **Unified parse method** - handles all use cases via ParseOptions. |
+
+The `Parser::parse()` method replaces multiple legacy methods:
+- Auto-detects dialect by default, or use explicit `{.dialect = ...}`
+- Collects errors with `{.errors = &collector}`, or throws by default
+- Choose algorithm with `{.algorithm = ParseAlgorithm::BRANCHLESS}` for optimization
 
 ### File I/O
 
@@ -124,17 +130,17 @@ auto result = parser.parse(data, len, custom);
 ### Automatic Detection
 
 ```cpp
-// Detect dialect from file
+// Detect dialect from file (standalone detection)
 auto detected = simdcsv::detect_dialect_file("mystery.csv");
 if (detected.success()) {
     std::cout << "Delimiter: '" << detected.dialect.delimiter << "'\n";
     std::cout << "Confidence: " << detected.confidence << "\n";
 }
 
-// Parse with auto-detection
+// Parse with auto-detection (default behavior)
 simdcsv::Parser parser(4);
-simdcsv::ErrorCollector errors;
-auto result = parser.parse_auto(data, len, errors);
+auto result = parser.parse(data, len);  // Auto-detects dialect
+std::cout << "Detected: " << result.dialect.to_string() << "\n";
 ```
 
 ---
@@ -158,7 +164,8 @@ simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
 simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
 simdcsv::Parser parser(4);
 
-auto result = parser.parse_with_errors(buffer.data(), buffer.size(), errors);
+// Use unified parse() with error collection via ParseOptions
+auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
 
 if (errors.has_errors()) {
     std::cout << errors.summary() << std::endl;
@@ -174,12 +181,12 @@ if (errors.has_errors()) {
 
 | Header | Purpose |
 |--------|---------|
-| @ref simdcsv.h | Main public header - includes everything you need |
-| @ref two_pass.h | Core parser (two_pass, index classes) |
+| @ref simdcsv.h | **Main public header** - includes Parser, FileBuffer, and everything you need |
 | @ref error.h | Error handling (ErrorCollector, ErrorCode, ParseError) |
 | @ref dialect.h | Dialect configuration and detection |
 | @ref io_util.h | File loading with SIMD alignment |
 | @ref mem_util.h | Aligned memory allocation |
+| @ref two_pass.h | Internal implementation (use simdcsv.h instead) |
 
 ---
 

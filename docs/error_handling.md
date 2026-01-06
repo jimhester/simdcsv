@@ -424,11 +424,12 @@ FileBuffer buf = load_file("messy_data.csv");
 ErrorCollector errors(ErrorMode::PERMISSIVE);
 Parser parser;
 
-auto result = parser.parse_auto(buf.data(), buf.size(), errors);
+// Use unified parse() with error collection
+auto result = parser.parse(buf.data(), buf.size(), {.errors = &errors});
 
 // Parsing completed (unless FATAL error occurred)
 if (result.successful) {
-    std::cout << "Parsed " << result.num_rows << " rows" << std::endl;
+    std::cout << "Parsed " << result.total_indexes() << " fields" << std::endl;
 }
 
 // Check what issues were found
@@ -538,7 +539,8 @@ bool parse_production_csv(const std::string& filepath) {
     ErrorCollector errors(ErrorMode::STRICT);
     Parser parser;
 
-    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+    // Use unified parse() with error collection
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
 
     if (!result.successful || errors.has_errors()) {
         // Log the error and reject the file
@@ -549,8 +551,8 @@ bool parse_production_csv(const std::string& filepath) {
         return false;
     }
 
-    std::cout << "Successfully parsed " << result.num_rows
-              << " rows, " << result.num_columns << " columns" << std::endl;
+    std::cout << "Successfully parsed " << result.num_columns()
+              << " columns" << std::endl;
     return true;
 }
 ```
@@ -573,14 +575,15 @@ void validate_csv_report(const std::string& filepath, const std::string& report_
     ErrorCollector errors(ErrorMode::PERMISSIVE);
     Parser parser;
 
-    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+    // Use unified parse() - auto-detects dialect by default
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
 
     // Write validation report
     std::ofstream report(report_path);
     report << "CSV Validation Report\n";
     report << "=====================\n\n";
     report << "File: " << filepath << "\n";
-    report << "Rows parsed: " << result.num_rows << "\n";
+    report << "Detected dialect: " << result.dialect.to_string() << "\n";
     report << "Parse completed: " << (result.successful ? "Yes" : "No") << "\n\n";
 
     if (errors.has_errors()) {
@@ -616,10 +619,11 @@ void import_messy_data(const std::string& filepath) {
     ErrorCollector errors(ErrorMode::BEST_EFFORT);
     Parser parser;
 
-    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+    // Use unified parse() with error collection
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
 
     std::cout << "Import Results:\n";
-    std::cout << "  Rows imported: " << result.num_rows << "\n";
+    std::cout << "  Fields found: " << result.total_indexes() << "\n";
     std::cout << "  Issues encountered: " << errors.error_count() << "\n";
 
     if (errors.has_errors()) {
@@ -653,7 +657,8 @@ void process_with_error_handling(const std::string& filepath) {
     ErrorCollector errors(ErrorMode::PERMISSIVE);
     Parser parser;
 
-    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+    // Use unified parse() with error collection
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
 
     // Handle different error types
     for (const auto& err : errors.errors()) {
@@ -689,40 +694,34 @@ void process_with_error_handling(const std::string& filepath) {
 
 ### Example 5: Multi-threaded Parsing with Error Collection
 
-Collect errors from parallel parsing threads:
+The `Parser` class handles multi-threaded parsing with error collection automatically:
 
 ```cpp
 #include <simdcsv.h>
 #include <thread>
-#include <vector>
 
 using namespace simdcsv;
 
 void parallel_parse_with_errors(const uint8_t* data, size_t len) {
     const size_t num_threads = std::thread::hardware_concurrency();
 
-    // Create thread-local error collectors
-    std::vector<ErrorCollector> thread_errors;
-    for (size_t i = 0; i < num_threads; ++i) {
-        thread_errors.emplace_back(ErrorMode::PERMISSIVE);
+    // Create parser with multiple threads
+    Parser parser(num_threads);
+
+    // Error collector - Parser handles thread-local collection internally
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+
+    // Use unified parse() - multi-threading is automatic based on num_threads
+    auto result = parser.parse(data, len, {.errors = &errors});
+
+    // Report results
+    if (result.successful) {
+        std::cout << "Parsed with " << num_threads << " threads\n";
     }
 
-    // Initialize parser
-    two_pass parser;
-    auto idx = parser.init(len, num_threads);
-
-    // Parse with multi-threading (each thread uses its own collector)
-    bool success = parser.parse_two_pass_with_errors(data, idx, len,
-                                                      thread_errors[0]);
-
-    // Merge all thread-local errors
-    ErrorCollector all_errors(ErrorMode::PERMISSIVE);
-    all_errors.merge_sorted(thread_errors);
-
-    // Report combined errors
-    if (all_errors.has_errors()) {
-        std::cout << "Combined errors from " << num_threads << " threads:\n";
-        std::cout << all_errors.summary() << std::endl;
+    if (errors.has_errors()) {
+        std::cout << "Errors found:\n";
+        std::cout << errors.summary() << std::endl;
     }
 }
 ```
@@ -739,7 +738,7 @@ void parallel_parse_with_errors(const uint8_t* data, size_t len) {
 ```cpp
 ErrorCollector errors(ErrorMode::STRICT);
 Parser parser;
-auto result = parser.parse_auto(data, len, errors);
+auto result = parser.parse(data, len, {.errors = &errors});
 
 if (!result.successful || errors.has_errors()) {
     // Log and reject
@@ -761,7 +760,7 @@ process_data(result);
 ```cpp
 ErrorCollector errors(ErrorMode::PERMISSIVE);
 Parser parser;
-auto result = parser.parse_auto(data, len, errors);
+auto result = parser.parse(data, len, {.errors = &errors});
 
 if (errors.has_errors()) {
     // Generate detailed report
@@ -787,16 +786,16 @@ if (errors.has_errors()) {
 ```cpp
 ErrorCollector errors(ErrorMode::BEST_EFFORT);
 Parser parser;
-auto result = parser.parse_auto(messy_data, len, errors);
+auto result = parser.parse(messy_data, len, {.errors = &errors});
 
-std::cout << "Imported " << result.num_rows << " rows";
+std::cout << "Imported " << result.total_indexes() << " fields";
 if (errors.has_errors()) {
     std::cout << " with " << errors.error_count() << " issues";
 }
 std::cout << std::endl;
 
 // Track quality metrics
-data_quality_log.record(filepath, result.num_rows, errors.error_count());
+data_quality_log.record(filepath, result.total_indexes(), errors.error_count());
 ```
 
 ### General Guidelines
@@ -835,8 +834,7 @@ All test files are validated by `test/error_handling_test.cpp`.
 ## See Also
 
 - `include/error.h` - Error handling API with detailed documentation
-- `include/simdcsv.h` - High-level Parser class with error support
-- `include/two_pass.h` - Core parser with `parse_with_errors()` and `parse_validate()` methods
+- `include/simdcsv.h` - **Main public header** with unified `Parser` class
 - `src/error.cpp` - Error handling implementation
 - `test/error_handling_test.cpp` - Error handling unit tests (37 tests)
 - `test/data/malformed/` - Malformed CSV test files for error detection

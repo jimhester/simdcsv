@@ -349,3 +349,150 @@ TEST_F(UnifiedAPITest, ExplicitDialectSkipsDetection) {
     EXPECT_EQ(result.detection.confidence, 0.0);
     EXPECT_EQ(result.detection.rows_analyzed, 0);
 }
+
+// ============================================================================
+// Tests for ParseAlgorithm selection
+// ============================================================================
+
+class AlgorithmSelectionTest : public ::testing::Test {
+protected:
+    static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
+        size_t len = content.size();
+        uint8_t* buf = allocate_padded_buffer(len, 64);
+        std::memcpy(buf, content.data(), len);
+        return {buf, len};
+    }
+};
+
+// Test: ParseAlgorithm::AUTO (default)
+TEST_F(AlgorithmSelectionTest, AutoAlgorithm) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               simdcsv::ParseOptions::with_algorithm(simdcsv::ParseAlgorithm::AUTO));
+    EXPECT_TRUE(result.success());
+    EXPECT_GT(result.total_indexes(), 0);
+}
+
+// Test: ParseAlgorithm::SPECULATIVE
+TEST_F(AlgorithmSelectionTest, SpeculativeAlgorithm) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ParseOptions opts;
+    opts.dialect = simdcsv::Dialect::csv();
+    opts.algorithm = simdcsv::ParseAlgorithm::SPECULATIVE;
+
+    auto result = parser.parse(buffer.data(), buffer.size(), opts);
+    EXPECT_TRUE(result.success());
+    EXPECT_GT(result.total_indexes(), 0);
+}
+
+// Test: ParseAlgorithm::TWO_PASS
+TEST_F(AlgorithmSelectionTest, TwoPassAlgorithm) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ParseOptions opts;
+    opts.dialect = simdcsv::Dialect::csv();
+    opts.algorithm = simdcsv::ParseAlgorithm::TWO_PASS;
+
+    auto result = parser.parse(buffer.data(), buffer.size(), opts);
+    EXPECT_TRUE(result.success());
+    EXPECT_GT(result.total_indexes(), 0);
+}
+
+// Test: ParseAlgorithm::BRANCHLESS
+TEST_F(AlgorithmSelectionTest, BranchlessAlgorithm) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    simdcsv::ParseOptions opts;
+    opts.dialect = simdcsv::Dialect::csv();
+    opts.algorithm = simdcsv::ParseAlgorithm::BRANCHLESS;
+
+    auto result = parser.parse(buffer.data(), buffer.size(), opts);
+    EXPECT_TRUE(result.success());
+    EXPECT_GT(result.total_indexes(), 0);
+}
+
+// Test: ParseOptions::branchless() factory
+TEST_F(AlgorithmSelectionTest, BranchlessFactory) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               simdcsv::ParseOptions::branchless());
+    EXPECT_TRUE(result.success());
+    EXPECT_GT(result.total_indexes(), 0);
+}
+
+// Test: Branchless with custom dialect
+TEST_F(AlgorithmSelectionTest, BranchlessWithDialect) {
+    auto [data, len] = make_buffer("a;b;c\n1;2;3\n4;5;6\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               simdcsv::ParseOptions::branchless(simdcsv::Dialect::semicolon()));
+    EXPECT_TRUE(result.success());
+    EXPECT_EQ(result.dialect.delimiter, ';');
+    EXPECT_GT(result.total_indexes(), 0);
+}
+
+// Test: Algorithm with multi-threading
+TEST_F(AlgorithmSelectionTest, BranchlessMultiThreaded) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n7,8,9\n10,11,12\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser(4);  // 4 threads
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               simdcsv::ParseOptions::branchless());
+    EXPECT_TRUE(result.success());
+    EXPECT_GT(result.total_indexes(), 0);
+}
+
+// Test: Different algorithms produce same results
+TEST_F(AlgorithmSelectionTest, AlgorithmsProduceSameResults) {
+    auto [data, len] = make_buffer("name,age,city\nAlice,30,NYC\nBob,25,LA\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    // Parse with each algorithm
+    auto result_auto = parser.parse(buffer.data(), buffer.size(),
+        {.dialect = simdcsv::Dialect::csv(), .algorithm = simdcsv::ParseAlgorithm::AUTO});
+    auto result_spec = parser.parse(buffer.data(), buffer.size(),
+        {.dialect = simdcsv::Dialect::csv(), .algorithm = simdcsv::ParseAlgorithm::SPECULATIVE});
+    auto result_two = parser.parse(buffer.data(), buffer.size(),
+        {.dialect = simdcsv::Dialect::csv(), .algorithm = simdcsv::ParseAlgorithm::TWO_PASS});
+    auto result_branch = parser.parse(buffer.data(), buffer.size(),
+        {.dialect = simdcsv::Dialect::csv(), .algorithm = simdcsv::ParseAlgorithm::BRANCHLESS});
+
+    // All should succeed and produce same number of indexes
+    EXPECT_TRUE(result_auto.success());
+    EXPECT_TRUE(result_spec.success());
+    EXPECT_TRUE(result_two.success());
+    EXPECT_TRUE(result_branch.success());
+
+    EXPECT_EQ(result_auto.total_indexes(), result_spec.total_indexes());
+    EXPECT_EQ(result_auto.total_indexes(), result_two.total_indexes());
+    EXPECT_EQ(result_auto.total_indexes(), result_branch.total_indexes());
+}
+
+// Test: Algorithm selection with quoted fields
+TEST_F(AlgorithmSelectionTest, BranchlessWithQuotedFields) {
+    auto [data, len] = make_buffer("name,description\n\"Alice\",\"Hello, World\"\n\"Bob\",\"Line1\\nLine2\"\n");
+    simdcsv::FileBuffer buffer(data, len);
+    simdcsv::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               simdcsv::ParseOptions::branchless());
+    EXPECT_TRUE(result.success());
+    EXPECT_GT(result.total_indexes(), 0);
+}
