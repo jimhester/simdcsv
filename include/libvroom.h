@@ -128,7 +128,17 @@ struct SizeLimits {
     size_t max_field_size = 16ULL * 1024 * 1024;  // 16MB default
 
     /**
-     * @brief Factory for default limits (10GB file, 16MB field).
+     * @brief Enable UTF-8 validation (default: false for performance).
+     *
+     * When true, the parser validates that all byte sequences are valid UTF-8.
+     * Invalid sequences are reported as INVALID_UTF8 errors. This has a
+     * performance cost, so only enable when parsing untrusted input that
+     * claims to be UTF-8 encoded.
+     */
+    bool validate_utf8 = false;
+
+    /**
+     * @brief Factory for default limits (10GB file, 16MB field, no UTF-8 validation).
      */
     static SizeLimits defaults() { return SizeLimits{}; }
 
@@ -156,6 +166,7 @@ struct SizeLimits {
         SizeLimits limits;
         limits.max_file_size = max_file;
         limits.max_field_size = max_field;
+        limits.validate_utf8 = true;
         return limits;
     }
 };
@@ -513,6 +524,143 @@ inline FileBuffer load_file(const std::string& filename, size_t padding = 64) {
 inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
     if (corpus.data()) {
         aligned_free(const_cast<uint8_t*>(corpus.data()));
+    }
+}
+
+/**
+ * @brief Internal UTF-8 validation function.
+ *
+ * Validates UTF-8 encoding and reports any invalid byte sequences to the
+ * error collector. This function implements the UTF-8 state machine to
+ * detect encoding errors including:
+ * - Invalid leading bytes
+ * - Truncated multi-byte sequences
+ * - Overlong encodings
+ * - Surrogate code points (U+D800-U+DFFF)
+ * - Code points exceeding U+10FFFF
+ *
+ * @param buf Pointer to data buffer
+ * @param len Length of data in bytes
+ * @param errors ErrorCollector to receive validation errors
+ *
+ * @note This is an internal function used by Parser when SizeLimits::validate_utf8 is true.
+ */
+inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollector& errors) {
+    size_t line = 1;
+    size_t column = 1;
+    size_t i = 0;
+
+    while (i < len) {
+        // Track line/column for error reporting
+        if (buf[i] == '\n') {
+            line++;
+            column = 1;
+            i++;
+            continue;
+        }
+        if (buf[i] == '\r') {
+            // Handle CRLF
+            if (i + 1 < len && buf[i + 1] == '\n') {
+                i++;  // Skip \r, let \n be handled next iteration
+            } else {
+                line++;
+                column = 1;
+            }
+            i++;
+            continue;
+        }
+
+        // Check for valid UTF-8 sequences
+        uint8_t byte = buf[i];
+
+        if ((byte & 0x80) == 0) {
+            // Single-byte ASCII (0xxxxxxx)
+            column++;
+            i++;
+        } else if ((byte & 0xE0) == 0xC0) {
+            // Two-byte sequence (110xxxxx 10xxxxxx)
+            if (i + 1 >= len || (buf[i + 1] & 0xC0) != 0x80) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: truncated 2-byte sequence");
+                if (errors.should_stop()) return;
+                column++;
+                i++;
+                continue;
+            }
+            // Check for overlong encoding (code points < 0x80 encoded as 2 bytes)
+            if ((byte & 0x1E) == 0) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: overlong 2-byte encoding");
+                if (errors.should_stop()) return;
+            }
+            column++;
+            i += 2;
+        } else if ((byte & 0xF0) == 0xE0) {
+            // Three-byte sequence (1110xxxx 10xxxxxx 10xxxxxx)
+            if (i + 2 >= len || (buf[i + 1] & 0xC0) != 0x80 || (buf[i + 2] & 0xC0) != 0x80) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: truncated 3-byte sequence");
+                if (errors.should_stop()) return;
+                column++;
+                i++;
+                continue;
+            }
+            // Check for overlong encoding and surrogate code points
+            uint32_t cp = ((byte & 0x0F) << 12) | ((buf[i + 1] & 0x3F) << 6) | (buf[i + 2] & 0x3F);
+            if (cp < 0x800) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: overlong 3-byte encoding");
+                if (errors.should_stop()) return;
+            } else if (cp >= 0xD800 && cp <= 0xDFFF) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: surrogate code point");
+                if (errors.should_stop()) return;
+            }
+            column++;
+            i += 3;
+        } else if ((byte & 0xF8) == 0xF0) {
+            // Four-byte sequence (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
+            if (i + 3 >= len || (buf[i + 1] & 0xC0) != 0x80 ||
+                (buf[i + 2] & 0xC0) != 0x80 || (buf[i + 3] & 0xC0) != 0x80) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: truncated 4-byte sequence");
+                if (errors.should_stop()) return;
+                column++;
+                i++;
+                continue;
+            }
+            // Check for overlong encoding and code points > U+10FFFF
+            uint32_t cp = ((byte & 0x07) << 18) | ((buf[i + 1] & 0x3F) << 12) |
+                         ((buf[i + 2] & 0x3F) << 6) | (buf[i + 3] & 0x3F);
+            if (cp < 0x10000) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: overlong 4-byte encoding");
+                if (errors.should_stop()) return;
+            } else if (cp > 0x10FFFF) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: code point exceeds U+10FFFF");
+                if (errors.should_stop()) return;
+            }
+            column++;
+            i += 4;
+        } else {
+            // Invalid leading byte (10xxxxxx continuation byte without leading byte,
+            // or invalid 5/6-byte sequence starts 111110xx/1111110x)
+            errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                           line, column, i,
+                           "Invalid UTF-8 sequence: invalid leading byte");
+            if (errors.should_stop()) return;
+            column++;
+            i++;
+        }
     }
 }
 
@@ -1180,6 +1328,15 @@ public:
             // Allocation failed or would overflow
             result.successful = false;
             return result;
+        }
+
+        // UTF-8 validation (optional, enabled via SizeLimits::validate_utf8)
+        if (options.limits.validate_utf8 && options.errors != nullptr) {
+            validate_utf8_internal(buf, len, *options.errors);
+            if (options.errors->should_stop()) {
+                result.successful = false;
+                return result;
+            }
         }
 
         // Determine dialect (explicit or auto-detect)
