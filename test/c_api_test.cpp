@@ -254,16 +254,23 @@ TEST_F(CAPITest, ErrorCollectorNullHandling) {
 
 // Index Tests
 TEST_F(CAPITest, IndexCreate) {
+    // Note: With the new Parser API, buffer_length is ignored since Parser
+    // allocates the index internally during parse(). The index positions will
+    // be nullptr until parse() is called.
     libvroom_index_t* idx = libvroom_index_create(1000, 1);
     ASSERT_NE(idx, nullptr);
     EXPECT_EQ(libvroom_index_num_threads(idx), 1u);
-    EXPECT_NE(libvroom_index_positions(idx), nullptr);
+    // Positions are nullptr until parse() is called
+    EXPECT_EQ(libvroom_index_positions(idx), nullptr);
     libvroom_index_destroy(idx);
 }
 
 TEST_F(CAPITest, IndexCreateInvalid) {
-    EXPECT_EQ(libvroom_index_create(0, 1), nullptr);
-    EXPECT_EQ(libvroom_index_create(1000, 0), nullptr);
+    // Note: buffer_length=0 is now valid since it's ignored (Parser allocates internally)
+    // Only num_threads=0 should return nullptr
+    EXPECT_NE(libvroom_index_create(0, 1), nullptr);  // Valid: buffer_length ignored
+    libvroom_index_destroy(libvroom_index_create(0, 1));  // Clean up
+    EXPECT_EQ(libvroom_index_create(1000, 0), nullptr);   // Invalid: num_threads=0
 }
 
 TEST_F(CAPITest, IndexColumnsAndTotalCount) {
