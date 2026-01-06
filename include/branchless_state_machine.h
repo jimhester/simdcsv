@@ -662,7 +662,8 @@ inline uint64_t second_pass_branchless_with_errors(
         // Handle CR specially for CRLF sequences
         if (value == '\r') {
             // CR is a line ending only if not followed by LF
-            bool is_line_ending = (pos + 1 >= end || buf[pos + 1] != '\n');
+            // Check both end and buf_len bounds to prevent out-of-bounds read
+            bool is_line_ending = (pos + 1 >= end || pos + 1 >= buf_len || buf[pos + 1] != '\n');
             if (is_line_ending && state != STATE_QUOTED_FIELD) {
                 indexes[idx] = pos;
                 idx += n_threads;
