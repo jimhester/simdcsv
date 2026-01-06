@@ -1,11 +1,8 @@
-// Benchmarks intentionally test deprecated two_pass methods for performance comparison
-#include "two_pass.h"
-LIBVROOM_SUPPRESS_DEPRECATION_START
-
 #include <benchmark/benchmark.h>
 #include "common_defs.h"
 #include "io_util.h"
 #include "mem_util.h"
+#include "libvroom.h"
 #include <fstream>
 #include <chrono>
 #include <thread>
@@ -19,7 +16,6 @@ LIBVROOM_SUPPRESS_DEPRECATION_START
 #endif
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern libvroom::two_pass* global_parser;
 
 // Energy efficiency benchmarks (Linux RAPL counters when available)
 
@@ -107,41 +103,39 @@ static void BM_EnergyPerByte(benchmark::State& state) {
   for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
-  
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
-  libvroom::index result = global_parser->init(data_size, 4);
-  
+
+  libvroom::Parser parser(4);
+
   RAPLEnergyMonitor energy_monitor;
-  
+
   // Measure energy if available
   auto start_energy = energy_monitor.read_energy();
   auto start_time = std::chrono::high_resolution_clock::now();
-  
+
   for (auto _ : state) {
-    global_parser->parse(data, result, data_size);
+    auto result = parser.parse(data, data_size);
     benchmark::DoNotOptimize(result);
   }
-  
+
   auto end_time = std::chrono::high_resolution_clock::now();
   auto end_energy = energy_monitor.read_energy();
-  
-  double duration = std::chrono::duration<double>(end_time - start_time).count();
-  
+
+  // Silence unused variable warning
+  (void)start_time;
+  (void)end_time;
+
   state.SetBytesProcessed(static_cast<int64_t>(data_size * state.iterations()));
   state.counters["DataSize"] = static_cast<double>(data_size);
-  
+
   // Calculate energy efficiency if RAPL is available
   if (energy_monitor.available() && start_energy.size() == end_energy.size()) {
     for (size_t i = 0; i < start_energy.size(); ++i) {
       double energy_consumed = end_energy[i].second - start_energy[i].second;
-      
+
       state.counters[start_energy[i].first + "_Energy_J"] = energy_consumed;
     }
   }
-  
+
   aligned_free(data);
 }
 
@@ -169,38 +163,36 @@ static void BM_EnergyEfficiency_ThreadCount(benchmark::State& state) {
   } else {
     data = test_data[filename];
   }
-  
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
-  libvroom::index result = global_parser->init(data.size(), n_threads);
-  
+
+  libvroom::Parser parser(n_threads);
+
   RAPLEnergyMonitor energy_monitor;
-  
+
   // Measure energy and performance
   auto start_energy = energy_monitor.read_energy();
   auto start_time = std::chrono::high_resolution_clock::now();
-  
+
   for (auto _ : state) {
-    global_parser->parse(data.data(), result, data.size());
+    auto result = parser.parse(data.data(), data.size());
     benchmark::DoNotOptimize(result);
   }
-  
+
   auto end_time = std::chrono::high_resolution_clock::now();
   auto end_energy = energy_monitor.read_energy();
-  
-  double duration = std::chrono::duration<double>(end_time - start_time).count();
-  
+
+  // Silence unused variable warning
+  (void)start_time;
+  (void)end_time;
+
   state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
   state.counters["Threads"] = static_cast<double>(n_threads);
   state.counters["FileSize"] = static_cast<double>(data.size());
-  
+
   // Energy efficiency metrics
   if (energy_monitor.available() && start_energy.size() == end_energy.size()) {
     for (size_t i = 0; i < start_energy.size(); ++i) {
       double energy_consumed = end_energy[i].second - start_energy[i].second;
-      
+
       state.counters[start_energy[i].first + "_Energy_J"] = energy_consumed;
     }
   }
@@ -227,41 +219,37 @@ static void BM_PowerConsumption_Estimate(benchmark::State& state) {
   for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
-  
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
-  libvroom::index result = global_parser->init(data_size, 4);
-  
+
+  libvroom::Parser parser(4);
+
   // Measure CPU usage time as proxy for power consumption
   auto start_time = std::chrono::high_resolution_clock::now();
-  
+
   for (auto _ : state) {
     // Repeat parsing based on workload size
     for (size_t i = 0; i < workload_size; ++i) {
-      global_parser->parse(data, result, data_size);
+      auto result = parser.parse(data, data_size);
       benchmark::DoNotOptimize(result);
     }
   }
-  
+
   auto end_time = std::chrono::high_resolution_clock::now();
-  
+
   double duration = std::chrono::duration<double>(end_time - start_time).count();
   double total_bytes = static_cast<double>(data_size * workload_size * state.iterations());
-  
+
   state.SetBytesProcessed(static_cast<int64_t>(total_bytes));
   state.counters["WorkloadSize"] = static_cast<double>(workload_size);
   state.counters["CPU_Time_s"] = duration;
-  
+
   // Estimate power consumption based on CPU usage
   // Assume typical CPU power consumption: 15-65W for mobile, 65-125W for desktop
   double estimated_cpu_power = 45.0; // Watts (conservative estimate)
   double estimated_energy = estimated_cpu_power * duration; // Joules
-  
+
   state.counters["Est_CPU_Power_W"] = estimated_cpu_power;
   state.counters["Est_Energy_J"] = estimated_energy;
-  
+
   aligned_free(data);
 }
 
@@ -287,34 +275,30 @@ static void BM_IdleVsActive_Power(benchmark::State& state) {
     // Active measurement - do parsing work
     size_t data_size = 512 * 1024; // 512KB
     auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
-    
+
     // Fill with CSV pattern
     for (size_t i = 0; i < data_size; ++i) {
       if (i % 100 == 0) data[i] = '\n';
       else if (i % 10 == 0) data[i] = ',';
       else data[i] = 'a' + (i % 26);
     }
-    
+
     // Add padding
     for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
       data[i] = '\0';
     }
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
-    libvroom::index result = global_parser->init(data_size, 4);
-    
+
+    libvroom::Parser parser(4);
+
     for (auto _ : state) {
-      global_parser->parse(data, result, data_size);
+      auto result = parser.parse(data, data_size);
       benchmark::DoNotOptimize(result);
     }
-    
+
     state.SetBytesProcessed(static_cast<int64_t>(data_size * state.iterations()));
     state.counters["Mode"] = 1.0; // Active
     state.counters["DataSize"] = static_cast<double>(data_size);
-    
+
     aligned_free(data);
   }
 }
@@ -344,39 +328,35 @@ static void BM_ThermalThrottling_Impact(benchmark::State& state) {
   for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
-  
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
-  libvroom::index result = global_parser->init(data_size, 4);
-  
+
+  libvroom::Parser parser(4);
+
   auto start_time = std::chrono::high_resolution_clock::now();
   auto target_duration = std::chrono::milliseconds(duration_ms);
-  
+
   size_t iterations = 0;
   for (auto _ : state) {
     auto current_time = std::chrono::high_resolution_clock::now();
-    
+
     // Run for specified duration
     while (current_time - start_time < target_duration) {
-      global_parser->parse(data, result, data_size);
+      auto result = parser.parse(data, data_size);
       benchmark::DoNotOptimize(result);
       iterations++;
       current_time = std::chrono::high_resolution_clock::now();
     }
-    
+
     break; // Only do one iteration for this benchmark
   }
-  
+
   auto end_time = std::chrono::high_resolution_clock::now();
   double actual_duration = std::chrono::duration<double>(end_time - start_time).count();
   double total_bytes = static_cast<double>(data_size * iterations);
-  
+
   state.SetBytesProcessed(static_cast<int64_t>(total_bytes));
   state.counters["Duration_ms"] = actual_duration * 1000.0;
   state.counters["Iterations"] = static_cast<double>(iterations);
-  
+
   aligned_free(data);
 }
 

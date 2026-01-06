@@ -1,18 +1,14 @@
-// Benchmarks intentionally test deprecated two_pass methods for performance comparison
-#include "two_pass.h"
-LIBVROOM_SUPPRESS_DEPRECATION_START
-
 #include <benchmark/benchmark.h>
 #include "common_defs.h"
 #include "io_util.h"
 #include "mem_util.h"
+#include "libvroom.h"
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern libvroom::two_pass* global_parser;
 
 // Simple CSV parser for comparison (naive implementation)
 class NaiveCSVParser {
@@ -60,7 +56,7 @@ public:
 // Benchmark libvroom vs naive parser
 static void BM_libvroom_vs_naive(benchmark::State& state, const std::string& filename) {
   std::basic_string_view<uint8_t> data;
-  
+
   if (test_data.find(filename) == test_data.end()) {
     try {
       data = get_corpus(filename.c_str(), LIBVROOM_PADDING);
@@ -72,30 +68,26 @@ static void BM_libvroom_vs_naive(benchmark::State& state, const std::string& fil
   } else {
     data = test_data[filename];
   }
-  
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
+
   bool use_libvroom = state.range(0) == 1;
-  
+
   if (use_libvroom) {
-    libvroom::index result = global_parser->init(data.size(), 1);
-    
+    libvroom::Parser parser(1);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
   } else {
     // Naive parser
     std::string str_data(reinterpret_cast<const char*>(data.data()), data.size());
-    
+
     for (auto _ : state) {
       auto result = NaiveCSVParser::parse(str_data);
       benchmark::DoNotOptimize(result);
     }
   }
-  
+
   state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
   state.counters["Parser"] = use_libvroom ? 1.0 : 0.0; // 1 = libvroom, 0 = naive
 }
@@ -119,7 +111,7 @@ BENCHMARK(BM_libvroom_vs_naive_many_rows)
 // Benchmark different parsing approaches
 static void BM_parsing_approaches(benchmark::State& state, const std::string& filename) {
   std::basic_string_view<uint8_t> data;
-  
+
   if (test_data.find(filename) == test_data.end()) {
     try {
       data = get_corpus(filename.c_str(), LIBVROOM_PADDING);
@@ -131,10 +123,10 @@ static void BM_parsing_approaches(benchmark::State& state, const std::string& fi
   } else {
     data = test_data[filename];
   }
-  
+
   int approach = static_cast<int>(state.range(0));
   std::string str_data(reinterpret_cast<const char*>(data.data()), data.size());
-  
+
   switch (approach) {
     case 0: { // Character-by-character counting
       for (auto _ : state) {
@@ -158,19 +150,16 @@ static void BM_parsing_approaches(benchmark::State& state, const std::string& fi
       break;
     }
     case 3: { // libvroom indexing
-      if (!global_parser) {
-        global_parser = new libvroom::two_pass();
-      }
-      libvroom::index result = global_parser->init(data.size(), 1);
-      
+      libvroom::Parser parser(1);
+
       for (auto _ : state) {
-        global_parser->parse(data.data(), result, data.size());
+        auto result = parser.parse(data.data(), data.size());
         benchmark::DoNotOptimize(result);
       }
       break;
     }
   }
-  
+
   state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
   state.counters["Approach"] = static_cast<double>(approach);
 }

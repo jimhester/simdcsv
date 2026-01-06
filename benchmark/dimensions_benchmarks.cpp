@@ -1,18 +1,14 @@
-// Benchmarks intentionally test deprecated two_pass methods for performance comparison
-#include "two_pass.h"
-LIBVROOM_SUPPRESS_DEPRECATION_START
-
 #include <benchmark/benchmark.h>
 #include "common_defs.h"
 #include "io_util.h"
 #include "mem_util.h"
+#include "libvroom.h"
 #include <fstream>
 #include <sstream>
 #include <random>
 #include <iomanip>
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern libvroom::two_pass* global_parser;
 
 // Synthetic data generator for dimension testing
 class DimensionDataGenerator {
@@ -84,38 +80,34 @@ public:
 // Benchmark different file sizes (1KB to 100MB)
 static void BM_FileSizes(benchmark::State& state) {
   size_t target_size = static_cast<size_t>(state.range(0));
-  
+
   // Estimate rows needed for target size (rough calculation)
   size_t cols = 10;
   size_t avg_field_size = 8; // average characters per field
   size_t estimated_rows = target_size / (cols * avg_field_size);
   estimated_rows = std::max(estimated_rows, size_t(10)); // minimum 10 rows
-  
+
   auto csv_data = DimensionDataGenerator::generate_csv(estimated_rows, cols, "mixed");
   TempCSVFile temp_file(csv_data);
-  
+
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
+
     int n_threads = 4;
-    libvroom::index result = global_parser->init(data.size(), n_threads);
-    
+    libvroom::Parser parser(n_threads);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     // Performance metrics
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["ActualSize"] = static_cast<double>(data.size());
     state.counters["TargetSize"] = static_cast<double>(target_size);
     state.counters["Rows"] = static_cast<double>(estimated_rows);
     state.counters["Cols"] = static_cast<double>(cols);
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -130,31 +122,27 @@ BENCHMARK(BM_FileSizes)
 static void BM_ColumnCounts(benchmark::State& state) {
   size_t num_cols = static_cast<size_t>(state.range(0));
   size_t num_rows = 1000; // Fixed row count
-  
+
   auto csv_data = DimensionDataGenerator::generate_csv(num_rows, num_cols, "mixed");
   TempCSVFile temp_file(csv_data);
-  
+
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
+
     int n_threads = 4;
-    libvroom::index result = global_parser->init(data.size(), n_threads);
-    
+    libvroom::Parser parser(n_threads);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     // Performance metrics
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["FileSize"] = static_cast<double>(data.size());
     state.counters["Columns"] = static_cast<double>(num_cols);
     state.counters["Rows"] = static_cast<double>(num_rows);
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -172,7 +160,7 @@ static void BM_DataTypes(benchmark::State& state) {
   int data_type = static_cast<int>(state.range(0));
   size_t num_rows = 5000;
   size_t num_cols = 10;
-  
+
   std::string type_name;
   switch (data_type) {
     case 0: type_name = "integers"; break;
@@ -181,30 +169,26 @@ static void BM_DataTypes(benchmark::State& state) {
     case 3: type_name = "mixed"; break;
     default: type_name = "mixed"; break;
   }
-  
+
   auto csv_data = DimensionDataGenerator::generate_csv(num_rows, num_cols, type_name);
   TempCSVFile temp_file(csv_data);
-  
+
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
+
     int n_threads = 4;
-    libvroom::index result = global_parser->init(data.size(), n_threads);
-    
+    libvroom::Parser parser(n_threads);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     // Performance metrics
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["FileSize"] = static_cast<double>(data.size());
     state.counters["DataType"] = static_cast<double>(data_type);
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -219,35 +203,31 @@ static void BM_ThreadScaling(benchmark::State& state) {
   int n_threads = static_cast<int>(state.range(0));
   size_t num_rows = 10000;
   size_t num_cols = 20;
-  
+
   auto csv_data = DimensionDataGenerator::generate_csv(num_rows, num_cols, "mixed");
   TempCSVFile temp_file(csv_data);
-  
+
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
-    libvroom::index result = global_parser->init(data.size(), n_threads);
-    
+
+    libvroom::Parser parser(n_threads);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     // Performance metrics
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["FileSize"] = static_cast<double>(data.size());
     state.counters["Threads"] = static_cast<double>(n_threads);
-    
+
     // Calculate efficiency metrics
     if (n_threads > 1) {
       // This is approximate - would need baseline single-thread measurement
       // for accurate efficiency calculation
     }
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -261,31 +241,27 @@ BENCHMARK(BM_ThreadScaling)
 static void BM_RowScaling(benchmark::State& state) {
   size_t num_rows = static_cast<size_t>(state.range(0));
   size_t num_cols = 10;
-  
+
   auto csv_data = DimensionDataGenerator::generate_csv(num_rows, num_cols, "mixed");
   TempCSVFile temp_file(csv_data);
-  
+
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
+
     int n_threads = 4;
-    libvroom::index result = global_parser->init(data.size(), n_threads);
-    
+    libvroom::Parser parser(n_threads);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     // Performance metrics
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["FileSize"] = static_cast<double>(data.size());
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["BytesPerRecord"] = static_cast<double>(data.size()) / num_rows;
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -300,25 +276,21 @@ BENCHMARK(BM_RowScaling)
 static void BM_RowColumnMatrix(benchmark::State& state) {
   size_t num_rows = static_cast<size_t>(state.range(0));
   size_t num_cols = static_cast<size_t>(state.range(1));
-  
+
   auto csv_data = DimensionDataGenerator::generate_csv(num_rows, num_cols, "mixed");
   TempCSVFile temp_file(csv_data);
-  
+
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
+
     int n_threads = 4;
-    libvroom::index result = global_parser->init(data.size(), n_threads);
-    
+    libvroom::Parser parser(n_threads);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     // Comprehensive performance metrics
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["FileSize"] = static_cast<double>(data.size());
@@ -326,7 +298,7 @@ static void BM_RowColumnMatrix(benchmark::State& state) {
     state.counters["Cols"] = static_cast<double>(num_cols);
     state.counters["TotalFields"] = static_cast<double>(num_rows * num_cols);
     state.counters["BytesPerField"] = static_cast<double>(data.size()) / (num_rows * num_cols);
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
