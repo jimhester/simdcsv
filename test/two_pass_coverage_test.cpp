@@ -231,6 +231,69 @@ TEST_F(FirstPassTest, FirstPassSIMDWithQuotes) {
 }
 
 // ============================================================================
+// CR LINE ENDING TESTS
+// ============================================================================
+
+TEST_F(FirstPassTest, FirstPassNaiveWithCR) {
+    // Test CR-only line endings (old Mac style)
+    std::string content = "a,b,c\r1,2,3\r4,5,6\r";
+    auto buf = makeBuffer(content);
+
+    auto stats = two_pass::first_pass_naive(buf.data(), 0, content.size());
+
+    // first_pass_naive should find the first CR as a line ending
+    EXPECT_EQ(stats.first_even_nl, 5);  // Position of first '\r'
+}
+
+TEST_F(FirstPassTest, FirstPassNaiveWithCRLF) {
+    // Test CRLF line endings - CR should NOT be treated as line ending
+    std::string content = "a,b,c\r\n1,2,3\r\n";
+    auto buf = makeBuffer(content);
+
+    auto stats = two_pass::first_pass_naive(buf.data(), 0, content.size());
+
+    // Should find LF as line ending, not CR (CR followed by LF is not a line ending)
+    EXPECT_EQ(stats.first_even_nl, 6);  // Position of '\n' after '\r'
+}
+
+TEST_F(FirstPassTest, FirstPassChunkWithCR) {
+    // Test CR-only line endings with quotes
+    std::string content = "\"a\",b,c\r1,\"2\",3\r";
+    auto buf = makeBuffer(content);
+
+    auto stats = two_pass::first_pass_chunk(buf.data(), 0, content.size(), '"');
+
+    // Should find CR as newline and count quotes
+    EXPECT_NE(stats.first_even_nl, null_pos);
+    EXPECT_EQ(stats.n_quotes, 4);  // 4 quote characters
+}
+
+TEST_F(FirstPassTest, FirstPassChunkWithCRLF) {
+    // Test CRLF line endings - CR followed by LF should use LF as line ending
+    std::string content = "\"a\",b,c\r\n1,\"2\",3\r\n";
+    auto buf = makeBuffer(content);
+
+    auto stats = two_pass::first_pass_chunk(buf.data(), 0, content.size(), '"');
+
+    // Should find LF as newline (position 8), not CR (position 7)
+    EXPECT_EQ(stats.first_even_nl, 8);
+    EXPECT_EQ(stats.n_quotes, 4);
+}
+
+TEST_F(FirstPassTest, FirstPassChunkCRInQuotes) {
+    // Test CR inside quoted field - should not be treated as line ending
+    std::string content = "\"a\rb\",c\r1,2,3\r";
+    auto buf = makeBuffer(content);
+
+    auto stats = two_pass::first_pass_chunk(buf.data(), 0, content.size(), '"');
+
+    // First newline outside quotes is at position 7 (after "c")
+    // The CR at position 2 is inside quotes
+    EXPECT_EQ(stats.first_even_nl, 7);
+    EXPECT_EQ(stats.n_quotes, 2);
+}
+
+// ============================================================================
 // GET QUOTATION STATE TESTS
 // ============================================================================
 
@@ -874,6 +937,28 @@ TEST_F(FirstPassSpeculateTest, NoNewline) {
     EXPECT_EQ(stats.first_odd_nl, null_pos);
 }
 
+TEST_F(FirstPassSpeculateTest, WithCRLineEnding) {
+    // Test CR-only line endings
+    std::string content = "abc,def\rghi,jkl\r";
+    auto buf = makeBuffer(content);
+
+    auto stats = two_pass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
+
+    // Should find the first CR as newline
+    EXPECT_EQ(stats.first_even_nl, 7);
+}
+
+TEST_F(FirstPassSpeculateTest, WithCRLFLineEnding) {
+    // Test CRLF line endings - CR followed by LF should use LF
+    std::string content = "abc,def\r\nghi,jkl\r\n";
+    auto buf = makeBuffer(content);
+
+    auto stats = two_pass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
+
+    // Should skip CR and find LF at position 8 as newline
+    EXPECT_EQ(stats.first_even_nl, 8);
+}
+
 // ============================================================================
 // PARSE VALIDATE TESTS
 // ============================================================================
@@ -1071,6 +1156,52 @@ TEST_F(SecondPassThrowingTest, ValidCSVDoesNotThrow) {
     });
 }
 
+TEST_F(SecondPassThrowingTest, CRLineEndingDoesNotThrow) {
+    // Test CR-only line endings
+    std::string content = "a,b,c\r1,2,3\r";
+    auto buf = makeBuffer(content);
+
+    two_pass parser;
+    simdcsv::index idx = parser.init(content.size(), 1);
+
+    EXPECT_NO_THROW({
+        auto n_indexes = two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(),
+                                              &idx, 0, ',', '"');
+        // Should have found indexes at each comma and CR
+        EXPECT_GT(n_indexes, 0);
+    });
+}
+
+TEST_F(SecondPassThrowingTest, CRLFLineEndingDoesNotThrow) {
+    // Test CRLF line endings - CR followed by LF
+    std::string content = "a,b,c\r\n1,2,3\r\n";
+    auto buf = makeBuffer(content);
+
+    two_pass parser;
+    simdcsv::index idx = parser.init(content.size(), 1);
+
+    EXPECT_NO_THROW({
+        auto n_indexes = two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(),
+                                              &idx, 0, ',', '"');
+        EXPECT_GT(n_indexes, 0);
+    });
+}
+
+TEST_F(SecondPassThrowingTest, CRInQuotedFieldDoesNotThrow) {
+    // Test CR inside quoted field - should not be treated as line ending
+    std::string content = "\"a\rb\",c\r1,2,3\r";
+    auto buf = makeBuffer(content);
+
+    two_pass parser;
+    simdcsv::index idx = parser.init(content.size(), 1);
+
+    EXPECT_NO_THROW({
+        auto n_indexes = two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(),
+                                              &idx, 0, ',', '"');
+        EXPECT_GT(n_indexes, 0);
+    });
+}
+
 // ============================================================================
 // IMPROVED BRANCH COVERAGE - STATE MACHINE EDGE CASES
 // ============================================================================
@@ -1241,6 +1372,51 @@ TEST_F(StateMachineEdgeCaseTest, NullByteDetection) {
     bool success = parser.parse_with_errors(buf.data(), idx, content_len, errors);
     EXPECT_TRUE(errors.has_errors());
     EXPECT_EQ(errors.errors()[0].code, ErrorCode::NULL_BYTE);
+}
+
+// Test CR-only line endings with parse_with_errors (uses second_pass_chunk)
+TEST_F(StateMachineEdgeCaseTest, CRLineEndingsWithErrors) {
+    // Test CR-only line endings
+    std::string content = "a,b,c\r1,2,3\r4,5,6\r";
+    auto buf = makeBuffer(content);
+
+    two_pass parser;
+    simdcsv::index idx = parser.init(content.size(), 1);
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+
+    bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
+    EXPECT_TRUE(success);
+    EXPECT_FALSE(errors.has_errors());
+}
+
+// Test CRLF line endings with parse_with_errors
+TEST_F(StateMachineEdgeCaseTest, CRLFLineEndingsWithErrors) {
+    // Test CRLF line endings
+    std::string content = "a,b,c\r\n1,2,3\r\n4,5,6\r\n";
+    auto buf = makeBuffer(content);
+
+    two_pass parser;
+    simdcsv::index idx = parser.init(content.size(), 1);
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+
+    bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
+    EXPECT_TRUE(success);
+    EXPECT_FALSE(errors.has_errors());
+}
+
+// Test CR inside quoted field with parse_with_errors
+TEST_F(StateMachineEdgeCaseTest, CRInQuotedFieldWithErrors) {
+    // CR inside quoted field should not end the record
+    std::string content = "\"line1\rline2\",b\r";
+    auto buf = makeBuffer(content);
+
+    two_pass parser;
+    simdcsv::index idx = parser.init(content.size(), 1);
+    ErrorCollector errors(ErrorMode::PERMISSIVE);
+
+    bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
+    EXPECT_TRUE(success);
+    EXPECT_FALSE(errors.has_errors());
 }
 
 // ============================================================================
