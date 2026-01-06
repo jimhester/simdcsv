@@ -1610,3 +1610,215 @@ TEST_F(IndexMemoryTest, ParserResultMove) {
     EXPECT_EQ(result2.idx.n_indexes, original_n_indexes);
     EXPECT_EQ(result2.idx.indexes, original_indexes);
 }
+
+// ============================================================================
+// Tests for Unified Error Handling API (Result.errors())
+// ============================================================================
+
+class UnifiedErrorHandlingTest : public ::testing::Test {
+protected:
+    static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
+        size_t len = content.size();
+        uint8_t* buf = allocate_padded_buffer(len, 64);
+        std::memcpy(buf, content.data(), len);
+        return {buf, len};
+    }
+};
+
+// Test: No errors on well-formed CSV
+TEST_F(UnifiedErrorHandlingTest, NoErrorsOnWellFormedCSV) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+    libvroom::ErrorCollector external_errors(libvroom::ErrorMode::PERMISSIVE);
+
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &external_errors});
+
+    EXPECT_TRUE(result.success());
+    EXPECT_FALSE(result.has_errors());
+    EXPECT_FALSE(result.has_fatal_errors());
+    EXPECT_EQ(result.error_count(), 0);
+    EXPECT_TRUE(result.errors().empty());
+}
+
+// Test: Errors collected on malformed CSV via result.errors()
+TEST_F(UnifiedErrorHandlingTest, ErrorsCollectedInResult) {
+    // CSV with inconsistent field count
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+    libvroom::ErrorCollector external_errors(libvroom::ErrorMode::PERMISSIVE);
+
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &external_errors});
+
+    EXPECT_TRUE(result.success());  // Parsing continues despite errors
+    EXPECT_TRUE(result.has_errors());
+    EXPECT_GT(result.error_count(), 0);
+    EXPECT_FALSE(result.errors().empty());
+
+    // Check that error is INCONSISTENT_FIELD_COUNT
+    bool found_field_count_error = false;
+    for (const auto& err : result.errors()) {
+        if (err.code == libvroom::ErrorCode::INCONSISTENT_FIELD_COUNT) {
+            found_field_count_error = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_field_count_error);
+}
+
+// Test: error_summary() returns non-empty string
+TEST_F(UnifiedErrorHandlingTest, ErrorSummaryWorks) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+    libvroom::ErrorCollector external_errors(libvroom::ErrorMode::PERMISSIVE);
+
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &external_errors});
+
+    std::string summary = result.error_summary();
+    EXPECT_FALSE(summary.empty());
+}
+
+// Test: error_mode() returns PERMISSIVE by default for internal collector
+TEST_F(UnifiedErrorHandlingTest, DefaultErrorMode) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    // Internal collector uses PERMISSIVE mode by default
+    EXPECT_EQ(result.error_mode(), libvroom::ErrorMode::PERMISSIVE);
+}
+
+// Test: Backward compatibility - external ErrorCollector still works
+TEST_F(UnifiedErrorHandlingTest, BackwardCompatibilityWithExternalCollector) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    libvroom::ErrorCollector external_errors(libvroom::ErrorMode::PERMISSIVE);
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &external_errors});
+
+    // Both external and internal collectors should have errors
+    EXPECT_TRUE(external_errors.has_errors());
+    EXPECT_TRUE(result.has_errors());
+    EXPECT_EQ(external_errors.error_count(), result.error_count());
+}
+
+// Test: Internal error collector uses PERMISSIVE mode even with external collector
+TEST_F(UnifiedErrorHandlingTest, InternalCollectorAlwaysPermissive) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    // Even if external collector has BEST_EFFORT mode, internal stays PERMISSIVE
+    libvroom::ErrorCollector external_errors(libvroom::ErrorMode::BEST_EFFORT);
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &external_errors});
+
+    // Internal collector always uses PERMISSIVE to collect all errors
+    EXPECT_EQ(result.error_mode(), libvroom::ErrorMode::PERMISSIVE);
+}
+
+// Test: Access to internal error_collector()
+TEST_F(UnifiedErrorHandlingTest, AccessToInternalErrorCollector) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+    libvroom::ErrorCollector external_errors(libvroom::ErrorMode::PERMISSIVE);
+
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &external_errors});
+
+    // Access const version
+    const auto& collector = result.error_collector();
+    EXPECT_TRUE(collector.has_errors());
+}
+
+// Test: Multiple errors collected
+TEST_F(UnifiedErrorHandlingTest, MultipleErrorsCollected) {
+    // CSV with multiple issues: inconsistent field count on multiple rows
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n6\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+    libvroom::ErrorCollector external_errors(libvroom::ErrorMode::PERMISSIVE);
+
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &external_errors});
+
+    EXPECT_TRUE(result.has_errors());
+    EXPECT_GE(result.error_count(), 1);  // At least one error
+}
+
+// Test: Errors accessible via iteration
+TEST_F(UnifiedErrorHandlingTest, ErrorsAccessibleViaIteration) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+    libvroom::ErrorCollector external_errors(libvroom::ErrorMode::PERMISSIVE);
+
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &external_errors});
+
+    // Iterate through errors
+    size_t count = 0;
+    for (const auto& err : result.errors()) {
+        EXPECT_NE(err.code, libvroom::ErrorCode::NONE);
+        ++count;
+    }
+    EXPECT_EQ(count, result.error_count());
+}
+
+// Test: Result without parsing has no errors
+TEST_F(UnifiedErrorHandlingTest, EmptyResultHasNoErrors) {
+    libvroom::Parser::Result result;
+
+    EXPECT_FALSE(result.has_errors());
+    EXPECT_FALSE(result.has_fatal_errors());
+    EXPECT_EQ(result.error_count(), 0);
+    EXPECT_TRUE(result.errors().empty());
+}
+
+// Test: Parse with valid data and iterate using new API
+TEST_F(UnifiedErrorHandlingTest, ParseAndIterateWithErrorCheck) {
+    auto [data, len] = make_buffer("name,age\nAlice,30\nBob,25\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+    libvroom::ErrorCollector external_errors(libvroom::ErrorMode::PERMISSIVE);
+
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &external_errors});
+
+    // Check no errors
+    EXPECT_FALSE(result.has_errors());
+
+    // Can still iterate over rows
+    int count = 0;
+    for (auto row : result.rows()) {
+        auto name = row.get_string_view("name");
+        auto age = row.get<int64_t>("age");
+        EXPECT_TRUE(age.ok());
+        ++count;
+    }
+    EXPECT_EQ(count, 2);
+}
+
+// Test: Parse malformed data and still iterate
+TEST_F(UnifiedErrorHandlingTest, ParseMalformedAndIterate) {
+    auto [data, len] = make_buffer("name,age\nAlice,30\nBob\n");  // Bob row is missing age
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+    libvroom::ErrorCollector external_errors(libvroom::ErrorMode::PERMISSIVE);
+
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &external_errors});
+
+    // Should have errors
+    EXPECT_TRUE(result.has_errors());
+
+    // But we can still check the error details
+    bool found_error = false;
+    for (const auto& err : result.errors()) {
+        if (err.code == libvroom::ErrorCode::INCONSISTENT_FIELD_COUNT) {
+            found_error = true;
+            EXPECT_EQ(err.line, 3);  // Error on line 3
+        }
+    }
+    EXPECT_TRUE(found_error);
+}

@@ -265,11 +265,30 @@ struct ParseOptions {
     /**
      * @brief Error collector for error-tolerant parsing.
      *
-     * If nullptr (default), parsing uses the fast path that throws on errors.
-     * Provide an ErrorCollector pointer to enable error collection mode, where
-     * errors are accumulated and parsing continues based on the collector's mode.
+     * @deprecated Use result.errors() instead. The Result class now has an
+     * internal ErrorCollector that is automatically populated during parsing.
+     * This field is maintained for backward compatibility but will be removed
+     * in a future version.
+     *
+     * If nullptr (default), errors are collected in Result's internal collector.
+     * If a pointer is provided, errors go to both the external collector and
+     * the Result's internal collector.
      *
      * @note The ErrorCollector must remain valid for the duration of parsing.
+     *
+     * Migration example:
+     * @code
+     * // Old pattern (deprecated):
+     * ErrorCollector errors(ErrorMode::PERMISSIVE);
+     * auto result = parser.parse(buf, len, {.errors = &errors});
+     * if (errors.has_errors()) { ... }
+     *
+     * // New pattern (preferred):
+     * auto result = parser.parse(buf, len);
+     * if (result.has_errors()) {
+     *     for (const auto& err : result.errors()) { ... }
+     * }
+     * @endcode
      */
     ErrorCollector* errors = nullptr;
 
@@ -1069,7 +1088,8 @@ public:
      * Contains the parsed index, dialect used (or detected), and success status.
      * This structure is move-only since the underlying index contains raw pointers.
      *
-     * Result provides a convenient API for iterating over rows and accessing columns:
+     * Result provides a convenient API for iterating over rows and accessing columns,
+     * as well as integrated error handling through the built-in ErrorCollector.
      *
      * @example Row iteration
      * @code
@@ -1088,6 +1108,17 @@ public:
      * auto names = result.column<std::string>("name");
      * auto ages = result.column<int64_t>("age");
      * @endcode
+     *
+     * @example Error handling (unified API)
+     * @code
+     * auto result = parser.parse(buffer.data(), buffer.size());
+     * if (result.has_errors()) {
+     *     std::cerr << result.error_summary() << std::endl;
+     *     for (const auto& err : result.errors()) {
+     *         std::cerr << err.to_string() << std::endl;
+     *     }
+     * }
+     * @endcode
      */
     struct Result {
         ParseIndex idx;               ///< The parsed field index.
@@ -1101,6 +1132,9 @@ public:
         mutable std::unique_ptr<ValueExtractor> extractor_;  ///< Lazy-initialized extractor.
         mutable std::unordered_map<std::string, size_t> column_map_;  ///< Column name to index map.
         mutable bool column_map_initialized_{false};
+        /// Internal error collector for unified error handling.
+        /// Uses PERMISSIVE mode by default to collect all errors without stopping.
+        ErrorCollector error_collector_{ErrorMode::PERMISSIVE};
 
         void ensure_extractor() const {
             if (!extractor_ && buf_ && len_ > 0) {
@@ -1408,6 +1442,100 @@ public:
             }
             return it->second;
         }
+
+        // =====================================================================
+        // Error Handling API (Unified)
+        // =====================================================================
+
+        /**
+         * @brief Check if any errors were recorded during parsing.
+         *
+         * This method provides a unified way to check for errors without
+         * needing to pass an external ErrorCollector.
+         *
+         * @return true if at least one error was recorded.
+         *
+         * @example
+         * @code
+         * auto result = parser.parse(buffer.data(), buffer.size());
+         * if (result.has_errors()) {
+         *     std::cerr << "Parsing encountered errors\n";
+         * }
+         * @endcode
+         */
+        bool has_errors() const { return error_collector_.has_errors(); }
+
+        /**
+         * @brief Check if any fatal errors were recorded during parsing.
+         *
+         * Fatal errors indicate unrecoverable parsing failures, such as
+         * unclosed quotes at end of file.
+         *
+         * @return true if at least one FATAL error was recorded.
+         */
+        bool has_fatal_errors() const { return error_collector_.has_fatal_errors(); }
+
+        /**
+         * @brief Get the number of errors recorded during parsing.
+         *
+         * @return Number of errors in the internal error collector.
+         */
+        size_t error_count() const { return error_collector_.error_count(); }
+
+        /**
+         * @brief Get read-only access to all recorded errors.
+         *
+         * @return Const reference to the vector of ParseError objects.
+         *
+         * @example
+         * @code
+         * auto result = parser.parse(buffer.data(), buffer.size());
+         * for (const auto& err : result.errors()) {
+         *     std::cerr << err.to_string() << std::endl;
+         * }
+         * @endcode
+         */
+        const std::vector<ParseError>& errors() const { return error_collector_.errors(); }
+
+        /**
+         * @brief Get a summary string of all errors.
+         *
+         * @return Human-readable summary of error counts by type.
+         *
+         * @example
+         * @code
+         * auto result = parser.parse(buffer.data(), buffer.size());
+         * if (result.has_errors()) {
+         *     std::cerr << result.error_summary() << std::endl;
+         * }
+         * @endcode
+         */
+        std::string error_summary() const { return error_collector_.summary(); }
+
+        /**
+         * @brief Get the error handling mode used during parsing.
+         *
+         * @return The ErrorMode of the internal error collector.
+         */
+        ErrorMode error_mode() const { return error_collector_.mode(); }
+
+        /**
+         * @brief Get mutable access to the internal error collector.
+         *
+         * This method is primarily for internal use by Parser::parse() to
+         * populate errors during parsing. Users should prefer the convenience
+         * methods has_errors(), errors(), etc.
+         *
+         * @return Reference to the internal ErrorCollector.
+         */
+        ErrorCollector& error_collector() { return error_collector_; }
+
+        /**
+         * @brief Get read-only access to the internal error collector.
+         *
+         * @return Const reference to the internal ErrorCollector.
+         */
+        const ErrorCollector& error_collector() const { return error_collector_; }
     };
 
     /**
@@ -1471,6 +1599,7 @@ public:
                 options.errors->add_error(ErrorCode::FILE_TOO_LARGE, ErrorSeverity::FATAL,
                     1, 1, 0, "File size " + std::to_string(len) +
                     " bytes exceeds maximum " + std::to_string(options.limits.max_file_size) + " bytes");
+                result.error_collector().merge_from(*options.errors);
                 result.successful = false;
                 return result;
             } else {
@@ -1483,6 +1612,9 @@ public:
         result.idx = parser_.init_safe(len, num_threads_, options.errors);
         if (result.idx.indexes == nullptr) {
             // Allocation failed or would overflow
+            if (options.errors != nullptr) {
+                result.error_collector().merge_from(*options.errors);
+            }
             result.successful = false;
             return result;
         }
@@ -1491,6 +1623,7 @@ public:
         if (options.limits.validate_utf8 && options.errors != nullptr) {
             validate_utf8_internal(buf, len, *options.errors);
             if (options.errors->should_stop()) {
+                result.error_collector().merge_from(*options.errors);
                 result.successful = false;
                 return result;
             }
@@ -1532,6 +1665,8 @@ public:
                         buf, result.idx, len, *options.errors, result.dialect);
                 }
             }
+            // Copy errors from external collector to internal collector
+            result.error_collector().merge_from(*options.errors);
         } else {
             // Fast path (throws on error) - respects algorithm selection
             switch (options.algorithm) {
