@@ -5,11 +5,12 @@ on:
     types: [opened, synchronize]
 
 jobs:
-  # Check eligibility first (fast, prevents wasted parallel jobs)
+  # Check eligibility and determine review type
   eligibility:
     runs-on: ubuntu-latest
     outputs:
       eligible: ${{ steps.check.outputs.eligible }}
+      review_type: ${{ steps.check.outputs.review_type }}
     steps:
       - name: Check PR eligibility
         id: check
@@ -23,14 +24,15 @@ jobs:
             exit 0
           fi
 
-          # Skip if Claude already reviewed this specific commit
+          # Check if Claude has reviewed this PR before
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          REVIEWED_THIS_SHA=$(gh pr view ${{ github.event.pull_request.number }} \
+          CLAUDE_COMMENTS=$(gh pr view ${{ github.event.pull_request.number }} \
             --repo ${{ github.repository }} \
             --json comments \
-            --jq ".comments[] | select(.body | contains(\"Generated with [Claude Code]\")) | select(.body | contains(\"${HEAD_SHA}\")) | .id" | wc -l)
+            --jq '.comments[] | select(.body | contains("Generated with [Claude Code]"))' 2>/dev/null)
 
-          if [ "$REVIEWED_THIS_SHA" -gt "0" ]; then
+          # Check if this specific commit was already reviewed
+          if echo "$CLAUDE_COMMENTS" | grep -q "${HEAD_SHA}"; then
             echo "eligible=false" >> $GITHUB_OUTPUT
             echo "Skipping: Claude already reviewed commit ${HEAD_SHA}"
             exit 0
@@ -38,10 +40,21 @@ jobs:
 
           echo "eligible=true" >> $GITHUB_OUTPUT
 
+          # Determine review type: full (first review) or followup
+          if [ -z "$CLAUDE_COMMENTS" ]; then
+            echo "review_type=full" >> $GITHUB_OUTPUT
+            echo "Review type: full (first review)"
+          else
+            echo "review_type=followup" >> $GITHUB_OUTPUT
+            echo "Review type: followup (new commits since last review)"
+          fi
+
+  # === FULL REVIEW JOBS (first review only) ===
+
   # Parallel review job 1: Requirements compliance
   review-requirements:
     needs: eligibility
-    if: needs.eligibility.outputs.eligible == 'true'
+    if: needs.eligibility.outputs.eligible == 'true' && needs.eligibility.outputs.review_type == 'full'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -80,7 +93,7 @@ jobs:
   # Parallel review job 2: Bug detection
   review-bugs:
     needs: eligibility
-    if: needs.eligibility.outputs.eligible == 'true'
+    if: needs.eligibility.outputs.eligible == 'true' && needs.eligibility.outputs.review_type == 'full'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -126,7 +139,7 @@ jobs:
   # Parallel review job 3: Historical context
   review-history:
     needs: eligibility
-    if: needs.eligibility.outputs.eligible == 'true'
+    if: needs.eligibility.outputs.eligible == 'true' && needs.eligibility.outputs.review_type == 'full'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -164,10 +177,10 @@ jobs:
           path: /tmp/history-issues.json
           if-no-files-found: ignore
 
-  # Aggregation job: Score, filter, and post comment
+  # Aggregation job: Score, filter, and post comment (full review only)
   aggregate:
     needs: [eligibility, review-requirements, review-bugs, review-history]
-    if: always() && needs.eligibility.outputs.eligible == 'true'
+    if: always() && needs.eligibility.outputs.eligible == 'true' && needs.eligibility.outputs.review_type == 'full'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -240,3 +253,60 @@ jobs:
             Generated with [Claude Code](https://claude.ai/code)
           claude_args: |
             --allowedTools "Read,Glob,Bash(ls:*),Bash(cat:*),Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh pr diff:*)"
+
+  # === FOLLOWUP REVIEW (lightweight, for new commits) ===
+
+  followup-review:
+    needs: eligibility
+    if: needs.eligibility.outputs.eligible == 'true' && needs.eligibility.outputs.review_type == 'followup'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lightweight followup review
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR: #${{ github.event.pull_request.number }}
+            COMMIT: ${{ github.event.pull_request.head.sha }}
+
+            This is a FOLLOWUP review - Claude has already reviewed this PR before.
+            Focus only on NEW changes since the last review.
+
+            1. Get the PR diff to see current changes
+            2. Look for obvious bugs in the new/modified code
+            3. Check if new changes still follow CLAUDE.md guidance
+
+            IGNORE:
+            - Issues already flagged in previous Claude reviews
+            - Style/formatting (linters handle this)
+            - Pre-existing code not modified in recent commits
+
+            Use `gh pr comment` to post:
+
+            ### Followup review
+
+            <If issues found>
+            Found N issues in new changes:
+
+            1. <description>
+
+            https://github.com/${{ github.repository }}/blob/${{ github.event.pull_request.head.sha }}/<file>#L<line>
+
+            ...
+            </If issues found>
+
+            <If no issues>
+            New changes look good. No issues found.
+            </If no issues>
+
+            Generated with [Claude Code](https://claude.ai/code)
+          claude_args: |
+            --allowedTools "Read,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*)"
