@@ -1108,33 +1108,38 @@ int main(int argc, char* argv[]) {
   simdcsv::Dialect dialect = parseDialect(delimiter_str, quote_char);
 
   // Dispatch to command handlers
+  int result = 0;
   if (command == "count") {
-    return cmdCount(filename, n_threads, has_header, dialect, auto_detect);
+    result = cmdCount(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "head") {
-    return cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect);
+    result = cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect);
   } else if (command == "tail") {
-    return cmdTail(filename, n_threads, num_rows, has_header, dialect, auto_detect);
+    result = cmdTail(filename, n_threads, num_rows, has_header, dialect, auto_detect);
   } else if (command == "sample") {
-    return cmdSample(filename, n_threads, num_rows, has_header, dialect, auto_detect, random_seed);
+    result = cmdSample(filename, n_threads, num_rows, has_header, dialect, auto_detect, random_seed);
   } else if (command == "select") {
     if (columns.empty()) {
       cerr << "Error: -c option required for select command\n";
       return 1;
     }
-    return cmdSelect(filename, n_threads, columns, has_header, dialect, auto_detect);
+    result = cmdSelect(filename, n_threads, columns, has_header, dialect, auto_detect);
   } else if (command == "info") {
-    return cmdInfo(filename, n_threads, has_header, dialect, auto_detect);
+    result = cmdInfo(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "pretty") {
-    return cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect);
+    result = cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect);
   } else if (command == "dialect") {
     // Note: dialect command ignores -d flag since it's for detection
     (void)delimiter_specified;  // Suppress unused warning
-    return cmdDialect(filename, json_output);
+    result = cmdDialect(filename, json_output);
   } else {
     cerr << "Error: Unknown command '" << command << "'\n";
     printUsage(argv[0]);
     return 1;
   }
 
-  return 0;
+  // Ensure all output is flushed before exit.
+  // This fixes flaky test failures on macOS where popen() may not capture
+  // all output if the process exits before buffers are flushed.
+  std::cout.flush();
+  return result;
 }
