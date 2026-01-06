@@ -249,8 +249,6 @@ class index {
       delete[] n_indexes;
     }
   }
-
-  void fill_double_array(index* idx, uint64_t column, double* out) {}
 };
 
 /**
@@ -2020,11 +2018,4 @@ class two_pass {
   }
 };
 
-class parser {
- public:
-  parser() noexcept {};
-  void parse(const uint8_t* buf, size_t len) {}
-
- private:
-};
 }  // namespace libvroom
