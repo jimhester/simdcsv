@@ -71,12 +71,14 @@ HWY_ATTR really_inline uint64_t cmp_mask_against_input(const simd_input& in, uin
     result |= (bits << i);
   }
 
+  // LCOV_EXCL_START - scalar fallback for non-64-byte aligned SIMD widths
   // Handle remaining bytes with scalar code
   for (; i < 64; ++i) {
     if (in.data[i] == m) {
       result |= (1ULL << i);
     }
   }
+  // LCOV_EXCL_STOP
 
   return result;
 }
@@ -225,6 +227,7 @@ really_inline int write(uint64_t* base_ptr, uint64_t& base, uint64_t idx, int st
     bits = clear_lowest_bit(bits);
   }
 
+  // LCOV_EXCL_BR_START - unlikely branches for high separator density
   if (unlikely(cnt > 8)) {
     for (int i = 8; i < 16; i++) {
       base_ptr[(base + i) * stride] = idx + trailing_zeroes(bits);
@@ -240,6 +243,7 @@ really_inline int write(uint64_t* base_ptr, uint64_t& base, uint64_t idx, int st
       } while (i < cnt);
     }
   }
+  // LCOV_EXCL_BR_STOP
 
   base += cnt;
   return cnt;

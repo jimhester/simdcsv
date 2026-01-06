@@ -43,6 +43,7 @@ really_inline ExtractResult<IntType> parse_integer(const char* str, size_t len,
     }
 
     bool negative = false;
+    // LCOV_EXCL_BR_START - if constexpr branches are compile-time only
     if constexpr (std::is_signed_v<IntType>) {
         if (*ptr == '-') { negative = true; ++ptr; }
         else if (*ptr == '+') { ++ptr; }
@@ -50,6 +51,7 @@ really_inline ExtractResult<IntType> parse_integer(const char* str, size_t len,
         if (*ptr == '+') ++ptr;
         if (*ptr == '-') return {std::nullopt, "Negative value for unsigned type"};
     }
+    // LCOV_EXCL_BR_STOP
 
     if (ptr == end) return {std::nullopt, "Invalid integer: no digits"};
 
@@ -70,6 +72,7 @@ really_inline ExtractResult<IntType> parse_integer(const char* str, size_t len,
         result += digit;
     }
 
+    // LCOV_EXCL_BR_START - if constexpr branches are compile-time only
     if constexpr (std::is_signed_v<IntType>) {
         if (negative) {
             constexpr UnsignedType max_negative = static_cast<UnsignedType>(std::numeric_limits<IntType>::max()) + 1;
@@ -83,6 +86,7 @@ really_inline ExtractResult<IntType> parse_integer(const char* str, size_t len,
     } else {
         return {result, nullptr};
     }
+    // LCOV_EXCL_BR_STOP
 }
 
 really_inline ExtractResult<double> parse_double(const char* str, size_t len,
@@ -199,6 +203,7 @@ public:
     template <typename T>
     ExtractResult<T> get(size_t row, size_t col) const {
         auto sv = get_string_view_internal(row, col);
+        // LCOV_EXCL_BR_START - if constexpr branches are compile-time only
         if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, int32_t>) {
             return parse_integer_simd<T>(sv.data(), sv.size(), config_);
         } else if constexpr (std::is_same_v<T, double>) {
@@ -208,6 +213,7 @@ public:
         } else {
             static_assert(!std::is_same_v<T, T>, "Unsupported type");
         }
+        // LCOV_EXCL_BR_STOP
     }
 
     std::vector<std::string_view> extract_column_string_view(size_t col) const;

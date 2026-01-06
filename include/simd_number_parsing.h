@@ -1138,6 +1138,7 @@ really_inline ExtractResult<IntType> parse_integer_simd(const char* str, size_t 
     }
 
     // Use SIMD parser for the actual parsing
+    // LCOV_EXCL_BR_START - if constexpr branches are compile-time only
     if constexpr (std::is_same_v<IntType, int64_t>) {
         auto result = SIMDIntegerParser::parse_int64(ptr, end - ptr, false);  // Already trimmed
         return result.to_extract_result();
@@ -1172,6 +1173,7 @@ really_inline ExtractResult<IntType> parse_integer_simd(const char* str, size_t 
         }
         return {static_cast<IntType>(result.value), nullptr};
     }
+    // LCOV_EXCL_BR_STOP
 }
 
 /**
@@ -1234,6 +1236,7 @@ really_inline ExtractResult<double> parse_double_simd(const char* str, size_t le
 template <typename T>
 really_inline ExtractResult<T> extract_value_simd(const char* str, size_t len,
                                                    const ExtractionConfig& config /* = ExtractionConfig::defaults() */) {
+    // LCOV_EXCL_BR_START - if constexpr branches are compile-time only
     if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, int32_t> ||
                   std::is_same_v<T, uint64_t> || std::is_same_v<T, uint32_t>) {
         return parse_integer_simd<T>(str, len, config);
@@ -1245,6 +1248,7 @@ really_inline ExtractResult<T> extract_value_simd(const char* str, size_t len,
     } else {
         static_assert(!std::is_same_v<T, T>, "Unsupported type for extract_value_simd");
     }
+    // LCOV_EXCL_BR_STOP
 }
 
 }  // namespace simdcsv

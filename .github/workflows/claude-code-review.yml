@@ -5,7 +5,7 @@ on:
     types: [opened, synchronize]
 
 jobs:
-  # Check eligibility first (fast, prevents wasted API calls)
+  # Check eligibility first (fast, prevents wasted parallel jobs)
   eligibility:
     runs-on: ubuntu-latest
     outputs:
@@ -37,98 +37,209 @@ jobs:
 
           echo "eligible=true" >> $GITHUB_OUTPUT
 
-  # Single comprehensive review job
-  claude-review:
+  # Parallel review job 1: Requirements compliance
+  review-requirements:
     needs: eligibility
     if: needs.eligibility.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Review requirements compliance
+        id: review
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR: #${{ github.event.pull_request.number }}
+
+            Review this PR for REQUIREMENTS COMPLIANCE only. Check:
+            1. Read all CLAUDE.md files (root + directories with modified files) - do changes follow the guidance?
+            2. Get the PR description and any linked issue - do changes address what was requested?
+            3. Read inline code comments in modified files - do changes comply with guidance in comments?
+
+            Write your findings to a file at /tmp/requirements-issues.json as a JSON array.
+            Each issue should have: "description", "source", "file", "line" (or null).
+            If no issues, write: []
+          claude_args: |
+            --max-turns 10
+            --allowedTools "Read,Write,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*)"
+      - name: Upload findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: requirements-issues
+          path: /tmp/requirements-issues.json
+          if-no-files-found: ignore
+
+  # Parallel review job 2: Bug detection
+  review-bugs:
+    needs: eligibility
+    if: needs.eligibility.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Review for bugs
+        id: review
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR: #${{ github.event.pull_request.number }}
+
+            Review this PR for BUGS only. Focus on:
+            1. Get the PR diff and read the changed files
+            2. Look for obvious bugs in the changed lines (not pre-existing issues)
+            3. Check for logic errors, off-by-one, null pointer issues, resource leaks
+            4. Check for security issues (injection, overflow, etc.)
+
+            IGNORE:
+            - Style/formatting issues (linters catch these)
+            - Missing tests (unless CLAUDE.md requires them)
+            - Pre-existing issues not introduced by this PR
+            - Nitpicks a senior engineer wouldn't flag
+
+            Write your findings to a file at /tmp/bug-issues.json as a JSON array.
+            Each issue should have: "description", "source" (always "bug detection"), "file", "line".
+            If no issues, write: []
+          claude_args: |
+            --max-turns 10
+            --allowedTools "Read,Write,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*)"
+      - name: Upload findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: bug-issues
+          path: /tmp/bug-issues.json
+          if-no-files-found: ignore
+
+  # Parallel review job 3: Historical context
+  review-history:
+    needs: eligibility
+    if: needs.eligibility.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git blame/log
+      - name: Review historical context
+        id: review
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR: #${{ github.event.pull_request.number }}
+
+            Review this PR using HISTORICAL CONTEXT. Check:
+            1. Use `git blame` and `git log` on modified files - are changes consistent with the code's history/intent?
+            2. Search for previous PRs that touched these files - any relevant comments that apply here?
+            3. Look for patterns that were intentionally established and might be broken
+
+            Write your findings to a file at /tmp/history-issues.json as a JSON array.
+            Each issue should have: "description", "source" (e.g., "git blame shows...", "PR #99 comment said..."), "file", "line" (or null).
+            If no issues, write: []
+          claude_args: |
+            --max-turns 15
+            --allowedTools "Read,Write,Glob,Grep,Bash(git blame:*),Bash(git log:*),Bash(git show:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*)"
+      - name: Upload findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: history-issues
+          path: /tmp/history-issues.json
+          if-no-files-found: ignore
+
+  # Aggregation job: Score, filter, and post comment
+  aggregate:
+    needs: [eligibility, review-requirements, review-bugs, review-history]
+    if: always() && needs.eligibility.outputs.eligible == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
       issues: read
       id-token: write
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Download all findings
+        uses: actions/download-artifact@v4
         with:
-          fetch-depth: 0  # Full history for git blame/log analysis
-
-      - name: Run Claude Code Review
-        id: claude-review
+          path: /tmp/findings
+          merge-multiple: true
+        continue-on-error: true
+      - name: List downloaded files
+        run: |
+          echo "Downloaded findings:"
+          ls -la /tmp/findings/ 2>/dev/null || echo "No findings directory"
+          cat /tmp/findings/*.json 2>/dev/null || echo "No JSON files found"
+      - name: Aggregate and post review
         uses: anthropics/claude-code-action@v1
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+            PR: #${{ github.event.pull_request.number }}
+            COMMIT: ${{ github.event.pull_request.head.sha }}
 
-            Provide a structured code review for this pull request. Follow these steps precisely:
+            Aggregate code review findings and post a comment.
 
-            ## Step 1: Gather Context
-            - Find all CLAUDE.md files (root and in modified directories)
-            - Get the PR diff and summary of changes
+            First, read the JSON files from /tmp/findings/ directory (if they exist):
+            - requirements-issues.json
+            - bug-issues.json
+            - history-issues.json
 
-            ## Step 2: Multi-Perspective Review
-            Analyze the changes from these 5 perspectives, documenting any issues found:
+            For each issue found, assign a confidence score (0-100):
+            - 0: False positive, doesn't hold up to scrutiny
+            - 25: Might be real, but unverified
+            - 50: Real but minor/nitpick
+            - 75: Verified, impacts functionality
+            - 100: Definitely real, will happen frequently
 
-            1. **CLAUDE.md Compliance**: Check if changes follow guidance in CLAUDE.md files
-            2. **Bug Detection**: Shallow scan for obvious bugs in the changed lines only. Focus on significant bugs, not nitpicks.
-            3. **Historical Context**: Use `git blame` and `git log` on modified files to understand context and catch regressions
-            4. **Previous PR Comments**: Check if previous PRs touching these files had relevant comments that apply here
-            5. **Code Comment Compliance**: Ensure changes comply with guidance in code comments
+            ONLY include issues scoring 80+.
 
-            ## Step 3: Score Each Issue (0-100)
-            For each issue found, assign a confidence score:
-            - 0: False positive, doesn't hold up to scrutiny, or pre-existing issue
-            - 25: Might be real, but could be false positive. Stylistic issues not in CLAUDE.md.
-            - 50: Real issue but minor/nitpick, not very important relative to the PR
-            - 75: Verified real issue that impacts functionality, or directly mentioned in CLAUDE.md
-            - 100: Definitely real, will happen frequently, evidence confirms it
+            Use `gh pr comment` to post in this exact format:
 
-            ## Step 4: Filter and Report
-            Only report issues scoring 80+. If no issues meet this threshold, report "No issues found."
-
-            ## False Positives to Ignore:
-            - Pre-existing issues (not introduced by this PR)
-            - Issues linters/compilers would catch (imports, types, formatting)
-            - General quality issues unless required by CLAUDE.md
-            - Issues silenced by lint ignore comments
-            - Intentional functionality changes related to the PR's purpose
-            - Issues on lines not modified in this PR
-
-            ## Output Format
-            Use `gh pr comment` to post exactly this format:
-
-            ```
             ### Code review
 
             Found N issues:
 
-            1. <brief description> (CLAUDE.md says "<quote>" OR bug due to <context>)
+            1. <description> (<source>)
 
-            <link to file with full SHA, e.g. https://github.com/owner/repo/blob/abc123def.../path/file.ext#L10-L15>
+            https://github.com/${{ github.repository }}/blob/${{ github.event.pull_request.head.sha }}/<file>#L<line-1>-L<line+1>
 
             ...
 
             Generated with [Claude Code](https://claude.ai/code)
 
             <sub>If useful, react with thumbs up. Otherwise, thumbs down.</sub>
-            ```
 
-            Or if no issues:
-            ```
+            ---
+
+            If no issues score 80+ (or no findings files exist), post:
+
             ### Code review
 
             No issues found. Checked for bugs and CLAUDE.md compliance.
 
             Generated with [Claude Code](https://claude.ai/code)
-            ```
-
-            Important:
-            - Use full git SHA in links (not HEAD or short SHA)
-            - Link format: `#L<start>-L<end>` with 1 line context before/after
-            - Keep output brief, avoid emojis
-            - Do NOT build/typecheck - CI handles that separately
-
-          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(git blame:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*)"'
+          claude_args: |
+            --max-turns 5
+            --allowedTools "Read,Glob,Bash(ls:*),Bash(cat:*),Bash(gh pr comment:*),Bash(gh pr view:*)"
