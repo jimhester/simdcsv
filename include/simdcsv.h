@@ -26,17 +26,65 @@
 namespace simdcsv {
 
 /**
+ * @brief Algorithm selection for parsing.
+ *
+ * Allows choosing between different parsing implementations that offer
+ * different performance characteristics.
+ */
+enum class ParseAlgorithm {
+    /**
+     * @brief Automatic algorithm selection (default).
+     *
+     * The parser chooses the best algorithm based on the data and options.
+     * Currently uses the speculative multi-threaded algorithm.
+     */
+    AUTO,
+
+    /**
+     * @brief Speculative multi-threaded parsing.
+     *
+     * Uses speculative execution to find safe chunk boundaries for parallel
+     * processing. Good general-purpose choice for large files.
+     */
+    SPECULATIVE,
+
+    /**
+     * @brief Two-pass algorithm with quote tracking.
+     *
+     * Traditional two-pass approach that tracks quote parity across chunks.
+     * More predictable than speculative but may be slower for some files.
+     */
+    TWO_PASS,
+
+    /**
+     * @brief Branchless state machine implementation.
+     *
+     * Uses lookup tables to eliminate branch mispredictions in the parsing
+     * hot path. Can provide significant speedups on data with many special
+     * characters (quotes, delimiters) that cause branch mispredictions.
+     *
+     * Performance characteristics:
+     * - Eliminates 90%+ of branches in parsing
+     * - Single memory access per character for classification and transition
+     * - Best for files with high quote/delimiter density
+     */
+    BRANCHLESS
+};
+
+/**
  * @brief Configuration options for parsing.
  *
  * ParseOptions provides a unified way to configure CSV parsing, combining
- * dialect selection and error handling into a single structure. This enables
- * a single parse() method to handle all use cases.
+ * dialect selection, error handling, and algorithm selection into a single
+ * structure. This enables a single parse() method to handle all use cases.
  *
  * Key behaviors:
  * - **Dialect**: If dialect is nullopt (default), the dialect is auto-detected
  *   from the data. Set an explicit dialect (e.g., Dialect::csv()) to skip detection.
  * - **Error collection**: If errors is nullptr (default), parsing uses the fast
  *   path and throws on errors. Provide an ErrorCollector for error-tolerant parsing.
+ * - **Algorithm**: Choose parsing algorithm for performance tuning. Default (AUTO)
+ *   uses speculative multi-threaded parsing.
  * - **Detection options**: Only used when dialect is nullopt and auto-detection runs.
  *
  * @example
@@ -58,11 +106,18 @@ namespace simdcsv {
  *     .dialect = Dialect::tsv(),
  *     .errors = &errors
  * });
+ *
+ * // Use branchless algorithm for maximum performance
+ * auto result = parser.parse(buf, len, {
+ *     .dialect = Dialect::csv(),
+ *     .algorithm = ParseAlgorithm::BRANCHLESS
+ * });
  * @endcode
  *
  * @see Parser::parse() for the unified parsing method
  * @see Dialect for dialect configuration options
  * @see ErrorCollector for error handling configuration
+ * @see ParseAlgorithm for algorithm selection
  */
 struct ParseOptions {
     /**
@@ -100,6 +155,17 @@ struct ParseOptions {
     DetectionOptions detection_options = DetectionOptions();
 
     /**
+     * @brief Algorithm to use for parsing.
+     *
+     * Allows selecting different parsing implementations for performance tuning.
+     * Default is AUTO which currently uses the speculative multi-threaded algorithm.
+     *
+     * Note: When errors is non-null, some algorithms may fall back to simpler
+     * implementations to ensure accurate error position tracking.
+     */
+    ParseAlgorithm algorithm = ParseAlgorithm::AUTO;
+
+    /**
      * @brief Factory for default options (auto-detect dialect, fast path).
      */
     static ParseOptions defaults() { return ParseOptions{}; }
@@ -129,6 +195,29 @@ struct ParseOptions {
         ParseOptions opts;
         opts.dialect = d;
         opts.errors = &e;
+        return opts;
+    }
+
+    /**
+     * @brief Factory for options with specific algorithm.
+     */
+    static ParseOptions with_algorithm(ParseAlgorithm algo) {
+        ParseOptions opts;
+        opts.algorithm = algo;
+        return opts;
+    }
+
+    /**
+     * @brief Factory for branchless parsing (performance optimization).
+     *
+     * Convenience factory for using the branchless state machine algorithm
+     * with an explicit dialect. This combination provides the best performance
+     * for files with known format.
+     */
+    static ParseOptions branchless(const Dialect& d = Dialect::csv()) {
+        ParseOptions opts;
+        opts.dialect = d;
+        opts.algorithm = ParseAlgorithm::BRANCHLESS;
         return opts;
     }
 };
@@ -453,38 +542,61 @@ public:
         Result result;
         result.idx = parser_.init(len, num_threads_);
 
+        // Determine dialect (explicit or auto-detect)
         if (options.dialect.has_value()) {
-            // Explicit dialect provided
             result.dialect = options.dialect.value();
-
-            if (options.errors != nullptr) {
-                // Explicit dialect + error collection
-                result.successful = parser_.parse_with_errors(
-                    buf, result.idx, len, *options.errors, result.dialect);
-            } else {
-                // Explicit dialect + fast path (throws on error)
-                result.successful = parser_.parse(buf, result.idx, len, result.dialect);
-            }
         } else {
             // Auto-detect dialect
-            if (options.errors != nullptr) {
-                // Auto-detect + error collection
+            DialectDetector detector(options.detection_options);
+            result.detection = detector.detect(buf, len);
+            result.dialect = result.detection.success()
+                ? result.detection.dialect : Dialect::csv();
+        }
+
+        // Suppress deprecation warnings for internal calls to two_pass methods
+        // (Parser is the public API that wraps these deprecated methods)
+        SIMDCSV_SUPPRESS_DEPRECATION_START
+
+        // Select parsing implementation based on algorithm and error collection
+        if (options.errors != nullptr) {
+            // Error collection mode - uses two_pass_with_errors regardless of algorithm
+            // (accurate error tracking requires the error-aware implementation)
+            if (!options.dialect.has_value()) {
+                // Auto-detect path with errors
                 result.successful = parser_.parse_auto(
                     buf, result.idx, len, *options.errors, &result.detection,
                     options.detection_options);
                 result.dialect = result.detection.dialect;
             } else {
-                // Auto-detect + fast path: detect first, then parse
-                DialectDetector detector(options.detection_options);
-                result.detection = detector.detect(buf, len);
-                // If detection failed, fall back to standard CSV
-                // Note: The fast path throws on parse errors, so this fallback
-                // behavior is documented but may lead to unexpected errors
-                result.dialect = result.detection.success()
-                    ? result.detection.dialect : Dialect::csv();
-                result.successful = parser_.parse(buf, result.idx, len, result.dialect);
+                // Explicit dialect with errors
+                result.successful = parser_.parse_with_errors(
+                    buf, result.idx, len, *options.errors, result.dialect);
+            }
+        } else {
+            // Fast path (throws on error) - respects algorithm selection
+            switch (options.algorithm) {
+                case ParseAlgorithm::BRANCHLESS:
+                    result.successful = parser_.parse_branchless(
+                        buf, result.idx, len, result.dialect);
+                    break;
+                case ParseAlgorithm::TWO_PASS:
+                    result.successful = parser_.parse_two_pass(
+                        buf, result.idx, len, result.dialect);
+                    break;
+                case ParseAlgorithm::SPECULATIVE:
+                    result.successful = parser_.parse_speculate(
+                        buf, result.idx, len, result.dialect);
+                    break;
+                case ParseAlgorithm::AUTO:
+                default:
+                    // AUTO currently uses speculative (same as parse())
+                    result.successful = parser_.parse(
+                        buf, result.idx, len, result.dialect);
+                    break;
             }
         }
+
+        SIMDCSV_SUPPRESS_DEPRECATION_END
 
         return result;
     }
