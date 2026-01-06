@@ -41,8 +41,17 @@ struct simdcsv_index {
 struct simdcsv_buffer {
     std::vector<uint8_t> data;
 
-    simdcsv_buffer(const uint8_t* ptr, size_t len) : data(ptr, ptr + len) {}
-    simdcsv_buffer() = default;
+    simdcsv_buffer(const uint8_t* ptr, size_t len) {
+        // Allocate with padding for safe SIMD overreads
+        data.resize(len + SIMDCSV_PADDING);
+        std::memcpy(data.data(), ptr, len);
+        // Note: The vector size includes padding, but simdcsv_buffer_length()
+        // returns the original length. Store original length separately.
+        original_length = len;
+    }
+    simdcsv_buffer() : original_length(0) {}
+
+    size_t original_length;
 };
 
 struct simdcsv_dialect {
@@ -167,8 +176,10 @@ simdcsv_buffer_t* simdcsv_buffer_load_file(const char* filename) {
             return nullptr;
         }
 
-        // Copy from string_view into vector
-        buffer->data.assign(corpus.begin(), corpus.end());
+        // Copy from string_view into vector with padding
+        buffer->original_length = corpus.size();
+        buffer->data.resize(corpus.size() + SIMDCSV_PADDING);
+        std::memcpy(buffer->data.data(), corpus.data(), corpus.size());
         // Free the original aligned buffer
         aligned_free(const_cast<uint8_t*>(corpus.data()));
         return buffer;
@@ -194,7 +205,7 @@ const uint8_t* simdcsv_buffer_data(const simdcsv_buffer_t* buffer) {
 
 size_t simdcsv_buffer_length(const simdcsv_buffer_t* buffer) {
     if (!buffer) return 0;
-    return buffer->data.size();
+    return buffer->original_length;
 }
 
 void simdcsv_buffer_destroy(simdcsv_buffer_t* buffer) {
@@ -363,14 +374,14 @@ simdcsv_error_t simdcsv_parse(simdcsv_parser_t* parser, const simdcsv_buffer_t* 
 
     try {
         simdcsv::Dialect d = dialect ? dialect->dialect : simdcsv::Dialect::csv();
-        index->idx = parser->parser.init(buffer->data.size(), index->num_threads);
+        index->idx = parser->parser.init(buffer->original_length, index->num_threads);
 
         bool success;
         if (errors) {
             success = parser->parser.parse_with_errors(buffer->data.data(), index->idx,
-                                             buffer->data.size(), errors->collector, d);
+                                             buffer->original_length, errors->collector, d);
         } else {
-            success = parser->parser.parse(buffer->data.data(), index->idx, buffer->data.size(), d);
+            success = parser->parser.parse(buffer->data.data(), index->idx, buffer->original_length, d);
         }
 
         if (errors && errors->collector.has_fatal_errors()) {
@@ -398,7 +409,7 @@ simdcsv_detection_result_t* simdcsv_detect_dialect(const simdcsv_buffer_t* buffe
 
     try {
         simdcsv::DialectDetector detector;
-        auto result = detector.detect(buffer->data.data(), buffer->data.size());
+        auto result = detector.detect(buffer->data.data(), buffer->original_length);
         return new (std::nothrow) simdcsv_detection_result(result);
     } catch (...) {
         return nullptr;
@@ -459,7 +470,7 @@ simdcsv_error_t simdcsv_parse_auto(simdcsv_parser_t* parser, const simdcsv_buffe
     try {
         // First detect the dialect
         simdcsv::DialectDetector detector;
-        auto result = detector.detect(buffer->data.data(), buffer->data.size());
+        auto result = detector.detect(buffer->data.data(), buffer->original_length);
 
         if (detected) {
             *detected = new (std::nothrow) simdcsv_detection_result(result);
@@ -470,13 +481,13 @@ simdcsv_error_t simdcsv_parse_auto(simdcsv_parser_t* parser, const simdcsv_buffe
         }
 
         // Parse with detected dialect
-        index->idx = parser->parser.init(buffer->data.size(), index->num_threads);
+        index->idx = parser->parser.init(buffer->original_length, index->num_threads);
 
         if (errors) {
             parser->parser.parse_with_errors(buffer->data.data(), index->idx,
-                                             buffer->data.size(), errors->collector, result.dialect);
+                                             buffer->original_length, errors->collector, result.dialect);
         } else {
-            parser->parser.parse(buffer->data.data(), index->idx, buffer->data.size(), result.dialect);
+            parser->parser.parse(buffer->data.data(), index->idx, buffer->original_length, result.dialect);
         }
 
         return SIMDCSV_OK;

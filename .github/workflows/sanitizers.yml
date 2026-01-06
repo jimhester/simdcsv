@@ -1,0 +1,90 @@
+name: Sanitizers
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  asan:
+    name: AddressSanitizer
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+
+    - name: Configure with ASAN
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON
+
+    - name: Build
+      run: |
+        cmake --build build
+
+    - name: Run tests with ASAN
+      env:
+        ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:halt_on_error=1
+      run: |
+        cd build && ctest --output-on-failure
+
+  ubsan:
+    name: UndefinedBehaviorSanitizer
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+
+    - name: Configure with UBSAN
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_UBSAN=ON
+
+    - name: Build
+      run: |
+        cmake --build build
+
+    - name: Run tests with UBSAN
+      env:
+        UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+      run: |
+        cd build && ctest --output-on-failure
+
+  asan-ubsan-combined:
+    name: ASAN + UBSAN Combined
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+
+    - name: Configure with ASAN and UBSAN
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON -DENABLE_UBSAN=ON
+
+    - name: Build
+      run: |
+        cmake --build build
+
+    - name: Run tests with ASAN and UBSAN
+      env:
+        ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:halt_on_error=1
+        UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+      run: |
+        cd build && ctest --output-on-failure

@@ -3,14 +3,10 @@
 
 #include <cassert>
 
-// the input buf should be readable up to buf + SIMDJSON_PADDING
-#ifdef __AVX2__
-#define SIMDCSV_PADDING  sizeof(__m256i)
-#else
-// this is a stopgap; there should be a better description of the
-// main loop and its behavior that abstracts over this
-#define SIMDCSV_PADDING  32
-#endif
+// The input buffer must be readable up to buf + SIMDCSV_PADDING.
+// This must be at least 64 bytes since SIMD operations load 64-byte blocks
+// and may read past the logical end of the data (masked results are discarded).
+#define SIMDCSV_PADDING  64
 
 
 // Align to N-byte boundary
