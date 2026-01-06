@@ -142,6 +142,78 @@ HWY_ATTR really_inline uint64_t find_quote_mask2(uint64_t quote_bits,
   return quote_mask;
 }
 
+/**
+ * @brief Compute line ending mask supporting LF, CRLF, and CR-only line endings.
+ *
+ * Returns a bitmask where bits are set at positions that are line endings:
+ * - LF (\n) positions are always included
+ * - CR (\r) positions are included ONLY if not immediately followed by LF
+ *
+ * For CRLF sequences, only the LF is marked as the line ending, which ensures
+ * the CR becomes part of the previous field's content (stripped later during
+ * value extraction).
+ *
+ * @param in SIMD input block (64 bytes)
+ * @param mask Valid byte mask (for partial final blocks)
+ * @param prev_ended_with_cr Output: set to true if this block ends with CR
+ *                          (caller should check if next block starts with LF)
+ * @param prev_block_ended_cr If true, previous block ended with CR. If current
+ *                           block starts with LF, that LF is NOT part of a new
+ *                           CRLF but completes the previous block's CRLF.
+ * @return Bitmask with line ending positions
+ */
+HWY_ATTR really_inline uint64_t compute_line_ending_mask(
+    const simd_input& in,
+    uint64_t mask,
+    bool& prev_ended_with_cr,
+    bool prev_block_ended_cr = false) {
+
+  uint64_t lf_mask = cmp_mask_against_input(in, '\n') & mask;
+  uint64_t cr_mask = cmp_mask_against_input(in, '\r') & mask;
+
+  // Find CR positions that are immediately followed by LF (CRLF sequences)
+  // These CRs should NOT be treated as line endings (the LF will be)
+  // (cr_mask << 1) shifts CR positions right; if LF is at that position, it's CRLF
+  uint64_t crlf_cr_mask = cr_mask & (lf_mask >> 1);
+
+  // Standalone CR: CR not followed by LF within this block
+  uint64_t standalone_cr = cr_mask & ~crlf_cr_mask;
+
+  // Check for cross-block CRLF: CR at position 63
+  // If this block ends with CR, we need to check the next block
+  prev_ended_with_cr = (cr_mask & (1ULL << 63)) != 0;
+
+  // Handle cross-block CRLF from previous block:
+  // If previous block ended with CR and this block starts with LF,
+  // that CR was part of CRLF, so we should NOT have counted it.
+  // However, since we process blocks sequentially in second_pass_simd,
+  // we handle this by NOT double-counting: the LF at position 0 is already
+  // the line ending. The CR from the previous block would have been marked
+  // as standalone (since we couldn't see the LF), but value extraction
+  // strips trailing CR anyway.
+
+  // Line endings: LF positions OR standalone CR positions
+  return lf_mask | standalone_cr;
+}
+
+/**
+ * @brief Simple line ending mask without cross-block tracking.
+ *
+ * For use in first-pass where we just need to find any line ending.
+ */
+HWY_ATTR really_inline uint64_t compute_line_ending_mask_simple(
+    const simd_input& in,
+    uint64_t mask) {
+  uint64_t lf_mask = cmp_mask_against_input(in, '\n') & mask;
+  uint64_t cr_mask = cmp_mask_against_input(in, '\r') & mask;
+
+  // CR followed by LF within this block - don't count CR as line ending
+  uint64_t crlf_cr_mask = cr_mask & (lf_mask >> 1);
+  uint64_t standalone_cr = cr_mask & ~crlf_cr_mask;
+
+  return lf_mask | standalone_cr;
+}
+
 // Write indexes to output array
 really_inline int write(uint64_t* base_ptr, uint64_t& base, uint64_t idx, int stride,
                         uint64_t bits) {

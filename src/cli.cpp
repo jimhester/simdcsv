@@ -87,10 +87,11 @@ class CsvIterator {
   }
 
   // Check if a field ends with newline (marks end of row)
+  // Supports LF (\n) and CR (\r) line endings
   bool isRowEnd(size_t i) const {
     if (i >= merged_indexes_.size()) return true;
     size_t pos = merged_indexes_[i];
-    return buf_[pos] == '\n';
+    return buf_[pos] == '\n' || buf_[pos] == '\r';
   }
 
   // Get all rows as vector of vectors of strings

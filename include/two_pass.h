@@ -303,7 +303,8 @@ class two_pass {
       uint64_t quotes = cmp_mask_against_input(in, static_cast<uint8_t>(quote_char)) & mask;
 
       if (needs_even || needs_odd) {
-        uint64_t nl = cmp_mask_against_input(in, '\n') & mask;
+        // Support LF, CRLF, and CR-only line endings
+        uint64_t nl = compute_line_ending_mask_simple(in, mask);
         if (nl == 0) {
           continue;
         }
@@ -340,7 +341,20 @@ class two_pass {
     bool needs_even = out.first_even_nl == null_pos;
     bool needs_odd = out.first_odd_nl == null_pos;
     while (i < end) {
+      // Support LF, CRLF, and CR-only line endings
+      // Check for line ending: \n, or \r not followed by \n
+      bool is_line_ending = false;
       if (buf[i] == '\n') {
+        is_line_ending = true;
+      } else if (buf[i] == '\r') {
+        // CR is a line ending only if not followed by LF
+        if (i + 1 >= end || buf[i + 1] != '\n') {
+          is_line_ending = true;
+        }
+        // If followed by LF, skip this CR (the LF will be the line ending)
+      }
+
+      if (is_line_ending) {
         bool is_even = (out.n_quotes % 2) == 0;
         if (needs_even && is_even) {
           out.first_even_nl = i;
@@ -361,9 +375,17 @@ class two_pass {
     stats out;
     uint64_t i = start;
     while (i < end) {
+      // Support LF, CRLF, and CR-only line endings
       if (buf[i] == '\n') {
         out.first_even_nl = i;
         return out;
+      } else if (buf[i] == '\r') {
+        // CR is a line ending only if not followed by LF
+        if (i + 1 >= end || buf[i + 1] != '\n') {
+          out.first_even_nl = i;
+          return out;
+        }
+        // If followed by LF, continue - the LF will be the line ending
       }
       ++i;
     }
@@ -371,10 +393,10 @@ class two_pass {
   }
 
   /**
-   * @brief Check if character is not a delimiter, newline, or quote.
+   * @brief Check if character is not a delimiter, newline (LF or CR), or quote.
    */
   static bool is_other(uint8_t c, char delimiter = ',', char quote_char = '"') {
-    return c != static_cast<uint8_t>(delimiter) && c != '\n' && c != static_cast<uint8_t>(quote_char);
+    return c != static_cast<uint8_t>(delimiter) && c != '\n' && c != '\r' && c != static_cast<uint8_t>(quote_char);
   }
 
   enum quote_state { AMBIGUOUS, QUOTED, UNQUOTED };
@@ -431,7 +453,18 @@ class two_pass {
 #endif
 
     for (size_t i = start; i < end; ++i) {
+      // Support LF, CRLF, and CR-only line endings
+      bool is_line_ending = false;
       if (buf[i] == '\n') {
+        is_line_ending = true;
+      } else if (buf[i] == '\r') {
+        // CR is a line ending only if not followed by LF
+        if (i + 1 >= end || buf[i + 1] != '\n') {
+          is_line_ending = true;
+        }
+      }
+
+      if (is_line_ending) {
         if (is_quoted == UNQUOTED || is_quoted == AMBIGUOUS) {
           return {0, i, null_pos};
         } else {
@@ -474,7 +507,8 @@ class two_pass {
 
       uint64_t quote_mask = find_quote_mask2(quotes, prev_iter_inside_quote);
       uint64_t sep = cmp_mask_against_input(in, static_cast<uint8_t>(delimiter));
-      uint64_t end_mask = cmp_mask_against_input(in, '\n');
+      // Support LF, CRLF, and CR-only line endings
+      uint64_t end_mask = compute_line_ending_mask_simple(in, mask);
       uint64_t field_sep = (end_mask | sep) & ~quote_mask;
       n_indexes +=
           write(out->indexes + thread_id, base, start + idx, out->n_threads, field_sep);
@@ -719,6 +753,17 @@ class two_pass {
         }
         result = newline_state(s);
         s = result.state;
+      } else if (value == '\r') {
+        // Support CR-only line endings: CR is a line ending if not followed by LF
+        bool is_line_ending = (pos + 1 >= end || buf[pos + 1] != '\n');
+        if (is_line_ending && s != QUOTED_FIELD) {
+          i = add_position(out, i, pos);
+          ++n_indexes;
+          result = newline_state(s);
+          s = result.state;
+        }
+        // If CR is followed by LF (CRLF), treat CR as regular character
+        // The LF will be the line ending; CR will be stripped during value extraction
       } else {
         result = other_state(s);
         if (result.error != ErrorCode::NONE && errors) {
@@ -790,6 +835,15 @@ class two_pass {
           ++n_indexes;
         }
         s = newline_state(s).state;
+      } else if (value == '\r') {
+        // Support CR-only line endings: CR is a line ending if not followed by LF
+        bool is_line_ending = (pos + 1 >= end || buf[pos + 1] != '\n');
+        if (is_line_ending && s != QUOTED_FIELD) {
+          i = add_position(out, i, pos);
+          ++n_indexes;
+          s = newline_state(s).state;
+        }
+        // If CR is followed by LF (CRLF), treat CR as regular character
       } else {
         result = other_state(s);
         if (result.error != ErrorCode::NONE) {

@@ -5,6 +5,13 @@
 #include <vector>
 #include <filesystem>
 
+#include "two_pass.h"
+#include "value_extraction.h"
+#include "io_util.h"
+#include "mem_util.h"
+#include "error.h"
+#include "dialect.h"
+
 namespace fs = std::filesystem;
 
 // Helper function to read entire file
@@ -315,6 +322,125 @@ TEST_F(CSVFileTest, NoFinalNewlineEndsWithoutNewline) {
     ASSERT_FALSE(content.empty());
     EXPECT_NE(content.back(), '\n')
         << "no_final_newline.csv should not end with newline";
+}
+
+// Test that CR-only line endings parse correctly to 3 columns and 3 rows
+TEST_F(CSVFileTest, CRLineEndingsParseCorrectly) {
+    std::string path = getTestDataPath("line_endings", "cr.csv");
+    auto corpus = get_corpus(path.c_str(), 64);
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(corpus.size(), 1);
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(), errors);
+
+    simdcsv::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
+                               corpus.size(), idx, simdcsv::Dialect::csv());
+    ve.set_has_header(true);
+
+    EXPECT_EQ(ve.num_columns(), 3) << "CR-only file should have 3 columns";
+    EXPECT_EQ(ve.num_rows(), 2) << "CR-only file should have 2 data rows (excluding header)";
+
+    // Verify header values
+    auto headers = ve.get_header();
+    ASSERT_EQ(headers.size(), 3);
+    EXPECT_EQ(headers[0], "A");
+    EXPECT_EQ(headers[1], "B");
+    EXPECT_EQ(headers[2], "C");
+
+    aligned_free((void*)corpus.data());
+}
+
+// Test that CRLF line endings parse correctly to 3 columns and 3 rows
+TEST_F(CSVFileTest, CRLFLineEndingsParseCorrectly) {
+    std::string path = getTestDataPath("line_endings", "crlf.csv");
+    auto corpus = get_corpus(path.c_str(), 64);
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(corpus.size(), 1);
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(), errors);
+
+    simdcsv::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
+                               corpus.size(), idx, simdcsv::Dialect::csv());
+    ve.set_has_header(true);
+
+    EXPECT_EQ(ve.num_columns(), 3) << "CRLF file should have 3 columns";
+    EXPECT_EQ(ve.num_rows(), 2) << "CRLF file should have 2 data rows (excluding header)";
+
+    // Verify header values - should NOT include \r
+    auto headers = ve.get_header();
+    ASSERT_EQ(headers.size(), 3);
+    EXPECT_EQ(headers[0], "A");
+    EXPECT_EQ(headers[1], "B");
+    EXPECT_EQ(headers[2], "C");  // Should be "C", not "C\r"
+
+    aligned_free((void*)corpus.data());
+}
+
+// Test that LF line endings parse correctly to 3 columns and 3 rows
+TEST_F(CSVFileTest, LFLineEndingsParseCorrectly) {
+    std::string path = getTestDataPath("line_endings", "lf.csv");
+    auto corpus = get_corpus(path.c_str(), 64);
+    simdcsv::two_pass parser;
+    simdcsv::index idx = parser.init(corpus.size(), 1);
+    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(), errors);
+
+    simdcsv::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
+                               corpus.size(), idx, simdcsv::Dialect::csv());
+    ve.set_has_header(true);
+
+    EXPECT_EQ(ve.num_columns(), 3) << "LF file should have 3 columns";
+    EXPECT_EQ(ve.num_rows(), 2) << "LF file should have 2 data rows (excluding header)";
+
+    // Verify header values
+    auto headers = ve.get_header();
+    ASSERT_EQ(headers.size(), 3);
+    EXPECT_EQ(headers[0], "A");
+    EXPECT_EQ(headers[1], "B");
+    EXPECT_EQ(headers[2], "C");
+
+    aligned_free((void*)corpus.data());
+}
+
+// Test that all line ending types produce equivalent results
+TEST_F(CSVFileTest, AllLineEndingsProduceEquivalentResults) {
+    std::vector<std::string> files = {"cr.csv", "crlf.csv", "lf.csv"};
+    std::vector<std::vector<std::vector<std::string>>> all_data;
+
+    for (const auto& file : files) {
+        std::string path = getTestDataPath("line_endings", file);
+        auto corpus = get_corpus(path.c_str(), 64);
+        simdcsv::two_pass parser;
+        simdcsv::index idx = parser.init(corpus.size(), 1);
+        simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+        parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(), errors);
+
+        simdcsv::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
+                                   corpus.size(), idx, simdcsv::Dialect::csv());
+        ve.set_has_header(true);
+
+        std::vector<std::vector<std::string>> data;
+        // Get header
+        data.push_back(ve.get_header());
+        // Get data rows
+        for (size_t row = 0; row < ve.num_rows(); ++row) {
+            std::vector<std::string> row_data;
+            for (size_t col = 0; col < ve.num_columns(); ++col) {
+                row_data.push_back(std::string(ve.get_string_view(row, col)));
+            }
+            data.push_back(row_data);
+        }
+        all_data.push_back(data);
+
+        aligned_free((void*)corpus.data());
+    }
+
+    // All files should produce the same data
+    ASSERT_EQ(all_data.size(), 3);
+    for (size_t i = 1; i < all_data.size(); ++i) {
+        EXPECT_EQ(all_data[0], all_data[i])
+            << "File " << files[i] << " should produce same data as " << files[0];
+    }
 }
 
 // ============================================================================
