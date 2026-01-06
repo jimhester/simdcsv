@@ -741,6 +741,315 @@ TEST_F(BranchlessErrorCollectionTest, ParserAPIWithErrorsDetectsProblems) {
     EXPECT_TRUE(found_quote_error) << "Should find QUOTE_IN_UNQUOTED_FIELD error";
 }
 
+// ============================================================================
+// ESCAPE CHARACTER SUPPORT TESTS
+// ============================================================================
+
+class EscapeCharacterTest : public ::testing::Test {
+protected:
+    std::string getTestDataPath(const std::string& category, const std::string& filename) {
+        return "test/data/" + category + "/" + filename;
+    }
+
+    // Helper to create a dialect with backslash escaping
+    Dialect backslashDialect() {
+        Dialect d;
+        d.delimiter = ',';
+        d.quote_char = '"';
+        d.escape_char = '\\';
+        d.double_quote = false;
+        return d;
+    }
+};
+
+TEST_F(EscapeCharacterTest, BackslashEscapedQuote) {
+    // Test backslash-escaped quotes: \"
+    // CSV content: Name,Value<newline>"Hello \"World\"",100<newline>
+    // After C++ escaping: \\\" -> \" (backslash + quote)
+    std::string content = "Name,Value\n\"Hello \\\"World\\\"\",100\n";
+    std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+
+    bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
+
+    EXPECT_TRUE(success) << "Should parse backslash-escaped quotes";
+    // Should find 4 separators: comma after Name, newline after Value, comma after quoted, newline at end
+    EXPECT_EQ(idx.n_indexes[0], 4) << "Should find 4 field separators";
+}
+
+TEST_F(EscapeCharacterTest, BackslashEscapedBackslash) {
+    // Test escaped backslash: \\
+    // Content: Path,Value<newline>"C:\\Users\\test",100<newline>
+    // Separators: comma(4), newline(10), comma(28), newline(32) = 4 separators
+    std::string content2 = std::string("Path,Value\n") + "\"C:\\\\Users\\\\test\",100\n";
+    std::vector<uint8_t> data(content2.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content2.data(), content2.size());
+
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+
+    bool success = parser.parse_branchless(data.data(), idx, content2.size(), backslashDialect());
+
+    EXPECT_TRUE(success) << "Should parse escaped backslashes";
+    EXPECT_EQ(idx.n_indexes[0], 4) << "Should find 4 field separators";
+}
+
+TEST_F(EscapeCharacterTest, BackslashEscapedDelimiter) {
+    // Test escaped delimiter within quoted field: \,
+    // Content: Text,Value<newline>"Hello\, World",100<newline>
+    // Separators: comma(4), newline(10), comma(26), newline(30) = 4 separators
+    std::string content = "Text,Value\n\"Hello\\, World\",100\n";
+    std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+
+    bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
+
+    EXPECT_TRUE(success) << "Should parse escaped delimiters";
+    EXPECT_EQ(idx.n_indexes[0], 4) << "Should find 4 field separators (comma in quotes is escaped)";
+}
+
+TEST_F(EscapeCharacterTest, BackslashEscapedNewline) {
+    // Test escaped newline: \n (literal backslash-n in the string, which becomes embedded newline)
+    // Note: In C++, \n in string literal becomes actual newline char (0x0A)
+    // Content: Text,Value<newline>"Line1<newline>Line2",100<newline>
+    // Separators: comma(4), newline(10), comma(25), newline(29) = 4 separators
+    std::string content = "Text,Value\n\"Line1\\nLine2\",100\n";
+    std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+
+    bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
+
+    EXPECT_TRUE(success) << "Should parse escaped newlines";
+    EXPECT_EQ(idx.n_indexes[0], 4) << "Should find 4 field separators";
+}
+
+TEST_F(EscapeCharacterTest, MixedEscapeSequences) {
+    // Test multiple escape sequences in one field
+    std::string content = "Data\n\"\\\"test\\\\path\\,value\\\"\"\n";
+    std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+
+    bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
+
+    EXPECT_TRUE(success) << "Should parse mixed escape sequences";
+}
+
+TEST_F(EscapeCharacterTest, ConsecutiveEscapes) {
+    // Test consecutive escapes: \\\\ (two escaped backslashes)
+    std::string content = "Path\n\"C:\\\\\\\\\"\n";
+    std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+
+    bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
+
+    EXPECT_TRUE(success) << "Should parse consecutive escape sequences";
+}
+
+TEST_F(EscapeCharacterTest, BackslashAtEndOfQuotedField) {
+    // Test backslash before closing quote: "value\" should close at "
+    // In escape mode, \" is an escaped quote, so the field continues
+    std::string content = "A,B\n\"val\",\"test\\\"\"\n";
+    std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+
+    bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
+
+    EXPECT_TRUE(success) << "Should handle backslash before quote correctly";
+}
+
+TEST_F(EscapeCharacterTest, ParseBackslashEscapeTestFile) {
+    // Parse the test file with backslash escapes
+    std::string path = getTestDataPath("escape", "backslash_escape.csv");
+    auto data = get_corpus(path, LIBVROOM_PADDING);
+
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+
+    bool success = parser.parse_branchless(data.data(), idx, data.size(), backslashDialect());
+
+    EXPECT_TRUE(success) << "Should parse backslash_escape.csv successfully";
+}
+
+TEST_F(EscapeCharacterTest, BranchlessStateMachineEscapeTransitions) {
+    // Test state machine transitions with escape character
+    BranchlessStateMachine sm(',', '"', '\\', false);
+
+    // Verify escape char is classified correctly
+    EXPECT_EQ(sm.classify('\\'), CHAR_ESCAPE);
+    EXPECT_EQ(sm.classify(','), CHAR_DELIMITER);
+    EXPECT_EQ(sm.classify('"'), CHAR_QUOTE);
+
+    // Test escape transition from QUOTED_FIELD
+    PackedResult r = sm.transition(STATE_QUOTED_FIELD, CHAR_ESCAPE);
+    EXPECT_EQ(r.state(), STATE_ESCAPED);
+    EXPECT_EQ(r.error(), ERR_NONE);
+
+    // Test that any char after escape returns to QUOTED_FIELD
+    r = sm.transition(STATE_ESCAPED, CHAR_QUOTE);
+    EXPECT_EQ(r.state(), STATE_QUOTED_FIELD);
+    EXPECT_EQ(r.error(), ERR_NONE);
+
+    r = sm.transition(STATE_ESCAPED, CHAR_DELIMITER);
+    EXPECT_EQ(r.state(), STATE_QUOTED_FIELD);
+    EXPECT_EQ(r.error(), ERR_NONE);
+
+    r = sm.transition(STATE_ESCAPED, CHAR_ESCAPE);
+    EXPECT_EQ(r.state(), STATE_QUOTED_FIELD);
+    EXPECT_EQ(r.error(), ERR_NONE);
+}
+
+TEST_F(EscapeCharacterTest, RFC4180ModeIgnoresEscape) {
+    // In double_quote=true mode, backslash should be treated as OTHER
+    BranchlessStateMachine sm(',', '"', '\\', true);
+
+    // Backslash should be classified as OTHER in RFC 4180 mode
+    EXPECT_EQ(sm.classify('\\'), CHAR_OTHER);
+}
+
+TEST_F(EscapeCharacterTest, ComputeEscapedMaskBasic) {
+    // Test the compute_escaped_mask function directly
+    // escape_mask with bit 10 set (backslash at position 10)
+    uint64_t escape_mask = 1ULL << 10;
+    uint64_t carry = 0;
+
+    uint64_t escaped = compute_escaped_mask(escape_mask, carry);
+
+    // Position 11 should be escaped (right after position 10)
+    EXPECT_TRUE((escaped & (1ULL << 11)) != 0) << "Position 11 should be escaped";
+    EXPECT_FALSE((escaped & (1ULL << 10)) != 0) << "Position 10 should NOT be escaped (it's the escape char)";
+    EXPECT_FALSE((escaped & (1ULL << 12)) != 0) << "Position 12 should NOT be escaped";
+}
+
+TEST_F(EscapeCharacterTest, ComputeEscapedMaskConsecutive) {
+    // Test consecutive escapes: \\ should escape the second backslash
+    // Bits 10 and 11 set (backslashes at positions 10 and 11)
+    uint64_t escape_mask = (1ULL << 10) | (1ULL << 11);
+    uint64_t carry = 0;
+
+    uint64_t escaped = compute_escaped_mask(escape_mask, carry);
+
+    // Position 11 should be escaped (the second backslash is escaped by the first)
+    EXPECT_TRUE((escaped & (1ULL << 11)) != 0) << "Position 11 should be escaped";
+    // Position 12 should NOT be escaped (no escape before it)
+    EXPECT_FALSE((escaped & (1ULL << 12)) != 0) << "Position 12 should NOT be escaped";
+}
+
+TEST_F(EscapeCharacterTest, ComputeEscapedMaskQuadBackslash) {
+    // Test \\\\ (four backslashes) - should result in two literal backslashes
+    // Bits 10, 11, 12, 13 set
+    uint64_t escape_mask = (1ULL << 10) | (1ULL << 11) | (1ULL << 12) | (1ULL << 13);
+    uint64_t carry = 0;
+
+    uint64_t escaped = compute_escaped_mask(escape_mask, carry);
+
+    // Positions 11 and 13 should be escaped (escaped by 10 and 12)
+    EXPECT_TRUE((escaped & (1ULL << 11)) != 0) << "Position 11 should be escaped";
+    EXPECT_TRUE((escaped & (1ULL << 13)) != 0) << "Position 13 should be escaped";
+    // Positions 10, 12 should NOT be escaped (they are the escape chars)
+    EXPECT_FALSE((escaped & (1ULL << 10)) != 0) << "Position 10 should NOT be escaped";
+    EXPECT_FALSE((escaped & (1ULL << 12)) != 0) << "Position 12 should NOT be escaped";
+}
+
+TEST_F(EscapeCharacterTest, ConsistencyWithScalarParsing) {
+    // Verify SIMD branchless produces same results as scalar for escape sequences
+    // Content: A,B,C<newline>"val\"1","val\\2",3<newline>"x","y\,z",4<newline>
+    // Expected separators for escape mode:
+    //   comma after A (pos 1), comma after B (pos 3), newline after C (pos 5)
+    //   comma after "val\"1" (pos 14), comma after "val\\2" (pos 24), newline after 3 (pos 26)
+    //   comma after "x" (pos 30), comma after "y\,z" (pos 38), newline after 4 (pos 40)
+    // Total = 9 separators
+    std::string content = "A,B,C\n\"val\\\"1\",\"val\\\\2\",3\n\"x\",\"y\\,z\",4\n";
+    std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    libvroom::two_pass parser;
+    Dialect dialect = backslashDialect();
+
+    // Parse with branchless (SIMD)
+    libvroom::index idx1 = parser.init(data.size(), 1);
+    parser.parse_branchless(data.data(), idx1, content.size(), dialect);
+
+    // Parse with error collection (uses scalar path)
+    libvroom::index idx2 = parser.init(data.size(), 1);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    parser.parse_branchless_with_errors(data.data(), idx2, content.size(), errors, dialect);
+
+    // Results should match
+    EXPECT_EQ(idx1.n_indexes[0], idx2.n_indexes[0])
+        << "SIMD and scalar should find same number of separators";
+
+    for (size_t i = 0; i < std::min(idx1.n_indexes[0], idx2.n_indexes[0]); ++i) {
+        EXPECT_EQ(idx1.indexes[i], idx2.indexes[i])
+            << "Separator position mismatch at index " << i;
+    }
+}
+
+TEST_F(EscapeCharacterTest, MultiThreadedEscapeParsing) {
+    // Test multi-threaded parsing with escape characters
+    std::string content;
+    content = "Name,Value,Path\n";
+    for (int i = 0; i < 5000; i++) {
+        content += "\"Name" + std::to_string(i) + "\",";
+        content += "\"val\\\"" + std::to_string(i) + "\",";
+        content += "\"C:\\\\path\\\\" + std::to_string(i) + "\"\n";
+    }
+
+    std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 4);
+
+    bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
+
+    EXPECT_TRUE(success) << "Multi-threaded escape parsing should succeed";
+}
+
+TEST_F(EscapeCharacterTest, CrossBlockEscapeSequence) {
+    // Create content where escape sequence crosses 64-byte block boundary
+    std::string padding(62, 'a');  // 62 bytes of 'a'
+    std::string content = "X\n\"" + padding + "\\\"\"\n";  // Escape at position 63-64
+    std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+
+    bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
+
+    EXPECT_TRUE(success) << "Should handle escape sequences crossing block boundaries";
+}
+
+TEST_F(EscapeCharacterTest, ParserAPIWithEscapeDialect) {
+    // Test the high-level Parser API with escape dialect
+    std::string content = "Name,Value\n\"Hello \\\"World\\\"\",100\n";
+    std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    Parser parser(1);
+    auto result = parser.parse(data.data(), content.size(), {.dialect = backslashDialect()});
+
+    EXPECT_TRUE(result.success()) << "Parser API should work with escape dialect";
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

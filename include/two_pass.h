@@ -1174,6 +1174,8 @@ class two_pass {
                                     const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
     char quote = dialect.quote_char;
+    char escape = dialect.escape_char;
+    bool double_quote = dialect.double_quote;
 
     // Handle empty input
     if (len == 0) return true;
@@ -1188,7 +1190,7 @@ class two_pass {
     check_line_endings(buf, len, errors);
     if (errors.should_stop()) return false;
 
-    BranchlessStateMachine sm(delim, quote);
+    BranchlessStateMachine sm(delim, quote, escape, double_quote);
     uint8_t n_threads = out.n_threads;
 
     // Validate n_threads: treat 0 as single-threaded to avoid division by zero
@@ -1324,7 +1326,8 @@ class two_pass {
   LIBVROOM_DEPRECATED("Use Parser::parse() with ParseOptions::branchless() instead")
   bool parse_branchless(const uint8_t* buf, index& out, size_t len,
                         const Dialect& dialect = Dialect::csv()) {
-    BranchlessStateMachine sm(dialect.delimiter, dialect.quote_char);
+    BranchlessStateMachine sm(dialect.delimiter, dialect.quote_char,
+                               dialect.escape_char, dialect.double_quote);
     uint8_t n_threads = out.n_threads;
 
     // Validate n_threads: treat 0 as single-threaded to avoid division by zero
