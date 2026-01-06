@@ -109,6 +109,10 @@ constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
  * @note This class is move-only. Copy operations are deleted to prevent accidental
  *       expensive copies of large index arrays.
  *
+ * @note Memory management uses std::unique_ptr for automatic RAII cleanup. The
+ *       raw pointer accessors (n_indexes, indexes) are provided for compatibility
+ *       with existing parsing code but ownership remains with the unique_ptr members.
+ *
  * @warning The caller must ensure the index remains valid while accessing the
  *          underlying buffer data. The index stores byte offsets, not the data itself.
  *
@@ -132,9 +136,11 @@ class ParseIndex {
   uint8_t n_threads{0};
 
   /// Array of size n_threads containing the count of indexes found by each thread.
+  /// @note This is a raw pointer accessor for compatibility; memory is managed by n_indexes_ptr_.
   uint64_t* n_indexes{nullptr};
 
   /// Array of field separator positions (byte offsets). Interleaved by thread.
+  /// @note This is a raw pointer accessor for compatibility; memory is managed by indexes_ptr_.
   uint64_t* indexes{nullptr};
 
   /// Default constructor. Creates an empty, uninitialized index.
@@ -151,7 +157,9 @@ class ParseIndex {
       : columns(other.columns),
         n_threads(other.n_threads),
         n_indexes(other.n_indexes),
-        indexes(other.indexes) {
+        indexes(other.indexes),
+        n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
+        indexes_ptr_(std::move(other.indexes_ptr_)) {
     other.n_indexes = nullptr;
     other.indexes = nullptr;
   }
@@ -166,12 +174,12 @@ class ParseIndex {
    */
   ParseIndex& operator=(ParseIndex&& other) noexcept {
     if (this != &other) {
-      delete[] indexes;
-      delete[] n_indexes;
       columns = other.columns;
       n_threads = other.n_threads;
       n_indexes = other.n_indexes;
       indexes = other.indexes;
+      n_indexes_ptr_ = std::move(other.n_indexes_ptr_);
+      indexes_ptr_ = std::move(other.indexes_ptr_);
       other.n_indexes = nullptr;
       other.indexes = nullptr;
     }
@@ -238,16 +246,23 @@ class ParseIndex {
   }
 
   /**
-   * @brief Destructor. Releases allocated index arrays.
+   * @brief Destructor. Releases allocated index arrays via RAII.
+   *
+   * Memory is automatically freed when the unique_ptr members are destroyed.
    */
-  ~ParseIndex() {
-    if (indexes) {
-      delete[] indexes;
-    }
-    if (n_indexes) {
-      delete[] n_indexes;
-    }
-  }
+  ~ParseIndex() = default;
+
+  void fill_double_array(ParseIndex* idx, uint64_t column, double* out) {}
+
+ private:
+  /// RAII owner for n_indexes array. Memory freed automatically on destruction.
+  std::unique_ptr<uint64_t[]> n_indexes_ptr_;
+
+  /// RAII owner for indexes array. Memory freed automatically on destruction.
+  std::unique_ptr<uint64_t[]> indexes_ptr_;
+
+  // Allow TwoPass::init() to set the private members
+  friend class TwoPass;
 };
 
 /// @brief Backward-compatible alias for ParseIndex.
@@ -1948,7 +1963,10 @@ class TwoPass {
     // Ensure at least 1 thread for valid memory allocation
     if (n_threads == 0) n_threads = 1;
     out.n_threads = n_threads;
-    out.n_indexes = new uint64_t[n_threads];
+
+    // Allocate n_indexes array with RAII ownership
+    out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+    out.n_indexes = out.n_indexes_ptr_.get();
 
     // Allocate space for interleaved index storage.
     //
@@ -1982,7 +2000,11 @@ class TwoPass {
       //               < (len + 8) * n_threads
       allocation_size = (len + 8) * n_threads;
     }
-    out.indexes = new uint64_t[allocation_size];
+
+    // Allocate indexes array with RAII ownership
+    out.indexes_ptr_ = std::make_unique<uint64_t[]>(allocation_size);
+    out.indexes = out.indexes_ptr_.get();
+
     return out;
   }
 

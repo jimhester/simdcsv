@@ -1294,3 +1294,319 @@ TEST_F(UTF8ValidationTest, OverlongEncodingDetected) {
                                {.errors = &errors, .limits = limits});
     EXPECT_TRUE(errors.has_errors());
 }
+
+// ============================================================================
+// Tests for AlignedBuffer and RAII memory management utilities
+// ============================================================================
+
+class AlignedBufferTest : public ::testing::Test {
+protected:
+    static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
+        size_t len = content.size();
+        uint8_t* buf = allocate_padded_buffer(len, 64);
+        std::memcpy(buf, content.data(), len);
+        return {buf, len};
+    }
+};
+
+// Test: AlignedBuffer basic construction and usage
+TEST_F(AlignedBufferTest, BasicConstruction) {
+    libvroom::AlignedBuffer empty;
+    EXPECT_FALSE(empty);
+    EXPECT_FALSE(empty.valid());
+    EXPECT_EQ(empty.data(), nullptr);
+    EXPECT_EQ(empty.size, 0);
+}
+
+// Test: AlignedBuffer with data
+TEST_F(AlignedBufferTest, WithData) {
+    AlignedPtr ptr = make_aligned_ptr(100, 64);
+    ASSERT_NE(ptr.get(), nullptr);
+    ptr[0] = 'X';
+    ptr[99] = 'Y';
+
+    uint8_t* raw = ptr.get();
+    libvroom::AlignedBuffer buffer(std::move(ptr), 100);
+
+    EXPECT_TRUE(buffer);
+    EXPECT_TRUE(buffer.valid());
+    EXPECT_EQ(buffer.data(), raw);
+    EXPECT_EQ(buffer.size, 100);
+    EXPECT_EQ(buffer.data()[0], 'X');
+    EXPECT_EQ(buffer.data()[99], 'Y');
+}
+
+// Test: AlignedBuffer move semantics
+TEST_F(AlignedBufferTest, MoveSemantics) {
+    AlignedPtr ptr = make_aligned_ptr(100, 64);
+    ptr[0] = 'A';
+    uint8_t* raw = ptr.get();
+
+    libvroom::AlignedBuffer buffer1(std::move(ptr), 100);
+    libvroom::AlignedBuffer buffer2(std::move(buffer1));
+
+    EXPECT_FALSE(buffer1.valid());
+    EXPECT_TRUE(buffer2.valid());
+    EXPECT_EQ(buffer2.data(), raw);
+    EXPECT_EQ(buffer2.data()[0], 'A');
+}
+
+// Test: AlignedBuffer move assignment
+TEST_F(AlignedBufferTest, MoveAssignment) {
+    AlignedPtr ptr1 = make_aligned_ptr(100, 64);
+    ptr1[0] = 'B';
+    uint8_t* raw1 = ptr1.get();
+
+    AlignedPtr ptr2 = make_aligned_ptr(200, 64);
+    ptr2[0] = 'C';
+
+    libvroom::AlignedBuffer buffer1(std::move(ptr1), 100);
+    libvroom::AlignedBuffer buffer2(std::move(ptr2), 200);
+
+    buffer2 = std::move(buffer1);
+
+    EXPECT_FALSE(buffer1.valid());
+    EXPECT_TRUE(buffer2.valid());
+    EXPECT_EQ(buffer2.data(), raw1);
+    EXPECT_EQ(buffer2.size, 100);
+    EXPECT_EQ(buffer2.data()[0], 'B');
+}
+
+// Test: AlignedBuffer release
+TEST_F(AlignedBufferTest, Release) {
+    AlignedPtr ptr = make_aligned_ptr(100, 64);
+    ptr[0] = 'D';
+    uint8_t* raw = ptr.get();
+
+    libvroom::AlignedBuffer buffer(std::move(ptr), 100);
+    uint8_t* released = buffer.release();
+
+    EXPECT_FALSE(buffer.valid());
+    EXPECT_EQ(buffer.size, 0);
+    EXPECT_EQ(released, raw);
+    EXPECT_EQ(released[0], 'D');
+
+    // Must manually free released pointer
+    aligned_free(released);
+}
+
+// Test: AlignedBuffer empty() method
+TEST_F(AlignedBufferTest, EmptyMethod) {
+    libvroom::AlignedBuffer empty;
+    EXPECT_TRUE(empty.empty());
+
+    AlignedPtr ptr = make_aligned_ptr(0, 64);
+    libvroom::AlignedBuffer zero_size(std::move(ptr), 0);
+    EXPECT_TRUE(zero_size.empty());
+    EXPECT_TRUE(zero_size.valid());  // Valid pointer but empty data
+}
+
+// Test: wrap_corpus utility function
+TEST_F(AlignedBufferTest, WrapCorpus) {
+    std::string content = "a,b,c\n1,2,3\n";
+    auto [data, len] = make_buffer(content);
+    std::basic_string_view<uint8_t> corpus(data, len);
+
+    auto [ptr, size] = libvroom::wrap_corpus(corpus);
+
+    EXPECT_NE(ptr.get(), nullptr);
+    EXPECT_EQ(size, content.size());
+    EXPECT_EQ(ptr[0], 'a');
+    // Memory freed when ptr goes out of scope
+}
+
+// Test: AlignedBuffer with Parser
+TEST_F(AlignedBufferTest, WithParser) {
+    auto [data, len] = make_buffer("name,age\nAlice,30\nBob,25\n");
+    AlignedPtr ptr(data);
+    libvroom::AlignedBuffer buffer(std::move(ptr), len);
+
+    libvroom::Parser parser;
+    auto result = parser.parse(buffer.data(), buffer.size);
+
+    EXPECT_TRUE(result.success());
+    EXPECT_GT(result.total_indexes(), 0);
+}
+
+// Test: Multiple AlignedBuffers (memory sanitizers will catch leaks)
+TEST_F(AlignedBufferTest, MultipleBuffers) {
+    std::vector<libvroom::AlignedBuffer> buffers;
+    for (int i = 0; i < 10; ++i) {
+        AlignedPtr ptr = make_aligned_ptr(1024, 64);
+        buffers.emplace_back(std::move(ptr), 1024);
+        EXPECT_TRUE(buffers.back().valid());
+    }
+    // All automatically freed when vector goes out of scope
+}
+
+// ============================================================================
+// Tests for ParseIndex class RAII memory management
+// ============================================================================
+
+class IndexMemoryTest : public ::testing::Test {
+protected:
+    static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
+        size_t len = content.size();
+        uint8_t* buf = allocate_padded_buffer(len, 64);
+        std::memcpy(buf, content.data(), len);
+        return {buf, len};
+    }
+};
+
+// Test: ParseIndex default construction creates empty, uninitialized index
+TEST_F(IndexMemoryTest, DefaultConstruction) {
+    libvroom::ParseIndex idx;
+    EXPECT_EQ(idx.columns, 0);
+    EXPECT_EQ(idx.n_threads, 0);
+    EXPECT_EQ(idx.n_indexes, nullptr);
+    EXPECT_EQ(idx.indexes, nullptr);
+}
+
+// Test: ParseIndex initialization via two_pass::init() allocates memory
+TEST_F(IndexMemoryTest, Initialization) {
+    libvroom::two_pass parser;
+    libvroom::ParseIndex idx = parser.init(1024, 4);
+
+    EXPECT_EQ(idx.n_threads, 4);
+    EXPECT_NE(idx.n_indexes, nullptr);
+    EXPECT_NE(idx.indexes, nullptr);
+    // Memory automatically freed when idx goes out of scope
+}
+
+// Test: ParseIndex move construction transfers ownership
+TEST_F(IndexMemoryTest, MoveConstruction) {
+    libvroom::two_pass parser;
+    libvroom::ParseIndex idx1 = parser.init(1024, 2);
+
+    uint64_t* original_n_indexes = idx1.n_indexes;
+    uint64_t* original_indexes = idx1.indexes;
+
+    libvroom::ParseIndex idx2(std::move(idx1));
+
+    // Original should be nulled out
+    EXPECT_EQ(idx1.n_indexes, nullptr);
+    EXPECT_EQ(idx1.indexes, nullptr);
+
+    // New index should have the pointers
+    EXPECT_EQ(idx2.n_indexes, original_n_indexes);
+    EXPECT_EQ(idx2.indexes, original_indexes);
+    EXPECT_EQ(idx2.n_threads, 2);
+}
+
+// Test: ParseIndex move assignment transfers ownership
+TEST_F(IndexMemoryTest, MoveAssignment) {
+    libvroom::two_pass parser;
+    libvroom::ParseIndex idx1 = parser.init(1024, 2);
+    libvroom::ParseIndex idx2 = parser.init(2048, 4);
+
+    uint64_t* idx1_n_indexes = idx1.n_indexes;
+    uint64_t* idx1_indexes = idx1.indexes;
+
+    idx2 = std::move(idx1);
+
+    // Original should be nulled out
+    EXPECT_EQ(idx1.n_indexes, nullptr);
+    EXPECT_EQ(idx1.indexes, nullptr);
+
+    // idx2 should now have idx1's pointers (old idx2 memory was freed)
+    EXPECT_EQ(idx2.n_indexes, idx1_n_indexes);
+    EXPECT_EQ(idx2.indexes, idx1_indexes);
+    EXPECT_EQ(idx2.n_threads, 2);
+}
+
+// Test: ParseIndex self-assignment is safe
+TEST_F(IndexMemoryTest, SelfAssignment) {
+    libvroom::two_pass parser;
+    libvroom::ParseIndex idx = parser.init(1024, 2);
+
+    uint64_t* original_n_indexes = idx.n_indexes;
+    uint64_t* original_indexes = idx.indexes;
+
+    idx = std::move(idx);  // Self-assignment
+
+    // Should still have valid pointers
+    EXPECT_EQ(idx.n_indexes, original_n_indexes);
+    EXPECT_EQ(idx.indexes, original_indexes);
+}
+
+// Test: Multiple ParseIndex allocations (memory sanitizers will catch leaks)
+TEST_F(IndexMemoryTest, MultipleAllocations) {
+    libvroom::two_pass parser;
+    std::vector<libvroom::ParseIndex> indexes;
+
+    for (int i = 0; i < 10; ++i) {
+        indexes.push_back(parser.init(1024, 4));
+        EXPECT_NE(indexes.back().n_indexes, nullptr);
+        EXPECT_NE(indexes.back().indexes, nullptr);
+    }
+    // All automatically freed when vector goes out of scope
+}
+
+// Test: ParseIndex with parsing (integration test)
+TEST_F(IndexMemoryTest, WithParsing) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
+    libvroom::FileBuffer buffer(data, len);
+
+    libvroom::two_pass parser;
+    libvroom::ParseIndex idx = parser.init(buffer.size(), 1);
+
+    LIBVROOM_SUPPRESS_DEPRECATION_START
+    bool success = parser.parse(buffer.data(), idx, buffer.size());
+    LIBVROOM_SUPPRESS_DEPRECATION_END
+
+    EXPECT_TRUE(success);
+    EXPECT_GT(idx.n_indexes[0], 0);
+    // Memory automatically freed when idx and buffer go out of scope
+}
+
+// Test: ParseIndex with multi-threaded parsing
+TEST_F(IndexMemoryTest, WithMultiThreadedParsing) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n7,8,9\n10,11,12\n");
+    libvroom::FileBuffer buffer(data, len);
+
+    libvroom::two_pass parser;
+    libvroom::ParseIndex idx = parser.init(buffer.size(), 4);
+
+    LIBVROOM_SUPPRESS_DEPRECATION_START
+    bool success = parser.parse(buffer.data(), idx, buffer.size());
+    LIBVROOM_SUPPRESS_DEPRECATION_END
+
+    EXPECT_TRUE(success);
+    // Memory automatically freed when idx and buffer go out of scope
+}
+
+// Test: Parser::Result (contains ParseIndex) memory management
+TEST_F(IndexMemoryTest, ParserResultMemory) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    libvroom::FileBuffer buffer(data, len);
+
+    libvroom::Parser parser;
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    EXPECT_TRUE(result.success());
+    EXPECT_NE(result.idx.n_indexes, nullptr);
+    EXPECT_NE(result.idx.indexes, nullptr);
+    // Memory automatically freed when result goes out of scope
+}
+
+// Test: Parser::Result move semantics
+TEST_F(IndexMemoryTest, ParserResultMove) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    libvroom::FileBuffer buffer(data, len);
+
+    libvroom::Parser parser;
+    auto result1 = parser.parse(buffer.data(), buffer.size());
+
+    uint64_t* original_n_indexes = result1.idx.n_indexes;
+    uint64_t* original_indexes = result1.idx.indexes;
+
+    auto result2 = std::move(result1);
+
+    // Original should be nulled out
+    EXPECT_EQ(result1.idx.n_indexes, nullptr);
+    EXPECT_EQ(result1.idx.indexes, nullptr);
+
+    // New result should have the pointers
+    EXPECT_EQ(result2.idx.n_indexes, original_n_indexes);
+    EXPECT_EQ(result2.idx.indexes, original_indexes);
+}
