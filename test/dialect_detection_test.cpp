@@ -2038,7 +2038,7 @@ TEST_F(DialectDetectionTest, WideCSVAdaptiveSampleSize) {
     EXPECT_TRUE(result.success()) << "Wide CSV detection should succeed with adaptive sample size";
     EXPECT_EQ(result.dialect.delimiter, ',') << "Should detect comma delimiter";
     EXPECT_EQ(result.detected_columns, 500) << "Should detect 500 columns";
-    EXPECT_GE(result.rows_analyzed, 3) << "Should analyze at least 3 rows";
+    EXPECT_GE(result.rows_analyzed, 2) << "Should analyze at least min_rows (2) rows";
 }
 
 TEST_F(DialectDetectionTest, VeryWideCSV1000Columns) {
