@@ -209,6 +209,7 @@ add_library(vroom
     src/libvroom_c.cpp
     src/value_extraction.cpp
     src/streaming.cpp
+    src/two_pass.cpp
 )
 
 target_include_directories(vroom PUBLIC
