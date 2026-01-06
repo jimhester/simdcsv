@@ -75,36 +75,49 @@ enum class ParseAlgorithm {
  * @brief Configuration options for parsing.
  *
  * ParseOptions provides a unified way to configure CSV parsing, combining
- * dialect selection, error handling, and algorithm selection into a single
+ * dialect selection, error handling mode, and algorithm selection into a single
  * structure. This enables a single parse() method to handle all use cases.
  *
- * Key behaviors:
+ * ## Key Behaviors
+ *
  * - **Dialect**: If dialect is nullopt (default), the dialect is auto-detected
  *   from the data. Set an explicit dialect (e.g., Dialect::csv()) to skip detection.
- * - **Error collection**: If errors is nullptr (default), parsing uses the fast
- *   path and throws on errors. Provide an ErrorCollector for error-tolerant parsing.
+ * - **Error mode**: Controls how errors are handled during parsing:
+ *   - STRICT (default): Stop on first error
+ *   - PERMISSIVE: Collect all errors, stop only on fatal
+ *   - BEST_EFFORT: Parse as much as possible, ignore errors
  * - **Algorithm**: Choose parsing algorithm for performance tuning. Default (AUTO)
  *   uses speculative multi-threaded parsing.
  * - **Detection options**: Only used when dialect is nullopt and auto-detection runs.
+ *
+ * ## Error Handling
+ *
+ * All errors are returned in the Result object, never thrown as exceptions.
+ * The `error_mode` setting controls parser behavior when errors are encountered,
+ * but errors are always collected and accessible via Result::errors().
  *
  * @example
  * @code
  * Parser parser;
  *
- * // Auto-detect dialect, throw on errors (fast path)
+ * // Auto-detect dialect, STRICT mode (default - stops on first error)
  * auto result = parser.parse(buf, len);
+ * if (!result.success()) {
+ *     for (const auto& err : result.errors()) {
+ *         std::cerr << err.to_string() << "\n";
+ *     }
+ * }
  *
- * // Auto-detect dialect, collect errors
- * ErrorCollector errors(ErrorMode::PERMISSIVE);
- * auto result = parser.parse(buf, len, {.errors = &errors});
+ * // Collect all errors with PERMISSIVE mode
+ * auto result = parser.parse(buf, len, {.error_mode = ErrorMode::PERMISSIVE});
  *
- * // Explicit CSV dialect, throw on errors
+ * // Explicit CSV dialect with STRICT mode
  * auto result = parser.parse(buf, len, {.dialect = Dialect::csv()});
  *
- * // Explicit dialect with error collection
+ * // Explicit dialect with PERMISSIVE error collection
  * auto result = parser.parse(buf, len, {
  *     .dialect = Dialect::tsv(),
- *     .errors = &errors
+ *     .error_mode = ErrorMode::PERMISSIVE
  * });
  *
  * // Use branchless algorithm for maximum performance
@@ -116,7 +129,7 @@ enum class ParseAlgorithm {
  *
  * @see Parser::parse() for the unified parsing method
  * @see Dialect for dialect configuration options
- * @see ErrorCollector for error handling configuration
+ * @see ErrorMode for error handling mode options
  * @see ParseAlgorithm for algorithm selection
  */
 struct ParseOptions {
@@ -136,15 +149,19 @@ struct ParseOptions {
     std::optional<Dialect> dialect = std::nullopt;
 
     /**
-     * @brief Error collector for error-tolerant parsing.
+     * @brief Error handling mode for parsing.
      *
-     * If nullptr (default), parsing uses the fast path that throws on errors.
-     * Provide an ErrorCollector pointer to enable error collection mode, where
-     * errors are accumulated and parsing continues based on the collector's mode.
+     * Controls how the parser responds to errors:
+     * - STRICT (default): Stop parsing on first error of any severity
+     * - PERMISSIVE: Collect all errors, only stop on FATAL errors
+     * - BEST_EFFORT: Parse as much as possible, ignoring all errors
      *
-     * @note The ErrorCollector must remain valid for the duration of parsing.
+     * Regardless of mode, all encountered errors are stored in Result::errors().
+     *
+     * @note This replaces the previous `errors` pointer parameter. Errors are
+     *       now always returned in the Result object.
      */
-    ErrorCollector* errors = nullptr;
+    ErrorMode error_mode = ErrorMode::STRICT;
 
     /**
      * @brief Options for dialect auto-detection.
@@ -159,14 +176,33 @@ struct ParseOptions {
      *
      * Allows selecting different parsing implementations for performance tuning.
      * Default is AUTO which currently uses the speculative multi-threaded algorithm.
-     *
-     * Note: When errors is non-null, some algorithms may fall back to simpler
-     * implementations to ensure accurate error position tracking.
      */
     ParseAlgorithm algorithm = ParseAlgorithm::AUTO;
 
     /**
-     * @brief Factory for default options (auto-detect dialect, fast path).
+     * @brief [DEPRECATED] External error collector pointer.
+     *
+     * @deprecated **Use `error_mode` instead and access errors via Result::errors().**
+     *
+     * This field exists for backward compatibility only. New code should:
+     * 1. Set `error_mode` to the desired ErrorMode (STRICT, PERMISSIVE, BEST_EFFORT)
+     * 2. Access errors via `Result::errors()`, `Result::has_errors()`, etc.
+     *
+     * Example of the new pattern:
+     * ```cpp
+     * auto result = parser.parse(buf, len, {.error_mode = ErrorMode::PERMISSIVE});
+     * if (result.has_errors()) {
+     *     for (const auto& err : result.errors()) { ... }
+     * }
+     * ```
+     *
+     * If this field is set, errors will be copied to the external collector
+     * after parsing for backward compatibility.
+     */
+    ErrorCollector* errors = nullptr;
+
+    /**
+     * @brief Factory for default options (auto-detect dialect, STRICT mode).
      */
     static ParseOptions defaults() { return ParseOptions{}; }
 
@@ -180,21 +216,21 @@ struct ParseOptions {
     }
 
     /**
-     * @brief Factory for options with error collection.
+     * @brief Factory for options with specific error mode.
      */
-    static ParseOptions with_errors(ErrorCollector& e) {
+    static ParseOptions with_error_mode(ErrorMode mode) {
         ParseOptions opts;
-        opts.errors = &e;
+        opts.error_mode = mode;
         return opts;
     }
 
     /**
-     * @brief Factory for options with both dialect and error collection.
+     * @brief Factory for options with both dialect and error mode.
      */
-    static ParseOptions with_dialect_and_errors(const Dialect& d, ErrorCollector& e) {
+    static ParseOptions with_dialect_and_error_mode(const Dialect& d, ErrorMode mode) {
         ParseOptions opts;
         opts.dialect = d;
-        opts.errors = &e;
+        opts.error_mode = mode;
         return opts;
     }
 
@@ -218,6 +254,36 @@ struct ParseOptions {
         ParseOptions opts;
         opts.dialect = d;
         opts.algorithm = ParseAlgorithm::BRANCHLESS;
+        return opts;
+    }
+
+    // =========================================================================
+    // Deprecated factory methods - for backward compatibility
+    // =========================================================================
+
+    /**
+     * @brief [DEPRECATED] Factory for options with external error collection.
+     * @deprecated Use with_error_mode(ErrorMode::PERMISSIVE) instead and access
+     *             errors via Result::errors().
+     */
+    LIBVROOM_DEPRECATED("Use with_error_mode() instead and access errors via Result::errors()")
+    static ParseOptions with_errors(ErrorCollector& e) {
+        ParseOptions opts;
+        opts.errors = &e;
+        opts.error_mode = e.mode();
+        return opts;
+    }
+
+    /**
+     * @brief [DEPRECATED] Factory for options with dialect and external error collection.
+     * @deprecated Use with_dialect_and_error_mode() instead and access errors via Result::errors().
+     */
+    LIBVROOM_DEPRECATED("Use with_dialect_and_error_mode() instead and access errors via Result::errors()")
+    static ParseOptions with_dialect_and_errors(const Dialect& d, ErrorCollector& e) {
+        ParseOptions opts;
+        opts.dialect = d;
+        opts.errors = &e;
+        opts.error_mode = e.mode();
         return opts;
     }
 };
@@ -394,17 +460,49 @@ inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
  *
  * Parser provides a simplified interface over the lower-level two_pass class.
  * It manages index allocation internally and returns a Result object containing
- * the parsed index, dialect information, and success status.
+ * the parsed index, dialect information, success status, and any errors encountered.
+ *
+ * ## Unified Error Handling
+ *
+ * Parser uses a **unified Result-based error handling pattern**:
+ *
+ * - **All errors in Result**: Access via `Result::errors()`, `Result::has_errors()`, etc.
+ * - **No exceptions for parse errors**: Malformed CSV never throws; errors are in Result
+ * - **Three error modes**: STRICT (default), PERMISSIVE, BEST_EFFORT
+ * - **Automatic multi-threading**: Thread-local errors are merged automatically
+ *
+ * Exceptions are reserved for truly exceptional conditions such as:
+ * - Memory allocation failures (std::bad_alloc)
+ * - Internal programming errors (std::logic_error)
+ *
+ * ## Usage Pattern
+ *
+ * ```cpp
+ * Parser parser;
+ *
+ * // STRICT mode (default): stops on first error
+ * auto result = parser.parse(buf, len);
+ *
+ * // PERMISSIVE mode: collects all errors
+ * auto result = parser.parse(buf, len, {.error_mode = ErrorMode::PERMISSIVE});
+ *
+ * // Check for errors - always via Result
+ * if (!result.success() || result.has_errors()) {
+ *     for (const auto& err : result.errors()) {
+ *         std::cerr << err.to_string() << "\n";
+ *     }
+ * }
+ * ```
  *
  * The Parser supports:
  * - Single-threaded and multi-threaded parsing
  * - Explicit dialect specification or auto-detection
- * - Error collection in permissive mode
+ * - Three error modes: STRICT, PERMISSIVE, and BEST_EFFORT
  *
  * @note For maximum performance with manual control, use two_pass directly.
  *       Parser is designed for convenience and typical use cases.
  *
- * @example
+ * @example Basic parsing with STRICT mode (default)
  * @code
  * #include "libvroom.h"
  *
@@ -414,27 +512,36 @@ inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
  * // Create parser with 4 threads
  * libvroom::Parser parser(4);
  *
- * // Parse with default CSV dialect
+ * // Parse with auto-detect dialect, STRICT mode (default)
+ * // Errors are NEVER thrown - always returned in Result
  * auto result = parser.parse(buffer.data(), buffer.size());
  *
  * if (result.success()) {
  *     std::cout << "Parsed " << result.num_columns() << " columns\n";
  *     std::cout << "Total indexes: " << result.total_indexes() << "\n";
+ * } else {
+ *     // Access errors via Result::errors()
+ *     for (const auto& err : result.errors()) {
+ *         std::cerr << err.to_string() << "\n";
+ *     }
  * }
  * @endcode
  *
- * @example
+ * @example Collecting all errors with PERMISSIVE mode
  * @code
- * // Parse with auto-detection and error collection
  * libvroom::Parser parser(4);
- * libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
  *
- * auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+ * // PERMISSIVE mode: collect all errors in Result
+ * auto result = parser.parse(buffer.data(), buffer.size(),
+ *                            {.error_mode = libvroom::ErrorMode::PERMISSIVE});
  *
  * std::cout << "Detected dialect: " << result.dialect.to_string() << "\n";
  *
- * if (errors.has_errors()) {
- *     for (const auto& err : errors.errors()) {
+ * // Access errors via Result - unified interface
+ * if (result.has_errors()) {
+ *     std::cout << "Found " << result.error_count() << " issues:\n";
+ *     std::cout << result.error_summary() << "\n";
+ *     for (const auto& err : result.errors()) {
  *         std::cerr << err.to_string() << "\n";
  *     }
  * }
@@ -443,22 +550,38 @@ inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
  * @see two_pass For lower-level parsing with full control.
  * @see FileBuffer For loading CSV files.
  * @see Dialect For dialect configuration options.
+ * @see ErrorMode For error handling mode options.
  */
 class Parser {
 public:
     /**
      * @brief Result of a parsing operation.
      *
-     * Contains the parsed index, dialect used (or detected), and success status.
+     * Contains the parsed index, dialect used (or detected), success status,
+     * and any errors encountered during parsing. This structure provides a
+     * unified interface for error handling - all error information is contained
+     * within the Result object rather than thrown as exceptions or passed via
+     * separate out-parameters.
+     *
+     * ## Error Handling
+     *
+     * The Result object owns an ErrorCollector that accumulates all errors
+     * found during parsing. Check for errors using:
+     * - `success()` - returns false if fatal errors occurred
+     * - `has_errors()` - returns true if any errors (including warnings) were found
+     * - `errors()` - access the list of ParseError objects
+     * - `error_count()` - get the number of errors found
+     * - `error_summary()` - get a human-readable summary
+     *
      * This structure is move-only since the underlying index contains raw pointers.
      */
     struct Result {
         index idx;               ///< The parsed field index.
         bool successful{false};  ///< Whether parsing completed without fatal errors.
         Dialect dialect;         ///< The dialect used for parsing.
-        DetectionResult detection;  ///< Detection result (populated by parse_auto).
+        DetectionResult detection;  ///< Detection result (populated when auto-detecting).
 
-        Result() = default;
+        Result() : error_collector_(ErrorMode::STRICT) {}
         Result(Result&&) = default;
         Result& operator=(Result&&) = default;
 
@@ -466,7 +589,7 @@ public:
         Result(const Result&) = delete;
         Result& operator=(const Result&) = delete;
 
-        /// @return true if parsing was successful.
+        /// @return true if parsing was successful (no fatal errors).
         bool success() const { return successful; }
 
         /// @return Number of columns detected in the CSV.
@@ -484,6 +607,50 @@ public:
             }
             return total;
         }
+
+        // =====================================================================
+        // Error Information Access
+        // =====================================================================
+
+        /**
+         * @brief Check if any errors were recorded during parsing.
+         * @return true if at least one error (including warnings) was recorded.
+         */
+        bool has_errors() const { return error_collector_.has_errors(); }
+
+        /**
+         * @brief Check if any fatal errors were recorded.
+         * @return true if at least one FATAL error was recorded.
+         */
+        bool has_fatal_errors() const { return error_collector_.has_fatal_errors(); }
+
+        /**
+         * @brief Get the number of errors recorded during parsing.
+         * @return Number of errors in the collection.
+         */
+        size_t error_count() const { return error_collector_.error_count(); }
+
+        /**
+         * @brief Get read-only access to all recorded errors.
+         * @return Const reference to the vector of ParseError objects.
+         */
+        const std::vector<ParseError>& errors() const { return error_collector_.errors(); }
+
+        /**
+         * @brief Get a summary string of all errors.
+         * @return Human-readable summary of error counts by type.
+         */
+        std::string error_summary() const { return error_collector_.summary(); }
+
+        /**
+         * @brief Get the error mode used during parsing.
+         * @return The ErrorMode that was used.
+         */
+        ErrorMode error_mode() const { return error_collector_.mode(); }
+
+    private:
+        friend class Parser;
+        ErrorCollector error_collector_;  ///< Internal error collector.
     };
 
     /**
@@ -498,49 +665,79 @@ public:
      * @brief Unified parse method with configurable options.
      *
      * This is the primary parsing method that handles all use cases through
-     * the ParseOptions structure. It unifies the previous parse(), parse_with_errors(),
-     * and parse_auto() methods into a single entry point.
+     * the ParseOptions structure. It provides a unified, Result-based error
+     * handling interface - parse errors are NEVER thrown as exceptions.
      *
-     * Behavior based on options:
+     * ## Error Handling
+     *
+     * All parse errors are returned in Result::errors(), never thrown.
+     * The `options.error_mode` controls parser behavior:
+     * - **STRICT** (default): Stop on first error
+     * - **PERMISSIVE**: Collect all errors, stop only on fatal
+     * - **BEST_EFFORT**: Parse as much as possible, ignore errors
+     *
+     * Check Result::success() to determine if parsing succeeded.
+     * Check Result::has_errors() to see if any issues were found.
+     *
+     * ## Dialect Detection
+     *
      * - **dialect = nullopt** (default): Auto-detect dialect from data
      * - **dialect = Dialect::xxx()**: Use the specified dialect
-     * - **errors = nullptr** (default): Fast path, throws on errors
-     * - **errors = &collector**: Collect errors, continue parsing based on mode
      *
      * @param buf Pointer to the CSV data buffer. Must remain valid during parsing.
      *            Should have at least 64 bytes of padding beyond len for SIMD safety.
      * @param len Length of the CSV data in bytes (excluding any padding).
-     * @param options Configuration options for parsing (default: auto-detect, fast path).
+     * @param options Configuration options for parsing (default: auto-detect, STRICT mode).
      *
-     * @return Result containing the parsed index, dialect used, and detection info.
+     * @return Result containing:
+     *         - Parsed index (Result::idx)
+     *         - Dialect used (Result::dialect)
+     *         - Detection info (Result::detection)
+     *         - Success status (Result::success())
+     *         - Any errors found (Result::errors())
      *
-     * @throws std::runtime_error On parsing errors when options.errors is nullptr.
+     * @note This method does NOT throw exceptions for parse errors. Only truly
+     *       exceptional conditions (memory allocation failure, internal errors)
+     *       may throw.
      *
      * @example
      * @code
      * Parser parser;
      *
-     * // Auto-detect dialect, throw on errors (simplest usage)
+     * // Auto-detect dialect, STRICT mode (stops on first error)
      * auto result = parser.parse(buf, len);
+     * if (!result.success()) {
+     *     std::cerr << "Parse failed: " << result.error_summary() << "\n";
+     *     for (const auto& err : result.errors()) {
+     *         std::cerr << "  " << err.to_string() << "\n";
+     *     }
+     *     return;
+     * }
      *
-     * // Auto-detect with error collection
-     * ErrorCollector errors(ErrorMode::PERMISSIVE);
-     * auto result = parser.parse(buf, len, {.errors = &errors});
+     * // Collect ALL errors with PERMISSIVE mode
+     * auto result = parser.parse(buf, len, {.error_mode = ErrorMode::PERMISSIVE});
+     * std::cout << "Found " << result.error_count() << " issues\n";
      *
      * // Explicit CSV dialect
      * auto result = parser.parse(buf, len, {.dialect = Dialect::csv()});
      *
-     * // Explicit TSV dialect with error collection
-     * auto result = parser.parse(buf, len, ParseOptions::with_dialect_and_errors(
-     *     Dialect::tsv(), errors));
+     * // Explicit TSV dialect with PERMISSIVE error collection
+     * auto result = parser.parse(buf, len, {
+     *     .dialect = Dialect::tsv(),
+     *     .error_mode = ErrorMode::PERMISSIVE
+     * });
      * @endcode
      *
      * @see ParseOptions for configuration details
+     * @see Result for accessing errors and parsed data
      */
     Result parse(const uint8_t* buf, size_t len,
                  const ParseOptions& options = ParseOptions{}) {
         Result result;
         result.idx = parser_.init(len, num_threads_);
+
+        // Set up the error collector with the requested mode
+        result.error_collector_.set_mode(options.error_mode);
 
         // Determine dialect (explicit or auto-detect)
         if (options.dialect.has_value()) {
@@ -557,52 +754,34 @@ public:
         // (Parser is the public API that wraps these deprecated methods)
         LIBVROOM_SUPPRESS_DEPRECATION_START
 
-        // Select parsing implementation based on algorithm and error collection
-        if (options.errors != nullptr) {
-            // Error collection mode - algorithm selection determines implementation
-            if (!options.dialect.has_value()) {
-                // Auto-detect path with errors
-                result.successful = parser_.parse_auto(
-                    buf, result.idx, len, *options.errors, &result.detection,
-                    options.detection_options);
-                result.dialect = result.detection.dialect;
-            } else {
-                // Explicit dialect with errors - respect algorithm selection
-                if (options.algorithm == ParseAlgorithm::BRANCHLESS) {
-                    // Use branchless implementation with error collection
-                    result.successful = parser_.parse_branchless_with_errors(
-                        buf, result.idx, len, *options.errors, result.dialect);
-                } else {
-                    // Default to switch-based implementation (faster for error collection)
-                    result.successful = parser_.parse_with_errors(
-                        buf, result.idx, len, *options.errors, result.dialect);
-                }
-            }
+        // Always use error-collecting parsing paths for unified error handling.
+        // The error_mode in the collector controls whether parsing stops early.
+        if (!options.dialect.has_value()) {
+            // Auto-detect path with errors
+            result.successful = parser_.parse_auto(
+                buf, result.idx, len, result.error_collector_, &result.detection,
+                options.detection_options);
+            result.dialect = result.detection.dialect;
         } else {
-            // Fast path (throws on error) - respects algorithm selection
-            switch (options.algorithm) {
-                case ParseAlgorithm::BRANCHLESS:
-                    result.successful = parser_.parse_branchless(
-                        buf, result.idx, len, result.dialect);
-                    break;
-                case ParseAlgorithm::TWO_PASS:
-                    result.successful = parser_.parse_two_pass(
-                        buf, result.idx, len, result.dialect);
-                    break;
-                case ParseAlgorithm::SPECULATIVE:
-                    result.successful = parser_.parse_speculate(
-                        buf, result.idx, len, result.dialect);
-                    break;
-                case ParseAlgorithm::AUTO:
-                default:
-                    // AUTO currently uses speculative (same as parse())
-                    result.successful = parser_.parse(
-                        buf, result.idx, len, result.dialect);
-                    break;
+            // Explicit dialect - respect algorithm selection
+            if (options.algorithm == ParseAlgorithm::BRANCHLESS) {
+                // Use branchless implementation with error collection
+                result.successful = parser_.parse_branchless_with_errors(
+                    buf, result.idx, len, result.error_collector_, result.dialect);
+            } else {
+                // Default: use two-pass with error collection for all other algorithms
+                // This ensures consistent error reporting across all code paths
+                result.successful = parser_.parse_two_pass_with_errors(
+                    buf, result.idx, len, result.error_collector_, result.dialect);
             }
         }
 
         LIBVROOM_SUPPRESS_DEPRECATION_END
+
+        // For backward compatibility: copy errors to external collector if provided
+        if (options.errors != nullptr) {
+            options.errors->merge_from(result.error_collector_);
+        }
 
         return result;
     }
@@ -610,16 +789,19 @@ public:
     // =========================================================================
     // Legacy methods - Provided for backward compatibility.
     // These delegate to the unified parse() method above.
+    // New code should use the unified parse() method with ParseOptions.
     // =========================================================================
 
     /**
      * @brief Parse with explicit dialect (legacy method).
      *
-     * @deprecated Use parse(buf, len, {.dialect = dialect}) instead.
+     * @deprecated Use parse(buf, len, {.dialect = dialect}) instead and access
+     *             errors via Result::errors().
      *
      * This method is provided for backward compatibility. New code should use
      * the unified parse() method with ParseOptions.
      */
+    LIBVROOM_DEPRECATED("Use parse(buf, len, {.dialect = dialect}) instead")
     Result parse(const uint8_t* buf, size_t len, const Dialect& dialect) {
         return parse(buf, len, ParseOptions::with_dialect(dialect));
     }
@@ -627,27 +809,35 @@ public:
     /**
      * @brief Parse with error collection (legacy method).
      *
-     * @deprecated Use parse(buf, len, {.dialect = dialect, .errors = &errors}) instead.
+     * @deprecated Use parse(buf, len, {.dialect = dialect, .error_mode = mode})
+     *             instead and access errors via Result::errors().
      *
      * This method is provided for backward compatibility. New code should use
      * the unified parse() method with ParseOptions.
      */
+    LIBVROOM_DEPRECATED("Use parse(buf, len, {.dialect = ..., .error_mode = ...}) and Result::errors() instead")
     Result parse_with_errors(const uint8_t* buf, size_t len,
                              ErrorCollector& errors,
                              const Dialect& dialect = Dialect::csv()) {
+        LIBVROOM_SUPPRESS_DEPRECATION_START
         return parse(buf, len, ParseOptions::with_dialect_and_errors(dialect, errors));
+        LIBVROOM_SUPPRESS_DEPRECATION_END
     }
 
     /**
      * @brief Parse with auto-detection and error collection (legacy method).
      *
-     * @deprecated Use parse(buf, len, {.errors = &errors}) instead.
+     * @deprecated Use parse(buf, len, {.error_mode = mode}) instead and access
+     *             errors via Result::errors().
      *
      * This method is provided for backward compatibility. New code should use
      * the unified parse() method with ParseOptions.
      */
+    LIBVROOM_DEPRECATED("Use parse(buf, len, {.error_mode = ...}) and Result::errors() instead")
     Result parse_auto(const uint8_t* buf, size_t len, ErrorCollector& errors) {
+        LIBVROOM_SUPPRESS_DEPRECATION_START
         return parse(buf, len, ParseOptions::with_errors(errors));
+        LIBVROOM_SUPPRESS_DEPRECATION_END
     }
 
     /**

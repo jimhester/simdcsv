@@ -496,3 +496,200 @@ TEST_F(AlgorithmSelectionTest, BranchlessWithQuotedFields) {
     EXPECT_TRUE(result.success());
     EXPECT_GT(result.total_indexes(), 0);
 }
+
+// ============================================================================
+// Tests for unified Result-based error handling pattern
+// ============================================================================
+
+class UnifiedErrorHandlingTest : public ::testing::Test {
+protected:
+    static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
+        size_t len = content.size();
+        uint8_t* buf = allocate_padded_buffer(len, 64);
+        std::memcpy(buf, content.data(), len);
+        return {buf, len};
+    }
+};
+
+// Test: Errors are returned in Result, not thrown
+TEST_F(UnifiedErrorHandlingTest, ErrorsInResultNotThrown) {
+    // CSV with inconsistent field count - should NOT throw
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    // Parse should NOT throw for parse errors
+    EXPECT_NO_THROW({
+        auto result = parser.parse(buffer.data(), buffer.size(),
+                                   {.error_mode = libvroom::ErrorMode::PERMISSIVE});
+        // Errors should be in Result
+        EXPECT_TRUE(result.has_errors());
+        EXPECT_GT(result.error_count(), 0);
+    });
+}
+
+// Test: Result::errors() provides access to all collected errors
+TEST_F(UnifiedErrorHandlingTest, ResultErrorsAccess) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n6,7,8,9\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               {.error_mode = libvroom::ErrorMode::PERMISSIVE});
+
+    // Should have collected errors
+    EXPECT_TRUE(result.has_errors());
+
+    // Access errors via Result::errors()
+    const auto& errors = result.errors();
+    EXPECT_FALSE(errors.empty());
+
+    // Verify errors have expected structure
+    for (const auto& err : errors) {
+        EXPECT_NE(err.code, libvroom::ErrorCode::NONE);
+        EXPECT_GT(err.line, 0);
+    }
+}
+
+// Test: Result::error_summary() provides human-readable summary
+TEST_F(UnifiedErrorHandlingTest, ResultErrorSummary) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               {.error_mode = libvroom::ErrorMode::PERMISSIVE});
+
+    // error_summary() should return non-empty string when errors exist
+    if (result.has_errors()) {
+        std::string summary = result.error_summary();
+        EXPECT_FALSE(summary.empty());
+        EXPECT_NE(summary, "No errors");
+    }
+}
+
+// Test: Result::error_mode() returns the mode used
+TEST_F(UnifiedErrorHandlingTest, ResultErrorMode) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    // STRICT mode
+    auto result1 = parser.parse(buffer.data(), buffer.size());
+    EXPECT_EQ(result1.error_mode(), libvroom::ErrorMode::STRICT);
+
+    // PERMISSIVE mode
+    auto result2 = parser.parse(buffer.data(), buffer.size(),
+                                {.error_mode = libvroom::ErrorMode::PERMISSIVE});
+    EXPECT_EQ(result2.error_mode(), libvroom::ErrorMode::PERMISSIVE);
+
+    // BEST_EFFORT mode
+    auto result3 = parser.parse(buffer.data(), buffer.size(),
+                                {.error_mode = libvroom::ErrorMode::BEST_EFFORT});
+    EXPECT_EQ(result3.error_mode(), libvroom::ErrorMode::BEST_EFFORT);
+}
+
+// Test: error_mode in ParseOptions replaces external ErrorCollector
+TEST_F(UnifiedErrorHandlingTest, ErrorModeReplacesExternalCollector) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    // New pattern: use error_mode, access errors via Result
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               {.error_mode = libvroom::ErrorMode::PERMISSIVE});
+
+    // Errors should be accessible via Result
+    EXPECT_TRUE(result.has_errors());
+    EXPECT_EQ(result.error_count(), result.errors().size());
+}
+
+// Test: STRICT mode stops on first error
+TEST_F(UnifiedErrorHandlingTest, StrictModeStopsOnFirstError) {
+    // Multiple errors: inconsistent field counts on rows 3 and 4
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n6,7,8,9\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    // STRICT mode (default)
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    // Should have stopped on first error
+    // Either not successful or has errors
+    EXPECT_TRUE(!result.success() || result.has_errors());
+
+    // In STRICT mode, might only have collected first error
+    // (implementation may vary based on when checks happen)
+}
+
+// Test: PERMISSIVE mode collects all errors
+TEST_F(UnifiedErrorHandlingTest, PermissiveModeCollectsAllErrors) {
+    // Multiple errors on different lines
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n6,7,8,9\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               {.error_mode = libvroom::ErrorMode::PERMISSIVE});
+
+    // Should have collected multiple errors
+    EXPECT_TRUE(result.has_errors());
+    // At least 2 errors (rows 3 and 4 both have wrong field count)
+    EXPECT_GE(result.error_count(), 2);
+}
+
+// Test: BEST_EFFORT mode parses despite errors
+TEST_F(UnifiedErrorHandlingTest, BestEffortModeParsesDespiteErrors) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n6,7,8\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               {.error_mode = libvroom::ErrorMode::BEST_EFFORT});
+
+    // Should still parse successfully
+    EXPECT_TRUE(result.success());
+    EXPECT_GT(result.total_indexes(), 0);
+
+    // Errors should still be collected
+    EXPECT_TRUE(result.has_errors());
+}
+
+// Test: No errors when CSV is valid
+TEST_F(UnifiedErrorHandlingTest, NoErrorsForValidCSV) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               {.error_mode = libvroom::ErrorMode::PERMISSIVE});
+
+    EXPECT_TRUE(result.success());
+    EXPECT_FALSE(result.has_errors());
+    EXPECT_EQ(result.error_count(), 0);
+    EXPECT_TRUE(result.errors().empty());
+}
+
+// Test: has_fatal_errors() distinguishes fatal from non-fatal
+TEST_F(UnifiedErrorHandlingTest, HasFatalErrorsDistinguishesSeverity) {
+    // Inconsistent field count is non-fatal (ERROR severity)
+    auto [data1, len1] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+    libvroom::FileBuffer buffer1(data1, len1);
+    libvroom::Parser parser;
+
+    auto result1 = parser.parse(buffer1.data(), buffer1.size(),
+                                {.error_mode = libvroom::ErrorMode::PERMISSIVE});
+
+    EXPECT_TRUE(result1.has_errors());
+    EXPECT_FALSE(result1.has_fatal_errors());  // Field count is ERROR, not FATAL
+
+    // Unclosed quote is FATAL
+    auto [data2, len2] = make_buffer("a,b,c\n\"unclosed\n");
+    libvroom::FileBuffer buffer2(data2, len2);
+
+    auto result2 = parser.parse(buffer2.data(), buffer2.size(),
+                                {.error_mode = libvroom::ErrorMode::PERMISSIVE});
+
+    EXPECT_TRUE(result2.has_errors());
+    EXPECT_TRUE(result2.has_fatal_errors());
+}
