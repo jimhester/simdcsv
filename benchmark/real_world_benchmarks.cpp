@@ -1,11 +1,8 @@
-// Benchmarks intentionally test deprecated two_pass methods for performance comparison
-#include "two_pass.h"
-LIBVROOM_SUPPRESS_DEPRECATION_START
-
 #include <benchmark/benchmark.h>
 #include "common_defs.h"
 #include "io_util.h"
 #include "mem_util.h"
+#include "libvroom.h"
 #include <fstream>
 #include <random>
 #include <algorithm>
@@ -13,7 +10,6 @@ LIBVROOM_SUPPRESS_DEPRECATION_START
 #include <sstream>
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern libvroom::two_pass* global_parser;
 
 // Generate synthetic CSV data for real-world scenarios
 class CSVDataGenerator {
@@ -226,25 +222,21 @@ static void BM_financial_data(benchmark::State& state) {
   size_t num_rows = static_cast<size_t>(state.range(0));
   auto data_str = CSVDataGenerator::generate_financial_data(num_rows);
   TempFile temp_file(data_str);
-  
+
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
-    libvroom::index result = global_parser->init(data.size(), 4);
-    
+
+    libvroom::Parser parser(4);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["FileSize"] = static_cast<double>(data.size());
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -258,26 +250,22 @@ static void BM_nyc_taxi_data(benchmark::State& state) {
   size_t num_rows = static_cast<size_t>(state.range(0));
   auto data_str = CSVDataGenerator::generate_nyc_taxi_data(num_rows);
   TempFile temp_file(data_str);
-  
+
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
-    libvroom::index result = global_parser->init(data.size(), 4);
-    
+
+    libvroom::Parser parser(4);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["FileSize"] = static_cast<double>(data.size());
     state.counters["Columns"] = 19.0; // NYC taxi has 19 columns
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -290,25 +278,21 @@ static void BM_genomics_data(benchmark::State& state) {
   size_t num_rows = static_cast<size_t>(state.range(0));
   auto data_str = CSVDataGenerator::generate_genomics_data(num_rows);
   TempFile temp_file(data_str);
-  
+
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
-    libvroom::index result = global_parser->init(data.size(), 4);
-    
+
+    libvroom::Parser parser(4);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["FileSize"] = static_cast<double>(data.size());
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -321,25 +305,21 @@ static void BM_log_data(benchmark::State& state) {
   size_t num_rows = static_cast<size_t>(state.range(0));
   auto data_str = CSVDataGenerator::generate_log_data(num_rows);
   TempFile temp_file(data_str);
-  
+
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
-    libvroom::index result = global_parser->init(data.size(), 4);
-    
+
+    libvroom::Parser parser(4);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["FileSize"] = static_cast<double>(data.size());
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -353,26 +333,22 @@ static void BM_wide_table(benchmark::State& state) {
   size_t num_cols = static_cast<size_t>(state.range(1));
   auto data_str = CSVDataGenerator::generate_wide_table(num_rows, num_cols);
   TempFile temp_file(data_str);
-  
+
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
-    libvroom::index result = global_parser->init(data.size(), 4);
-    
+
+    libvroom::Parser parser(4);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["Cols"] = static_cast<double>(num_cols);
     state.counters["FileSize"] = static_cast<double>(data.size());
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -386,7 +362,7 @@ static void BM_simd_levels(benchmark::State& state) {
   // This would require modifying the parser to expose SIMD level selection
   // For now, we'll benchmark the default parser
   std::string filename = "test/data/basic/many_rows.csv";
-  
+
   std::basic_string_view<uint8_t> data;
   if (test_data.find(filename) == test_data.end()) {
     try {
@@ -399,18 +375,14 @@ static void BM_simd_levels(benchmark::State& state) {
   } else {
     data = test_data[filename];
   }
-  
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
-  libvroom::index result = global_parser->init(data.size(), 1);
-  
+
+  libvroom::Parser parser(1);
+
   for (auto _ : state) {
-    global_parser->parse(data.data(), result, data.size());
+    auto result = parser.parse(data.data(), data.size());
     benchmark::DoNotOptimize(result);
   }
-  
+
   state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
   state.counters["SIMD"] = 1.0; // Default SIMD level
 }
