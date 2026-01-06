@@ -734,6 +734,31 @@ add_custom_command(TARGET bounds_validation_test POST_BUILD
 # Register bounds validation tests with CTest
 gtest_discover_tests(bounds_validation_test)
 
+# End-to-end integration tests
+add_executable(integration_test
+    test/integration_test.cpp
+)
+
+target_link_libraries(integration_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(integration_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for integration tests
+add_custom_command(TARGET integration_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register integration tests with CTest
+gtest_discover_tests(integration_test)
+
 # Arrow output test (only if Arrow is enabled)
 if(LIBVROOM_ENABLE_ARROW)
     add_executable(arrow_output_test test/arrow_output_test.cpp)
