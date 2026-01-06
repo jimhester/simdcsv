@@ -19,10 +19,10 @@ protected:
 TEST_F(CSVParserTest, ParseSimpleCSV) {
     std::string path = getTestDataPath("basic", "simple.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -34,10 +34,10 @@ TEST_F(CSVParserTest, ParseSimpleCSV) {
 TEST_F(CSVParserTest, ParseSimpleCSVColumnCount) {
     std::string path = getTestDataPath("basic", "simple.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -50,10 +50,10 @@ TEST_F(CSVParserTest, ParseSimpleCSVColumnCount) {
 TEST_F(CSVParserTest, ParseWideColumnsCSV) {
     std::string path = getTestDataPath("basic", "wide_columns.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -65,10 +65,10 @@ TEST_F(CSVParserTest, ParseWideColumnsCSV) {
 TEST_F(CSVParserTest, ParseSingleColumnCSV) {
     std::string path = getTestDataPath("basic", "single_column.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -80,10 +80,10 @@ TEST_F(CSVParserTest, ParseSingleColumnCSV) {
 TEST_F(CSVParserTest, ParseQuotedFieldsCSV) {
     std::string path = getTestDataPath("quoted", "quoted_fields.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -95,10 +95,10 @@ TEST_F(CSVParserTest, ParseQuotedFieldsCSV) {
 TEST_F(CSVParserTest, ParseEscapedQuotesCSV) {
     std::string path = getTestDataPath("quoted", "escaped_quotes.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -110,10 +110,10 @@ TEST_F(CSVParserTest, ParseEscapedQuotesCSV) {
 TEST_F(CSVParserTest, ParseNewlinesInQuotesCSV) {
     std::string path = getTestDataPath("quoted", "newlines_in_quotes.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -125,10 +125,10 @@ TEST_F(CSVParserTest, ParseNewlinesInQuotesCSV) {
 TEST_F(CSVParserTest, ParseFinancialDataCSV) {
     std::string path = getTestDataPath("real_world", "financial.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -140,10 +140,10 @@ TEST_F(CSVParserTest, ParseFinancialDataCSV) {
 TEST_F(CSVParserTest, ParseUnicodeCSV) {
     std::string path = getTestDataPath("real_world", "unicode.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -155,10 +155,10 @@ TEST_F(CSVParserTest, ParseUnicodeCSV) {
 TEST_F(CSVParserTest, ParseEmptyFieldsCSV) {
     std::string path = getTestDataPath("edge_cases", "empty_fields.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -170,10 +170,10 @@ TEST_F(CSVParserTest, ParseEmptyFieldsCSV) {
 TEST_F(CSVParserTest, IndexStructureValid) {
     std::string path = getTestDataPath("basic", "simple.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     parser.parse(data.data(), idx, data.size());
 
@@ -185,10 +185,10 @@ TEST_F(CSVParserTest, IndexStructureValid) {
 TEST_F(CSVParserTest, MultiThreadedParsing) {
     std::string path = getTestDataPath("basic", "many_rows.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 2);  // Use 2 threads
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 2);  // Use 2 threads
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -205,13 +205,13 @@ TEST_F(CSVParserTest, MultiThreadedParsing) {
 TEST_F(CSVParserTest, ParseMalformedUnclosedQuote) {
     std::string path = getTestDataPath("malformed", "unclosed_quote.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     // Use parse_validate to detect the error
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
 
     // Should detect the unclosed quote error
@@ -222,13 +222,13 @@ TEST_F(CSVParserTest, ParseMalformedUnclosedQuote) {
 TEST_F(CSVParserTest, ParseMalformedUnclosedQuoteEOF) {
     std::string path = getTestDataPath("malformed", "unclosed_quote_eof.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     // Use parse_validate to detect the error
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
 
     // Should detect the unclosed quote at EOF
@@ -239,13 +239,13 @@ TEST_F(CSVParserTest, ParseMalformedUnclosedQuoteEOF) {
 TEST_F(CSVParserTest, ParseMalformedQuoteInUnquotedField) {
     std::string path = getTestDataPath("malformed", "quote_in_unquoted_field.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     // Use parse_validate to detect the error
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_validate(data.data(), idx, data.size(), errors);
 
     // Should detect quote in unquoted field error
@@ -255,13 +255,13 @@ TEST_F(CSVParserTest, ParseMalformedQuoteInUnquotedField) {
 TEST_F(CSVParserTest, ParseMalformedInconsistentColumns) {
     std::string path = getTestDataPath("malformed", "inconsistent_columns.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     // Use parse_validate to detect the error
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_validate(data.data(), idx, data.size(), errors);
 
     // Should detect inconsistent column count
@@ -271,13 +271,13 @@ TEST_F(CSVParserTest, ParseMalformedInconsistentColumns) {
 TEST_F(CSVParserTest, ParseMalformedTripleQuote) {
     std::string path = getTestDataPath("malformed", "triple_quote.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     // Triple quote sequence """bad""" is actually valid RFC 4180 CSV
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
 
     // This is valid CSV, should parse successfully
@@ -288,10 +288,10 @@ TEST_F(CSVParserTest, ParseMalformedTripleQuote) {
 TEST_F(CSVParserTest, ParseMalformedMixedLineEndings) {
     std::string path = getTestDataPath("malformed", "mixed_line_endings.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -302,13 +302,13 @@ TEST_F(CSVParserTest, ParseMalformedMixedLineEndings) {
 TEST_F(CSVParserTest, ParseMalformedNullByte) {
     std::string path = getTestDataPath("malformed", "null_byte.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     // Use parse_validate to detect the null byte error
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_validate(data.data(), idx, data.size(), errors);
 
     // Should detect null byte in data
@@ -318,13 +318,13 @@ TEST_F(CSVParserTest, ParseMalformedNullByte) {
 TEST_F(CSVParserTest, ParseMalformedMultipleErrors) {
     std::string path = getTestDataPath("malformed", "multiple_errors.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     // Use parse_validate to detect errors
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_validate(data.data(), idx, data.size(), errors);
 
     // Should detect multiple errors
@@ -340,11 +340,11 @@ TEST_F(CSVParserTest, ParseEmptyQuotedFields) {
     // Create test data with empty quoted fields: A,B,C\n1,"",3\n
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n1,\"\",3\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -355,11 +355,11 @@ TEST_F(CSVParserTest, ParseSingleQuoteCharacter) {
     // Test file with just a quote character
     std::vector<uint8_t> data;
     std::string content = "\"";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -370,11 +370,11 @@ TEST_F(CSVParserTest, ParseOnlyQuotes) {
     // Test file with only quotes
     std::vector<uint8_t> data;
     std::string content = "\"\"\"\"\"\"\n\"\"\"\"";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -384,11 +384,11 @@ TEST_F(CSVParserTest, ParseOnlyQuotes) {
 TEST_F(CSVParserTest, ParseAlternatingQuotedUnquoted) {
     std::vector<uint8_t> data;
     std::string content = "A,B,C,D\n1,\"2\",3,\"4\"\n\"5\",6,\"7\",8\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -399,11 +399,11 @@ TEST_F(CSVParserTest, ParseOnlyDelimiters) {
     // File with only commas and newlines
     std::vector<uint8_t> data;
     std::string content = ",,,\n,,,\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -414,11 +414,11 @@ TEST_F(CSVParserTest, ParseConsecutiveQuotes) {
     // Test escaped quotes (doubled quotes)
     std::vector<uint8_t> data;
     std::string content = "A,B\n\"test\"\"value\",\"another\"\"one\"\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -429,11 +429,11 @@ TEST_F(CSVParserTest, ParseQuoteCommaQuoteSequence) {
     // Test tricky quote-comma-quote sequences
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n\",\",\",\",\",\"\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -444,11 +444,11 @@ TEST_F(CSVParserTest, ParseDeeplyNestedQuotes) {
     // Test multiple levels of quote escaping
     std::vector<uint8_t> data;
     std::string content = "A\n\"a\"\"b\"\"c\"\"d\"\"e\"\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -459,11 +459,11 @@ TEST_F(CSVParserTest, ParseTruncatedRow) {
     // File that ends mid-row without newline
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n1,2,3\n4,5";  // No final field or newline
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -477,11 +477,11 @@ TEST_F(CSVParserTest, ParseVeryLongField) {
     content += "\"";
     content += std::string(1024 * 1024, 'x');  // 1MB of x's
     content += "\",2\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -506,11 +506,11 @@ TEST_F(CSVParserTest, ParseVeryWideCSV) {
     row += "\n";
 
     std::string content = header + row;
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -528,11 +528,11 @@ TEST_F(CSVParserTest, ParseManyRowsWithQuotes) {
         content += "\"data" + std::to_string(i) + "\"\n";
     }
 
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -543,11 +543,11 @@ TEST_F(CSVParserTest, ParseAllQuotedFields) {
     // Every field is quoted
     std::vector<uint8_t> data;
     std::string content = "\"A\",\"B\",\"C\"\n\"1\",\"2\",\"3\"\n\"4\",\"5\",\"6\"\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -557,11 +557,11 @@ TEST_F(CSVParserTest, ParseAllQuotedFields) {
 TEST_F(CSVParserTest, ParseQuotedFieldWithEmbeddedNewlines) {
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n\"line1\nline2\nline3\",2,3\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -571,13 +571,13 @@ TEST_F(CSVParserTest, ParseQuotedFieldWithEmbeddedNewlines) {
 TEST_F(CSVParserTest, ParseMultiThreadedMalformed) {
     std::string path = getTestDataPath("malformed", "unclosed_quote.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 2);  // Use 2 threads with malformed data
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 2);  // Use 2 threads with malformed data
 
     // Use parse_validate to detect the error
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
 
     // Should detect unclosed quote error
@@ -593,11 +593,11 @@ TEST_F(CSVParserTest, ParseQuoteOtherPattern) {
     // Test quote followed by "other" character (not comma/newline/quote)
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n\"test\"x,2,3\n";  // Quote followed by 'x'
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -608,11 +608,11 @@ TEST_F(CSVParserTest, ParseOtherQuotePattern) {
     // Test "other" character followed by quote
     std::vector<uint8_t> data;
     std::string content = "A,B,C\nx\"test\",2,3\n";  // 'x' followed by quote
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -636,11 +636,11 @@ TEST_F(CSVParserTest, ParseVeryLargeMultiThreaded) {
         content += "\"value" + std::to_string(i) + "\"\n";
     }
 
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 4);  // Use 4 threads
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 4);  // Use 4 threads
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -651,11 +651,11 @@ TEST_F(CSVParserTest, ParseNoNewlineAtAll) {
     // File with no newlines - just commas
     std::vector<uint8_t> data;
     std::string content = "a,b,c,d,e,f,g,h";  // No newlines
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -666,11 +666,11 @@ TEST_F(CSVParserTest, ParseQuotedFieldNoNewline) {
     // Quoted field with no newline after
     std::vector<uint8_t> data;
     std::string content = "\"field\"";  // Just a quoted field, no newline
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -685,11 +685,11 @@ TEST_F(CSVParserTest, ParseComplexQuoteSequences) {
                           "a\"b,c,d\n"                     // Quote in middle
                           "\"x\",\"y\",\"z\"\n"           // All quoted
                           "1,2,3\n";                       // All unquoted
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -708,11 +708,11 @@ TEST_F(CSVParserTest, ParseLargeFieldSpanningChunks) {
     content += "\",normalfield\n";
     content += "1,2\n";
 
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);  // Single thread to avoid bug
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);  // Single thread to avoid bug
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -739,11 +739,11 @@ TEST_F(CSVParserTest, ParseMixedQuotePatternsMultiThread) {
         }
     }
 
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 4);  // 4 threads
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 4);  // 4 threads
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -757,10 +757,10 @@ TEST_F(CSVParserTest, ParseMixedQuotePatternsMultiThread) {
 TEST_F(CSVParserTest, ParseSemicolonSeparator) {
     std::string path = getTestDataPath("separators", "semicolon.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -770,10 +770,10 @@ TEST_F(CSVParserTest, ParseSemicolonSeparator) {
 TEST_F(CSVParserTest, ParseTabSeparator) {
     std::string path = getTestDataPath("separators", "tab.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -783,10 +783,10 @@ TEST_F(CSVParserTest, ParseTabSeparator) {
 TEST_F(CSVParserTest, ParsePipeSeparator) {
     std::string path = getTestDataPath("separators", "pipe.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -800,10 +800,10 @@ TEST_F(CSVParserTest, ParsePipeSeparator) {
 TEST_F(CSVParserTest, ParseCRLFLineEndings) {
     std::string path = getTestDataPath("line_endings", "crlf.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -813,10 +813,10 @@ TEST_F(CSVParserTest, ParseCRLFLineEndings) {
 TEST_F(CSVParserTest, ParseCRLineEndings) {
     std::string path = getTestDataPath("line_endings", "cr.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -826,10 +826,10 @@ TEST_F(CSVParserTest, ParseCRLineEndings) {
 TEST_F(CSVParserTest, ParseLFLineEndings) {
     std::string path = getTestDataPath("line_endings", "lf.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -839,10 +839,10 @@ TEST_F(CSVParserTest, ParseLFLineEndings) {
 TEST_F(CSVParserTest, ParseNoFinalNewline) {
     std::string path = getTestDataPath("line_endings", "no_final_newline.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -856,10 +856,10 @@ TEST_F(CSVParserTest, ParseNoFinalNewline) {
 TEST_F(CSVParserTest, Parse8Threads) {
     std::string path = getTestDataPath("basic", "many_rows.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 8);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 8);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -879,11 +879,11 @@ TEST_F(CSVParserTest, Parse16ThreadsLargeData) {
         content += std::to_string(i * 3) + "\n";
     }
 
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 16);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 16);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -893,11 +893,11 @@ TEST_F(CSVParserTest, Parse16ThreadsLargeData) {
 TEST_F(CSVParserTest, ParseQuotedFieldsMultiThreaded) {
     std::string path = getTestDataPath("quoted", "quoted_fields.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
+    libvroom::two_pass parser;
     // Use 2 threads instead of 4 for small file to avoid segfault
-    simdcsv::index idx = parser.init(data.size(), 2);
+    libvroom::index idx = parser.init(data.size(), 2);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -907,11 +907,11 @@ TEST_F(CSVParserTest, ParseQuotedFieldsMultiThreaded) {
 TEST_F(CSVParserTest, ParseEscapedQuotesMultiThreaded) {
     std::string path = getTestDataPath("quoted", "escaped_quotes.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
+    libvroom::two_pass parser;
     // Use 2 threads instead of 4 for small file to avoid segfault
-    simdcsv::index idx = parser.init(data.size(), 2);
+    libvroom::index idx = parser.init(data.size(), 2);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -921,11 +921,11 @@ TEST_F(CSVParserTest, ParseEscapedQuotesMultiThreaded) {
 TEST_F(CSVParserTest, ParseNewlinesInQuotesMultiThreaded) {
     std::string path = getTestDataPath("quoted", "newlines_in_quotes.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
+    libvroom::two_pass parser;
     // Use 2 threads instead of 4 for small file to avoid segfault
-    simdcsv::index idx = parser.init(data.size(), 2);
+    libvroom::index idx = parser.init(data.size(), 2);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -939,10 +939,10 @@ TEST_F(CSVParserTest, ParseNewlinesInQuotesMultiThreaded) {
 TEST_F(CSVParserTest, ParseEmptyFile) {
     std::string path = getTestDataPath("edge_cases", "empty_file.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -952,10 +952,10 @@ TEST_F(CSVParserTest, ParseEmptyFile) {
 TEST_F(CSVParserTest, ParseSingleCell) {
     std::string path = getTestDataPath("edge_cases", "single_cell.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -965,10 +965,10 @@ TEST_F(CSVParserTest, ParseSingleCell) {
 TEST_F(CSVParserTest, ParseSingleRowHeaderOnly) {
     std::string path = getTestDataPath("edge_cases", "single_row_header_only.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -978,10 +978,10 @@ TEST_F(CSVParserTest, ParseSingleRowHeaderOnly) {
 TEST_F(CSVParserTest, ParseWhitespaceFields) {
     std::string path = getTestDataPath("edge_cases", "whitespace_fields.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -995,11 +995,11 @@ TEST_F(CSVParserTest, ParseWhitespaceFields) {
 TEST_F(CSVParserTest, ParseSingleNewline) {
     std::vector<uint8_t> data;
     std::string content = "\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1009,11 +1009,11 @@ TEST_F(CSVParserTest, ParseSingleNewline) {
 TEST_F(CSVParserTest, ParseMultipleNewlines) {
     std::vector<uint8_t> data;
     std::string content = "\n\n\n\n\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1023,11 +1023,11 @@ TEST_F(CSVParserTest, ParseMultipleNewlines) {
 TEST_F(CSVParserTest, ParseSingleComma) {
     std::vector<uint8_t> data;
     std::string content = ",";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1038,12 +1038,12 @@ TEST_F(CSVParserTest, ParseSmallDataMultiThreaded) {
     // Small data with moderate threads - exercises thread boundary logic
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n1,2,3\n4,5,6\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
+    libvroom::two_pass parser;
     // Use 2 threads instead of 8 for very small data to avoid segfault
-    simdcsv::index idx = parser.init(data.size(), 2);
+    libvroom::index idx = parser.init(data.size(), 2);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1053,10 +1053,10 @@ TEST_F(CSVParserTest, ParseSmallDataMultiThreaded) {
 TEST_F(CSVParserTest, ParseOddThreadCount) {
     std::string path = getTestDataPath("basic", "many_rows.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 3);  // Odd number
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 3);  // Odd number
 
     bool success = parser.parse(data.data(), idx, data.size());
 
@@ -1070,11 +1070,11 @@ TEST_F(CSVParserTest, ParseVariedFieldLengths) {
     content += "aaaa,bbb,cc\n";                                 // Decreasing lengths
     content += "\"\",\"medium length\",\"very long field with lots of text\"\n";
     content += "1,2,3\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1087,11 +1087,11 @@ TEST_F(CSVParserTest, ParseAlternatingEmptyFields) {
     content += "1,,3,,5\n";
     content += ",2,,4,\n";
     content += ",,,,\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1101,11 +1101,11 @@ TEST_F(CSVParserTest, ParseAlternatingEmptyFields) {
 TEST_F(CSVParserTest, ParseQuoteAtEndOfLine) {
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n1,2,\"3\"\n\"4\",\"5\",\"6\"\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1115,11 +1115,11 @@ TEST_F(CSVParserTest, ParseQuoteAtEndOfLine) {
 TEST_F(CSVParserTest, ParseMixedCRLFAndLF) {
     std::vector<uint8_t> data;
     std::string content = "A,B,C\r\n1,2,3\n4,5,6\r\n7,8,9\n";  // Mixed CRLF and LF
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1138,11 +1138,11 @@ TEST_F(CSVParserTest, ParseDataAligned64) {
         content += "1,2\n";
     }
     content.resize(64);  // Exactly 64 bytes
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1153,11 +1153,11 @@ TEST_F(CSVParserTest, ParseDataUnaligned) {
     // Data size that's NOT aligned to 64 bytes
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n1,2,3\n4,5,6\n7,8,9\n";  // 30 bytes, not aligned to 64
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1172,11 +1172,11 @@ TEST_F(CSVParserTest, ParseData63Bytes) {
         content += "x,";
     }
     content.resize(63);
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1191,11 +1191,11 @@ TEST_F(CSVParserTest, ParseData65Bytes) {
         content += "xy,";
     }
     content.resize(65);
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1210,11 +1210,11 @@ TEST_F(CSVParserTest, ParseData128Bytes) {
         content += "ab,";
     }
     content.resize(128);
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1228,11 +1228,11 @@ TEST_F(CSVParserTest, ParseData128Bytes) {
 TEST_F(CSVParserTest, ParseQuoteAtFieldStart) {
     std::vector<uint8_t> data;
     std::string content = "A,B\n\"quoted\",unquoted\nunquoted,\"quoted\"\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1242,11 +1242,11 @@ TEST_F(CSVParserTest, ParseQuoteAtFieldStart) {
 TEST_F(CSVParserTest, ParseQuoteNotAtFieldStart) {
     std::vector<uint8_t> data;
     std::string content = "A,B\ntest\"quote,normal\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1256,11 +1256,11 @@ TEST_F(CSVParserTest, ParseQuoteNotAtFieldStart) {
 TEST_F(CSVParserTest, ParseQuoteAfterComma) {
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n1,\"2\",3\n\"4\",5,\"6\"\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1270,11 +1270,11 @@ TEST_F(CSVParserTest, ParseQuoteAfterComma) {
 TEST_F(CSVParserTest, ParseQuoteBeforeComma) {
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n\"field\",2,3\n1,\"field2\",3\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1284,11 +1284,11 @@ TEST_F(CSVParserTest, ParseQuoteBeforeComma) {
 TEST_F(CSVParserTest, ParseQuoteBeforeNewline) {
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n1,2,\"field\"\n4,5,\"field2\"\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1298,11 +1298,11 @@ TEST_F(CSVParserTest, ParseQuoteBeforeNewline) {
 TEST_F(CSVParserTest, ParseConsecutiveSeparators) {
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n,,\n1,,3\n,2,\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1313,11 +1313,11 @@ TEST_F(CSVParserTest, ParseMultiByteSequence) {
     // Test with data that might trigger different byte patterns
     std::vector<uint8_t> data;
     std::string content = "A,B\n\xFF\xFE,test\n";  // Some high bytes
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1331,11 +1331,11 @@ TEST_F(CSVParserTest, ParseRepeatingPattern) {
     for (int i = 0; i < 100; i++) {
         content += "\"a\",\"b\",\"c\"\n";
     }
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1353,11 +1353,11 @@ TEST_F(CSVParserTest, ParseAlternatingPattern) {
             content += "unquoted,\"quoted\",unquoted\n";
         }
     }
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse(data.data(), idx, content.size());
 

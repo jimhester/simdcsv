@@ -30,7 +30,7 @@ jobs:
 
     - name: Build benchmark
       run: |
-        cmake --build build --target simdcsv_benchmark --config Release
+        cmake --build build --target libvroom_benchmark --config Release
 
     - name: Run quick benchmark
       timeout-minutes: 5
@@ -39,7 +39,7 @@ jobs:
         # Filter to run essential benchmarks only, with JSON output for comparison
         # Benchmark names defined in benchmark/basic_benchmarks.cpp
         cd build
-        ./simdcsv_benchmark \
+        ./libvroom_benchmark \
           --benchmark_filter="BM_ParseSimple_Threads/1|BM_ParseManyRows_Threads/1|BM_ParseQuoted/1" \
           --benchmark_repetitions=3 \
           --benchmark_min_time=0.1s \

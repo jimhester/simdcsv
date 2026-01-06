@@ -10,7 +10,7 @@
 #include <iomanip>
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern simdcsv::two_pass* global_parser;
+extern libvroom::two_pass* global_parser;
 
 // SIMD instruction level benchmarks and comparisons
 
@@ -21,7 +21,7 @@ private:
   
 public:
   explicit TempCSVFile(const std::string& content) 
-      : filename_("/tmp/simdcsv_simd_" + std::to_string(std::random_device{}()) + ".csv") {
+      : filename_("/tmp/libvroom_simd_" + std::to_string(std::random_device{}()) + ".csv") {
     std::ofstream file(filename_);
     file << content;
     file.close();
@@ -111,16 +111,16 @@ static void BM_SIMD_vs_Scalar(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
     // For this benchmark, we're testing the current SIMD implementation
     // vs a conceptual scalar implementation (using single thread to simulate)
     int n_threads = use_simd ? 4 : 1; // More threads generally means more SIMD usage
-    simdcsv::index result = global_parser->init(data.size(), n_threads);
+    libvroom::index result = global_parser->init(data.size(), n_threads);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -148,7 +148,7 @@ static void BM_VectorWidth_Effectiveness(benchmark::State& state) {
   
   // Generate data with specific characteristics for vector processing
   size_t data_size = 64 * 1024; // 64KB
-  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + SIMDCSV_PADDING));
+  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
   
   // Pattern optimized for different vector widths
   for (size_t i = 0; i < data_size; ++i) {
@@ -160,15 +160,15 @@ static void BM_VectorWidth_Effectiveness(benchmark::State& state) {
   }
   
   // Add padding
-  for (size_t i = data_size; i < data_size + SIMDCSV_PADDING; ++i) {
+  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
   
   if (!global_parser) {
-    global_parser = new simdcsv::two_pass();
+    global_parser = new libvroom::two_pass();
   }
   
-  simdcsv::index result = global_parser->init(data_size, 1);
+  libvroom::index result = global_parser->init(data_size, 1);
   
   for (auto _ : state) {
     global_parser->parse(data, result, data_size);
@@ -202,7 +202,7 @@ static void BM_QuoteDetection_SIMD(benchmark::State& state) {
   double quote_density = static_cast<double>(state.range(0)) / 100.0; // Percentage as decimal
   
   size_t data_size = 1024 * 1024; // 1MB
-  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + SIMDCSV_PADDING));
+  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
   
   std::random_device rd;
   std::mt19937 gen(rd());
@@ -237,15 +237,15 @@ static void BM_QuoteDetection_SIMD(benchmark::State& state) {
   }
   
   // Add padding
-  for (size_t i = data_size; i < data_size + SIMDCSV_PADDING; ++i) {
+  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
   
   if (!global_parser) {
-    global_parser = new simdcsv::two_pass();
+    global_parser = new libvroom::two_pass();
   }
   
-  simdcsv::index result = global_parser->init(data_size, 1);
+  libvroom::index result = global_parser->init(data_size, 1);
   
   for (auto _ : state) {
     global_parser->parse(data, result, data_size);
@@ -272,7 +272,7 @@ static void BM_SeparatorDetection_SIMD(benchmark::State& state) {
   char separator = static_cast<char>(state.range(0));
   
   size_t data_size = 1024 * 1024; // 1MB  
-  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + SIMDCSV_PADDING));
+  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
   
   // Generate data with specific separator
   for (size_t i = 0; i < data_size; ++i) {
@@ -286,15 +286,15 @@ static void BM_SeparatorDetection_SIMD(benchmark::State& state) {
   }
   
   // Add padding
-  for (size_t i = data_size; i < data_size + SIMDCSV_PADDING; ++i) {
+  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
   
   if (!global_parser) {
-    global_parser = new simdcsv::two_pass();
+    global_parser = new libvroom::two_pass();
   }
   
-  simdcsv::index result = global_parser->init(data_size, 1);
+  libvroom::index result = global_parser->init(data_size, 1);
   
   for (auto _ : state) {
     global_parser->parse(data, result, data_size);
@@ -320,7 +320,7 @@ static void BM_MemoryAccess_SIMD(benchmark::State& state) {
   int access_pattern = static_cast<int>(state.range(0));
   
   size_t data_size = 2 * 1024 * 1024; // 2MB
-  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + SIMDCSV_PADDING));
+  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
   
   // Different memory access patterns
   switch (access_pattern) {
@@ -354,15 +354,15 @@ static void BM_MemoryAccess_SIMD(benchmark::State& state) {
   }
   
   // Add padding
-  for (size_t i = data_size; i < data_size + SIMDCSV_PADDING; ++i) {
+  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
   
   if (!global_parser) {
-    global_parser = new simdcsv::two_pass();
+    global_parser = new libvroom::two_pass();
   }
   
-  simdcsv::index result = global_parser->init(data_size, 1);
+  libvroom::index result = global_parser->init(data_size, 1);
   
   for (auto _ : state) {
     global_parser->parse(data, result, data_size);
@@ -405,13 +405,13 @@ static void BM_Branchless_vs_Standard(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
 
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
 
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
 
-    simdcsv::index result = global_parser->init(data.size(), 1);
+    libvroom::index result = global_parser->init(data.size(), 1);
 
     for (auto _ : state) {
       if (use_branchless) {
@@ -445,13 +445,13 @@ static void BM_Branchless_Scalability(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
 
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
 
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
 
-    simdcsv::index result = global_parser->init(data.size(), 1);
+    libvroom::index result = global_parser->init(data.size(), 1);
 
     for (auto _ : state) {
       if (use_branchless) {
@@ -491,13 +491,13 @@ static void BM_Branchless_Multithreaded(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
 
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
 
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
 
-    simdcsv::index result = global_parser->init(data.size(), n_threads);
+    libvroom::index result = global_parser->init(data.size(), n_threads);
 
     for (auto _ : state) {
       if (use_branchless) {
@@ -528,7 +528,7 @@ static void BM_Branchless_BranchSensitive(benchmark::State& state) {
   int pattern_type = static_cast<int>(state.range(1));
 
   size_t data_size = 1024 * 1024; // 1MB
-  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + SIMDCSV_PADDING));
+  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
 
   std::random_device rd;
   std::mt19937 gen(rd());
@@ -588,15 +588,15 @@ static void BM_Branchless_BranchSensitive(benchmark::State& state) {
   }
 
   // Add padding
-  for (size_t i = data_size; i < data_size + SIMDCSV_PADDING; ++i) {
+  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
 
   if (!global_parser) {
-    global_parser = new simdcsv::two_pass();
+    global_parser = new libvroom::two_pass();
   }
 
-  simdcsv::index result = global_parser->init(data_size, 1);
+  libvroom::index result = global_parser->init(data_size, 1);
 
   for (auto _ : state) {
     if (use_branchless) {

@@ -1,18 +1,18 @@
 /**
  * @file arrow_output.h
- * @brief Apache Arrow output integration for simdcsv.
+ * @brief Apache Arrow output integration for libvroom.
  *
  * This header provides functionality to convert parsed CSV data into Apache Arrow
  * format (Arrays and Tables). Arrow integration is optional and requires building
- * with -DSIMDCSV_ENABLE_ARROW=ON.
+ * with -DLIBVROOM_ENABLE_ARROW=ON.
  *
- * @note This header is only available when compiled with SIMDCSV_ENABLE_ARROW=ON
+ * @note This header is only available when compiled with LIBVROOM_ENABLE_ARROW=ON
  */
 
-#ifndef SIMDCSV_ARROW_OUTPUT_H
-#define SIMDCSV_ARROW_OUTPUT_H
+#ifndef LIBVROOM_ARROW_OUTPUT_H
+#define LIBVROOM_ARROW_OUTPUT_H
 
-#ifdef SIMDCSV_ENABLE_ARROW
+#ifdef LIBVROOM_ENABLE_ARROW
 
 #include <arrow/api.h>
 #include <arrow/builder.h>
@@ -25,7 +25,7 @@
 #include "two_pass.h"
 #include "dialect.h"
 
-namespace simdcsv {
+namespace libvroom {
 
 enum class ColumnType {
     STRING, INT64, DOUBLE, BOOLEAN, DATE, TIMESTAMP, NULL_TYPE, AUTO
@@ -138,7 +138,7 @@ ArrowConvertResult csv_to_arrow_from_memory(const uint8_t* data, size_t len,
                                             const ArrowConvertOptions& options = ArrowConvertOptions(),
                                             const Dialect& dialect = Dialect::csv());
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
-#endif  // SIMDCSV_ENABLE_ARROW
-#endif  // SIMDCSV_ARROW_OUTPUT_H
+#endif  // LIBVROOM_ENABLE_ARROW
+#endif  // LIBVROOM_ARROW_OUTPUT_H

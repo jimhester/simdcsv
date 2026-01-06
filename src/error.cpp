@@ -1,7 +1,7 @@
 #include "error.h"
 #include <sstream>
 
-namespace simdcsv {
+namespace libvroom {
 
 const char* error_code_to_string(ErrorCode code) {
     switch (code) {
@@ -90,4 +90,4 @@ std::string ParseException::format_errors(const std::vector<ParseError>& errors)
     return ss.str();
 }
 
-} // namespace simdcsv
+} // namespace libvroom

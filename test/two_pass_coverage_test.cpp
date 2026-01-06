@@ -9,7 +9,7 @@
 #include <thread>
 
 namespace fs = std::filesystem;
-using namespace simdcsv;
+using namespace libvroom;
 
 // ============================================================================
 // INDEX CLASS TESTS - Move semantics, serialization
@@ -32,7 +32,7 @@ protected:
 
 TEST_F(IndexClassTest, MoveConstructor) {
     two_pass parser;
-    simdcsv::index original = parser.init(100, 2);
+    libvroom::index original = parser.init(100, 2);
 
     // Set some values
     original.columns = 5;
@@ -42,7 +42,7 @@ TEST_F(IndexClassTest, MoveConstructor) {
     original.indexes[1] = 84;
 
     // Move construct
-    simdcsv::index moved(std::move(original));
+    libvroom::index moved(std::move(original));
 
     EXPECT_EQ(moved.columns, 5);
     EXPECT_EQ(moved.n_threads, 2);
@@ -58,8 +58,8 @@ TEST_F(IndexClassTest, MoveConstructor) {
 
 TEST_F(IndexClassTest, MoveAssignment) {
     two_pass parser;
-    simdcsv::index original = parser.init(100, 2);
-    simdcsv::index target = parser.init(50, 1);
+    libvroom::index original = parser.init(100, 2);
+    libvroom::index target = parser.init(50, 1);
 
     // Set values on original
     original.columns = 7;
@@ -81,12 +81,12 @@ TEST_F(IndexClassTest, MoveAssignment) {
 
 TEST_F(IndexClassTest, MoveAssignmentSelfAssignment) {
     two_pass parser;
-    simdcsv::index idx = parser.init(100, 2);
+    libvroom::index idx = parser.init(100, 2);
     idx.columns = 3;
     idx.n_indexes[0] = 10;
 
     // Self-assignment should be safe
-    simdcsv::index& ref = idx;
+    libvroom::index& ref = idx;
     idx = std::move(ref);
 
     EXPECT_EQ(idx.columns, 3);
@@ -96,7 +96,7 @@ TEST_F(IndexClassTest, MoveAssignmentSelfAssignment) {
 
 TEST_F(IndexClassTest, WriteAndRead) {
     two_pass parser;
-    simdcsv::index original = parser.init(100, 2);
+    libvroom::index original = parser.init(100, 2);
 
     // Set values
     original.columns = 10;
@@ -112,7 +112,7 @@ TEST_F(IndexClassTest, WriteAndRead) {
     original.write(temp_filename);
 
     // Read into new index
-    simdcsv::index restored = parser.init(100, 2);
+    libvroom::index restored = parser.init(100, 2);
     restored.read(temp_filename);
 
     EXPECT_EQ(restored.columns, 10);
@@ -127,7 +127,7 @@ TEST_F(IndexClassTest, WriteAndRead) {
 }
 
 TEST_F(IndexClassTest, DefaultConstructor) {
-    simdcsv::index idx;
+    libvroom::index idx;
     EXPECT_EQ(idx.columns, 0);
     EXPECT_EQ(idx.n_threads, 0);
     EXPECT_EQ(idx.n_indexes, nullptr);
@@ -141,7 +141,7 @@ TEST_F(IndexClassTest, DefaultConstructor) {
 class FirstPassTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -300,7 +300,7 @@ TEST_F(FirstPassTest, FirstPassChunkCRInQuotes) {
 class QuotationStateTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -386,7 +386,7 @@ TEST_F(QuotationStateTest, LongContextAmbiguous) {
 class ParseBranchlessTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -397,7 +397,7 @@ TEST_F(ParseBranchlessTest, SimpleCSV) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse_branchless(buf.data(), idx, content.size());
 
@@ -410,7 +410,7 @@ TEST_F(ParseBranchlessTest, QuotedFields) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse_branchless(buf.data(), idx, content.size());
 
@@ -426,7 +426,7 @@ TEST_F(ParseBranchlessTest, MultiThreaded) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 4);
+    libvroom::index idx = parser.init(content.size(), 4);
 
     bool success = parser.parse_branchless(buf.data(), idx, content.size());
 
@@ -438,7 +438,7 @@ TEST_F(ParseBranchlessTest, ZeroThreadsFallsBack) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 0);
+    libvroom::index idx = parser.init(content.size(), 0);
 
     // n_threads=0 should be handled (falls back to 1)
     bool success = parser.parse_branchless(buf.data(), idx, content.size());
@@ -453,7 +453,7 @@ TEST_F(ParseBranchlessTest, SmallChunkFallback) {
 
     two_pass parser;
     // Allocate with enough space; parser will update n_threads to 1
-    simdcsv::index idx = parser.init(content.size() + 64, 8);  // Too many threads for tiny file
+    libvroom::index idx = parser.init(content.size() + 64, 8);  // Too many threads for tiny file
 
     bool success = parser.parse_branchless(buf.data(), idx, content.size());
 
@@ -467,7 +467,7 @@ TEST_F(ParseBranchlessTest, CustomDialect) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse_branchless(buf.data(), idx, content.size(),
                                            Dialect::semicolon());
@@ -482,7 +482,7 @@ TEST_F(ParseBranchlessTest, CustomDialect) {
 class ParseAutoTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -523,7 +523,7 @@ TEST_F(ParseAutoTest, ParseAutoCSV) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
     DetectionResult detected;
 
@@ -539,7 +539,7 @@ TEST_F(ParseAutoTest, ParseAutoTSV) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
     DetectionResult detected;
 
@@ -556,7 +556,7 @@ TEST_F(ParseAutoTest, ParseAutoNullDetectedResult) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_auto(buf.data(), idx, content.size(), errors, nullptr);
@@ -571,7 +571,7 @@ TEST_F(ParseAutoTest, ParseAutoNullDetectedResult) {
 class EdgeCaseTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -582,7 +582,7 @@ TEST_F(EdgeCaseTest, ZeroThreadsSpeculate) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 0);
+    libvroom::index idx = parser.init(content.size(), 0);
 
     bool success = parser.parse_speculate(buf.data(), idx, content.size());
 
@@ -594,7 +594,7 @@ TEST_F(EdgeCaseTest, ZeroThreadsTwoPass) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 0);
+    libvroom::index idx = parser.init(content.size(), 0);
 
     bool success = parser.parse_two_pass(buf.data(), idx, content.size());
 
@@ -606,7 +606,7 @@ TEST_F(EdgeCaseTest, ZeroThreadsTwoPassWithErrors) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 0);
+    libvroom::index idx = parser.init(content.size(), 0);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_two_pass_with_errors(buf.data(), idx, content.size(), errors);
@@ -615,10 +615,10 @@ TEST_F(EdgeCaseTest, ZeroThreadsTwoPassWithErrors) {
 }
 
 TEST_F(EdgeCaseTest, EmptyInputTwoPassWithErrors) {
-    std::vector<uint8_t> buf(SIMDCSV_PADDING, 0);
+    std::vector<uint8_t> buf(LIBVROOM_PADDING, 0);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(0, 1);
+    libvroom::index idx = parser.init(0, 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_two_pass_with_errors(buf.data(), idx, 0, errors);
@@ -632,7 +632,7 @@ TEST_F(EdgeCaseTest, VerySmallChunksMultiThreaded) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 16);
+    libvroom::index idx = parser.init(content.size(), 16);
 
     bool success = parser.parse_speculate(buf.data(), idx, content.size());
 
@@ -648,7 +648,7 @@ TEST_F(EdgeCaseTest, ChunkBoundaryExactly64Bytes) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -665,7 +665,7 @@ TEST_F(EdgeCaseTest, ChunkBoundaryExactly128Bytes) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -909,7 +909,7 @@ TEST(IsOtherTest, CustomQuote) {
 class FirstPassSpeculateTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -966,7 +966,7 @@ TEST_F(FirstPassSpeculateTest, WithCRLFLineEnding) {
 class ParseValidateTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -977,7 +977,7 @@ TEST_F(ParseValidateTest, ValidCSV) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_validate(buf.data(), idx, content.size(), errors);
@@ -991,7 +991,7 @@ TEST_F(ParseValidateTest, WithDialect) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_validate(buf.data(), idx, content.size(), errors,
@@ -1007,7 +1007,7 @@ TEST_F(ParseValidateTest, WithDialect) {
 class MultiThreadedFallbackTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -1020,7 +1020,7 @@ TEST_F(MultiThreadedFallbackTest, SpeculateFallsBackOnNullPos) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 4);  // Try to use 4 threads
+    libvroom::index idx = parser.init(content.size(), 4);  // Try to use 4 threads
 
     bool success = parser.parse_speculate(buf.data(), idx, content.size());
 
@@ -1034,7 +1034,7 @@ TEST_F(MultiThreadedFallbackTest, TwoPassFallsBackOnNullPos) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 4);
+    libvroom::index idx = parser.init(content.size(), 4);
 
     bool success = parser.parse_two_pass(buf.data(), idx, content.size());
 
@@ -1049,7 +1049,7 @@ TEST_F(MultiThreadedFallbackTest, TwoPassFallsBackOnNullPos) {
 class DialectIntegrationTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -1060,7 +1060,7 @@ TEST_F(DialectIntegrationTest, ParseWithTSVDialect) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse(buf.data(), idx, content.size(), Dialect::tsv());
 
@@ -1072,7 +1072,7 @@ TEST_F(DialectIntegrationTest, ParseWithSemicolonDialect) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse(buf.data(), idx, content.size(), Dialect::semicolon());
 
@@ -1084,7 +1084,7 @@ TEST_F(DialectIntegrationTest, ParseWithPipeDialect) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse(buf.data(), idx, content.size(), Dialect::pipe());
 
@@ -1096,7 +1096,7 @@ TEST_F(DialectIntegrationTest, ParseWithSingleQuoteDialect) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     Dialect dialect{',', '\'', '\'', true, Dialect::LineEnding::UNKNOWN};
     bool success = parser.parse(buf.data(), idx, content.size(), dialect);
@@ -1111,7 +1111,7 @@ TEST_F(DialectIntegrationTest, ParseWithSingleQuoteDialect) {
 class SecondPassThrowingTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -1122,7 +1122,7 @@ TEST_F(SecondPassThrowingTest, ThrowsOnQuoteInUnquotedField) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     EXPECT_THROW({
         two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(),
@@ -1135,7 +1135,7 @@ TEST_F(SecondPassThrowingTest, ThrowsOnInvalidQuoteEscape) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     EXPECT_THROW({
         two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(),
@@ -1148,7 +1148,7 @@ TEST_F(SecondPassThrowingTest, ValidCSVDoesNotThrow) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     EXPECT_NO_THROW({
         two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(),
@@ -1162,7 +1162,7 @@ TEST_F(SecondPassThrowingTest, CRLineEndingDoesNotThrow) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     EXPECT_NO_THROW({
         auto n_indexes = two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(),
@@ -1178,7 +1178,7 @@ TEST_F(SecondPassThrowingTest, CRLFLineEndingDoesNotThrow) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     EXPECT_NO_THROW({
         auto n_indexes = two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(),
@@ -1193,7 +1193,7 @@ TEST_F(SecondPassThrowingTest, CRInQuotedFieldDoesNotThrow) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     EXPECT_NO_THROW({
         auto n_indexes = two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(),
@@ -1209,7 +1209,7 @@ TEST_F(SecondPassThrowingTest, CRInQuotedFieldDoesNotThrow) {
 class StateMachineEdgeCaseTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -1224,7 +1224,7 @@ TEST_F(StateMachineEdgeCaseTest, AllValidTransitions) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1238,7 +1238,7 @@ TEST_F(StateMachineEdgeCaseTest, EscapedQuoteTransition) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1252,7 +1252,7 @@ TEST_F(StateMachineEdgeCaseTest, NewlineInQuotedField) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1266,7 +1266,7 @@ TEST_F(StateMachineEdgeCaseTest, CommaInQuotedField) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1280,7 +1280,7 @@ TEST_F(StateMachineEdgeCaseTest, QuoteErrorInUnquotedField) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1294,7 +1294,7 @@ TEST_F(StateMachineEdgeCaseTest, InvalidCharAfterClosingQuote) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1308,7 +1308,7 @@ TEST_F(StateMachineEdgeCaseTest, EmptyFieldsAtStart) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1321,7 +1321,7 @@ TEST_F(StateMachineEdgeCaseTest, EmptyFieldsAtEnd) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1333,7 +1333,7 @@ TEST_F(StateMachineEdgeCaseTest, ConsecutiveEmptyFields) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1346,7 +1346,7 @@ TEST_F(StateMachineEdgeCaseTest, EmptyQuotedField) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1357,7 +1357,7 @@ TEST_F(StateMachineEdgeCaseTest, EmptyQuotedField) {
 // Test null byte detection
 TEST_F(StateMachineEdgeCaseTest, NullByteDetection) {
     // Create content with explicit null byte
-    std::vector<uint8_t> buf(32 + SIMDCSV_PADDING, 0);
+    std::vector<uint8_t> buf(32 + LIBVROOM_PADDING, 0);
     const char* data = "a,b";
     std::memcpy(buf.data(), data, 3);
     buf[3] = '\0';  // Null byte
@@ -1366,7 +1366,7 @@ TEST_F(StateMachineEdgeCaseTest, NullByteDetection) {
     size_t content_len = 7;  // "a,b\0,c\n"
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content_len, 1);
+    libvroom::index idx = parser.init(content_len, 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content_len, errors);
@@ -1381,7 +1381,7 @@ TEST_F(StateMachineEdgeCaseTest, CRLineEndingsWithErrors) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1396,7 +1396,7 @@ TEST_F(StateMachineEdgeCaseTest, CRLFLineEndingsWithErrors) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1411,7 +1411,7 @@ TEST_F(StateMachineEdgeCaseTest, CRInQuotedFieldWithErrors) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1426,7 +1426,7 @@ TEST_F(StateMachineEdgeCaseTest, CRInQuotedFieldWithErrors) {
 class QuoteParityTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -1530,7 +1530,7 @@ TEST_F(QuoteParityTest, CustomQuoteCharacter) {
 class MultiThreadedChunkTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -1547,7 +1547,7 @@ TEST_F(MultiThreadedChunkTest, SuccessfulMultiThreadedParsing) {
 
     two_pass parser;
     size_t num_threads = 4;
-    simdcsv::index idx = parser.init(content.size(), num_threads);
+    libvroom::index idx = parser.init(content.size(), num_threads);
 
     bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1563,7 +1563,7 @@ TEST_F(MultiThreadedChunkTest, QuotedFieldsSpanningChunks) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 4);
+    libvroom::index idx = parser.init(content.size(), 4);
 
     bool success = parser.parse_speculate(buf.data(), idx, content.size());
 
@@ -1579,7 +1579,7 @@ TEST_F(MultiThreadedChunkTest, ParseTwoPassMultiThreaded) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 4);
+    libvroom::index idx = parser.init(content.size(), 4);
 
     bool success = parser.parse_two_pass(buf.data(), idx, content.size());
 
@@ -1595,7 +1595,7 @@ TEST_F(MultiThreadedChunkTest, ParseTwoPassWithErrorsMultiThreaded) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 4);
+    libvroom::index idx = parser.init(content.size(), 4);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_two_pass_with_errors(buf.data(), idx, content.size(), errors);
@@ -1617,7 +1617,7 @@ TEST_F(MultiThreadedChunkTest, ErrorsInDifferentChunks) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 4);
+    libvroom::index idx = parser.init(content.size(), 4);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     parser.parse_two_pass_with_errors(buf.data(), idx, content.size(), errors);
@@ -1631,7 +1631,7 @@ TEST_F(MultiThreadedChunkTest, FallbackOnSmallChunks) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 16);  // Too many threads
+    libvroom::index idx = parser.init(content.size(), 16);  // Too many threads
 
     bool success = parser.parse_two_pass(buf.data(), idx, content.size());
 
@@ -1646,7 +1646,7 @@ TEST_F(MultiThreadedChunkTest, NoValidSplitPoints) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 4);
+    libvroom::index idx = parser.init(content.size(), 4);
 
     bool success = parser.parse_speculate(buf.data(), idx, content.size());
 
@@ -1660,7 +1660,7 @@ TEST_F(MultiThreadedChunkTest, NoValidSplitPoints) {
 class SIMDScalarFallbackTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -1672,7 +1672,7 @@ TEST_F(SIMDScalarFallbackTest, VerySmallFile) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1688,7 +1688,7 @@ TEST_F(SIMDScalarFallbackTest, ScalarSizes) {
 
         two_pass parser;
         // Allocate more space than content size for safety margin
-        simdcsv::index idx = parser.init(content.size() + 64, 1);
+        libvroom::index idx = parser.init(content.size() + 64, 1);
 
         bool success = parser.parse(buf.data(), idx, content.size());
         EXPECT_TRUE(success) << "Failed for size " << size;
@@ -1702,7 +1702,7 @@ TEST_F(SIMDScalarFallbackTest, ExactlyOneSIMDBlock) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1716,7 +1716,7 @@ TEST_F(SIMDScalarFallbackTest, ExactlyTwoSIMDBlocks) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1732,7 +1732,7 @@ TEST_F(SIMDScalarFallbackTest, SIMDWithRemainders) {
 
         two_pass parser;
         // Allocate more space for safety margin
-        simdcsv::index idx = parser.init(content.size() + 64, 1);
+        libvroom::index idx = parser.init(content.size() + 64, 1);
 
         bool success = parser.parse(buf.data(), idx, content.size());
         EXPECT_TRUE(success) << "Failed for size " << size;
@@ -1746,7 +1746,7 @@ TEST_F(SIMDScalarFallbackTest, SingleByteRemainder) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1760,7 +1760,7 @@ TEST_F(SIMDScalarFallbackTest, MaxRemainder) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
 
     bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1779,7 +1779,7 @@ TEST_F(SIMDScalarFallbackTest, SecondPassSIMDVariousLengths) {
         auto buf = makeBuffer(content);
 
         two_pass parser;
-        simdcsv::index idx = parser.init(content.size(), 1);
+        libvroom::index idx = parser.init(content.size(), 1);
 
         auto n_indexes = two_pass::second_pass_simd(
             buf.data(), 0, content.size(), &idx, 0, ',', '"');
@@ -1795,7 +1795,7 @@ TEST_F(SIMDScalarFallbackTest, SecondPassSIMDVariousLengths) {
 class ErrorHandlingEdgeCaseTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -1807,7 +1807,7 @@ TEST_F(ErrorHandlingEdgeCaseTest, UnclosedQuoteAtEnd) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1830,7 +1830,7 @@ TEST_F(ErrorHandlingEdgeCaseTest, EmptyHeaderLine) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1852,7 +1852,7 @@ TEST_F(ErrorHandlingEdgeCaseTest, DuplicateColumns) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1873,7 +1873,7 @@ TEST_F(ErrorHandlingEdgeCaseTest, InconsistentFieldCount) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1894,7 +1894,7 @@ TEST_F(ErrorHandlingEdgeCaseTest, MixedLineEndings) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1915,7 +1915,7 @@ TEST_F(ErrorHandlingEdgeCaseTest, StrictModeStopsEarly) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::STRICT);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1931,7 +1931,7 @@ TEST_F(ErrorHandlingEdgeCaseTest, BestEffortMode) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::BEST_EFFORT);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1946,7 +1946,7 @@ TEST_F(ErrorHandlingEdgeCaseTest, NoTrailingNewlineFieldCount) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 1);
+    libvroom::index idx = parser.init(content.size(), 1);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1968,7 +1968,7 @@ TEST_F(ErrorHandlingEdgeCaseTest, NoTrailingNewlineFieldCount) {
 class QuotationStateEdgeCaseTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -2035,7 +2035,7 @@ protected:
 
 // Test destructor with null pointers
 TEST_F(IndexEdgeCaseTest, DestructorWithNullPointers) {
-    simdcsv::index idx;
+    libvroom::index idx;
     // Default constructor leaves pointers as nullptr
     EXPECT_EQ(idx.indexes, nullptr);
     EXPECT_EQ(idx.n_indexes, nullptr);
@@ -2046,9 +2046,9 @@ TEST_F(IndexEdgeCaseTest, DestructorWithNullPointers) {
 // Test move from already-moved object
 TEST_F(IndexEdgeCaseTest, MoveFromMovedObject) {
     two_pass parser;
-    simdcsv::index original = parser.init(100, 2);
-    simdcsv::index first_move(std::move(original));
-    simdcsv::index second_move(std::move(original));  // original is now empty
+    libvroom::index original = parser.init(100, 2);
+    libvroom::index first_move(std::move(original));
+    libvroom::index second_move(std::move(original));  // original is now empty
 
     EXPECT_EQ(second_move.indexes, nullptr);
     EXPECT_EQ(second_move.n_indexes, nullptr);
@@ -2106,7 +2106,7 @@ TEST(GetContextEdgeCaseTest, WithNonPrintable) {
 class CheckFunctionsTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -2132,7 +2132,7 @@ TEST_F(CheckFunctionsTest, DuplicateQuotedColumns) {
 
 // Test check_empty_header with empty buffer
 TEST_F(CheckFunctionsTest, EmptyBufferHeader) {
-    std::vector<uint8_t> buf(SIMDCSV_PADDING, 0);
+    std::vector<uint8_t> buf(LIBVROOM_PADDING, 0);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     bool result = two_pass::check_empty_header(buf.data(), 0, errors);
@@ -2207,7 +2207,7 @@ TEST_F(CheckFunctionsTest, OnlyCR) {
 
 // Test check_field_counts with empty buffer
 TEST_F(CheckFunctionsTest, FieldCountEmptyBuffer) {
-    std::vector<uint8_t> buf(SIMDCSV_PADDING, 0);
+    std::vector<uint8_t> buf(LIBVROOM_PADDING, 0);
     ErrorCollector errors(ErrorMode::PERMISSIVE);
 
     two_pass::check_field_counts(buf.data(), 0, errors, ',', '"');
@@ -2234,7 +2234,7 @@ TEST_F(CheckFunctionsTest, FieldCountQuotedNewlines) {
 class SpeculateEdgeCaseTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -2290,7 +2290,7 @@ TEST_F(SpeculateEdgeCaseTest, QuoteToggling) {
 class BranchlessMultiThreadedTest : public ::testing::Test {
 protected:
     std::vector<uint8_t> makeBuffer(const std::string& content) {
-        std::vector<uint8_t> buf(content.size() + SIMDCSV_PADDING);
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
         std::memcpy(buf.data(), content.data(), content.size());
         return buf;
     }
@@ -2303,7 +2303,7 @@ TEST_F(BranchlessMultiThreadedTest, NullPosFallback) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 8);
+    libvroom::index idx = parser.init(content.size(), 8);
 
     bool success = parser.parse_branchless(buf.data(), idx, content.size());
 
@@ -2320,7 +2320,7 @@ TEST_F(BranchlessMultiThreadedTest, LargeFileMultiThreaded) {
     auto buf = makeBuffer(content);
 
     two_pass parser;
-    simdcsv::index idx = parser.init(content.size(), 4);
+    libvroom::index idx = parser.init(content.size(), 4);
 
     bool success = parser.parse_branchless(buf.data(), idx, content.size());
 

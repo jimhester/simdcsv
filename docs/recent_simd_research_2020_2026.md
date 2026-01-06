@@ -54,7 +54,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 
 **Key Difference**: Mison optimizes for **sparse access** (few fields), simdjson for **dense access** (full document).
 
-### Applicability to simdcsv
+### Applicability to libvroom
 
 **Rating**: LOW-MEDIUM
 
@@ -108,7 +108,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 
 **Key Difference**: Sparser **avoids parsing** most data; simdjson parses everything faster.
 
-### Applicability to simdcsv
+### Applicability to libvroom
 
 **Rating**: LOW for core CSV parsing, MEDIUM-HIGH for future query integration
 
@@ -128,7 +128,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 **NO for core parser, YES for future query layer**
 
 **Rationale**:
-- Core simdcsv: Focus on fast full-file parsing (simdjson approach)
+- Core libvroom: Focus on fast full-file parsing (simdjson approach)
 - Future enhancement: Add optional RF layer for query workloads (post-1.0)
 - Not applicable to Phase 1-3 (vroom integration)
 
@@ -136,7 +136,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 
 **LOW** for Phase 1-3, **MEDIUM** for future (post-1.0)
 
-### Novel Idea for simdcsv
+### Novel Idea for libvroom
 
 **Structure-Aware Raw Filters**:
 - Combine Sparser's filtering with simdjson's structural indexing
@@ -181,7 +181,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 | **Complexity** | Medium | High |
 | **Risk** | Low | Medium (must benchmark) |
 
-### Applicability to simdcsv
+### Applicability to libvroom
 
 **Rating**: MEDIUM (worthwhile, but not critical)
 
@@ -254,7 +254,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 | **Hardware** | Graviton 3+, Apple M-series, Neoverse V1+ | Intel Ice Lake+, AMD Zen 4+ |
 | **Downclocking** | **None reported** | **Severe on older Intel** |
 
-### Applicability to simdcsv
+### Applicability to libvroom
 
 **Rating**: MEDIUM-HIGH (for ARM support)
 
@@ -306,7 +306,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 - Industry implementations (DuckDB, Sep) use similar speculative approaches
 - **Conclusion**: 2019 research still state-of-the-art for parallel CSV parsing
 
-### Applicability to simdcsv
+### Applicability to libvroom
 
 **Rating**: MEDIUM (already incorporated)
 
@@ -343,7 +343,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 
 **Insight**: **Proves simdjson techniques translate directly to CSV with excellent results**
 
-### Applicability to simdcsv
+### Applicability to libvroom
 
 **Rating**: HIGH (validation)
 
@@ -379,7 +379,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 
 **Performance**: Undisclosed (marketing claims "world's fastest")
 
-### Applicability to simdcsv
+### Applicability to libvroom
 
 **Rating**: MEDIUM (competitor, validates SIMD CSV market)
 
@@ -413,16 +413,16 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
    - CSV reader **only 2x slower than Parquet** (Feb 2024)
    - **15% speedup** in parallel newline finding (Feb 2025, v1.2.0)
 
-### Comparison to simdcsv (planned)
+### Comparison to libvroom (planned)
 
-| Aspect | DuckDB | simdcsv (planned) |
+| Aspect | DuckDB | libvroom (planned) |
 |--------|--------|-------------------|
 | **SIMD** | Compiler auto-vectorization | Explicit SIMD intrinsics (AVX2/AVX-512) |
 | **Performance** | 2x slower than Parquet | Target: Match/exceed DuckDB |
 | **Portability** | High (compiler handles SIMD) | Medium (manual porting) |
 | **Optimization** | Easier to maintain | Higher performance ceiling |
 
-### Applicability to simdcsv
+### Applicability to libvroom
 
 **Rating**: HIGH (validation)
 
@@ -438,7 +438,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 **Rationale**:
 - DuckDB's auto-vectorization is conservative (compiler limitations)
 - Explicit SIMD (simdjson approach) can achieve **higher performance ceiling**
-- simdcsv's index-based output better suited for vroom than DuckDB's columnar output
+- libvroom's index-based output better suited for vroom than DuckDB's columnar output
 
 **Takeaway**: DuckDB validates CSV parsing is critical, benchmark against DuckDB as baseline
 
@@ -457,12 +457,12 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 - **5x speedup** vs traditional row-based readers (2022 benchmark)
 - Recent optimizations (2025): BYTE_STREAM_SPLIT, fixed-length arrays 3x faster
 
-### Applicability to simdcsv
+### Applicability to libvroom
 
 **Rating**: MEDIUM
 
 **Why Medium**:
-- Arrow's columnar format differs from simdcsv's index-based output
+- Arrow's columnar format differs from libvroom's index-based output
 - SIMD techniques applicable, but different data model
 - Validates SIMD + columnar is industry standard
 
@@ -500,7 +500,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 
 1. **Langdale & Lemire Two-Stage SIMD** (Phase 2)
    - ✅ Validated by Sep (21 GB/s), DuckDB, Arrow
-   - Expected 2-4x speedup for simdcsv
+   - Expected 2-4x speedup for libvroom
    - **Status**: Confirmed as highest-priority optimization
    - **Target**: >5 GB/s AVX2, >8 GB/s AVX-512
 
@@ -545,7 +545,7 @@ After comprehensive research of work from 2020-2026, **no superior approach to s
 8. **Compiler Auto-Vectorization** (DuckDB approach)
    - **Trade-off**: Easier maintenance vs lower performance ceiling
    - **Decision**: Stick with explicit SIMD for maximum performance
-   - **Rationale**: simdcsv targets high-performance niche (vroom integration)
+   - **Rationale**: libvroom targets high-performance niche (vroom integration)
 
 ---
 
@@ -659,31 +659,31 @@ Based on this research review, the following GitHub issues have been created to 
 
 ### High Priority
 
-- **Issue #39**: [PCLMULQDQ-based Quote Mask](https://github.com/jimhester/simdcsv/issues/39)
+- **Issue #39**: [PCLMULQDQ-based Quote Mask](https://github.com/jimhester/libvroom/issues/39)
   - Replace scalar loop in `find_quote_mask` with carryless multiply
   - Expected: 2-4x speedup in quote handling
 
-- **Issue #41**: [Branchless CSV State Machine](https://github.com/jimhester/simdcsv/issues/41)
+- **Issue #41**: [Branchless CSV State Machine](https://github.com/jimhester/libvroom/issues/41)
   - Replace switch-based state machine with lookup tables
   - Expected: Eliminate 90%+ branches
 
 ### Medium Priority
 
-- **Issue #40**: [AVX-512 with Runtime Selection](https://github.com/jimhester/simdcsv/issues/40)
+- **Issue #40**: [AVX-512 with Runtime Selection](https://github.com/jimhester/libvroom/issues/40)
   - Add AVX-512 support with automatic fallback to AVX2
   - Expected: 25-40% speedup on compatible hardware
 
-- **Issue #42**: [ARM NEON/SVE Optimization](https://github.com/jimhester/simdcsv/issues/42)
+- **Issue #42**: [ARM NEON/SVE Optimization](https://github.com/jimhester/libvroom/issues/42)
   - Benchmark and optimize for Apple Silicon and Graviton
   - Expected: 5-10 GB/s on modern ARM
 
-- **Issue #44**: [SIMD Number Parsing](https://github.com/jimhester/simdcsv/issues/44)
+- **Issue #44**: [SIMD Number Parsing](https://github.com/jimhester/libvroom/issues/44)
   - Add SIMD-accelerated integer, float, and timestamp parsing
   - Expected: 5-10x speedup in type inference
 
 ### Low Priority (Post-1.0)
 
-- **Issue #43**: [Structure-Aware Raw Filters](https://github.com/jimhester/simdcsv/issues/43)
+- **Issue #43**: [Structure-Aware Raw Filters](https://github.com/jimhester/libvroom/issues/43)
   - Sparser-style filtering for query pushdown
   - Expected: 10-22x speedup on selective queries
 

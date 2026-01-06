@@ -4,17 +4,17 @@ title: "Benchmarks"
 
 ## Overview
 
-simdcsv includes a comprehensive benchmark suite for measuring parsing performance across different dimensions: file sizes, column counts, thread scaling, and data types.
+libvroom includes a comprehensive benchmark suite for measuring parsing performance across different dimensions: file sizes, column counts, thread scaling, and data types.
 
-## Comparative Performance: simdcsv vs zsv
+## Comparative Performance: libvroom vs zsv
 
-The following benchmarks compare simdcsv against [zsv](https://github.com/liquidaty/zsv), a high-performance CSV parser. Tests were run on Apple Silicon (M3 Max, 14 cores) using `hyperfine` for accurate measurements.
+The following benchmarks compare libvroom against [zsv](https://github.com/liquidaty/zsv), a high-performance CSV parser. Tests were run on Apple Silicon (M3 Max, 14 cores) using `hyperfine` for accurate measurements.
 
 ### Single-Threaded Performance
 
-simdcsv's SIMD-optimized parsing provides significant speedups over zsv in single-threaded mode:
+libvroom's SIMD-optimized parsing provides significant speedups over zsv in single-threaded mode:
 
-| File Size | simdcsv Time | simdcsv Throughput | zsv Time | zsv Throughput | Speedup |
+| File Size | libvroom Time | libvroom Throughput | zsv Time | zsv Throughput | Speedup |
 |-----------|--------------|-------------------|----------|----------------|---------|
 | 10 MB | 3.2 ms | 3.1 GB/s | 12.7 ms | 787 MB/s | **4.0x** |
 | 50 MB | 12.6 ms | 4.0 GB/s | 54.3 ms | 921 MB/s | **4.3x** |
@@ -23,7 +23,7 @@ simdcsv's SIMD-optimized parsing provides significant speedups over zsv in singl
 
 Key observations:
 
-- simdcsv achieves **3-5 GB/s** single-threaded throughput on Apple Silicon
+- libvroom achieves **3-5 GB/s** single-threaded throughput on Apple Silicon
 - Performance advantage increases with file size (4.0x at 10MB to 4.9x at 200MB)
 - Larger files benefit more from SIMD vectorization as memory bandwidth becomes the bottleneck
 
@@ -33,18 +33,18 @@ Both parsers support multi-threaded parsing. Here's how they compare at 100MB:
 
 | Parser | Configuration | Time | Throughput |
 |--------|---------------|------|------------|
-| simdcsv | 1 thread | 22.9 ms | 4.4 GB/s |
-| simdcsv | 4 threads | 18.2 ms | 5.5 GB/s |
-| simdcsv | 8 threads | 18.0 ms | 5.6 GB/s |
+| libvroom | 1 thread | 22.9 ms | 4.4 GB/s |
+| libvroom | 4 threads | 18.2 ms | 5.5 GB/s |
+| libvroom | 8 threads | 18.0 ms | 5.6 GB/s |
 | zsv | 1 thread | 105.2 ms | 951 MB/s |
 | zsv | 4 threads | 31.3 ms | 3.2 GB/s |
 | zsv | --parallel (auto) | 16.1 ms | 6.2 GB/s |
 
 For multi-threaded workloads:
 
-- simdcsv's single-threaded performance often matches or exceeds multi-threaded zsv
+- libvroom's single-threaded performance often matches or exceeds multi-threaded zsv
 - zsv's `--parallel` mode with auto-detection is highly optimized for its architecture
-- At 4 threads, simdcsv is **1.7x faster** than zsv (18.2 ms vs 31.3 ms)
+- At 4 threads, libvroom is **1.7x faster** than zsv (18.2 ms vs 31.3 ms)
 
 ## Performance Summary
 
@@ -77,7 +77,7 @@ For large files (100MB+), multi-threading provides meaningful speedups:
 
 ### 100MB File
 
-| Threads | simdcsv Time | Throughput | Scaling |
+| Threads | libvroom Time | Throughput | Scaling |
 |---------|--------------|------------|---------|
 | 1 | 22.9 ms | 4.4 GB/s | 1.00x |
 | 2 | 19.9 ms | 5.0 GB/s | 1.15x |
@@ -86,7 +86,7 @@ For large files (100MB+), multi-threading provides meaningful speedups:
 
 ### 200MB File
 
-| Threads | simdcsv Time | Throughput | Scaling |
+| Threads | libvroom Time | Throughput | Scaling |
 |---------|--------------|------------|---------|
 | 1 | 42.4 ms | 4.7 GB/s | 1.00x |
 | 4 | 33.5 ms | 6.0 GB/s | 1.27x |
@@ -109,24 +109,24 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 
 # Run all benchmarks
-./build/simdcsv_benchmark
+./build/libvroom_benchmark
 
 # Run specific benchmark categories
-./build/simdcsv_benchmark --benchmark_filter="BM_Parse.*"
-./build/simdcsv_benchmark --benchmark_filter="BM_FileSizes.*"
+./build/libvroom_benchmark --benchmark_filter="BM_Parse.*"
+./build/libvroom_benchmark --benchmark_filter="BM_FileSizes.*"
 ```
 
 ### Output Formats
 
 ```bash
 # Console output (default)
-./build/simdcsv_benchmark
+./build/libvroom_benchmark
 
 # JSON output for analysis
-./build/simdcsv_benchmark --benchmark_format=json --benchmark_out=results.json
+./build/libvroom_benchmark --benchmark_format=json --benchmark_out=results.json
 
 # CSV output
-./build/simdcsv_benchmark --benchmark_format=csv --benchmark_out=results.csv
+./build/libvroom_benchmark --benchmark_format=csv --benchmark_out=results.csv
 ```
 
 ### Automated Benchmarking
@@ -134,7 +134,7 @@ cmake --build build
 Use the benchmark script for comprehensive testing:
 
 ```bash
-./benchmark/run_benchmarks.sh ./build/simdcsv_benchmark
+./benchmark/run_benchmarks.sh ./build/libvroom_benchmark
 ```
 
 This runs all benchmark categories and generates reports in `benchmark_results/`.
@@ -213,7 +213,7 @@ The benchmark suite includes comparison benchmarks against:
 To run comparison benchmarks:
 
 ```bash
-./build/simdcsv_benchmark --benchmark_filter="BM_Compare.*"
+./build/libvroom_benchmark --benchmark_filter="BM_Compare.*"
 ```
 
 ## CI Integration
@@ -222,7 +222,7 @@ Benchmarks can be integrated into CI pipelines:
 
 ```bash
 # Run with regression detection
-./benchmark/run_benchmarks.sh ./build/simdcsv_benchmark results/ baseline.json 10.0
+./benchmark/run_benchmarks.sh ./build/libvroom_benchmark results/ baseline.json 10.0
 
 # Exit code indicates regression if threshold exceeded
 if [ $? -ne 0 ]; then
@@ -262,17 +262,17 @@ To reproduce the comparative benchmarks on your system:
 # Install dependencies (macOS)
 brew install zsv hyperfine
 
-# Build simdcsv
+# Build libvroom
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 
 # Generate test files
-TEMP_DIR="/tmp/simdcsv_benchmark"
+TEMP_DIR="/tmp/libvroom_benchmark"
 mkdir -p "$TEMP_DIR"
 
 # Run comparative benchmark (example: 100MB)
 hyperfine --warmup 2 \
-  "./build/scsv count -t 1 $TEMP_DIR/test_100mb.csv" \
+  "./build/vroom count -t 1 $TEMP_DIR/test_100mb.csv" \
   "zsv count $TEMP_DIR/test_100mb.csv"
 ```
 

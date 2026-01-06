@@ -1,15 +1,15 @@
-#ifndef SIMDCSV_COMMON_DEFS_H
-#define SIMDCSV_COMMON_DEFS_H
+#ifndef LIBVROOM_COMMON_DEFS_H
+#define LIBVROOM_COMMON_DEFS_H
 
 #include <cassert>
 
 // the input buf should be readable up to buf + SIMDJSON_PADDING
 #ifdef __AVX2__
-#define SIMDCSV_PADDING  sizeof(__m256i)
+#define LIBVROOM_PADDING  sizeof(__m256i)
 #else
 // this is a stopgap; there should be a better description of the
 // main loop and its behavior that abstracts over this
-#define SIMDCSV_PADDING  32
+#define LIBVROOM_PADDING  32
 #endif
 
 

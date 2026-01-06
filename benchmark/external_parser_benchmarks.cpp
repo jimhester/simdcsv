@@ -1,5 +1,5 @@
 // External CSV Parser Benchmarks
-// Compares simdcsv against best-in-class CSV parsers: DuckDB, zsv, and Apache Arrow
+// Compares libvroom against best-in-class CSV parsers: DuckDB, zsv, and Apache Arrow
 //
 // =============================================================================
 // HOW TO ENABLE AND RUN EXTERNAL PARSER BENCHMARKS
@@ -23,8 +23,8 @@
 //
 // Build and run:
 //   cmake --build build
-//   ./build/simdcsv_benchmark --benchmark_filter="BM_external"
-//   ./build/simdcsv_benchmark --benchmark_filter="BM_fair_comparison"
+//   ./build/libvroom_benchmark --benchmark_filter="BM_external"
+//   ./build/libvroom_benchmark --benchmark_filter="BM_fair_comparison"
 //
 // =============================================================================
 // IMPLEMENTATION NOTES
@@ -189,7 +189,7 @@ private:
 #endif
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern simdcsv::two_pass* global_parser;
+extern libvroom::two_pass* global_parser;
 
 // ============================================================================
 // Test Data Generation
@@ -290,15 +290,15 @@ static const std::string& get_or_generate_quoted_data(size_t size) {
 }
 
 // ============================================================================
-// simdcsv Parser (baseline)
+// libvroom Parser (baseline)
 // ============================================================================
 
-static size_t parse_simdcsv(const uint8_t* data, size_t len) {
+static size_t parse_libvroom(const uint8_t* data, size_t len) {
     if (!global_parser) {
-        global_parser = new simdcsv::two_pass();
+        global_parser = new libvroom::two_pass();
     }
 
-    simdcsv::index result = global_parser->init(len, 1);
+    libvroom::index result = global_parser->init(len, 1);
     global_parser->parse(data, result, len);
 
     // Return total field count as work indicator
@@ -326,16 +326,16 @@ struct ZsvParseContext {
     const uint8_t* base_ptr;  // Base pointer to calculate offsets
     size_t row_count = 0;
     size_t cell_count = 0;
-    // Index vector to store cell positions - similar to simdcsv's index
+    // Index vector to store cell positions - similar to libvroom's index
     std::vector<uint64_t>* index_storage;
 };
 
-// Row handler that builds an index of all cell positions (like simdcsv)
+// Row handler that builds an index of all cell positions (like libvroom)
 static void zsv_row_handler_with_index(void* ctx) {
     auto* context = static_cast<ZsvParseContext*>(ctx);
     context->row_count++;
 
-    // Get and iterate through all cells - this is the work simdcsv does
+    // Get and iterate through all cells - this is the work libvroom does
     // when it builds its field index
     size_t cell_count = zsv_cell_count(context->parser);
     size_t write_pos = context->cell_count;
@@ -346,13 +346,13 @@ static void zsv_row_handler_with_index(void* ctx) {
         context->index_storage->resize((write_pos + cell_count) * 2);
     }
 
-    // Write to index array (like simdcsv does)
+    // Write to index array (like libvroom does)
     uint64_t* positions = context->index_storage->data();
     for (size_t i = 0; i < cell_count; i++, write_pos++) {
         struct zsv_cell cell = zsv_get_cell(context->parser, i);
-        // Calculate byte offset from start of data - this is what simdcsv stores
+        // Calculate byte offset from start of data - this is what libvroom stores
         uint64_t offset = static_cast<uint64_t>(cell.str - context->base_ptr);
-        // Write to index array - this is the key work that simdcsv does
+        // Write to index array - this is the key work that libvroom does
         positions[write_pos] = offset;
     }
 }
@@ -382,7 +382,7 @@ static size_t parse_zsv(const uint8_t* data, size_t len) {
     ctx.index_storage = &zsv_index_storage;
     ZsvMemoryStream mem_stream = {data, len, 0};
 
-    // Pre-allocate index array - estimate ~1 cell per 8 bytes (similar to simdcsv)
+    // Pre-allocate index array - estimate ~1 cell per 8 bytes (similar to libvroom)
     size_t estimated_cells = len / 8;
     if (zsv_index_storage.size() < estimated_cells) {
         zsv_index_storage.resize(estimated_cells);
@@ -418,7 +418,7 @@ static size_t parse_zsv(const uint8_t* data, size_t len) {
     benchmark::DoNotOptimize(zsv_index_storage.data());
     benchmark::ClobberMemory();
 
-    // Return cell count as work indicator (similar to simdcsv field count)
+    // Return cell count as work indicator (similar to libvroom field count)
     return ctx.cell_count;
 }
 
@@ -517,19 +517,19 @@ static size_t parse_arrow(const uint8_t* data, size_t len) {
 // Benchmark Functions
 // ============================================================================
 
-// Benchmark simdcsv with generated data
-static void BM_simdcsv_generated(benchmark::State& state) {
+// Benchmark libvroom with generated data
+static void BM_libvroom_generated(benchmark::State& state) {
     size_t data_size = static_cast<size_t>(state.range(0));
     const std::string& csv_data = get_or_generate_data(data_size);
 
-    // Allocate padded buffer for simdcsv
-    size_t padded_size = csv_data.size() + SIMDCSV_PADDING;
+    // Allocate padded buffer for libvroom
+    size_t padded_size = csv_data.size() + LIBVROOM_PADDING;
     auto* buffer = static_cast<uint8_t*>(aligned_malloc(64, padded_size));
     memcpy(buffer, csv_data.data(), csv_data.size());
-    memset(buffer + csv_data.size(), 0, SIMDCSV_PADDING);
+    memset(buffer + csv_data.size(), 0, LIBVROOM_PADDING);
 
     for (auto _ : state) {
-        size_t result = parse_simdcsv(buffer, csv_data.size());
+        size_t result = parse_libvroom(buffer, csv_data.size());
         benchmark::DoNotOptimize(result);
     }
 
@@ -537,7 +537,7 @@ static void BM_simdcsv_generated(benchmark::State& state) {
 
     state.SetBytesProcessed(static_cast<int64_t>(csv_data.size() * state.iterations()));
     state.counters["FileSize_MB"] = static_cast<double>(csv_data.size()) / (1024.0 * 1024.0);
-    state.counters["Parser"] = 0; // simdcsv = 0
+    state.counters["Parser"] = 0; // libvroom = 0
 }
 
 #ifdef HAVE_ZSV
@@ -592,17 +592,17 @@ static void BM_arrow_generated(benchmark::State& state) {
 // Quoted CSV Benchmarks
 // ============================================================================
 
-static void BM_simdcsv_quoted(benchmark::State& state) {
+static void BM_libvroom_quoted(benchmark::State& state) {
     size_t data_size = static_cast<size_t>(state.range(0));
     const std::string& csv_data = get_or_generate_quoted_data(data_size);
 
-    size_t padded_size = csv_data.size() + SIMDCSV_PADDING;
+    size_t padded_size = csv_data.size() + LIBVROOM_PADDING;
     auto* buffer = static_cast<uint8_t*>(aligned_malloc(64, padded_size));
     memcpy(buffer, csv_data.data(), csv_data.size());
-    memset(buffer + csv_data.size(), 0, SIMDCSV_PADDING);
+    memset(buffer + csv_data.size(), 0, LIBVROOM_PADDING);
 
     for (auto _ : state) {
-        size_t result = parse_simdcsv(buffer, csv_data.size());
+        size_t result = parse_libvroom(buffer, csv_data.size());
         benchmark::DoNotOptimize(result);
     }
 
@@ -662,18 +662,18 @@ static void BM_fair_comparison(benchmark::State& state) {
 
     const std::string& csv_data = get_or_generate_data(data_size);
 
-    // Prepare simdcsv buffer (with padding)
-    size_t padded_size = csv_data.size() + SIMDCSV_PADDING;
+    // Prepare libvroom buffer (with padding)
+    size_t padded_size = csv_data.size() + LIBVROOM_PADDING;
     auto* padded_buffer = static_cast<uint8_t*>(aligned_malloc(64, padded_size));
     memcpy(padded_buffer, csv_data.data(), csv_data.size());
-    memset(padded_buffer + csv_data.size(), 0, SIMDCSV_PADDING);
+    memset(padded_buffer + csv_data.size(), 0, LIBVROOM_PADDING);
 
     const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(csv_data.data());
 
     switch (parser_type) {
         case ParserType::SIMDCSV: {
             for (auto _ : state) {
-                size_t result = parse_simdcsv(padded_buffer, csv_data.size());
+                size_t result = parse_libvroom(padded_buffer, csv_data.size());
                 benchmark::DoNotOptimize(result);
             }
             break;
@@ -720,7 +720,7 @@ static void BM_fair_comparison(benchmark::State& state) {
 // Helper to get parser name for labels
 static std::string GetParserName(int parser_id) {
     switch (static_cast<ParserType>(parser_id)) {
-        case ParserType::SIMDCSV: return "simdcsv";
+        case ParserType::SIMDCSV: return "libvroom";
         case ParserType::ZSV: return "zsv";
         case ParserType::DUCKDB: return "duckdb";
         case ParserType::ARROW: return "arrow";
@@ -735,16 +735,16 @@ static std::string GetParserName(int parser_id) {
 // Benchmark data sizes: 1KB, 10KB, 100KB, 1MB, 10MB, 100MB (powers of 10)
 #define BENCHMARK_CSV_SIZES_1KB_TO_100MB Range(1024, 100 * 1024 * 1024)->RangeMultiplier(10)
 
-// Register simdcsv benchmarks (always available)
-BENCHMARK(BM_simdcsv_generated)
+// Register libvroom benchmarks (always available)
+BENCHMARK(BM_libvroom_generated)
     ->BENCHMARK_CSV_SIZES_1KB_TO_100MB
     ->Unit(benchmark::kMillisecond)
-    ->Name("BM_external/simdcsv/generated");
+    ->Name("BM_external/libvroom/generated");
 
-BENCHMARK(BM_simdcsv_quoted)
+BENCHMARK(BM_libvroom_quoted)
     ->BENCHMARK_CSV_SIZES_1KB_TO_100MB
     ->Unit(benchmark::kMillisecond)
-    ->Name("BM_external/simdcsv/quoted");
+    ->Name("BM_external/libvroom/quoted");
 
 // Register zsv benchmarks
 #ifdef HAVE_ZSV
@@ -791,7 +791,7 @@ static void RegisterFairComparisonBenchmarks() {
         100 * 1024 * 1024   // 100MB
     };
 
-    std::vector<int> parsers = {0}; // simdcsv always available
+    std::vector<int> parsers = {0}; // libvroom always available
 #ifdef HAVE_ZSV
     parsers.push_back(1);
 #endif
@@ -810,17 +810,17 @@ static void RegisterFairComparisonBenchmarks() {
                 [size, parser](benchmark::State& state) {
                     const std::string& csv_data = get_or_generate_data(size);
 
-                    size_t padded_size = csv_data.size() + SIMDCSV_PADDING;
+                    size_t padded_size = csv_data.size() + LIBVROOM_PADDING;
                     auto* padded_buffer = static_cast<uint8_t*>(aligned_malloc(64, padded_size));
                     memcpy(padded_buffer, csv_data.data(), csv_data.size());
-                    memset(padded_buffer + csv_data.size(), 0, SIMDCSV_PADDING);
+                    memset(padded_buffer + csv_data.size(), 0, LIBVROOM_PADDING);
 
                     const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(csv_data.data());
 
                     switch (static_cast<ParserType>(parser)) {
                         case ParserType::SIMDCSV: {
                             for (auto _ : state) {
-                                size_t result = parse_simdcsv(padded_buffer, csv_data.size());
+                                size_t result = parse_libvroom(padded_buffer, csv_data.size());
                                 benchmark::DoNotOptimize(result);
                             }
                             break;

@@ -2,11 +2,11 @@
  * @file two_pass.h
  * @brief Internal implementation of the high-performance CSV parser.
  *
- * @warning **Do not include this header directly.** Use `#include "simdcsv.h"`
+ * @warning **Do not include this header directly.** Use `#include "libvroom.h"`
  *          and the `Parser` class instead. This header contains internal
  *          implementation details that may change without notice.
  *
- * This header provides the core parsing functionality of the simdcsv library.
+ * This header provides the core parsing functionality of the libvroom library.
  * The parser uses a speculative multi-threaded two-pass algorithm based on
  * research by Chang et al. (SIGMOD 2019) combined with SIMD techniques from
  * Langdale & Lemire (simdjson).
@@ -14,19 +14,19 @@
  * ## Recommended Usage
  *
  * ```cpp
- * #include "simdcsv.h"
+ * #include "libvroom.h"
  *
- * simdcsv::Parser parser(num_threads);
+ * libvroom::Parser parser(num_threads);
  *
  * // Auto-detect dialect, throw on errors (simplest)
  * auto result = parser.parse(buf, len);
  *
  * // With error collection
- * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+ * libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
  * auto result = parser.parse(buf, len, {.errors = &errors});
  *
  * // Explicit dialect
- * auto result = parser.parse(buf, len, {.dialect = simdcsv::Dialect::tsv()});
+ * auto result = parser.parse(buf, len, {.dialect = libvroom::Dialect::tsv()});
  * ```
  *
  * ## Algorithm Overview
@@ -40,9 +40,9 @@
  * 3. **Second Pass**: SIMD-based field indexing using a state machine. Processes
  *    64 bytes at a time using Google Highway portable SIMD intrinsics.
  *
- * @see simdcsv::Parser for the unified public API
- * @see simdcsv::ParseOptions for configuration options
- * @see simdcsv::index for the result structure containing field positions
+ * @see libvroom::Parser for the unified public API
+ * @see libvroom::ParseOptions for configuration options
+ * @see libvroom::index for the result structure containing field positions
  */
 
 #include <unistd.h>  // for getopt
@@ -62,33 +62,33 @@
 
 // Deprecation macro for cross-compiler support
 #if defined(__GNUC__) || defined(__clang__)
-    #define SIMDCSV_DEPRECATED(msg) __attribute__((deprecated(msg)))
+    #define LIBVROOM_DEPRECATED(msg) __attribute__((deprecated(msg)))
 #elif defined(_MSC_VER)
-    #define SIMDCSV_DEPRECATED(msg) __declspec(deprecated(msg))
+    #define LIBVROOM_DEPRECATED(msg) __declspec(deprecated(msg))
 #else
-    #define SIMDCSV_DEPRECATED(msg)
+    #define LIBVROOM_DEPRECATED(msg)
 #endif
 
 // Macro to suppress deprecation warnings for internal use
 // (Parser class needs to call deprecated methods)
 #ifdef __GNUC__
-    #define SIMDCSV_SUPPRESS_DEPRECATION_START \
+    #define LIBVROOM_SUPPRESS_DEPRECATION_START \
         _Pragma("GCC diagnostic push") \
         _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
-    #define SIMDCSV_SUPPRESS_DEPRECATION_END \
+    #define LIBVROOM_SUPPRESS_DEPRECATION_END \
         _Pragma("GCC diagnostic pop")
 #elif defined(_MSC_VER)
-    #define SIMDCSV_SUPPRESS_DEPRECATION_START \
+    #define LIBVROOM_SUPPRESS_DEPRECATION_START \
         __pragma(warning(push)) \
         __pragma(warning(disable: 4996))
-    #define SIMDCSV_SUPPRESS_DEPRECATION_END \
+    #define LIBVROOM_SUPPRESS_DEPRECATION_END \
         __pragma(warning(pop))
 #else
-    #define SIMDCSV_SUPPRESS_DEPRECATION_START
-    #define SIMDCSV_SUPPRESS_DEPRECATION_END
+    #define LIBVROOM_SUPPRESS_DEPRECATION_START
+    #define LIBVROOM_SUPPRESS_DEPRECATION_END
 #endif
 
-namespace simdcsv {
+namespace libvroom {
 
 /// Sentinel value indicating an invalid or unset position.
 constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
@@ -113,8 +113,8 @@ constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
  * @example
  * @code
  * // Create parser and initialize index
- * simdcsv::two_pass parser;
- * simdcsv::index idx = parser.init(buffer_length, num_threads);
+ * libvroom::two_pass parser;
+ * libvroom::index idx = parser.init(buffer_length, num_threads);
  *
  * // Parse the CSV data
  * parser.parse(buffer, idx, buffer_length);
@@ -282,17 +282,17 @@ class index {
  * #include "io_util.h"
  *
  * // Load CSV file with SIMD-aligned padding
- * auto [buffer, length] = simdcsv::load_file("data.csv");
+ * auto [buffer, length] = libvroom::load_file("data.csv");
  *
  * // Create parser and initialize index
- * simdcsv::two_pass parser;
- * simdcsv::index idx = parser.init(length, 4);  // 4 threads
+ * libvroom::two_pass parser;
+ * libvroom::index idx = parser.init(length, 4);  // 4 threads
  *
  * // Parse without error collection (throws on error)
  * parser.parse(buffer, idx, length);
  *
  * // Or parse with error collection
- * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+ * libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
  * bool success = parser.parse_with_errors(buffer, idx, length, errors);
  *
  * if (!success || errors.error_count() > 0) {
@@ -497,7 +497,7 @@ class two_pass {
   static stats first_pass_speculate(const uint8_t* buf, size_t start, size_t end,
                                     char delimiter = ',', char quote_char = '"') {
     auto is_quoted = get_quotation_state(buf, start, delimiter, quote_char);
-#ifndef SIMDCSV_BENCHMARK_MODE
+#ifndef LIBVROOM_BENCHMARK_MODE
     printf("start: %lu\tis_ambigious: %s\tstate: %s\n", start,
            is_quoted == AMBIGUOUS ? "true" : "false",
            is_quoted == QUOTED ? "quoted" : "unquoted");
@@ -591,7 +591,7 @@ class two_pass {
   static uint64_t second_pass_simd_branchless(const BranchlessStateMachine& sm,
                                                const uint8_t* buf, size_t start, size_t end,
                                                index* out, size_t thread_id) {
-    return simdcsv::second_pass_simd_branchless(
+    return libvroom::second_pass_simd_branchless(
         sm, buf, start, end, out->indexes, thread_id, out->n_threads);
   }
 
@@ -924,7 +924,7 @@ class two_pass {
    * @deprecated Use Parser::parse() with ParseOptions{.algorithm = ParseAlgorithm::SPECULATIVE}
    *             instead. This method will be made private in a future version.
    */
-  SIMDCSV_DEPRECATED("Use Parser::parse() with ParseAlgorithm::SPECULATIVE instead")
+  LIBVROOM_DEPRECATED("Use Parser::parse() with ParseAlgorithm::SPECULATIVE instead")
   bool parse_speculate(const uint8_t* buf, index& out, size_t len,
                        const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
@@ -957,14 +957,14 @@ class two_pass {
     }
 
     auto st = first_pass_fut[0].get();
-#ifndef SIMDCSV_BENCHMARK_MODE
+#ifndef LIBVROOM_BENCHMARK_MODE
     printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
            st.first_even_nl, st.first_odd_nl, st.n_quotes);
 #endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef SIMDCSV_BENCHMARK_MODE
+#ifndef LIBVROOM_BENCHMARK_MODE
       printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
              st.first_even_nl, st.first_odd_nl, st.n_quotes);
 #endif
@@ -1002,7 +1002,7 @@ class two_pass {
    * @deprecated Use Parser::parse() with ParseOptions{.algorithm = ParseAlgorithm::TWO_PASS}
    *             instead. This method will be made private in a future version.
    */
-  SIMDCSV_DEPRECATED("Use Parser::parse() with ParseAlgorithm::TWO_PASS instead")
+  LIBVROOM_DEPRECATED("Use Parser::parse() with ParseAlgorithm::TWO_PASS instead")
   bool parse_two_pass(const uint8_t* buf, index& out, size_t len,
                       const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
@@ -1036,14 +1036,14 @@ class two_pass {
 
     auto st = first_pass_fut[0].get();
     size_t n_quotes = st.n_quotes;
-#ifndef SIMDCSV_BENCHMARK_MODE
+#ifndef LIBVROOM_BENCHMARK_MODE
     printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
            st.first_even_nl, st.first_odd_nl, st.n_quotes);
 #endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef SIMDCSV_BENCHMARK_MODE
+#ifndef LIBVROOM_BENCHMARK_MODE
       printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
              st.first_even_nl, st.first_odd_nl, st.n_quotes);
 #endif
@@ -1102,11 +1102,11 @@ class two_pass {
    * @note The buffer should be loaded using io_util.h functions which ensure
    *       proper SIMD-aligned padding.
    *
-   * @deprecated Use Parser::parse() from simdcsv.h instead. The Parser class
+   * @deprecated Use Parser::parse() from libvroom.h instead. The Parser class
    *             provides a simpler, unified API with automatic index management.
    *             Example:
    *             ```cpp
-   *             simdcsv::Parser parser(num_threads);
+   *             libvroom::Parser parser(num_threads);
    *             auto result = parser.parse(buf, len, {.dialect = dialect});
    *             ```
    *
@@ -1114,12 +1114,12 @@ class two_pass {
    * @see parse_with_errors() For single-threaded parsing with error collection.
    * @see parse_two_pass_with_errors() For multi-threaded parsing with error collection.
    */
-  SIMDCSV_DEPRECATED("Use Parser::parse() from simdcsv.h instead")
+  LIBVROOM_DEPRECATED("Use Parser::parse() from libvroom.h instead")
   bool parse(const uint8_t* buf, index& out, size_t len,
              const Dialect& dialect = Dialect::csv()) {
-    SIMDCSV_SUPPRESS_DEPRECATION_START
+    LIBVROOM_SUPPRESS_DEPRECATION_START
     return parse_speculate(buf, out, len, dialect);
-    SIMDCSV_SUPPRESS_DEPRECATION_END
+    LIBVROOM_SUPPRESS_DEPRECATION_END
   }
 
   /**
@@ -1153,14 +1153,14 @@ class two_pass {
    * @deprecated Use Parser::parse() with ParseOptions::branchless() instead.
    *             Example:
    *             ```cpp
-   *             simdcsv::Parser parser(num_threads);
+   *             libvroom::Parser parser(num_threads);
    *             auto result = parser.parse(buf, len, ParseOptions::branchless());
    *             ```
    *
    * @see Parser For the recommended high-level API.
    * @see ParseAlgorithm::BRANCHLESS For algorithm selection.
    */
-  SIMDCSV_DEPRECATED("Use Parser::parse() with ParseOptions::branchless() instead")
+  LIBVROOM_DEPRECATED("Use Parser::parse() with ParseOptions::branchless() instead")
   bool parse_branchless(const uint8_t* buf, index& out, size_t len,
                         const Dialect& dialect = Dialect::csv()) {
     BranchlessStateMachine sm(dialect.delimiter, dialect.quote_char);
@@ -1254,8 +1254,8 @@ class two_pass {
    *
    * @deprecated Use Parser::parse() with default ParseOptions (auto-detects dialect):
    *             ```cpp
-   *             simdcsv::Parser parser(num_threads);
-   *             simdcsv::ErrorCollector errors(ErrorMode::PERMISSIVE);
+   *             libvroom::Parser parser(num_threads);
+   *             libvroom::ErrorCollector errors(ErrorMode::PERMISSIVE);
    *             auto result = parser.parse(buf, len, {.errors = &errors});
    *             // result.detection contains dialect detection info
    *             ```
@@ -1263,7 +1263,7 @@ class two_pass {
    * @see Parser For the recommended high-level API.
    * @see Dialect For dialect configuration options.
    */
-  SIMDCSV_DEPRECATED("Use Parser::parse() with {.errors = &errors} instead (auto-detects dialect)")
+  LIBVROOM_DEPRECATED("Use Parser::parse() with {.errors = &errors} instead (auto-detects dialect)")
   bool parse_auto(const uint8_t* buf, index& out, size_t len,
                   ErrorCollector& errors, DetectionResult* detected = nullptr,
                   const DetectionOptions& detection_options = DetectionOptions()) {
@@ -1292,9 +1292,9 @@ class two_pass {
 
     // Parse with detected dialect
     // Suppress internal deprecation warning (parse_auto is itself deprecated)
-    SIMDCSV_SUPPRESS_DEPRECATION_START
+    LIBVROOM_SUPPRESS_DEPRECATION_START
     return parse_two_pass_with_errors(buf, out, len, errors, dialect);
-    SIMDCSV_SUPPRESS_DEPRECATION_END
+    LIBVROOM_SUPPRESS_DEPRECATION_END
   }
 
   /**
@@ -1312,7 +1312,7 @@ class two_pass {
    *
    * @example
    * @code
-   * auto result = simdcsv::two_pass::detect_dialect(buffer, length);
+   * auto result = libvroom::two_pass::detect_dialect(buffer, length);
    * if (result.success()) {
    *     std::cout << "Delimiter: " << result.dialect.delimiter << "\n";
    *     std::cout << "Confidence: " << result.confidence << "\n";
@@ -1387,8 +1387,8 @@ class two_pass {
    *
    * @deprecated Use Parser::parse() with error collection instead:
    *             ```cpp
-   *             simdcsv::Parser parser(num_threads);
-   *             simdcsv::ErrorCollector errors(ErrorMode::PERMISSIVE);
+   *             libvroom::Parser parser(num_threads);
+   *             libvroom::ErrorCollector errors(ErrorMode::PERMISSIVE);
    *             auto result = parser.parse(buf, len, {
    *                 .dialect = dialect,
    *                 .errors = &errors
@@ -1398,7 +1398,7 @@ class two_pass {
    * @see Parser For the recommended high-level API.
    * @see ErrorCollector::merge_sorted() For error merging details.
    */
-  SIMDCSV_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
+  LIBVROOM_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
   bool parse_two_pass_with_errors(const uint8_t* buf, index& out, size_t len,
                                   ErrorCollector& errors,
                                   const Dialect& dialect = Dialect::csv()) {
@@ -1445,14 +1445,14 @@ class two_pass {
 
     auto st = first_pass_fut[0].get();
     size_t n_quotes = st.n_quotes;
-#ifndef SIMDCSV_BENCHMARK_MODE
+#ifndef LIBVROOM_BENCHMARK_MODE
     printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
            st.first_even_nl, st.first_odd_nl, st.n_quotes);
 #endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef SIMDCSV_BENCHMARK_MODE
+#ifndef LIBVROOM_BENCHMARK_MODE
       printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
              st.first_even_nl, st.first_odd_nl, st.n_quotes);
 #endif
@@ -1530,9 +1530,9 @@ class two_pass {
    *
    * @example
    * @code
-   * simdcsv::two_pass parser;
-   * simdcsv::index idx = parser.init(length, 1);
-   * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+   * libvroom::two_pass parser;
+   * libvroom::index idx = parser.init(length, 1);
+   * libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
    *
    * bool success = parser.parse_with_errors(buffer, idx, length, errors);
    *
@@ -1552,8 +1552,8 @@ class two_pass {
    *
    * @deprecated Use Parser::parse() with error collection instead:
    *             ```cpp
-   *             simdcsv::Parser parser(1);  // single-threaded
-   *             simdcsv::ErrorCollector errors(ErrorMode::PERMISSIVE);
+   *             libvroom::Parser parser(1);  // single-threaded
+   *             libvroom::ErrorCollector errors(ErrorMode::PERMISSIVE);
    *             auto result = parser.parse(buf, len, {
    *                 .dialect = dialect,
    *                 .errors = &errors
@@ -1564,7 +1564,7 @@ class two_pass {
    * @see ErrorCollector For error handling configuration and access.
    * @see ErrorMode For different error handling strategies.
    */
-  SIMDCSV_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
+  LIBVROOM_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
   bool parse_with_errors(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors,
                          const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
@@ -1744,8 +1744,8 @@ class two_pass {
    *
    * @deprecated Use Parser::parse() with error collection instead (same functionality):
    *             ```cpp
-   *             simdcsv::Parser parser;
-   *             simdcsv::ErrorCollector errors(ErrorMode::PERMISSIVE);
+   *             libvroom::Parser parser;
+   *             libvroom::ErrorCollector errors(ErrorMode::PERMISSIVE);
    *             auto result = parser.parse(buf, len, {
    *                 .dialect = dialect,
    *                 .errors = &errors
@@ -1755,7 +1755,7 @@ class two_pass {
    * @see Parser For the recommended high-level API.
    * @see ErrorCollector For accessing validation results
    */
-  SIMDCSV_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
+  LIBVROOM_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
   bool parse_validate(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors,
                       const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
@@ -1802,16 +1802,16 @@ class two_pass {
    *
    * @example
    * @code
-   * simdcsv::two_pass parser;
+   * libvroom::two_pass parser;
    *
    * // Single-threaded parsing
-   * simdcsv::index idx = parser.init(buffer_length, 1);
+   * libvroom::index idx = parser.init(buffer_length, 1);
    *
    * // Multi-threaded parsing with 4 threads
-   * simdcsv::index idx = parser.init(buffer_length, 4);
+   * libvroom::index idx = parser.init(buffer_length, 4);
    *
    * // Use hardware concurrency
-   * simdcsv::index idx = parser.init(buffer_length,
+   * libvroom::index idx = parser.init(buffer_length,
    *                                   std::thread::hardware_concurrency());
    * @endcode
    */
@@ -1864,4 +1864,4 @@ class parser {
 
  private:
 };
-}  // namespace simdcsv
+}  // namespace libvroom

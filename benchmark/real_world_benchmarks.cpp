@@ -10,7 +10,7 @@
 #include <sstream>
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern simdcsv::two_pass* global_parser;
+extern libvroom::two_pass* global_parser;
 
 // Generate synthetic CSV data for real-world scenarios
 class CSVDataGenerator {
@@ -205,7 +205,7 @@ private:
   
 public:
   explicit TempFile(const std::string& content) 
-      : filename_("/tmp/simdcsv_benchmark_" + std::to_string(std::random_device{}())) {
+      : filename_("/tmp/libvroom_benchmark_" + std::to_string(std::random_device{}())) {
     std::ofstream file(filename_);
     file << content;
     file.close();
@@ -225,13 +225,13 @@ static void BM_financial_data(benchmark::State& state) {
   TempFile temp_file(data_str);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
-    simdcsv::index result = global_parser->init(data.size(), 4);
+    libvroom::index result = global_parser->init(data.size(), 4);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -257,13 +257,13 @@ static void BM_nyc_taxi_data(benchmark::State& state) {
   TempFile temp_file(data_str);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
-    simdcsv::index result = global_parser->init(data.size(), 4);
+    libvroom::index result = global_parser->init(data.size(), 4);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -289,13 +289,13 @@ static void BM_genomics_data(benchmark::State& state) {
   TempFile temp_file(data_str);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
-    simdcsv::index result = global_parser->init(data.size(), 4);
+    libvroom::index result = global_parser->init(data.size(), 4);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -320,13 +320,13 @@ static void BM_log_data(benchmark::State& state) {
   TempFile temp_file(data_str);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
-    simdcsv::index result = global_parser->init(data.size(), 4);
+    libvroom::index result = global_parser->init(data.size(), 4);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -352,13 +352,13 @@ static void BM_wide_table(benchmark::State& state) {
   TempFile temp_file(data_str);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
-    simdcsv::index result = global_parser->init(data.size(), 4);
+    libvroom::index result = global_parser->init(data.size(), 4);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -387,7 +387,7 @@ static void BM_simd_levels(benchmark::State& state) {
   std::basic_string_view<uint8_t> data;
   if (test_data.find(filename) == test_data.end()) {
     try {
-      data = get_corpus(filename.c_str(), SIMDCSV_PADDING);
+      data = get_corpus(filename.c_str(), LIBVROOM_PADDING);
       test_data[filename] = data;
     } catch (const std::exception& e) {
       state.SkipWithError(("Failed to load " + filename + ": " + e.what()).c_str());
@@ -398,10 +398,10 @@ static void BM_simd_levels(benchmark::State& state) {
   }
   
   if (!global_parser) {
-    global_parser = new simdcsv::two_pass();
+    global_parser = new libvroom::two_pass();
   }
   
-  simdcsv::index result = global_parser->init(data.size(), 1);
+  libvroom::index result = global_parser->init(data.size(), 1);
   
   for (auto _ : state) {
     global_parser->parse(data.data(), result, data.size());

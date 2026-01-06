@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <cstring>
 
-namespace simdcsv {
+namespace libvroom {
 
 //-----------------------------------------------------------------------------
 // Field implementation
@@ -791,4 +791,4 @@ RowIterator StreamReader::end() {
     return RowIterator();
 }
 
-}  // namespace simdcsv
+}  // namespace libvroom

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# CLI Benchmark: Compare simdcsv (scsv) vs zsv with parallel options
+# CLI Benchmark: Compare libvroom (vroom) vs zsv with parallel options
 #
 # This script tests real-world CLI performance with file I/O,
 # comparing both single-threaded and multi-threaded modes.
@@ -9,9 +9,9 @@
 set -e
 
 # Configuration
-SCSV="./build/scsv"
+SCSV="./build/vroom"
 ZSV="${ZSV:-$HOME/p/zsv/local/bin/zsv}"
-TEMP_DIR="/tmp/simdcsv_benchmark"
+TEMP_DIR="/tmp/libvroom_benchmark"
 NUM_ITERATIONS=${NUM_ITERATIONS:-5}
 
 # Colors for output
@@ -23,8 +23,8 @@ NC='\033[0m' # No Color
 
 # Check for dependencies
 if [ ! -f "$SCSV" ]; then
-    echo -e "${RED}Error: scsv not found at $SCSV${NC}"
-    echo "Build with: cmake -B build && cmake --build build --target scsv"
+    echo -e "${RED}Error: vroom not found at $SCSV${NC}"
+    echo "Build with: cmake -B build && cmake --build build --target vroom"
     exit 1
 fi
 
@@ -37,8 +37,8 @@ fi
 # Create temp directory
 mkdir -p "$TEMP_DIR"
 
-echo -e "${BLUE}=== CLI Benchmark: scsv vs zsv ===${NC}"
-echo "scsv: $SCSV"
+echo -e "${BLUE}=== CLI Benchmark: vroom vs zsv ===${NC}"
+echo "vroom: $SCSV"
 echo "zsv: $ZSV"
 echo "Iterations: $NUM_ITERATIONS"
 echo ""
@@ -131,34 +131,34 @@ benchmark_file() {
         fi
     done
 
-    # scsv single-threaded
-    local scsv_1t=$(run_benchmark "$SCSV count -t 1 $test_file")
-    local scsv_1t_throughput=$(echo "scale=2; $file_size / 1024 / 1024 / ($scsv_1t / 1000)" | bc)
-    echo "| scsv | 1 | $scsv_1t | $scsv_1t_throughput |"
+    # vroom single-threaded
+    local vroom_1t=$(run_benchmark "$SCSV count -t 1 $test_file")
+    local vroom_1t_throughput=$(echo "scale=2; $file_size / 1024 / 1024 / ($vroom_1t / 1000)" | bc)
+    echo "| vroom | 1 | $vroom_1t | $vroom_1t_throughput |"
 
-    # scsv with auto-detect (default mode, no -t flag)
-    local scsv_auto=$(run_benchmark "$SCSV count $test_file")
-    local scsv_auto_throughput=$(echo "scale=2; $file_size / 1024 / 1024 / ($scsv_auto / 1000)" | bc)
-    echo "| scsv | auto | $scsv_auto | $scsv_auto_throughput |"
+    # vroom with auto-detect (default mode, no -t flag)
+    local vroom_auto=$(run_benchmark "$SCSV count $test_file")
+    local vroom_auto_throughput=$(echo "scale=2; $file_size / 1024 / 1024 / ($vroom_auto / 1000)" | bc)
+    echo "| vroom | auto | $vroom_auto | $vroom_auto_throughput |"
 
-    # scsv with specific thread counts
+    # vroom with specific thread counts
     for threads in 2 4 8; do
         if [ "$threads" -le "$CPU_CORES" ]; then
-            local scsv_nt=$(run_benchmark "$SCSV count -t $threads $test_file")
-            local scsv_nt_throughput=$(echo "scale=2; $file_size / 1024 / 1024 / ($scsv_nt / 1000)" | bc)
-            echo "| scsv | $threads | $scsv_nt | $scsv_nt_throughput |"
+            local vroom_nt=$(run_benchmark "$SCSV count -t $threads $test_file")
+            local vroom_nt_throughput=$(echo "scale=2; $file_size / 1024 / 1024 / ($vroom_nt / 1000)" | bc)
+            echo "| vroom | $threads | $vroom_nt | $vroom_nt_throughput |"
         fi
     done
 
     echo ""
     echo "Analysis:"
     echo "  zsv single -> parallel speedup: $(echo "scale=2; $zsv_1t / $zsv_parallel" | bc)x"
-    echo "  scsv single -> auto speedup: $(echo "scale=2; $scsv_1t / $scsv_auto" | bc)x"
-    echo "  scsv (1t) vs zsv (1t): $(echo "scale=2; $zsv_1t / $scsv_1t" | bc)x (>1 means scsv faster)"
-    echo "  scsv (auto) vs zsv (parallel): $(echo "scale=2; $zsv_parallel / $scsv_auto" | bc)x (>1 means scsv faster)"
+    echo "  vroom single -> auto speedup: $(echo "scale=2; $vroom_1t / $vroom_auto" | bc)x"
+    echo "  vroom (1t) vs zsv (1t): $(echo "scale=2; $zsv_1t / $vroom_1t" | bc)x (>1 means vroom faster)"
+    echo "  vroom (auto) vs zsv (parallel): $(echo "scale=2; $zsv_parallel / $vroom_auto" | bc)x (>1 means vroom faster)"
 
     # Store results for final summary
-    echo "$size_mb,$zsv_1t,$zsv_parallel,$scsv_1t,$scsv_auto" >> "$TEMP_DIR/results.csv"
+    echo "$size_mb,$zsv_1t,$zsv_parallel,$vroom_1t,$vroom_auto" >> "$TEMP_DIR/results.csv"
 }
 
 # Main benchmark
@@ -174,7 +174,7 @@ echo ""
 echo -e "${BLUE}Running benchmarks...${NC}"
 
 # Initialize results file
-echo "size_mb,zsv_1t,zsv_parallel,scsv_1t,scsv_auto" > "$TEMP_DIR/results.csv"
+echo "size_mb,zsv_1t,zsv_parallel,vroom_1t,vroom_auto" > "$TEMP_DIR/results.csv"
 
 # Run benchmarks for each size
 for size in 10 50 100; do

@@ -7,7 +7,7 @@
 #include <sstream>
 
 namespace fs = std::filesystem;
-using namespace simdcsv;
+using namespace libvroom;
 
 class CSVParserErrorTest : public ::testing::Test {
 protected:

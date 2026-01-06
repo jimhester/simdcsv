@@ -1,13 +1,13 @@
 #!/bin/bash
 set -uo pipefail
 
-# test-scsv-files - Test scsv CLI against a collection of CSV files
+# test-vroom-files - Test vroom CLI against a collection of CSV files
 #
-# Usage: ./scripts/test-scsv-files [--verbose]
+# Usage: ./scripts/test-vroom-files [--verbose]
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SCSV="${REPO_ROOT}/build/scsv"
+VROOM="${REPO_ROOT}/build/vroom"
 
 VERBOSE=false
 [[ "${1:-}" == "--verbose" ]] && VERBOSE=true
@@ -25,16 +25,16 @@ FAILED=0
 WARNINGS=0
 FAILURES=""
 
-# Check scsv exists
-if [[ ! -x "$SCSV" ]]; then
-    echo "Error: scsv not found at $SCSV"
+# Check vroom exists
+if [[ ! -x "$VROOM" ]]; then
+    echo "Error: vroom not found at $VROOM"
     exit 1
 fi
 
-echo "scsv CLI Test Suite"
+echo "vroom CLI Test Suite"
 echo "==================="
-echo "scsv: $SCSV"
-echo "Version: $($SCSV --version 2>&1)"
+echo "vroom: $VROOM"
+echo "Version: $($VROOM --version 2>&1)"
 echo ""
 
 # Build file list
@@ -66,7 +66,7 @@ echo ""
 echo "Running tests..."
 $VERBOSE || echo -n "Progress: "
 
-# Test commands (only valid scsv commands)
+# Test commands (only valid vroom commands)
 CMDS="head:-n:5
 tail:-n:5
 dialect
@@ -94,9 +94,9 @@ while IFS= read -r file; do
 
         # Run test with timeout (command name first, then args, then file)
         # Capture stdout and stderr separately to avoid false positives from CSV content
-        tmpfile="/tmp/scsv_test_$$"
-        stderrfile="/tmp/scsv_test_stderr_$$"
-        timeout 10 "$SCSV" "$cmd_name" "${args[@]}" "$file" >"$tmpfile" 2>"$stderrfile" || exit_code=$?
+        tmpfile="/tmp/vroom_test_$$"
+        stderrfile="/tmp/vroom_test_stderr_$$"
+        timeout 10 "$VROOM" "$cmd_name" "${args[@]}" "$file" >"$tmpfile" 2>"$stderrfile" || exit_code=$?
         exit_code=${exit_code:-0}
 
         if [[ $exit_code -gt 128 ]]; then

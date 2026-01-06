@@ -3,7 +3,7 @@
  * @brief Portable aligned memory allocation utilities.
  *
  * This header provides cross-platform aligned memory allocation and deallocation
- * functions. These are used internally by simdcsv to ensure buffers are properly
+ * functions. These are used internally by libvroom to ensure buffers are properly
  * aligned for SIMD operations (typically 64-byte cache line alignment).
  *
  * The functions handle platform differences:
@@ -15,7 +15,7 @@
  *       aligned_free(). Do NOT use standard free() or delete.
  *
  * @see allocate_padded_buffer() in io_util.h for higher-level allocation.
- * @see FileBuffer in simdcsv.h for RAII memory management.
+ * @see FileBuffer in libvroom.h for RAII memory management.
  */
 
 #ifndef MEM_UTIL_H

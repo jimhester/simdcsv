@@ -3,8 +3,8 @@
  * @brief Field type detection for CSV data.
  */
 
-#ifndef SIMDCSV_TYPE_DETECTOR_H
-#define SIMDCSV_TYPE_DETECTOR_H
+#ifndef LIBVROOM_TYPE_DETECTOR_H
+#define LIBVROOM_TYPE_DETECTOR_H
 
 #include <cassert>
 #include <cstdint>
@@ -16,7 +16,7 @@
 #include "common_defs.h"
 #include "simd_highway.h"
 
-namespace simdcsv {
+namespace libvroom {
 
 enum class FieldType : uint8_t {
   BOOLEAN = 0,
@@ -683,6 +683,6 @@ struct TypeHints {
   }
 };
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
-#endif  // SIMDCSV_TYPE_DETECTOR_H
+#endif  // LIBVROOM_TYPE_DETECTOR_H

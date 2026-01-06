@@ -11,7 +11,7 @@
 #include "two_pass.h"
 #include "io_util.h"
 
-using namespace simdcsv;
+using namespace libvroom;
 
 // ============================================================================
 // BRANCHLESS STATE MACHINE UNIT TESTS
@@ -298,10 +298,10 @@ protected:
 TEST_F(BranchlessParsingTest, ParseSimpleCSV) {
     std::string path = getTestDataPath("basic", "simple.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
@@ -311,10 +311,10 @@ TEST_F(BranchlessParsingTest, ParseSimpleCSV) {
 TEST_F(BranchlessParsingTest, ParseQuotedFields) {
     std::string path = getTestDataPath("quoted", "quoted_fields.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
@@ -324,10 +324,10 @@ TEST_F(BranchlessParsingTest, ParseQuotedFields) {
 TEST_F(BranchlessParsingTest, ParseEscapedQuotes) {
     std::string path = getTestDataPath("quoted", "escaped_quotes.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
@@ -337,10 +337,10 @@ TEST_F(BranchlessParsingTest, ParseEscapedQuotes) {
 TEST_F(BranchlessParsingTest, ParseNewlinesInQuotes) {
     std::string path = getTestDataPath("quoted", "newlines_in_quotes.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
@@ -350,10 +350,10 @@ TEST_F(BranchlessParsingTest, ParseNewlinesInQuotes) {
 TEST_F(BranchlessParsingTest, ParseManyRows) {
     std::string path = getTestDataPath("basic", "many_rows.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
@@ -363,10 +363,10 @@ TEST_F(BranchlessParsingTest, ParseManyRows) {
 TEST_F(BranchlessParsingTest, ParseWideColumns) {
     std::string path = getTestDataPath("basic", "wide_columns.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
@@ -376,10 +376,10 @@ TEST_F(BranchlessParsingTest, ParseWideColumns) {
 TEST_F(BranchlessParsingTest, ParseEmptyFields) {
     std::string path = getTestDataPath("edge_cases", "empty_fields.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
@@ -390,14 +390,14 @@ TEST_F(BranchlessParsingTest, ParseCustomDelimiter) {
     // Test with semicolon delimiter
     std::vector<uint8_t> data;
     std::string content = "A;B;C\n1;2;3\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     bool success = parser.parse_branchless(data.data(), idx, content.size(),
-                                           simdcsv::Dialect::semicolon());
+                                           libvroom::Dialect::semicolon());
 
     EXPECT_TRUE(success) << "Branchless parser should handle semicolon delimiter";
 }
@@ -406,14 +406,14 @@ TEST_F(BranchlessParsingTest, ParseCustomQuote) {
     // Test with single quote
     std::vector<uint8_t> data;
     std::string content = "A,B,C\n'a,b',2,3\n";
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
 
     // Create dialect with single quote as quote character
-    simdcsv::Dialect dialect{',', '\'', '\'', true, simdcsv::Dialect::LineEnding::UNKNOWN};
+    libvroom::Dialect dialect{',', '\'', '\'', true, libvroom::Dialect::LineEnding::UNKNOWN};
     bool success = parser.parse_branchless(data.data(), idx, content.size(), dialect);
 
     EXPECT_TRUE(success) << "Branchless parser should handle single quote character";
@@ -422,10 +422,10 @@ TEST_F(BranchlessParsingTest, ParseCustomQuote) {
 TEST_F(BranchlessParsingTest, MultiThreadedParsing) {
     std::string path = getTestDataPath("basic", "many_rows.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 2);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 2);
 
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
@@ -436,16 +436,16 @@ TEST_F(BranchlessParsingTest, ConsistencyWithStandardParser) {
     // Verify branchless parser produces same results as standard parser
     std::string path = getTestDataPath("basic", "simple.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
+    libvroom::two_pass parser;
 
     // Parse with standard parser
-    simdcsv::index idx1 = parser.init(data.size(), 1);
+    libvroom::index idx1 = parser.init(data.size(), 1);
     parser.parse(data.data(), idx1, data.size());
 
     // Parse with branchless parser
-    simdcsv::index idx2 = parser.init(data.size(), 1);
+    libvroom::index idx2 = parser.init(data.size(), 1);
     parser.parse_branchless(data.data(), idx2, data.size());
 
     // Compare results
@@ -462,16 +462,16 @@ TEST_F(BranchlessParsingTest, ConsistencyWithQuotedFields) {
     // Verify branchless parser produces same results with quoted fields
     std::string path = getTestDataPath("quoted", "quoted_fields.csv");
 
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
+    libvroom::two_pass parser;
 
     // Parse with standard parser
-    simdcsv::index idx1 = parser.init(data.size(), 1);
+    libvroom::index idx1 = parser.init(data.size(), 1);
     parser.parse(data.data(), idx1, data.size());
 
     // Parse with branchless parser
-    simdcsv::index idx2 = parser.init(data.size(), 1);
+    libvroom::index idx2 = parser.init(data.size(), 1);
     parser.parse_branchless(data.data(), idx2, data.size());
 
     // Compare results
@@ -497,11 +497,11 @@ TEST_F(BranchlessParsingTest, LargeDataMultithreaded) {
         content += "data" + std::to_string(i) + "\n";
     }
 
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 4);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 4);
 
     bool success = parser.parse_branchless(data.data(), idx, content.size());
 
@@ -521,14 +521,14 @@ TEST_F(BranchlessParsingTest, CustomDelimiterMultithreaded) {
         content += "data" + std::to_string(i) + "\n";
     }
 
-    data.resize(content.size() + SIMDCSV_PADDING);
+    data.resize(content.size() + LIBVROOM_PADDING);
     std::memcpy(data.data(), content.data(), content.size());
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 4);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 4);
 
     bool success = parser.parse_branchless(data.data(), idx, content.size(),
-                                           simdcsv::Dialect::semicolon());
+                                           libvroom::Dialect::semicolon());
 
     EXPECT_TRUE(success) << "Branchless parser should handle multi-threaded semicolon delimiter";
 

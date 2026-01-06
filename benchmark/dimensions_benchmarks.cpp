@@ -9,7 +9,7 @@
 #include <iomanip>
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern simdcsv::two_pass* global_parser;
+extern libvroom::two_pass* global_parser;
 
 // Synthetic data generator for dimension testing
 class DimensionDataGenerator {
@@ -65,7 +65,7 @@ private:
   
 public:
   explicit TempCSVFile(const std::string& content) 
-      : filename_("/tmp/simdcsv_dim_" + std::to_string(std::random_device{}()) + ".csv") {
+      : filename_("/tmp/libvroom_dim_" + std::to_string(std::random_device{}()) + ".csv") {
     std::ofstream file(filename_);
     file << content;
     file.close();
@@ -92,14 +92,14 @@ static void BM_FileSizes(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
     int n_threads = 4;
-    simdcsv::index result = global_parser->init(data.size(), n_threads);
+    libvroom::index result = global_parser->init(data.size(), n_threads);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -132,14 +132,14 @@ static void BM_ColumnCounts(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
     int n_threads = 4;
-    simdcsv::index result = global_parser->init(data.size(), n_threads);
+    libvroom::index result = global_parser->init(data.size(), n_threads);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -183,14 +183,14 @@ static void BM_DataTypes(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
     int n_threads = 4;
-    simdcsv::index result = global_parser->init(data.size(), n_threads);
+    libvroom::index result = global_parser->init(data.size(), n_threads);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -221,13 +221,13 @@ static void BM_ThreadScaling(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
-    simdcsv::index result = global_parser->init(data.size(), n_threads);
+    libvroom::index result = global_parser->init(data.size(), n_threads);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -263,14 +263,14 @@ static void BM_RowScaling(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
     int n_threads = 4;
-    simdcsv::index result = global_parser->init(data.size(), n_threads);
+    libvroom::index result = global_parser->init(data.size(), n_threads);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -302,14 +302,14 @@ static void BM_RowColumnMatrix(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
   
   try {
-    auto data = get_corpus(temp_file.path().c_str(), SIMDCSV_PADDING);
+    auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
     
     if (!global_parser) {
-      global_parser = new simdcsv::two_pass();
+      global_parser = new libvroom::two_pass();
     }
     
     int n_threads = 4;
-    simdcsv::index result = global_parser->init(data.size(), n_threads);
+    libvroom::index result = global_parser->init(data.size(), n_threads);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());

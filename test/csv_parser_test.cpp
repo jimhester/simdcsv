@@ -328,13 +328,13 @@ TEST_F(CSVFileTest, NoFinalNewlineEndsWithoutNewline) {
 TEST_F(CSVFileTest, CRLineEndingsParseCorrectly) {
     std::string path = getTestDataPath("line_endings", "cr.csv");
     auto corpus = get_corpus(path.c_str(), 64);
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.size(), 1);
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.size(), 1);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(), errors);
 
-    simdcsv::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
-                               corpus.size(), idx, simdcsv::Dialect::csv());
+    libvroom::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
+                               corpus.size(), idx, libvroom::Dialect::csv());
     ve.set_has_header(true);
 
     EXPECT_EQ(ve.num_columns(), 3) << "CR-only file should have 3 columns";
@@ -354,13 +354,13 @@ TEST_F(CSVFileTest, CRLineEndingsParseCorrectly) {
 TEST_F(CSVFileTest, CRLFLineEndingsParseCorrectly) {
     std::string path = getTestDataPath("line_endings", "crlf.csv");
     auto corpus = get_corpus(path.c_str(), 64);
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.size(), 1);
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.size(), 1);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(), errors);
 
-    simdcsv::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
-                               corpus.size(), idx, simdcsv::Dialect::csv());
+    libvroom::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
+                               corpus.size(), idx, libvroom::Dialect::csv());
     ve.set_has_header(true);
 
     EXPECT_EQ(ve.num_columns(), 3) << "CRLF file should have 3 columns";
@@ -380,13 +380,13 @@ TEST_F(CSVFileTest, CRLFLineEndingsParseCorrectly) {
 TEST_F(CSVFileTest, LFLineEndingsParseCorrectly) {
     std::string path = getTestDataPath("line_endings", "lf.csv");
     auto corpus = get_corpus(path.c_str(), 64);
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.size(), 1);
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.size(), 1);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(), errors);
 
-    simdcsv::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
-                               corpus.size(), idx, simdcsv::Dialect::csv());
+    libvroom::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
+                               corpus.size(), idx, libvroom::Dialect::csv());
     ve.set_has_header(true);
 
     EXPECT_EQ(ve.num_columns(), 3) << "LF file should have 3 columns";
@@ -410,13 +410,13 @@ TEST_F(CSVFileTest, AllLineEndingsProduceEquivalentResults) {
     for (const auto& file : files) {
         std::string path = getTestDataPath("line_endings", file);
         auto corpus = get_corpus(path.c_str(), 64);
-        simdcsv::two_pass parser;
-        simdcsv::index idx = parser.init(corpus.size(), 1);
-        simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+        libvroom::two_pass parser;
+        libvroom::index idx = parser.init(corpus.size(), 1);
+        libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
         parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(), errors);
 
-        simdcsv::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
-                                   corpus.size(), idx, simdcsv::Dialect::csv());
+        libvroom::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()),
+                                   corpus.size(), idx, libvroom::Dialect::csv());
         ve.set_has_header(true);
 
         std::vector<std::vector<std::string>> data;

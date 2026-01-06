@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-BENCHMARK_EXECUTABLE="${1:-./simdcsv_benchmark}"
+BENCHMARK_EXECUTABLE="${1:-./libvroom_benchmark}"
 OUTPUT_DIR="${2:-benchmark_results}"
 BASELINE_FILE="${3:-}"
 REGRESSION_THRESHOLD="${4:-10.0}"
@@ -19,7 +19,7 @@ TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 RESULTS_FILE="$OUTPUT_DIR/benchmark_results_$TIMESTAMP.json"
 REPORT_FILE="$OUTPUT_DIR/benchmark_report_$TIMESTAMP.md"
 
-echo "=== simdcsv Benchmark Suite ==="
+echo "=== libvroom Benchmark Suite ==="
 echo "Timestamp: $TIMESTAMP"
 echo "Results will be saved to: $RESULTS_FILE"
 echo "Report will be saved to: $REPORT_FILE"
@@ -28,7 +28,7 @@ echo ""
 # Check if benchmark executable exists
 if [ ! -f "$BENCHMARK_EXECUTABLE" ]; then
     echo "Error: Benchmark executable '$BENCHMARK_EXECUTABLE' not found"
-    echo "Please build the project first with: cmake --build . --target simdcsv_benchmark"
+    echo "Please build the project first with: cmake --build . --target libvroom_benchmark"
     exit 1
 fi
 
@@ -83,7 +83,7 @@ $BENCHMARK_EXECUTABLE \
 # Comparison benchmarks
 echo "Running comparison benchmarks..."
 $BENCHMARK_EXECUTABLE \
-    --benchmark_filter="BM_(simdcsv_vs_naive|parsing_approaches|memory_bandwidth)" \
+    --benchmark_filter="BM_(libvroom_vs_naive|parsing_approaches|memory_bandwidth)" \
     --benchmark_format=json \
     --benchmark_out="$RESULTS_FILE.comparison" \
     --benchmark_repetitions=3 \
@@ -133,7 +133,7 @@ if ! python3 -c "import json, pandas, matplotlib" 2>/dev/null; then
     echo "Generating basic report only..."
     
     # Basic report without Python dependencies
-    echo "# simdcsv Benchmark Results" > "$REPORT_FILE"
+    echo "# libvroom Benchmark Results" > "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"
     echo "Generated: $(date)" >> "$REPORT_FILE"
     echo "" >> "$REPORT_FILE"

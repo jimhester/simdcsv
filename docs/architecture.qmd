@@ -4,7 +4,7 @@ title: "Architecture"
 
 ## Overview
 
-simdcsv implements a speculative multi-threaded two-pass algorithm for high-performance CSV parsing. The design is based on research from Chang et al. (SIGMOD 2019) combined with SIMD techniques from Langdale & Lemire's simdjson.
+libvroom implements a speculative multi-threaded two-pass algorithm for high-performance CSV parsing. The design is based on research from Chang et al. (SIGMOD 2019) combined with SIMD techniques from Langdale & Lemire's simdjson.
 
 The parser achieves high throughput by:
 
@@ -55,7 +55,7 @@ The cumulative quote count from all preceding chunks determines which split poin
 
 ### Speculative Parsing
 
-For scenarios where determining exact quote state is expensive, simdcsv supports **speculative parsing** (Chang et al., SIGMOD 2019):
+For scenarios where determining exact quote state is expensive, libvroom supports **speculative parsing** (Chang et al., SIGMOD 2019):
 
 1. **Divide** the file into N chunks (one per thread)
 2. **Speculate** about quote state at each boundary by scanning backwards
@@ -120,7 +120,7 @@ The state machine has five states compliant with RFC 4180. Transitions are deter
 
 ### Branchless Implementation
 
-For maximum performance, simdcsv provides a branchless state machine implementation (`branchless_state_machine.h`) that uses lookup tables instead of switch statements:
+For maximum performance, libvroom provides a branchless state machine implementation (`branchless_state_machine.h`) that uses lookup tables instead of switch statements:
 
 ```cpp
 // Character classification table: 256 bytes, O(1) lookup
@@ -138,7 +138,7 @@ This eliminates 90%+ of branches in the parsing hot path, significantly improvin
 
 ## SIMD Implementation
 
-simdcsv uses [Google Highway](https://github.com/google/highway) (v1.3.0) for portable SIMD operations across different architectures:
+libvroom uses [Google Highway](https://github.com/google/highway) (v1.3.0) for portable SIMD operations across different architectures:
 
 | Architecture | SIMD Support | Vector Width |
 |--------------|--------------|--------------|
@@ -173,7 +173,7 @@ This technique, pioneered by simdjson, provides approximately 28× speedup over 
 
 ### Handling Quoted Fields at Chunk Boundaries
 
-When parsing in parallel, quoted fields may span chunk boundaries. simdcsv handles this through:
+When parsing in parallel, quoted fields may span chunk boundaries. libvroom handles this through:
 
 1. **First pass**: Each chunk reports both `first_even_nl` and `first_odd_nl`
 2. **Cumulative tracking**: Running quote count determines which boundary to use
@@ -252,7 +252,7 @@ The design achieves lock-free parallelism by ensuring threads never write to the
 
 ## References
 
-The simdcsv architecture draws from these foundational papers:
+The libvroom architecture draws from these foundational papers:
 
 1. **Chang, G., Li, Y., Eilebrecht, E., Chandramouli, B., & Kossmann, D.** (2019).
    *Speculative Distributed CSV Data Parsing for Big Data Analytics*.
@@ -266,11 +266,11 @@ The simdcsv architecture draws from these foundational papers:
    The VLDB Journal, 28(6), pp. 941-960.
    [https://doi.org/10.1007/s00778-019-00578-5](https://doi.org/10.1007/s00778-019-00578-5)
 
-   Introduces the two-stage SIMD parsing architecture, carry-less multiplication for quote parity, and branchless design patterns used throughout simdcsv.
+   Introduces the two-stage SIMD parsing architecture, carry-less multiplication for quote parity, and branchless design patterns used throughout libvroom.
 
 3. **van den Burgh, G.J.J. & Nazabal, A.** (2019).
    *Wrangling Messy CSV Files by Detecting Row and Type Patterns*.
    Data Mining and Knowledge Discovery, 33(4), pp. 1415-1441.
    [https://doi.org/10.1007/s10618-019-00646-y](https://doi.org/10.1007/s10618-019-00646-y)
 
-   Provides the basis for simdcsv's dialect detection algorithm (CleverCSV approach).
+   Provides the basis for libvroom's dialect detection algorithm (CleverCSV approach).

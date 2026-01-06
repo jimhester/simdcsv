@@ -1,6 +1,6 @@
-# simdcsv Enhanced Benchmark Suite
+# libvroom Enhanced Benchmark Suite
 
-This directory contains a comprehensive benchmark suite for simdcsv, implementing the enhanced benchmarking framework outlined in the Production Readiness Plan (Section 6).
+This directory contains a comprehensive benchmark suite for libvroom, implementing the enhanced benchmarking framework outlined in the Production Readiness Plan (Section 6).
 
 ## Overview
 
@@ -58,7 +58,7 @@ The benchmark suite provides:
 - **Linux RAPL Integration**: Hardware energy counters when available
 
 ### 7. Comparison Benchmarks (`comparison_benchmarks.cpp`)
-- **simdcsv vs Naive Parser**: Performance comparison
+- **libvroom vs Naive Parser**: Performance comparison
 - **Multiple Parsing Approaches**: Different algorithm comparisons
 - **Memory Bandwidth**: Raw memory throughput baseline
 
@@ -68,33 +68,33 @@ The benchmark suite provides:
 ```bash
 mkdir build && cd build
 cmake ..
-make simdcsv_benchmark
+make libvroom_benchmark
 ```
 
 ### Running All Benchmarks
 ```bash
-./benchmark/run_benchmarks.sh ./build/simdcsv_benchmark
+./benchmark/run_benchmarks.sh ./build/libvroom_benchmark
 ```
 
 ### Running Specific Categories
 ```bash
 # Basic benchmarks only
-./simdcsv_benchmark --benchmark_filter="BM_Parse.*"
+./libvroom_benchmark --benchmark_filter="BM_Parse.*"
 
 # Dimension benchmarks only
-./simdcsv_benchmark --benchmark_filter="BM_(FileSizes|ColumnCounts|DataTypes)"
+./libvroom_benchmark --benchmark_filter="BM_(FileSizes|ColumnCounts|DataTypes)"
 
 # Real-world benchmarks only
-./simdcsv_benchmark --benchmark_filter="BM_(financial|genomics|taxi|log)"
+./libvroom_benchmark --benchmark_filter="BM_(financial|genomics|taxi|log)"
 
 # SIMD benchmarks only
-./simdcsv_benchmark --benchmark_filter="BM_.*SIMD.*"
+./libvroom_benchmark --benchmark_filter="BM_.*SIMD.*"
 ```
 
 ### Generating Reports
 ```bash
 # Run with JSON output
-./simdcsv_benchmark --benchmark_format=json --benchmark_out=results.json
+./libvroom_benchmark --benchmark_format=json --benchmark_out=results.json
 
 # Generate HTML report
 python3 benchmark/report_generator.py results.json --output=report.md
@@ -118,8 +118,8 @@ The `run_benchmarks.sh` script provides a complete automated benchmarking soluti
 ./benchmark/run_benchmarks.sh [executable] [output_dir] [baseline_file] [threshold]
 
 # Examples
-./benchmark/run_benchmarks.sh ./build/simdcsv_benchmark
-./benchmark/run_benchmarks.sh ./build/simdcsv_benchmark results/ baseline.json 5.0
+./benchmark/run_benchmarks.sh ./build/libvroom_benchmark
+./benchmark/run_benchmarks.sh ./build/libvroom_benchmark results/ baseline.json 5.0
 ```
 
 Features:
@@ -155,7 +155,7 @@ For continuous integration, use:
 
 ```bash
 # In CI pipeline
-./benchmark/run_benchmarks.sh ./build/simdcsv_benchmark ci_results/ baseline.json 10.0
+./benchmark/run_benchmarks.sh ./build/libvroom_benchmark ci_results/ baseline.json 10.0
 if [ $? -ne 0 ]; then
   echo "Performance regression detected!"
   exit 1
@@ -236,5 +236,5 @@ When adding new benchmarks:
 ## References
 
 - [Google Benchmark User Guide](https://github.com/google/benchmark/blob/main/docs/user_guide.md)
-- [simdcsv Production Readiness Plan](../PRODUCTION_READINESS_PLAN.md#6-enhanced-benchmark-suite)
+- [libvroom Production Readiness Plan](../PRODUCTION_READINESS_PLAN.md#6-enhanced-benchmark-suite)
 - [Intel RAPL Documentation](https://intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/advisory-guidance/running-average-power-limit.html)

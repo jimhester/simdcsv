@@ -1,16 +1,16 @@
 /**
  * @file debug_parser.h
- * @brief Debug-enabled parsing methods for the simdcsv CSV parser.
+ * @brief Debug-enabled parsing methods for the libvroom CSV parser.
  */
 
-#ifndef SIMDCSV_DEBUG_PARSER_H
-#define SIMDCSV_DEBUG_PARSER_H
+#ifndef LIBVROOM_DEBUG_PARSER_H
+#define LIBVROOM_DEBUG_PARSER_H
 
 #include "two_pass.h"
 #include "debug.h"
 #include <string>
 
-namespace simdcsv {
+namespace libvroom {
 
 inline const char* get_simd_path_name() {
 #if defined(__AVX512F__)
@@ -130,6 +130,6 @@ private:
     two_pass parser_;
 };
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
-#endif  // SIMDCSV_DEBUG_PARSER_H
+#endif  // LIBVROOM_DEBUG_PARSER_H

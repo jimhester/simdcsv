@@ -6,7 +6,7 @@
 #include <memory>
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern simdcsv::two_pass* global_parser;
+extern libvroom::two_pass* global_parser;
 
 // Basic parsing benchmark for different file sizes
 static void BM_ParseFile(benchmark::State& state, const std::string& filename) {
@@ -15,7 +15,7 @@ static void BM_ParseFile(benchmark::State& state, const std::string& filename) {
   // Try to load the file if not already loaded
   if (test_data.find(filename) == test_data.end()) {
     try {
-      data = get_corpus(filename.c_str(), SIMDCSV_PADDING);
+      data = get_corpus(filename.c_str(), LIBVROOM_PADDING);
       test_data[filename] = data;
     } catch (const std::exception& e) {
       state.SkipWithError(("Failed to load " + filename + ": " + e.what()).c_str());
@@ -26,11 +26,11 @@ static void BM_ParseFile(benchmark::State& state, const std::string& filename) {
   }
   
   if (!global_parser) {
-    global_parser = new simdcsv::two_pass();
+    global_parser = new libvroom::two_pass();
   }
   
   int n_threads = static_cast<int>(state.range(0));
-  simdcsv::index result = global_parser->init(data.size(), n_threads);
+  libvroom::index result = global_parser->init(data.size(), n_threads);
   
   for (auto _ : state) {
     global_parser->parse(data.data(), result, data.size());
@@ -96,7 +96,7 @@ static void BM_MemoryAllocation(benchmark::State& state) {
   size_t file_size = static_cast<size_t>(state.range(0));
   
   for (auto _ : state) {
-    auto data = aligned_malloc(64, file_size + SIMDCSV_PADDING);
+    auto data = aligned_malloc(64, file_size + LIBVROOM_PADDING);
     benchmark::DoNotOptimize(data);
     aligned_free(data);
   }
@@ -110,7 +110,7 @@ BENCHMARK(BM_MemoryAllocation)
 // Index creation benchmark
 static void BM_IndexCreation(benchmark::State& state) {
   if (!global_parser) {
-    global_parser = new simdcsv::two_pass();
+    global_parser = new libvroom::two_pass();
   }
   
   size_t file_size = static_cast<size_t>(state.range(0));

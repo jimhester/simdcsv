@@ -42,7 +42,7 @@ jobs:
 
     - name: Run well-formed CSV tests
       run: |
-        ./build/simdcsv_test
+        ./build/libvroom_test
 
     - name: Run error handling tests
       run: |
@@ -100,7 +100,7 @@ jobs:
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
-      if: github.repository == 'jimhester/simdcsv'
+      if: github.repository == 'jimhester/libvroom'
       continue-on-error: true
       with:
         files: ./build/coverage.info
@@ -132,33 +132,33 @@ jobs:
     - name: Verify expected artifacts exist
       run: |
         echo "Checking for library..."
-        if ls build/libsimdcsv_lib.* 1>/dev/null 2>&1; then
+        if ls build/liblibvroom_lib.* 1>/dev/null 2>&1; then
           echo "✓ Library found:"
-          ls -la build/libsimdcsv_lib.*
+          ls -la build/liblibvroom_lib.*
         else
           echo "✗ Library not found!"
           exit 1
         fi
 
-        echo "Checking for scsv binary..."
-        if [ -f build/scsv ]; then
-          echo "✓ scsv binary found:"
-          ls -la build/scsv
+        echo "Checking for vroom binary..."
+        if [ -f build/vroom ]; then
+          echo "✓ vroom binary found:"
+          ls -la build/vroom
         else
-          echo "✗ scsv binary not found!"
+          echo "✗ vroom binary not found!"
           exit 1
         fi
 
-    - name: Smoke test scsv binary
+    - name: Smoke test vroom binary
       run: |
-        echo "Running smoke test: scsv --help"
-        ./build/scsv --help
-        echo "✓ scsv binary runs successfully"
+        echo "Running smoke test: vroom --help"
+        ./build/vroom --help
+        echo "✓ vroom binary runs successfully"
 
     - name: Verify test executables are NOT built
       run: |
         echo "Verifying test executables are not present..."
-        TEST_EXECUTABLES="simdcsv_test error_handling_test csv_parsing_test csv_parser_errors_test csv_extended_test dialect_detection_test type_detection_test c_api_test debug_test api_test quote_mask_test value_extraction_test streaming_test branchless_test simd_number_parsing_test io_util_test cli_test two_pass_coverage_test"
+        TEST_EXECUTABLES="libvroom_test error_handling_test csv_parsing_test csv_parser_errors_test csv_extended_test dialect_detection_test type_detection_test c_api_test debug_test api_test quote_mask_test value_extraction_test streaming_test branchless_test simd_number_parsing_test io_util_test cli_test two_pass_coverage_test"
 
         FOUND_TESTS=""
         for test in $TEST_EXECUTABLES; do
@@ -176,7 +176,7 @@ jobs:
     - name: Verify benchmark executables are NOT built
       run: |
         echo "Verifying benchmark executables are not present..."
-        BENCHMARK_EXECUTABLES="simdcsv_benchmark quote_mask_benchmark"
+        BENCHMARK_EXECUTABLES="libvroom_benchmark quote_mask_benchmark"
 
         FOUND_BENCHMARKS=""
         for bench in $BENCHMARK_EXECUTABLES; do
@@ -227,9 +227,9 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         echo "Checking for shared library (.so)..."
-        if ls build/libsimdcsv_lib.so* 1>/dev/null 2>&1; then
+        if ls build/liblibvroom_lib.so* 1>/dev/null 2>&1; then
           echo "✓ Shared library found:"
-          ls -la build/libsimdcsv_lib.so*
+          ls -la build/liblibvroom_lib.so*
         else
           echo "✗ Shared library not found!"
           ls -la build/
@@ -240,38 +240,38 @@ jobs:
       if: runner.os == 'macOS'
       run: |
         echo "Checking for shared library (.dylib)..."
-        if ls build/libsimdcsv_lib.dylib* 1>/dev/null 2>&1; then
+        if ls build/liblibvroom_lib.dylib* 1>/dev/null 2>&1; then
           echo "✓ Shared library found:"
-          ls -la build/libsimdcsv_lib.dylib*
+          ls -la build/liblibvroom_lib.dylib*
         else
           echo "✗ Shared library not found!"
           ls -la build/
           exit 1
         fi
 
-    - name: Verify scsv binary exists and links correctly
+    - name: Verify vroom binary exists and links correctly
       run: |
-        echo "Checking for scsv binary..."
-        if [ -f build/scsv ]; then
-          echo "✓ scsv binary found:"
-          ls -la build/scsv
+        echo "Checking for vroom binary..."
+        if [ -f build/vroom ]; then
+          echo "✓ vroom binary found:"
+          ls -la build/vroom
         else
-          echo "✗ scsv binary not found!"
+          echo "✗ vroom binary not found!"
           exit 1
         fi
 
-    - name: Test scsv can execute (Linux)
+    - name: Test vroom can execute (Linux)
       if: runner.os == 'Linux'
       run: |
-        echo "Testing scsv execution with LD_LIBRARY_PATH..."
+        echo "Testing vroom execution with LD_LIBRARY_PATH..."
         export LD_LIBRARY_PATH="${PWD}/build:${LD_LIBRARY_PATH}"
-        ./build/scsv --help
+        ./build/vroom --help
 
-    - name: Test scsv can execute (macOS)
+    - name: Test vroom can execute (macOS)
       if: runner.os == 'macOS'
       run: |
-        echo "Testing scsv execution..."
-        ./build/scsv --help
+        echo "Testing vroom execution..."
+        ./build/vroom --help
 
   code-quality:
     name: Code Quality Checks

@@ -1,19 +1,19 @@
 /**
- * @file simdcsv.h
- * @brief simdcsv - High-performance CSV parser using portable SIMD instructions.
+ * @file libvroom.h
+ * @brief libvroom - High-performance CSV parser using portable SIMD instructions.
  * @version 0.1.0
  *
- * This is the main public header for the simdcsv library. Include this single
+ * This is the main public header for the libvroom library. Include this single
  * header to access all public functionality.
  */
 
-#ifndef SIMDCSV_H
-#define SIMDCSV_H
+#ifndef LIBVROOM_H
+#define LIBVROOM_H
 
-#define SIMDCSV_VERSION_MAJOR 0
-#define SIMDCSV_VERSION_MINOR 1
-#define SIMDCSV_VERSION_PATCH 0
-#define SIMDCSV_VERSION_STRING "0.1.0"
+#define LIBVROOM_VERSION_MAJOR 0
+#define LIBVROOM_VERSION_MINOR 1
+#define LIBVROOM_VERSION_PATCH 0
+#define LIBVROOM_VERSION_STRING "0.1.0"
 
 #include "error.h"
 #include "dialect.h"
@@ -23,7 +23,7 @@
 
 #include <optional>
 
-namespace simdcsv {
+namespace libvroom {
 
 /**
  * @brief Algorithm selection for parsing.
@@ -240,7 +240,7 @@ struct ParseOptions {
  * @example
  * @code
  * // Load a file using the convenience function
- * simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
+ * libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
  *
  * if (buffer) {  // Check if valid using operator bool
  *     std::cout << "Loaded " << buffer.size() << " bytes\n";
@@ -248,8 +248,8 @@ struct ParseOptions {
  *     // Access data
  *     const uint8_t* data = buffer.data();
  *
- *     // Parse with simdcsv
- *     simdcsv::Parser parser;
+ *     // Parse with libvroom
+ *     libvroom::Parser parser;
  *     auto result = parser.parse(data, buffer.size());
  * }
  * // Memory automatically freed when buffer goes out of scope
@@ -406,13 +406,13 @@ inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
  *
  * @example
  * @code
- * #include "simdcsv.h"
+ * #include "libvroom.h"
  *
  * // Load CSV file
- * simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
+ * libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
  *
  * // Create parser with 4 threads
- * simdcsv::Parser parser(4);
+ * libvroom::Parser parser(4);
  *
  * // Parse with default CSV dialect
  * auto result = parser.parse(buffer.data(), buffer.size());
@@ -426,8 +426,8 @@ inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
  * @example
  * @code
  * // Parse with auto-detection and error collection
- * simdcsv::Parser parser(4);
- * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+ * libvroom::Parser parser(4);
+ * libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
  *
  * auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
  *
@@ -555,7 +555,7 @@ public:
 
         // Suppress deprecation warnings for internal calls to two_pass methods
         // (Parser is the public API that wraps these deprecated methods)
-        SIMDCSV_SUPPRESS_DEPRECATION_START
+        LIBVROOM_SUPPRESS_DEPRECATION_START
 
         // Select parsing implementation based on algorithm and error collection
         if (options.errors != nullptr) {
@@ -596,7 +596,7 @@ public:
             }
         }
 
-        SIMDCSV_SUPPRESS_DEPRECATION_END
+        LIBVROOM_SUPPRESS_DEPRECATION_END
 
         return result;
     }
@@ -673,7 +673,7 @@ private:
  *
  * @example
  * @code
- * auto result = simdcsv::detect_dialect(buffer.data(), buffer.size());
+ * auto result = libvroom::detect_dialect(buffer.data(), buffer.size());
  * if (result.success()) {
  *     std::cout << "Delimiter: '" << result.dialect.delimiter << "'\n";
  *     std::cout << "Confidence: " << result.confidence << "\n";
@@ -701,7 +701,7 @@ inline DetectionResult detect_dialect(const uint8_t* buf, size_t len,
  *
  * @example
  * @code
- * auto result = simdcsv::detect_dialect_file("data.csv");
+ * auto result = libvroom::detect_dialect_file("data.csv");
  * if (result.success()) {
  *     std::cout << "Detected " << result.detected_columns << " columns\n";
  *     std::cout << "Format: " << result.dialect.to_string() << "\n";
@@ -717,6 +717,6 @@ inline DetectionResult detect_dialect_file(const std::string& filename,
     return detector.detect_file(filename);
 }
 
-} // namespace simdcsv
+} // namespace libvroom
 
-#endif // SIMDCSV_H
+#endif // LIBVROOM_H

@@ -1,6 +1,6 @@
-# simdcsv Test Suite
+# libvroom Test Suite
 
-This directory contains the test suite for simdcsv, including test data files and Google Test-based test harness.
+This directory contains the test suite for libvroom, including test data files and Google Test-based test harness.
 
 ## Directory Structure
 
@@ -128,7 +128,7 @@ cmake --build build
 cd build && ctest --output-on-failure
 
 # Or run test executables directly
-./build/simdcsv_test          # Well-formed CSV tests (42 tests)
+./build/libvroom_test          # Well-formed CSV tests (42 tests)
 ./build/error_handling_test   # Error handling tests (37 tests)
 ```
 
@@ -137,7 +137,7 @@ cd build && ctest --output-on-failure
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
-./build/simdcsv_test
+./build/libvroom_test
 ```
 
 ## Test Organization
@@ -177,7 +177,7 @@ This test suite was inspired by:
 
 ## Next Steps
 
-1. **Parser integration**: Update tests to actually parse CSVs using simdcsv
+1. **Parser integration**: Update tests to actually parse CSVs using libvroom
 2. **Index validation**: Verify field positions are correctly identified
 3. **Performance tests**: Add benchmarks for each test file
 4. **Fuzz testing**: Implement randomized CSV generation (à la Sep)

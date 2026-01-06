@@ -30,8 +30,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     std::memcpy(buf, data, size);
     std::memset(buf + size, 0, 64);
 
-    simdcsv::DialectDetector detector;
-    simdcsv::DetectionResult result = detector.detect(buf, size);
+    libvroom::DialectDetector detector;
+    libvroom::DetectionResult result = detector.detect(buf, size);
     (void)result.success();
 
     return 0;

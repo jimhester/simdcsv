@@ -19,11 +19,11 @@
  * achieve significant IPC (instructions per cycle) improvement.
  *
  * @see two_pass.h For the main parser that uses this state machine
- * @see https://github.com/jimhester/simdcsv/issues/41 For design discussion
+ * @see https://github.com/jimhester/libvroom/issues/41 For design discussion
  */
 
-#ifndef SIMDCSV_BRANCHLESS_STATE_MACHINE_H
-#define SIMDCSV_BRANCHLESS_STATE_MACHINE_H
+#ifndef LIBVROOM_BRANCHLESS_STATE_MACHINE_H
+#define LIBVROOM_BRANCHLESS_STATE_MACHINE_H
 
 #include <cassert>
 #include <cstdint>
@@ -31,7 +31,7 @@
 #include "common_defs.h"
 #include "simd_highway.h"
 
-namespace simdcsv {
+namespace libvroom {
 
 /**
  * @brief Character classification for branchless CSV parsing.
@@ -517,6 +517,6 @@ inline uint64_t second_pass_simd_branchless(
     return count;
 }
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
-#endif  // SIMDCSV_BRANCHLESS_STATE_MACHINE_H
+#endif  // LIBVROOM_BRANCHLESS_STATE_MACHINE_H

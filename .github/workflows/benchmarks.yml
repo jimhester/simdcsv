@@ -74,7 +74,7 @@ jobs:
 
     - name: Build benchmark executable
       run: |
-        cmake --build build --target simdcsv_benchmark -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+        cmake --build build --target libvroom_benchmark -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
     - name: Run benchmarks
       id: run_benchmarks
@@ -108,7 +108,7 @@ jobs:
         echo "Results will be saved to: $RESULTS_FILE"
 
         # Run benchmarks with JSON output
-        ./build/simdcsv_benchmark \
+        ./build/libvroom_benchmark \
           --benchmark_format=json \
           --benchmark_out="$RESULTS_FILE" \
           --benchmark_repetitions=3 \
@@ -195,7 +195,7 @@ jobs:
 
         # Build
         cmake -B build-compare -DCMAKE_BUILD_TYPE=Release
-        cmake --build build-compare --target simdcsv_benchmark -j$(nproc)
+        cmake --build build-compare --target libvroom_benchmark -j$(nproc)
 
         # Run benchmarks
         mkdir -p comparison_output
@@ -210,7 +210,7 @@ jobs:
           FILTER_ARG="--benchmark_filter=$FILTER"
         fi
 
-        ./build-compare/simdcsv_benchmark \
+        ./build-compare/libvroom_benchmark \
           --benchmark_format=json \
           --benchmark_out="comparison_output/baseline.json" \
           --benchmark_repetitions=3 \

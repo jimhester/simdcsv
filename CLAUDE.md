@@ -4,17 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-simdcsv is a high-performance CSV parser library using portable SIMD instructions (via Google Highway), designed for future integration with R's [vroom](https://github.com/tidyverse/vroom) package. The parser uses a speculative multi-threaded two-pass algorithm based on research by Chang et al. (SIGMOD 2019) and SIMD techniques from Langdale & Lemire (simdjson).
+libvroom is a high-performance CSV parser library using portable SIMD instructions (via Google Highway), designed for future integration with R's [vroom](https://github.com/tidyverse/vroom) package. The parser uses a speculative multi-threaded two-pass algorithm based on research by Chang et al. (SIGMOD 2019) and SIMD techniques from Langdale & Lemire (simdjson).
 
 ## Naming and Authorship
 
-This project is authored by Jim Hester, the original author of [vroom](https://github.com/tidyverse/vroom). The project is planned to be renamed to **libvroom** to:
+This project is authored by Jim Hester, the original author of [vroom](https://github.com/tidyverse/vroom). The project was renamed from simdcsv to **libvroom** to:
 
 1. Clearly indicate its relationship to vroom as the native SIMD parsing engine
 2. Avoid confusion with abandoned simdjson-adjacent projects (e.g., geofflangdale/simdcsv)
 3. Use conventional `lib*` naming for C/C++ libraries
-
-Until the rename is complete, the codebase uses "simdcsv" naming internally.
 
 ## Build Commands
 
@@ -35,12 +33,12 @@ cmake --build build
 cd build && ctest --output-on-failure
 
 # Run specific test binary
-./build/simdcsv_test               # 42 well-formed CSV tests
+./build/libvroom_test              # 42 well-formed CSV tests
 ./build/error_handling_test        # 37 error handling tests
 ./build/csv_parsing_test           # Integration tests
 
 # Run benchmarks
-./build/simdcsv_benchmark
+./build/libvroom_benchmark
 
 # Build with code coverage
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
@@ -68,7 +66,7 @@ The core algorithm in `include/two_pass.h` uses speculative multi-threaded parsi
 | `include/error.h` | Error codes, severity levels, ErrorCollector class |
 | `include/io_util.h` | File loading with SIMD-aligned padding (32+ bytes) |
 | `include/mem_util.h` | Aligned memory allocation for SIMD |
-| `src/cli.cpp` | User-friendly CSV tool (scsv) |
+| `src/cli.cpp` | User-friendly CSV tool (vroom) |
 
 ### Error Handling Framework
 

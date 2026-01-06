@@ -8,8 +8,8 @@ cmake-build-*/
 *.so
 *.dylib
 *.exe
-simdcsv
-simdcsv_test
+vroom
+libvroom_test
 
 # CMake generated files
 CMakeCache.txt

@@ -24,7 +24,7 @@
 struct CorpusGuard {
     std::basic_string_view<uint8_t> data;
     explicit CorpusGuard(const std::string& path)
-        : data(get_corpus(path, SIMDCSV_PADDING)) {}
+        : data(get_corpus(path, LIBVROOM_PADDING)) {}
     ~CorpusGuard() {
         if (data.data()) {
         }
@@ -70,8 +70,8 @@ TEST_F(CSVExtendedTest, UTF8BOMParsing) {
     std::string path = getTestDataPath("encoding", "utf8_bom.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle BOM (may or may not skip it)
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
@@ -102,8 +102,8 @@ TEST_F(CSVExtendedTest, Latin1Parsing) {
     std::string path = getTestDataPath("encoding", "latin1.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should parse Latin-1 file (treating bytes as-is)
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
@@ -126,15 +126,15 @@ TEST_F(CSVExtendedTest, UTF16BOMDetection) {
 }
 
 TEST_F(CSVExtendedTest, UTF16BOMParsing) {
-    // Note: simdcsv is a byte-oriented parser and does NOT support UTF-16.
+    // Note: libvroom is a byte-oriented parser and does NOT support UTF-16.
     // This test documents expected behavior: the parser will treat UTF-16
     // data as binary/garbage and may fail or produce incorrect results.
     // UTF-16 files should be converted to UTF-8 before parsing.
     std::string path = getTestDataPath("encoding", "utf16_bom.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser will attempt to parse but results are undefined for UTF-16
     // We just ensure it doesn't crash but we can verify indexes were created
@@ -156,8 +156,8 @@ TEST_F(CSVExtendedTest, BlankLeadingRowsParsing) {
     std::string path = getTestDataPath("whitespace", "blank_leading_rows.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // blank_leading_rows.csv has 5 blank lines before the header
     // This validates that leading blank lines don't corrupt parsing
@@ -174,8 +174,8 @@ TEST_F(CSVExtendedTest, WhitespaceOnlyRowsParsing) {
     std::string path = getTestDataPath("whitespace", "whitespace_only_rows.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
     EXPECT_TRUE(success) << "Parser should handle whitespace-only rows";
@@ -190,11 +190,11 @@ TEST_F(CSVExtendedTest, TrimFieldsParsing) {
     std::string path = getTestDataPath("whitespace", "trim_fields.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Fields with leading/trailing whitespace should parse correctly
-    // Note: simdcsv preserves whitespace; trimming is caller responsibility
+    // Note: libvroom preserves whitespace; trimming is caller responsibility
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
     EXPECT_TRUE(success) << "Parser should handle fields with whitespace";
 }
@@ -208,8 +208,8 @@ TEST_F(CSVExtendedTest, BlankRowsMixedParsing) {
     std::string path = getTestDataPath("whitespace", "blank_rows_mixed.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
     EXPECT_TRUE(success) << "Parser should handle blank rows mixed throughout";
@@ -232,8 +232,8 @@ TEST_F(CSVExtendedTest, LongLineParsing) {
     // File should be >10KB
     EXPECT_GT(corpus.data.size(), 10000) << "long_line.csv should be >10KB";
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
     EXPECT_TRUE(success) << "Parser should handle very long lines";
@@ -252,8 +252,8 @@ TEST_F(CSVExtendedTest, LargeFieldParsing) {
     // File should be >64KB (larger than typical SIMD buffer)
     EXPECT_GT(corpus.data.size(), 64000) << "large_field.csv should be >64KB";
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
     EXPECT_TRUE(success) << "Parser should handle very large fields";
@@ -269,8 +269,8 @@ TEST_F(CSVExtendedTest, BufferBoundaryParsing) {
     std::string path = getTestDataPath("large", "buffer_boundary.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
     EXPECT_TRUE(success) << "Parser should handle quoted newlines at buffer boundaries";
@@ -289,8 +289,8 @@ TEST_F(CSVExtendedTest, ParallelChunkBoundaryParsing) {
     // File should be ~2MB
     EXPECT_GT(corpus.data.size(), 1500000) << "parallel_chunk_boundary.csv should be >1.5MB";
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
     EXPECT_TRUE(success) << "Parser should handle parallel chunk boundary test file";
@@ -302,8 +302,8 @@ TEST_F(CSVExtendedTest, ParallelChunkBoundaryMultiThreaded) {
     CorpusGuard corpus(path);
 
     // Parse with multiple threads to stress test chunk boundaries
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 4);  // 4 threads
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 4);  // 4 threads
 
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
     EXPECT_TRUE(success) << "Multi-threaded parsing should handle chunk boundaries";
@@ -314,8 +314,8 @@ TEST_F(CSVExtendedTest, ParallelChunkBoundary8Threads) {
     std::string path = getTestDataPath("large", "parallel_chunk_boundary.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 8);  // 8 threads
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 8);  // 8 threads
 
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
     EXPECT_TRUE(success) << "8-thread parsing should handle chunk boundaries";
@@ -335,8 +335,8 @@ TEST_F(CSVExtendedTest, HashCommentsParsing) {
     std::string path = getTestDataPath("comments", "hash_comments.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser currently doesn't skip comments, but should parse without crashing
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
@@ -353,8 +353,8 @@ TEST_F(CSVExtendedTest, QuotedHashParsing) {
     std::string path = getTestDataPath("comments", "quoted_hash.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Hash inside quoted field should NOT be treated as comment
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
@@ -371,8 +371,8 @@ TEST_F(CSVExtendedTest, SemicolonCommentsParsing) {
     std::string path = getTestDataPath("comments", "semicolon_comments.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser currently doesn't skip comments, but should parse without crashing
     // Semicolon comments are common in some European CSV formats
@@ -394,8 +394,8 @@ TEST_F(CSVExtendedTest, FewerColumnsParsing) {
     std::string path = getTestDataPath("ragged", "fewer_columns.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle rows with fewer columns than header
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
@@ -412,8 +412,8 @@ TEST_F(CSVExtendedTest, MoreColumnsParsing) {
     std::string path = getTestDataPath("ragged", "more_columns.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle rows with more columns than header
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
@@ -430,8 +430,8 @@ TEST_F(CSVExtendedTest, MixedColumnsParsing) {
     std::string path = getTestDataPath("ragged", "mixed_columns.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle mixed column counts
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
@@ -457,12 +457,12 @@ TEST_F(CSVExtendedTest, BadEscapeParsing) {
     std::string path = getTestDataPath("fuzz", "bad_escape.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle backslash escapes without crashing
     // (non-RFC 4180 - backslashes are treated as literal characters)
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
 
     // Just verify the parser completes without crashing
@@ -479,12 +479,12 @@ TEST_F(CSVExtendedTest, InvalidUTF8Parsing) {
     std::string path = getTestDataPath("fuzz", "invalid_utf8.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should not crash on invalid UTF-8 sequences (0xFE, 0xFF, truncated multibyte)
     // Note: UTF-8 validation is not yet implemented (INVALID_UTF8 is reserved)
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
 
     // Just verify the parser completes without crashing
@@ -501,11 +501,11 @@ TEST_F(CSVExtendedTest, ScatteredNullsParsing) {
     std::string path = getTestDataPath("fuzz", "scattered_nulls.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle embedded null bytes (0x00) by detecting errors
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
     
     // Null bytes should be detected as errors
@@ -522,8 +522,8 @@ TEST_F(CSVExtendedTest, DeepQuotesParsing) {
     std::string path = getTestDataPath("fuzz", "deep_quotes.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle many consecutive quotes without stack overflow
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
@@ -542,8 +542,8 @@ TEST_F(CSVExtendedTest, QuoteDelimiterAltParsing) {
     std::string path = getTestDataPath("fuzz", "quote_delimiter_alt.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle alternating quotes and delimiters
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
@@ -562,8 +562,8 @@ TEST_F(CSVExtendedTest, JustQuotesParsing) {
     std::string path = getTestDataPath("fuzz", "just_quotes.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle file with only quotes
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
@@ -582,11 +582,11 @@ TEST_F(CSVExtendedTest, QuoteEOFParsing) {
     std::string path = getTestDataPath("fuzz", "quote_eof.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle unclosed quote at EOF by detecting the error
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     bool success = parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
     
     // Unclosed quote at EOF should be detected as an error
@@ -604,8 +604,8 @@ TEST_F(CSVExtendedTest, MixedCRParsing) {
     std::string path = getTestDataPath("fuzz", "mixed_cr.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should handle mixed CR and CRLF line endings
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());
@@ -624,11 +624,11 @@ TEST_F(CSVExtendedTest, AFLBinaryParsing) {
     std::string path = getTestDataPath("fuzz", "afl_binary.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // Parser should not crash on binary garbage (AFL-discovered test case)
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_validate(corpus.data.data(), idx, corpus.data.size(), errors);
     
     // Binary garbage should be detected as errors
@@ -645,8 +645,8 @@ TEST_F(CSVExtendedTest, AFL10Parsing) {
     std::string path = getTestDataPath("fuzz", "afl_10.csv");
     CorpusGuard corpus(path);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(corpus.data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(corpus.data.size(), 1);
 
     // AFL-discovered edge case test file
     bool success = parser.parse(corpus.data.data(), idx, corpus.data.size());

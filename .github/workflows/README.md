@@ -1,6 +1,6 @@
 # GitHub Actions CI
 
-This directory contains GitHub Actions workflows for simdcsv continuous integration.
+This directory contains GitHub Actions workflows for libvroom continuous integration.
 
 ## Workflows
 
@@ -17,7 +17,7 @@ Runs on every push and pull request to main/master branches and all `claude/**` 
 1. Checkout code
 2. Install dependencies (CMake, build tools)
 3. Configure CMake with specified build type
-4. Build all targets (simdcsv, simdcsv_test, error_handling_test)
+4. Build all targets (libvroom, libvroom_test, error_handling_test)
 5. Run well-formed CSV tests (42 tests)
 6. Run error handling tests (37 tests)
 7. Run full CTest suite (79 tests)
@@ -31,7 +31,7 @@ Runs on every push and pull request to main/master branches and all `claude/**` 
 
 Add to README.md:
 ```markdown
-![CI](https://github.com/jimhester/simdcsv/workflows/CI/badge.svg)
+![CI](https://github.com/jimhester/libvroom/workflows/CI/badge.svg)
 ```
 
 ## Local Testing
@@ -42,7 +42,7 @@ To test locally before pushing:
 # Run the same commands as CI
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/simdcsv_test
+./build/libvroom_test
 ./build/error_handling_test
 cd build && ctest --output-on-failure
 ```

@@ -16,7 +16,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace simdcsv {
+namespace libvroom {
 
 // ============================================================================
 // Constants for dialect scoring
@@ -854,4 +854,4 @@ const char* DialectDetector::cell_type_to_string(CellType type) {
     }
 }
 
-}  // namespace simdcsv
+}  // namespace libvroom

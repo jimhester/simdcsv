@@ -17,7 +17,7 @@
 #include "value_extraction.h"
 #include "type_detector.h"
 
-using namespace simdcsv;
+using namespace libvroom;
 
 namespace {
 

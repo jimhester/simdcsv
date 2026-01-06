@@ -1,4 +1,4 @@
-#ifdef SIMDCSV_ENABLE_ARROW
+#ifdef LIBVROOM_ENABLE_ARROW
 
 #include "arrow_output.h"
 #include "io_util.h"
@@ -15,7 +15,7 @@
 #include <memory>
 #include <stdexcept>
 
-namespace simdcsv {
+namespace libvroom {
 
 // RAII wrapper for aligned memory to ensure proper cleanup on all code paths
 // This prevents memory leaks when exceptions are thrown during parsing or conversion
@@ -418,6 +418,6 @@ ArrowConvertResult csv_to_arrow_from_memory(const uint8_t* data, size_t len, con
     return result;
 }
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
-#endif  // SIMDCSV_ENABLE_ARROW
+#endif  // LIBVROOM_ENABLE_ARROW

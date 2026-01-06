@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(simdcsv VERSION 0.1.0 LANGUAGES CXX C)
+project(libvroom VERSION 0.1.0 LANGUAGES CXX C)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -70,7 +70,7 @@ if(BUILD_BENCHMARKS)
 endif()
 
 # Apache Arrow output integration (optional)
-option(SIMDCSV_ENABLE_ARROW "Enable Apache Arrow output integration" OFF)
+option(LIBVROOM_ENABLE_ARROW "Enable Apache Arrow output integration" OFF)
 
 # External benchmark parsers (only built if benchmarks enabled)
 if(BUILD_BENCHMARKS)
@@ -168,21 +168,21 @@ if(BUILD_BENCHMARKS)
 endif()
 
 # Library target (SHARED or STATIC based on BUILD_SHARED_LIBS)
-add_library(simdcsv_lib
+add_library(libvroom_lib
     src/io_util.cpp
     src/error.cpp
     src/dialect.cpp
     src/encoding.cpp
-    src/simdcsv_c.cpp
+    src/libvroom_c.cpp
     src/value_extraction.cpp
     src/streaming.cpp
 )
 
-target_include_directories(simdcsv_lib PUBLIC
+target_include_directories(libvroom_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(simdcsv_lib PUBLIC
+target_link_libraries(libvroom_lib PUBLIC
     hwy
 )
 
@@ -190,17 +190,17 @@ target_link_libraries(simdcsv_lib PUBLIC
 include(cmake/ArrowIntegration.cmake)
 
 # CLI utility (user-friendly CSV tool)
-add_executable(scsv
+add_executable(vroom
     src/cli.cpp
 )
 
-target_link_libraries(scsv PRIVATE
-    simdcsv_lib
+target_link_libraries(vroom PRIVATE
+    libvroom_lib
     pthread
 )
 
 # Suppress debug output for CLI
-target_compile_definitions(scsv PRIVATE SIMDCSV_BENCHMARK_MODE)
+target_compile_definitions(vroom PRIVATE LIBVROOM_BENCHMARK_MODE)
 
 # =============================================================================
 # Testing (optional, controlled by BUILD_TESTING)
@@ -220,22 +220,22 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(googletest)
 
 # Test executable
-add_executable(simdcsv_test
+add_executable(libvroom_test
     test/csv_parser_test.cpp
 )
 
-target_link_libraries(simdcsv_test PRIVATE
-    simdcsv_lib
+target_link_libraries(libvroom_test PRIVATE
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
 
-target_include_directories(simdcsv_test PRIVATE
+target_include_directories(libvroom_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 # Copy test data to build directory
-add_custom_command(TARGET simdcsv_test POST_BUILD
+add_custom_command(TARGET libvroom_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_CURRENT_SOURCE_DIR}/test/data
     ${CMAKE_CURRENT_BINARY_DIR}/test/data
@@ -247,7 +247,7 @@ add_executable(error_handling_test
 )
 
 target_link_libraries(error_handling_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -265,7 +265,7 @@ add_custom_command(TARGET error_handling_test POST_BUILD
 
 # Register tests with CTest
 include(GoogleTest)
-gtest_discover_tests(simdcsv_test)
+gtest_discover_tests(libvroom_test)
 gtest_discover_tests(error_handling_test)
 
 # CSV parsing test executable (portable SIMD via Highway)
@@ -274,7 +274,7 @@ add_executable(csv_parsing_test
 )
 
 target_link_libraries(csv_parsing_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -299,7 +299,7 @@ add_executable(csv_parser_errors_test
 )
 
 target_link_libraries(csv_parser_errors_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -324,7 +324,7 @@ add_executable(csv_extended_test
 )
 
 target_link_libraries(csv_extended_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -349,7 +349,7 @@ add_executable(dialect_detection_test
 )
 
 target_link_libraries(dialect_detection_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -374,7 +374,7 @@ add_executable(type_detection_test
 )
 
 target_link_libraries(type_detection_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -399,7 +399,7 @@ add_executable(c_api_test
 )
 
 target_link_libraries(c_api_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -424,7 +424,7 @@ add_executable(debug_test
 )
 
 target_link_libraries(debug_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -442,7 +442,7 @@ add_executable(api_test
 )
 
 target_link_libraries(api_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -484,7 +484,7 @@ add_executable(value_extraction_test
 )
 
 target_link_libraries(value_extraction_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -509,7 +509,7 @@ add_executable(streaming_test
 )
 
 target_link_libraries(streaming_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -534,7 +534,7 @@ add_executable(branchless_test
 )
 
 target_link_libraries(branchless_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -559,7 +559,7 @@ add_executable(simd_number_parsing_test
 )
 
 target_link_libraries(simd_number_parsing_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -584,7 +584,7 @@ add_executable(io_util_test
 )
 
 target_link_libraries(io_util_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -617,8 +617,8 @@ target_include_directories(cli_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# CLI test depends on scsv executable being built
-add_dependencies(cli_test scsv)
+# CLI test depends on vroom executable being built
+add_dependencies(cli_test vroom)
 
 # Copy test data to build directory for CLI tests
 add_custom_command(TARGET cli_test POST_BUILD
@@ -636,7 +636,7 @@ add_executable(two_pass_coverage_test
 )
 
 target_link_libraries(two_pass_coverage_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -661,7 +661,7 @@ add_executable(encoding_test
 )
 
 target_link_libraries(encoding_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -686,7 +686,7 @@ add_executable(bounds_validation_test
 )
 
 target_link_libraries(bounds_validation_test PRIVATE
-    simdcsv_lib
+    libvroom_lib
     GTest::gtest_main
     pthread
 )
@@ -706,9 +706,9 @@ add_custom_command(TARGET bounds_validation_test POST_BUILD
 gtest_discover_tests(bounds_validation_test)
 
 # Arrow output test (only if Arrow is enabled)
-if(SIMDCSV_ENABLE_ARROW)
+if(LIBVROOM_ENABLE_ARROW)
     add_executable(arrow_output_test test/arrow_output_test.cpp)
-    target_link_libraries(arrow_output_test PRIVATE simdcsv_lib GTest::gtest_main pthread)
+    target_link_libraries(arrow_output_test PRIVATE libvroom_lib GTest::gtest_main pthread)
     target_include_directories(arrow_output_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_custom_command(TARGET arrow_output_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
@@ -716,7 +716,7 @@ if(SIMDCSV_ENABLE_ARROW)
 
     # Arrow file-based tests (loading real CSV files)
     add_executable(arrow_file_test test/arrow_file_test.cpp)
-    target_link_libraries(arrow_file_test PRIVATE simdcsv_lib GTest::gtest_main pthread)
+    target_link_libraries(arrow_file_test PRIVATE libvroom_lib GTest::gtest_main pthread)
     target_include_directories(arrow_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_custom_command(TARGET arrow_file_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
@@ -747,40 +747,40 @@ if(HAVE_ZSV OR HAVE_DUCKDB OR HAVE_ARROW)
     list(APPEND BENCHMARK_SOURCES benchmark/external_parser_benchmarks.cpp)
 endif()
 
-add_executable(simdcsv_benchmark ${BENCHMARK_SOURCES})
+add_executable(libvroom_benchmark ${BENCHMARK_SOURCES})
 
-target_link_libraries(simdcsv_benchmark PRIVATE
-    simdcsv_lib
+target_link_libraries(libvroom_benchmark PRIVATE
+    libvroom_lib
     benchmark::benchmark
     benchmark::benchmark_main
     pthread
 )
 
-target_include_directories(simdcsv_benchmark PRIVATE
+target_include_directories(libvroom_benchmark PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 # Define benchmark mode to suppress debug output during benchmarking
-target_compile_definitions(simdcsv_benchmark PRIVATE SIMDCSV_BENCHMARK_MODE)
+target_compile_definitions(libvroom_benchmark PRIVATE LIBVROOM_BENCHMARK_MODE)
 
 # Conditionally link external CSV parsers
 if(HAVE_ZSV)
-    target_link_libraries(simdcsv_benchmark PRIVATE zsv_lib)
-    target_compile_definitions(simdcsv_benchmark PRIVATE HAVE_ZSV)
+    target_link_libraries(libvroom_benchmark PRIVATE zsv_lib)
+    target_compile_definitions(libvroom_benchmark PRIVATE HAVE_ZSV)
 endif()
 
 if(HAVE_DUCKDB)
-    target_link_libraries(simdcsv_benchmark PRIVATE duckdb)
-    target_compile_definitions(simdcsv_benchmark PRIVATE HAVE_DUCKDB)
+    target_link_libraries(libvroom_benchmark PRIVATE duckdb)
+    target_compile_definitions(libvroom_benchmark PRIVATE HAVE_DUCKDB)
 endif()
 
 if(HAVE_ARROW)
-    target_link_libraries(simdcsv_benchmark PRIVATE Arrow::arrow_shared)
-    target_compile_definitions(simdcsv_benchmark PRIVATE HAVE_ARROW)
+    target_link_libraries(libvroom_benchmark PRIVATE Arrow::arrow_shared)
+    target_compile_definitions(libvroom_benchmark PRIVATE HAVE_ARROW)
 endif()
 
 # Copy test data to build directory for benchmarks
-add_custom_command(TARGET simdcsv_benchmark POST_BUILD
+add_custom_command(TARGET libvroom_benchmark POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_CURRENT_SOURCE_DIR}/test/data
     ${CMAKE_CURRENT_BINARY_DIR}/benchmark/data
@@ -817,25 +817,25 @@ if(ENABLE_FUZZING)
     set(FUZZ_LINK_FLAGS -fsanitize=fuzzer,address,undefined)
 
     add_executable(fuzz_csv_parser fuzz/fuzz_csv_parser.cpp)
-    target_link_libraries(fuzz_csv_parser PRIVATE simdcsv_lib)
+    target_link_libraries(fuzz_csv_parser PRIVATE libvroom_lib)
     target_include_directories(fuzz_csv_parser PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(fuzz_csv_parser PRIVATE ${FUZZ_FLAGS})
     target_link_options(fuzz_csv_parser PRIVATE ${FUZZ_LINK_FLAGS})
-    target_compile_definitions(fuzz_csv_parser PRIVATE SIMDCSV_BENCHMARK_MODE)
+    target_compile_definitions(fuzz_csv_parser PRIVATE LIBVROOM_BENCHMARK_MODE)
 
     add_executable(fuzz_dialect_detection fuzz/fuzz_dialect_detection.cpp)
-    target_link_libraries(fuzz_dialect_detection PRIVATE simdcsv_lib)
+    target_link_libraries(fuzz_dialect_detection PRIVATE libvroom_lib)
     target_include_directories(fuzz_dialect_detection PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(fuzz_dialect_detection PRIVATE ${FUZZ_FLAGS})
     target_link_options(fuzz_dialect_detection PRIVATE ${FUZZ_LINK_FLAGS})
-    target_compile_definitions(fuzz_dialect_detection PRIVATE SIMDCSV_BENCHMARK_MODE)
+    target_compile_definitions(fuzz_dialect_detection PRIVATE LIBVROOM_BENCHMARK_MODE)
 
     add_executable(fuzz_parse_auto fuzz/fuzz_parse_auto.cpp)
-    target_link_libraries(fuzz_parse_auto PRIVATE simdcsv_lib)
+    target_link_libraries(fuzz_parse_auto PRIVATE libvroom_lib)
     target_include_directories(fuzz_parse_auto PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(fuzz_parse_auto PRIVATE ${FUZZ_FLAGS})
     target_link_options(fuzz_parse_auto PRIVATE ${FUZZ_LINK_FLAGS})
-    target_compile_definitions(fuzz_parse_auto PRIVATE SIMDCSV_BENCHMARK_MODE)
+    target_compile_definitions(fuzz_parse_auto PRIVATE LIBVROOM_BENCHMARK_MODE)
 
     add_custom_command(TARGET fuzz_csv_parser POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/fuzz_corpus

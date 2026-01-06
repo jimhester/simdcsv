@@ -4,21 +4,21 @@ title: "CLI Reference"
 
 ```{bash}
 #| include: false
-# Set up PATH to include the scsv binary for examples
+# Set up PATH to include the vroom binary for examples
 export PATH="../build:$PATH"
 ```
 
 ## Overview
 
-The `scsv` command line tool provides a user-friendly way to work with CSV files using the high-performance simdcsv parser. It supports common operations like counting rows, displaying data, selecting columns, and detecting file formats.
+The `vroom` command line tool provides a user-friendly way to work with CSV files using the high-performance libvroom parser. It supports common operations like counting rows, displaying data, selecting columns, and detecting file formats.
 
 ## Basic Usage
 
 ```bash
-scsv <command> [options] [csvfile]
+vroom <command> [options] [csvfile]
 ```
 
-If `csvfile` is omitted or `-` is specified, scsv reads from standard input.
+If `csvfile` is omitted or `-` is specified, vroom reads from standard input.
 
 ## Commands
 
@@ -71,7 +71,7 @@ If `csvfile` is omitted or `-` is specified, scsv reads from standard input.
 
 ### Input Sources
 
-scsv can read CSV data from multiple sources:
+vroom can read CSV data from multiple sources:
 
 - **Files**: Provide the path to a CSV file
 - **stdin**: Omit the filename or use `-` to read from standard input
@@ -95,14 +95,14 @@ scsv can read CSV data from multiple sources:
 
 ## Examples
 
-The examples below use test data files from the simdcsv repository.
+The examples below use test data files from the libvroom repository.
 
 ### Counting Rows
 
 Count the number of data rows (excluding header):
 
 ```{bash}
-scsv count ../test/data/real_world/contacts.csv
+vroom count ../test/data/real_world/contacts.csv
 ```
 
 ### Viewing First Rows
@@ -110,13 +110,13 @@ scsv count ../test/data/real_world/contacts.csv
 Display the first rows:
 
 ```{bash}
-scsv head ../test/data/real_world/contacts.csv
+vroom head ../test/data/real_world/contacts.csv
 ```
 
 Display the first 2 rows:
 
 ```{bash}
-scsv head -n 2 ../test/data/real_world/contacts.csv
+vroom head -n 2 ../test/data/real_world/contacts.csv
 ```
 
 ### Selecting Columns
@@ -124,13 +124,13 @@ scsv head -n 2 ../test/data/real_world/contacts.csv
 Select columns by name:
 
 ```{bash}
-scsv select -c Name,Email ../test/data/real_world/contacts.csv
+vroom select -c Name,Email ../test/data/real_world/contacts.csv
 ```
 
 Select columns by index (0-based):
 
 ```{bash}
-scsv select -c 0,2 ../test/data/real_world/contacts.csv
+vroom select -c 0,2 ../test/data/real_world/contacts.csv
 ```
 
 ### File Information
@@ -138,7 +138,7 @@ scsv select -c 0,2 ../test/data/real_world/contacts.csv
 Display metadata about a CSV file:
 
 ```{bash}
-scsv info ../test/data/real_world/contacts.csv
+vroom info ../test/data/real_world/contacts.csv
 ```
 
 ### Pretty Printing
@@ -146,13 +146,13 @@ scsv info ../test/data/real_world/contacts.csv
 Display CSV data in a formatted table:
 
 ```{bash}
-scsv pretty ../test/data/real_world/contacts.csv
+vroom pretty ../test/data/real_world/contacts.csv
 ```
 
 Limit to first 2 rows:
 
 ```{bash}
-scsv pretty -n 2 ../test/data/real_world/contacts.csv
+vroom pretty -n 2 ../test/data/real_world/contacts.csv
 ```
 
 ### Dialect Detection
@@ -160,35 +160,35 @@ scsv pretty -n 2 ../test/data/real_world/contacts.csv
 Detect the CSV dialect (delimiter, quoting style, line endings):
 
 ```{bash}
-scsv dialect ../test/data/separators/semicolon.csv
+vroom dialect ../test/data/separators/semicolon.csv
 ```
 
 Get dialect information in JSON format for scripting:
 
 ```{bash}
-scsv dialect -j ../test/data/separators/tab.csv
+vroom dialect -j ../test/data/separators/tab.csv
 ```
 
 ### Working with Different Delimiters
 
-By default, scsv auto-detects the delimiter. You can also specify it explicitly.
+By default, vroom auto-detects the delimiter. You can also specify it explicitly.
 
 Parse a tab-separated file with explicit delimiter:
 
 ```{bash}
-scsv count -d tab ../test/data/separators/tab.csv
+vroom count -d tab ../test/data/separators/tab.csv
 ```
 
 Parse a semicolon-separated file (common in European locales):
 
 ```{bash}
-scsv head -d semicolon ../test/data/separators/semicolon.csv
+vroom head -d semicolon ../test/data/separators/semicolon.csv
 ```
 
 Parse a pipe-separated file:
 
 ```{bash}
-scsv select -d pipe -c 0,1 ../test/data/separators/pipe.csv
+vroom select -d pipe -c 0,1 ../test/data/separators/pipe.csv
 ```
 
 ### Working with Quoted Fields
@@ -196,49 +196,49 @@ scsv select -d pipe -c 0,1 ../test/data/separators/pipe.csv
 CSV files often contain fields with special characters that require quoting:
 
 ```{bash}
-scsv pretty ../test/data/quoted/embedded_separators.csv
+vroom pretty ../test/data/quoted/embedded_separators.csv
 ```
 
 Fields containing embedded quotes (escaped as `""`):
 
 ```{bash}
-scsv pretty ../test/data/quoted/escaped_quotes.csv
+vroom pretty ../test/data/quoted/escaped_quotes.csv
 ```
 
 ### Multi-threaded Parsing
 
-By default, scsv uses all available CPU cores for parallel parsing. You can limit the thread count if needed:
+By default, vroom uses all available CPU cores for parallel parsing. You can limit the thread count if needed:
 
 ```{bash}
-scsv count -t 4 ../test/data/real_world/contacts.csv
+vroom count -t 4 ../test/data/real_world/contacts.csv
 ```
 
-By default, scsv automatically uses the number of hardware threads available.
+By default, vroom automatically uses the number of hardware threads available.
 
 ### Files Without Headers
 
 When the CSV has no header row, use `-H`:
 
 ```{bash}
-scsv count -H ../test/data/basic/simple_no_header.csv
+vroom count -H ../test/data/basic/simple_no_header.csv
 ```
 
 ```{bash}
-scsv select -H -c 0,1,2 ../test/data/basic/simple_no_header.csv
+vroom select -H -c 0,1,2 ../test/data/basic/simple_no_header.csv
 ```
 
 ### Reading from stdin
 
-Pipe data directly to scsv:
+Pipe data directly to vroom:
 
 ```{bash}
-cat ../test/data/basic/simple.csv | scsv count
+cat ../test/data/basic/simple.csv | vroom count
 ```
 
 Use `-` to explicitly read from stdin:
 
 ```{bash}
-scsv head - < ../test/data/basic/simple.csv
+vroom head - < ../test/data/basic/simple.csv
 ```
 
 ## Common Workflows
@@ -249,11 +249,11 @@ When working with a CSV file of unknown format:
 
 ```bash
 # First, detect the dialect
-scsv dialect data.csv
+vroom dialect data.csv
 
 # Then view the structure and sample data
-scsv info data.csv
-scsv pretty -n 5 data.csv
+vroom info data.csv
+vroom pretty -n 5 data.csv
 ```
 
 ### Extracting Specific Columns
@@ -262,34 +262,34 @@ Extract columns for further processing:
 
 ```bash
 # By name (requires header row)
-scsv select -c id,email,status data.csv > extracted.csv
+vroom select -c id,email,status data.csv > extracted.csv
 
 # By index (works with or without header)
-scsv select -c 0,3,5 data.csv > extracted.csv
+vroom select -c 0,3,5 data.csv > extracted.csv
 ```
 
 ### Processing Large Files
 
-For large files, scsv automatically uses multiple threads:
+For large files, vroom automatically uses multiple threads:
 
 ```bash
 # Count rows quickly (uses optimized SIMD row counter)
-scsv count large_file.csv
+vroom count large_file.csv
 
 # Explicitly set thread count if needed
-scsv count -t 8 large_file.csv
+vroom count -t 8 large_file.csv
 ```
 
 ### Pipeline Integration
 
-scsv works well in Unix pipelines:
+vroom works well in Unix pipelines:
 
 ```bash
 # Filter and process
-cat data.csv | scsv select -c name,email | grep "@company.com"
+cat data.csv | vroom select -c name,email | grep "@company.com"
 
 # Chain with other tools
-scsv head -n 100 huge.csv | scsv pretty
+vroom head -n 100 huge.csv | vroom pretty
 ```
 
 ### Working with Non-Standard Formats
@@ -298,15 +298,15 @@ For files with non-standard delimiters:
 
 ```bash
 # Colon-separated (e.g., /etc/passwd format)
-scsv count -d : passwords.txt
+vroom count -d : passwords.txt
 
 # Custom single-character delimiter
-scsv head -d "^" caret_delimited.csv
+vroom head -d "^" caret_delimited.csv
 ```
 
 ## Performance Tips
 
-1. **Thread count**: By default, scsv uses all available hardware threads. For large files (>1MB), this provides the best performance. Use `-t 1` to force single-threaded operation if needed.
+1. **Thread count**: By default, vroom uses all available hardware threads. For large files (>1MB), this provides the best performance. Use `-t 1` to force single-threaded operation if needed.
 
 2. **Row counting**: The `count` command uses an optimized SIMD algorithm that doesn't build a full index, making it significantly faster than other commands for simply counting rows.
 
@@ -333,4 +333,4 @@ The `dialect` command analyzes the CSV structure and reports:
 - **Columns**: Number of columns detected
 - **Confidence**: Detection confidence level (0-100%)
 
-The command also outputs suggested CLI flags for use with other scsv commands.
+The command also outputs suggested CLI flags for use with other vroom commands.

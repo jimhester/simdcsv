@@ -10,7 +10,7 @@
 #include "debug_parser.h"
 #include "error.h"
 
-using namespace simdcsv;
+using namespace libvroom;
 
 class DebugTest : public ::testing::Test {
 protected:
@@ -64,7 +64,7 @@ TEST_F(DebugTest, DebugTraceLog) {
     trace.log("Test message %d", 42);
 
     std::string output = get_output();
-    EXPECT_NE(output.find("[simdcsv] Test message 42"), std::string::npos);
+    EXPECT_NE(output.find("[libvroom] Test message 42"), std::string::npos);
 }
 
 TEST_F(DebugTest, DebugTraceLogDisabled) {
@@ -153,7 +153,7 @@ TEST_F(DebugTest, DebugTraceLogStr) {
     trace.log_str("Safe string message");
 
     std::string output = get_output();
-    EXPECT_NE(output.find("[simdcsv] Safe string message"), std::string::npos);
+    EXPECT_NE(output.find("[libvroom] Safe string message"), std::string::npos);
 }
 
 TEST_F(DebugTest, DebugTraceLogStrDisabled) {
@@ -533,13 +533,13 @@ TEST_F(DebugTest, DebugParserParse) {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(csv);
     size_t len = strlen(csv);
 
-    simdcsv::index idx = parser.init(len, 1);
+    libvroom::index idx = parser.init(len, 1);
     bool result = parser.parse_debug(buf, idx, len, trace);
 
     EXPECT_TRUE(result);
 
     std::string output = get_output();
-    EXPECT_NE(output.find("[simdcsv]"), std::string::npos);
+    EXPECT_NE(output.find("[libvroom]"), std::string::npos);
     EXPECT_NE(output.find("Starting parse"), std::string::npos);
 }
 
@@ -739,7 +739,7 @@ TEST_F(DebugTest, DebugParserPassThrough) {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(csv);
     size_t len = strlen(csv);
 
-    simdcsv::index idx = parser.init(len, 1);
+    libvroom::index idx = parser.init(len, 1);
     bool result = parser.parse(buf, idx, len);
 
     EXPECT_TRUE(result);
@@ -751,8 +751,8 @@ TEST_F(DebugTest, DebugParserParseWithErrors) {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(csv);
     size_t len = strlen(csv);
 
-    simdcsv::index idx = parser.init(len, 1);
-    simdcsv::ErrorCollector errors;
+    libvroom::index idx = parser.init(len, 1);
+    libvroom::ErrorCollector errors;
     bool result = parser.parse_with_errors(buf, idx, len, errors);
 
     EXPECT_TRUE(result);
@@ -772,14 +772,14 @@ TEST_F(DebugTest, DebugParserParseWithErrorsDebug) {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(csv);
     size_t len = strlen(csv);
 
-    simdcsv::index idx = parser.init(len, 1);
-    simdcsv::ErrorCollector errors;
+    libvroom::index idx = parser.init(len, 1);
+    libvroom::ErrorCollector errors;
     bool result = parser.parse_with_errors_debug(buf, idx, len, errors, trace);
 
     EXPECT_TRUE(result);
 
     std::string output = get_output();
-    EXPECT_NE(output.find("[simdcsv]"), std::string::npos);
+    EXPECT_NE(output.find("[libvroom]"), std::string::npos);
     EXPECT_NE(output.find("Starting parse_with_errors"), std::string::npos);
     EXPECT_NE(output.find("Parse complete"), std::string::npos);
 }
@@ -798,7 +798,7 @@ TEST_F(DebugTest, DebugParserParseDebugWithMasks) {
     const uint8_t* buf = reinterpret_cast<const uint8_t*>(csv);
     size_t len = strlen(csv);
 
-    simdcsv::index idx = parser.init(len, 1);
+    libvroom::index idx = parser.init(len, 1);
     bool result = parser.parse_debug(buf, idx, len, trace);
 
     EXPECT_TRUE(result);

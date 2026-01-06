@@ -8,7 +8,7 @@
 #include <sstream>
 #include <vector>
 
-using namespace simdcsv;
+using namespace libvroom;
 
 //-----------------------------------------------------------------------------
 // Basic Parsing Tests

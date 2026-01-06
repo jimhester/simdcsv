@@ -17,8 +17,8 @@
  * - https://github.com/fastfloat/fast_float
  */
 
-#ifndef SIMDCSV_SIMD_NUMBER_PARSING_H
-#define SIMDCSV_SIMD_NUMBER_PARSING_H
+#ifndef LIBVROOM_SIMD_NUMBER_PARSING_H
+#define LIBVROOM_SIMD_NUMBER_PARSING_H
 
 #include <cstdint>
 #include <cstddef>
@@ -34,7 +34,7 @@
 #include "extraction_config.h"
 #include "value_extraction.h"
 
-namespace simdcsv {
+namespace libvroom {
 
 /**
  * Result structure for SIMD parsing operations.
@@ -1251,6 +1251,6 @@ really_inline ExtractResult<T> extract_value_simd(const char* str, size_t len,
     // LCOV_EXCL_BR_STOP
 }
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
-#endif  // SIMDCSV_SIMD_NUMBER_PARSING_H
+#endif  // LIBVROOM_SIMD_NUMBER_PARSING_H

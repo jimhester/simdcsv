@@ -4,7 +4,7 @@ title: "Error Handling"
 
 ## Overview
 
-simdcsv provides a comprehensive error handling framework with configurable behavior. The parser can detect 16 different error types with three severity levels.
+libvroom provides a comprehensive error handling framework with configurable behavior. The parser can detect 16 different error types with three severity levels.
 
 ## Error Modes
 
@@ -20,9 +20,9 @@ The parser supports three error handling modes:
 #include "error.h"
 
 // Create collectors with different modes
-simdcsv::ErrorCollector strict(simdcsv::ErrorMode::STRICT);
-simdcsv::ErrorCollector permissive(simdcsv::ErrorMode::PERMISSIVE);
-simdcsv::ErrorCollector best_effort(simdcsv::ErrorMode::BEST_EFFORT);
+libvroom::ErrorCollector strict(libvroom::ErrorMode::STRICT);
+libvroom::ErrorCollector permissive(libvroom::ErrorMode::PERMISSIVE);
+libvroom::ErrorCollector best_effort(libvroom::ErrorMode::BEST_EFFORT);
 ```
 
 ## Error Types
@@ -93,9 +93,9 @@ Bob,25,NYC,USA
 
 void parse_with_errors(const uint8_t* buf, size_t len) {
     // Create parser and error collector
-    simdcsv::two_pass parser;
+    libvroom::two_pass parser;
     auto idx = parser.init(len, 1);
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
     // Parse with error collection
     bool success = parser.parse_with_errors(buf, idx, len, errors);
@@ -128,10 +128,10 @@ To prevent out-of-memory issues with malformed files containing many errors, Err
 
 ```cpp
 // Default limit is 10,000 errors
-simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
 // Custom limit
-simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE, 1000);
+libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE, 1000);
 
 // Check if limit reached
 if (errors.at_error_limit()) {
@@ -144,9 +144,9 @@ if (errors.at_error_limit()) {
 When parsing with multiple threads, each thread collects errors locally. After parsing, errors are merged and sorted by byte offset:
 
 ```cpp
-simdcsv::two_pass parser;
+libvroom::two_pass parser;
 auto idx = parser.init(len, 4);  // 4 threads
-simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
 // Errors will be collected per-thread and merged
 parser.parse_two_pass_with_errors(buf, idx, len, errors);
