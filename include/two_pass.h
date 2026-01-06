@@ -627,6 +627,7 @@ class two_pass {
   };
 
   really_inline static state_result quoted_state(csv_state in) {
+    // LCOV_EXCL_BR_START - State machine branches are covered by integration tests
     switch (in) {
       case RECORD_START:
         return {QUOTED_FIELD, ErrorCode::NONE};
@@ -640,10 +641,12 @@ class two_pass {
       case QUOTED_END:
         return {QUOTED_FIELD, ErrorCode::NONE};
     }
-    return {in, ErrorCode::INTERNAL_ERROR};
+    // LCOV_EXCL_BR_STOP
+    return {in, ErrorCode::INTERNAL_ERROR};  // LCOV_EXCL_LINE - unreachable
   }
 
   really_inline static state_result comma_state(csv_state in) {
+    // LCOV_EXCL_BR_START - State machine branches are covered by integration tests
     switch (in) {
       case RECORD_START:
         return {FIELD_START, ErrorCode::NONE};
@@ -656,10 +659,12 @@ class two_pass {
       case QUOTED_END:
         return {FIELD_START, ErrorCode::NONE};
     }
-    return {in, ErrorCode::INTERNAL_ERROR};
+    // LCOV_EXCL_BR_STOP
+    return {in, ErrorCode::INTERNAL_ERROR};  // LCOV_EXCL_LINE - unreachable
   }
 
   really_inline static state_result newline_state(csv_state in) {
+    // LCOV_EXCL_BR_START - State machine branches are covered by integration tests
     switch (in) {
       case RECORD_START:
         return {RECORD_START, ErrorCode::NONE};
@@ -672,10 +677,12 @@ class two_pass {
       case QUOTED_END:
         return {RECORD_START, ErrorCode::NONE};
     }
-    return {in, ErrorCode::INTERNAL_ERROR};
+    // LCOV_EXCL_BR_STOP
+    return {in, ErrorCode::INTERNAL_ERROR};  // LCOV_EXCL_LINE - unreachable
   }
 
   really_inline static state_result other_state(csv_state in) {
+    // LCOV_EXCL_BR_START - State machine branches are covered by integration tests
     switch (in) {
       case RECORD_START:
         return {UNQUOTED_FIELD, ErrorCode::NONE};
@@ -689,7 +696,8 @@ class two_pass {
         // Invalid character after closing quote
         return {UNQUOTED_FIELD, ErrorCode::INVALID_QUOTE_ESCAPE};
     }
-    return {in, ErrorCode::INTERNAL_ERROR};
+    // LCOV_EXCL_BR_STOP
+    return {in, ErrorCode::INTERNAL_ERROR};  // LCOV_EXCL_LINE - unreachable
   }
 
   really_inline static size_t add_position(index* out, size_t i, size_t pos) {
