@@ -51,7 +51,7 @@ FetchContent_Declare(libvroom
   GIT_TAG main)
 FetchContent_MakeAvailable(libvroom)
 
-target_link_libraries(your_target PRIVATE libvroom_lib)
+target_link_libraries(your_target PRIVATE vroom)
 ```
 
 ## Features

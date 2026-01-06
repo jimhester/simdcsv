@@ -194,7 +194,7 @@ if(BUILD_BENCHMARKS)
 endif()
 
 # Library target (SHARED or STATIC based on BUILD_SHARED_LIBS)
-add_library(libvroom_lib
+add_library(vroom
     src/io_util.cpp
     src/error.cpp
     src/dialect.cpp
@@ -204,11 +204,11 @@ add_library(libvroom_lib
     src/streaming.cpp
 )
 
-target_include_directories(libvroom_lib PUBLIC
+target_include_directories(vroom PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(libvroom_lib PUBLIC
+target_link_libraries(vroom PUBLIC
     hwy
 )
 
@@ -216,17 +216,20 @@ target_link_libraries(libvroom_lib PUBLIC
 include(cmake/ArrowIntegration.cmake)
 
 # CLI utility (user-friendly CSV tool)
-add_executable(vroom
+add_executable(vroom-cli
     src/cli.cpp
 )
 
-target_link_libraries(vroom PRIVATE
-    libvroom_lib
+# Set output binary name to 'vroom' (target name is 'vroom-cli' to avoid conflict with library)
+set_target_properties(vroom-cli PROPERTIES OUTPUT_NAME vroom)
+
+target_link_libraries(vroom-cli PRIVATE
+    vroom
     pthread
 )
 
 # Suppress debug output for CLI
-target_compile_definitions(vroom PRIVATE LIBVROOM_BENCHMARK_MODE)
+target_compile_definitions(vroom-cli PRIVATE LIBVROOM_BENCHMARK_MODE)
 
 # =============================================================================
 # Testing (optional, controlled by BUILD_TESTING)
@@ -251,7 +254,7 @@ add_executable(libvroom_test
 )
 
 target_link_libraries(libvroom_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -273,7 +276,7 @@ add_executable(error_handling_test
 )
 
 target_link_libraries(error_handling_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -300,7 +303,7 @@ add_executable(csv_parsing_test
 )
 
 target_link_libraries(csv_parsing_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -325,7 +328,7 @@ add_executable(csv_parser_errors_test
 )
 
 target_link_libraries(csv_parser_errors_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -350,7 +353,7 @@ add_executable(csv_extended_test
 )
 
 target_link_libraries(csv_extended_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -375,7 +378,7 @@ add_executable(dialect_detection_test
 )
 
 target_link_libraries(dialect_detection_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -400,7 +403,7 @@ add_executable(type_detection_test
 )
 
 target_link_libraries(type_detection_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -425,7 +428,7 @@ add_executable(c_api_test
 )
 
 target_link_libraries(c_api_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -450,7 +453,7 @@ add_executable(debug_test
 )
 
 target_link_libraries(debug_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -468,7 +471,7 @@ add_executable(api_test
 )
 
 target_link_libraries(api_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -510,7 +513,7 @@ add_executable(value_extraction_test
 )
 
 target_link_libraries(value_extraction_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -535,7 +538,7 @@ add_executable(streaming_test
 )
 
 target_link_libraries(streaming_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -560,7 +563,7 @@ add_executable(branchless_test
 )
 
 target_link_libraries(branchless_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -585,7 +588,7 @@ add_executable(simd_number_parsing_test
 )
 
 target_link_libraries(simd_number_parsing_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -610,7 +613,7 @@ add_executable(io_util_test
 )
 
 target_link_libraries(io_util_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -644,7 +647,7 @@ target_include_directories(cli_test PRIVATE
 )
 
 # CLI test depends on vroom executable being built
-add_dependencies(cli_test vroom)
+add_dependencies(cli_test vroom-cli)
 
 # Copy test data to build directory for CLI tests
 add_custom_command(TARGET cli_test POST_BUILD
@@ -662,7 +665,7 @@ add_executable(two_pass_coverage_test
 )
 
 target_link_libraries(two_pass_coverage_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -687,7 +690,7 @@ add_executable(encoding_test
 )
 
 target_link_libraries(encoding_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -712,7 +715,7 @@ add_executable(bounds_validation_test
 )
 
 target_link_libraries(bounds_validation_test PRIVATE
-    libvroom_lib
+    vroom
     GTest::gtest_main
     pthread
 )
@@ -734,7 +737,7 @@ gtest_discover_tests(bounds_validation_test)
 # Arrow output test (only if Arrow is enabled)
 if(LIBVROOM_ENABLE_ARROW)
     add_executable(arrow_output_test test/arrow_output_test.cpp)
-    target_link_libraries(arrow_output_test PRIVATE libvroom_lib GTest::gtest_main pthread)
+    target_link_libraries(arrow_output_test PRIVATE vroom GTest::gtest_main pthread)
     target_include_directories(arrow_output_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_custom_command(TARGET arrow_output_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
@@ -742,7 +745,7 @@ if(LIBVROOM_ENABLE_ARROW)
 
     # Arrow file-based tests (loading real CSV files)
     add_executable(arrow_file_test test/arrow_file_test.cpp)
-    target_link_libraries(arrow_file_test PRIVATE libvroom_lib GTest::gtest_main pthread)
+    target_link_libraries(arrow_file_test PRIVATE vroom GTest::gtest_main pthread)
     target_include_directories(arrow_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_custom_command(TARGET arrow_file_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
@@ -776,7 +779,7 @@ endif()
 add_executable(libvroom_benchmark ${BENCHMARK_SOURCES})
 
 target_link_libraries(libvroom_benchmark PRIVATE
-    libvroom_lib
+    vroom
     benchmark::benchmark
     benchmark::benchmark_main
     pthread
@@ -843,21 +846,21 @@ if(ENABLE_FUZZING)
     set(FUZZ_LINK_FLAGS -fsanitize=fuzzer,address,undefined)
 
     add_executable(fuzz_csv_parser fuzz/fuzz_csv_parser.cpp)
-    target_link_libraries(fuzz_csv_parser PRIVATE libvroom_lib)
+    target_link_libraries(fuzz_csv_parser PRIVATE vroom)
     target_include_directories(fuzz_csv_parser PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(fuzz_csv_parser PRIVATE ${FUZZ_FLAGS})
     target_link_options(fuzz_csv_parser PRIVATE ${FUZZ_LINK_FLAGS})
     target_compile_definitions(fuzz_csv_parser PRIVATE LIBVROOM_BENCHMARK_MODE)
 
     add_executable(fuzz_dialect_detection fuzz/fuzz_dialect_detection.cpp)
-    target_link_libraries(fuzz_dialect_detection PRIVATE libvroom_lib)
+    target_link_libraries(fuzz_dialect_detection PRIVATE vroom)
     target_include_directories(fuzz_dialect_detection PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(fuzz_dialect_detection PRIVATE ${FUZZ_FLAGS})
     target_link_options(fuzz_dialect_detection PRIVATE ${FUZZ_LINK_FLAGS})
     target_compile_definitions(fuzz_dialect_detection PRIVATE LIBVROOM_BENCHMARK_MODE)
 
     add_executable(fuzz_parse_auto fuzz/fuzz_parse_auto.cpp)
-    target_link_libraries(fuzz_parse_auto PRIVATE libvroom_lib)
+    target_link_libraries(fuzz_parse_auto PRIVATE vroom)
     target_include_directories(fuzz_parse_auto PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(fuzz_parse_auto PRIVATE ${FUZZ_FLAGS})
     target_link_options(fuzz_parse_auto PRIVATE ${FUZZ_LINK_FLAGS})
