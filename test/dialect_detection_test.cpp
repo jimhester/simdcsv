@@ -1,10 +1,13 @@
 #include <gtest/gtest.h>
 #include <string>
+#include <vector>
+#include <cstring>
 
 #include "dialect.h"
 #include "two_pass.h"
 #include "io_util.h"
 #include "libvroom.h"
+#include "common_defs.h"
 
 // ============================================================================
 // DIALECT DETECTION TESTS
@@ -84,6 +87,14 @@ class DialectDetectionTest : public ::testing::Test {
 protected:
     std::string getTestDataPath(const std::string& category, const std::string& filename) {
         return "test/data/" + category + "/" + filename;
+    }
+
+    // Create a padded buffer from a string for SIMD-safe parsing
+    std::vector<uint8_t> makeBuffer(const std::string& content) {
+        std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
+        std::memcpy(buf.data(), content.data(), content.size());
+        std::memset(buf.data() + content.size(), 0, LIBVROOM_PADDING);
+        return buf;
     }
 
     libvroom::DialectDetector detector;
@@ -556,6 +567,7 @@ TEST_F(DialectDetectionTest, ParseWithPipeDialect) {
 TEST_F(DialectDetectionTest, ParseWithErrorsDialect) {
     // Test parse_with_errors with semicolon dialect
     const std::string csv_data = "name;age;city\nAlice;30;Paris\nBob;25;London\n";
+    auto buf = makeBuffer(csv_data);
 
     libvroom::two_pass parser;
     libvroom::index idx = parser.init(csv_data.size(), 1);
@@ -563,8 +575,7 @@ TEST_F(DialectDetectionTest, ParseWithErrorsDialect) {
     libvroom::Dialect semicolon = libvroom::Dialect::semicolon();
 
     bool success = parser.parse_with_errors(
-        reinterpret_cast<const uint8_t*>(csv_data.data()),
-        idx, csv_data.size(), errors, semicolon);
+        buf.data(), idx, csv_data.size(), errors, semicolon);
 
     EXPECT_TRUE(success) << "Should parse successfully";
     EXPECT_EQ(errors.error_count(), 0) << "Should have no errors";
@@ -573,6 +584,7 @@ TEST_F(DialectDetectionTest, ParseWithErrorsDialect) {
 TEST_F(DialectDetectionTest, ParseValidateDialect) {
     // Test parse_validate with tab dialect
     const std::string tsv_data = "name\tage\tcity\nAlice\t30\tParis\nBob\t25\tLondon\n";
+    auto buf = makeBuffer(tsv_data);
 
     libvroom::two_pass parser;
     libvroom::index idx = parser.init(tsv_data.size(), 1);
@@ -580,8 +592,7 @@ TEST_F(DialectDetectionTest, ParseValidateDialect) {
     libvroom::Dialect tsv = libvroom::Dialect::tsv();
 
     bool success = parser.parse_validate(
-        reinterpret_cast<const uint8_t*>(tsv_data.data()),
-        idx, tsv_data.size(), errors, tsv);
+        buf.data(), idx, tsv_data.size(), errors, tsv);
 
     EXPECT_TRUE(success) << "Validation should pass";
     EXPECT_EQ(errors.error_count(), 0) << "Should have no validation errors";
@@ -590,6 +601,7 @@ TEST_F(DialectDetectionTest, ParseValidateDialect) {
 TEST_F(DialectDetectionTest, ParseWithSingleQuote) {
     // Test parsing with single-quote as quote character
     const std::string csv_data = "name,description\nAlice,'Hello, World'\nBob,'Test \"quote\"'\n";
+    auto buf = makeBuffer(csv_data);
 
     libvroom::Dialect single_quote;
     single_quote.delimiter = ',';
@@ -599,8 +611,7 @@ TEST_F(DialectDetectionTest, ParseWithSingleQuote) {
     libvroom::index idx = parser.init(csv_data.size(), 1);
 
     bool success = parser.parse(
-        reinterpret_cast<const uint8_t*>(csv_data.data()),
-        idx, csv_data.size(), single_quote);
+        buf.data(), idx, csv_data.size(), single_quote);
 
     EXPECT_TRUE(success) << "Should parse successfully with single-quote";
 }
@@ -608,6 +619,7 @@ TEST_F(DialectDetectionTest, ParseWithSingleQuote) {
 TEST_F(DialectDetectionTest, ParseTwoPassWithErrorsDialect) {
     // Test parse_two_pass_with_errors with semicolon dialect
     const std::string csv_data = "name;age;city\nAlice;30;Paris\nBob;25;London\nCharlie;35;Berlin\n";
+    auto buf = makeBuffer(csv_data);
 
     libvroom::two_pass parser;
     libvroom::index idx = parser.init(csv_data.size(), 2);  // 2 threads
@@ -615,8 +627,7 @@ TEST_F(DialectDetectionTest, ParseTwoPassWithErrorsDialect) {
     libvroom::Dialect semicolon = libvroom::Dialect::semicolon();
 
     bool success = parser.parse_two_pass_with_errors(
-        reinterpret_cast<const uint8_t*>(csv_data.data()),
-        idx, csv_data.size(), errors, semicolon);
+        buf.data(), idx, csv_data.size(), errors, semicolon);
 
     EXPECT_TRUE(success) << "Should parse successfully with multi-threading";
     EXPECT_EQ(errors.error_count(), 0) << "Should have no errors";
