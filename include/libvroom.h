@@ -390,6 +390,151 @@ inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
 }
 
 /**
+ * @brief Result of loading a file with RAII memory management.
+ *
+ * Combines an AlignedPtr (owning the buffer) with size information.
+ * This provides RAII semantics while also tracking the data size
+ * (since padding is allocated but not counted in the logical size).
+ *
+ * @example
+ * @code
+ * auto [buffer, size] = libvroom::load_file_to_ptr("data.csv");
+ * if (buffer) {
+ *     parser.parse(buffer.get(), size);
+ * }
+ * // Memory automatically freed when buffer goes out of scope
+ * @endcode
+ */
+struct AlignedBuffer {
+    AlignedPtr ptr;   ///< Smart pointer owning the buffer
+    size_t size{0};   ///< Size of the data (not including padding)
+
+    /// Default constructor creates an empty, invalid buffer.
+    AlignedBuffer() = default;
+
+    /// Construct from pointer and size.
+    AlignedBuffer(AlignedPtr p, size_t s) : ptr(std::move(p)), size(s) {}
+
+    /// Move constructor.
+    AlignedBuffer(AlignedBuffer&&) = default;
+
+    /// Move assignment.
+    AlignedBuffer& operator=(AlignedBuffer&&) = default;
+
+    // Non-copyable
+    AlignedBuffer(const AlignedBuffer&) = delete;
+    AlignedBuffer& operator=(const AlignedBuffer&) = delete;
+
+    /// @return true if the buffer is valid.
+    explicit operator bool() const { return ptr != nullptr; }
+
+    /// @return Pointer to the buffer data.
+    uint8_t* data() { return ptr.get(); }
+
+    /// @return Const pointer to the buffer data.
+    const uint8_t* data() const { return ptr.get(); }
+
+    /// @return true if the buffer is empty.
+    bool empty() const { return size == 0; }
+
+    /// @return true if the buffer is valid.
+    bool valid() const { return ptr != nullptr; }
+
+    /// Release ownership and return the raw pointer.
+    uint8_t* release() {
+        size = 0;
+        return ptr.release();
+    }
+};
+
+/**
+ * @brief Loads a file into an AlignedBuffer with RAII memory management.
+ *
+ * This function provides an alternative to load_file() that returns an
+ * AlignedBuffer (using AlignedPtr internally) instead of FileBuffer.
+ * Both approaches provide automatic memory management; AlignedBuffer
+ * exposes the underlying smart pointer type for compatibility with
+ * code that works with AlignedPtr directly.
+ *
+ * @param filename Path to the file to load.
+ * @param padding Extra bytes to allocate for SIMD overreads (default: 64).
+ * @return AlignedBuffer containing the file data. Check with if(buffer) or valid().
+ * @throws std::runtime_error if file cannot be opened or read.
+ *
+ * @example
+ * @code
+ * auto buffer = libvroom::load_file_to_ptr("data.csv");
+ * if (buffer) {
+ *     libvroom::Parser parser;
+ *     auto result = parser.parse(buffer.data(), buffer.size);
+ * }
+ * // Memory automatically freed when buffer goes out of scope
+ * @endcode
+ *
+ * @see load_file() For FileBuffer-based loading.
+ * @see load_stdin_to_ptr() For reading from stdin.
+ */
+inline AlignedBuffer load_file_to_ptr(const std::string& filename, size_t padding = 64) {
+    auto corpus = get_corpus(filename, padding);
+    AlignedPtr ptr(const_cast<uint8_t*>(corpus.data()));
+    return AlignedBuffer(std::move(ptr), corpus.size());
+}
+
+/**
+ * @brief Loads stdin into an AlignedBuffer with RAII memory management.
+ *
+ * Reads all data from standard input into an RAII-managed buffer.
+ * Useful for piping data into CSV processing tools.
+ *
+ * @param padding Extra bytes to allocate for SIMD overreads (default: 64).
+ * @return AlignedBuffer containing the stdin data. Check with if(buffer) or valid().
+ * @throws std::runtime_error if reading fails or allocation fails.
+ *
+ * @example
+ * @code
+ * // cat data.csv | ./my_program
+ * auto buffer = libvroom::load_stdin_to_ptr();
+ * if (buffer) {
+ *     libvroom::Parser parser;
+ *     auto result = parser.parse(buffer.data(), buffer.size);
+ * }
+ * // Memory automatically freed when buffer goes out of scope
+ * @endcode
+ *
+ * @see load_file_to_ptr() For loading from files.
+ * @see get_corpus_stdin() For manual memory management.
+ */
+inline AlignedBuffer load_stdin_to_ptr(size_t padding = 64) {
+    auto corpus = get_corpus_stdin(padding);
+    AlignedPtr ptr(const_cast<uint8_t*>(corpus.data()));
+    return AlignedBuffer(std::move(ptr), corpus.size());
+}
+
+/**
+ * @brief Loads a file using the legacy get_corpus() API, wrapped with RAII.
+ *
+ * This function wraps the raw pointer from get_corpus() in an AlignedPtr
+ * for automatic memory management. It's useful when you need to work with
+ * existing code that uses get_corpus() but want RAII semantics.
+ *
+ * @param filename Path to the file to load.
+ * @param padding Extra bytes to allocate for SIMD overreads.
+ * @return A pair of (AlignedPtr, size). The AlignedPtr is empty on failure.
+ * @throws std::runtime_error if file cannot be opened or read.
+ *
+ * @deprecated Prefer load_file_to_ptr() for new code.
+ *
+ * @example
+ * @code
+ * auto [ptr, size] = libvroom::wrap_corpus(get_corpus("data.csv", 64));
+ * // Memory automatically freed when ptr goes out of scope
+ * @endcode
+ */
+inline std::pair<AlignedPtr, size_t> wrap_corpus(std::basic_string_view<uint8_t> corpus) {
+    return {AlignedPtr(const_cast<uint8_t*>(corpus.data())), corpus.size()};
+}
+
+/**
  * @brief High-level CSV parser with automatic index management.
  *
  * Parser provides a simplified interface over the lower-level two_pass class.
