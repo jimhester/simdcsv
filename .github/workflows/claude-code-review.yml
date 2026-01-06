@@ -23,15 +23,16 @@ jobs:
             exit 0
           fi
 
-          # Skip if already reviewed by Claude
-          CLAUDE_COMMENTS=$(gh pr view ${{ github.event.pull_request.number }} \
+          # Skip if Claude already reviewed this specific commit
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          REVIEWED_THIS_SHA=$(gh pr view ${{ github.event.pull_request.number }} \
             --repo ${{ github.repository }} \
             --json comments \
-            --jq '.comments[] | select(.body | contains("Generated with [Claude Code]")) | .id' | wc -l)
+            --jq ".comments[] | select(.body | contains(\"Generated with [Claude Code]\")) | select(.body | contains(\"${HEAD_SHA}\")) | .id" | wc -l)
 
-          if [ "$CLAUDE_COMMENTS" -gt "0" ]; then
+          if [ "$REVIEWED_THIS_SHA" -gt "0" ]; then
             echo "eligible=false" >> $GITHUB_OUTPUT
-            echo "Skipping: Already reviewed by Claude"
+            echo "Skipping: Claude already reviewed commit ${HEAD_SHA}"
             exit 0
           fi
 
