@@ -615,46 +615,46 @@ bool StreamParser::is_finished() const {
 }
 
 //-----------------------------------------------------------------------------
-// RowIterator implementation
+// StreamRowIterator implementation
 //-----------------------------------------------------------------------------
 
-RowIterator::RowIterator() : reader_(nullptr), at_end_(true) {}
+StreamRowIterator::StreamRowIterator() : reader_(nullptr), at_end_(true) {}
 
-RowIterator::RowIterator(StreamReader* reader) : reader_(reader), at_end_(false) {
+StreamRowIterator::StreamRowIterator(StreamReader* reader) : reader_(reader), at_end_(false) {
     // Advance to first row
     if (reader_ && !reader_->next_row()) {
         at_end_ = true;
     }
 }
 
-RowIterator::reference RowIterator::operator*() const {
+StreamRowIterator::reference StreamRowIterator::operator*() const {
     return reader_->row();
 }
 
-RowIterator::pointer RowIterator::operator->() const {
+StreamRowIterator::pointer StreamRowIterator::operator->() const {
     return &reader_->row();
 }
 
-RowIterator& RowIterator::operator++() {
+StreamRowIterator& StreamRowIterator::operator++() {
     if (reader_ && !reader_->next_row()) {
         at_end_ = true;
     }
     return *this;
 }
 
-RowIterator RowIterator::operator++(int) {
-    RowIterator tmp = *this;
+StreamRowIterator StreamRowIterator::operator++(int) {
+    StreamRowIterator tmp = *this;
     ++(*this);
     return tmp;
 }
 
-bool RowIterator::operator==(const RowIterator& other) const {
+bool StreamRowIterator::operator==(const StreamRowIterator& other) const {
     if (at_end_ && other.at_end_) return true;
     if (at_end_ || other.at_end_) return false;
     return reader_ == other.reader_;
 }
 
-bool RowIterator::operator!=(const RowIterator& other) const {
+bool StreamRowIterator::operator!=(const StreamRowIterator& other) const {
     return !(*this == other);
 }
 
@@ -783,12 +783,12 @@ bool StreamReader::eof() const {
     return impl_->eof && impl_->parser.is_finished();
 }
 
-RowIterator StreamReader::begin() {
-    return RowIterator(this);
+StreamRowIterator StreamReader::begin() {
+    return StreamRowIterator(this);
 }
 
-RowIterator StreamReader::end() {
-    return RowIterator();
+StreamRowIterator StreamReader::end() {
+    return StreamRowIterator();
 }
 
 }  // namespace libvroom

@@ -304,6 +304,7 @@ TEST_F(BranchlessParsingTest, ParseSimpleCSV) {
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Branchless parser should successfully parse simple.csv";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseQuotedFields) {
@@ -317,6 +318,7 @@ TEST_F(BranchlessParsingTest, ParseQuotedFields) {
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Branchless parser should handle quoted fields";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseEscapedQuotes) {
@@ -330,6 +332,7 @@ TEST_F(BranchlessParsingTest, ParseEscapedQuotes) {
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Branchless parser should handle escaped quotes";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseNewlinesInQuotes) {
@@ -343,6 +346,7 @@ TEST_F(BranchlessParsingTest, ParseNewlinesInQuotes) {
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Branchless parser should handle newlines in quoted fields";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseManyRows) {
@@ -356,6 +360,7 @@ TEST_F(BranchlessParsingTest, ParseManyRows) {
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Branchless parser should handle many rows";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseWideColumns) {
@@ -369,6 +374,7 @@ TEST_F(BranchlessParsingTest, ParseWideColumns) {
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Branchless parser should handle wide CSV";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseEmptyFields) {
@@ -382,6 +388,7 @@ TEST_F(BranchlessParsingTest, ParseEmptyFields) {
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Branchless parser should handle empty fields";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseCustomDelimiter) {
@@ -428,6 +435,7 @@ TEST_F(BranchlessParsingTest, MultiThreadedParsing) {
     bool success = parser.parse_branchless(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Branchless parser should handle multi-threaded parsing";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ConsistencyWithStandardParser) {
@@ -454,6 +462,7 @@ TEST_F(BranchlessParsingTest, ConsistencyWithStandardParser) {
         EXPECT_EQ(idx1.indexes[i], idx2.indexes[i])
             << "Field separator positions should match at index " << i;
     }
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ConsistencyWithQuotedFields) {
@@ -480,6 +489,7 @@ TEST_F(BranchlessParsingTest, ConsistencyWithQuotedFields) {
         EXPECT_EQ(idx1.indexes[i], idx2.indexes[i])
             << "Field separator positions should match at index " << i;
     }
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, LargeDataMultithreaded) {
@@ -563,6 +573,7 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsBasic) {
 
     EXPECT_TRUE(success) << "Branchless with errors should parse valid CSV successfully";
     EXPECT_EQ(errors.error_count(), 0) << "No errors expected for valid CSV";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsUnclosedQuote) {
@@ -577,6 +588,7 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsUnclosedQuote) {
     bool success = parser.parse_branchless_with_errors(data.data(), idx, data.size(), errors);
 
     EXPECT_TRUE(errors.has_errors()) << "Should detect unclosed quote error";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsQuoteInUnquoted) {
@@ -599,6 +611,7 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsQuoteInUnquoted) {
         }
     }
     EXPECT_TRUE(found_quote_error) << "Should have QUOTE_IN_UNQUOTED_FIELD error";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsNullByte) {
@@ -620,6 +633,7 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsNullByte) {
         }
     }
     EXPECT_TRUE(found_null_error) << "Should detect NULL_BYTE error";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsMultiThreaded) {
@@ -673,6 +687,7 @@ TEST_F(BranchlessErrorCollectionTest, ConsistencyBranchlessWithErrorsVsSwitch) {
         EXPECT_EQ(idx1.indexes[i], idx2.indexes[i])
             << "Field separator positions should match at index " << i;
     }
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, ConsistencyBranchlessWithErrorsQuotedFields) {
@@ -695,6 +710,7 @@ TEST_F(BranchlessErrorCollectionTest, ConsistencyBranchlessWithErrorsQuotedField
     // Compare results
     EXPECT_EQ(idx1.n_indexes[0], idx2.n_indexes[0])
         << "Should find same number of separators for quoted fields";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, ParserAPIUsesUnified) {
@@ -709,6 +725,7 @@ TEST_F(BranchlessErrorCollectionTest, ParserAPIUsesUnified) {
 
     EXPECT_TRUE(result.success()) << "Parser should succeed with error collection";
     EXPECT_EQ(errors.error_count(), 0) << "No errors expected for valid CSV";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, ParserAPIWithErrorsDetectsProblems) {
@@ -739,6 +756,7 @@ TEST_F(BranchlessErrorCollectionTest, ParserAPIWithErrorsDetectsProblems) {
         }
     }
     EXPECT_TRUE(found_quote_error) << "Should find QUOTE_IN_UNQUOTED_FIELD error";
+    libvroom::free_buffer(data);
 }
 
 int main(int argc, char **argv) {

@@ -1,3 +1,6 @@
+#ifndef TWO_PASS_H
+#define TWO_PASS_H
+
 /**
  * @file two_pass.h
  * @brief Internal implementation of the high-performance CSV parser.
@@ -2028,3 +2031,5 @@ class parser {
  private:
 };
 }  // namespace libvroom
+
+#endif  // TWO_PASS_H
