@@ -2,7 +2,7 @@
 #include "common_defs.h"
 #include "io_util.h"
 #include "mem_util.h"
-#include "two_pass.h"
+#include "libvroom.h"
 #include <fstream>
 #include <random>
 #include <cstring>
@@ -10,7 +10,6 @@
 #include <iomanip>
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern libvroom::two_pass* global_parser;
 
 // SIMD instruction level benchmarks and comparisons
 
@@ -112,27 +111,23 @@ static void BM_SIMD_vs_Scalar(benchmark::State& state) {
   
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
-    
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
-    }
-    
+
     // For this benchmark, we're testing the current SIMD implementation
     // vs a conceptual scalar implementation (using single thread to simulate)
     int n_threads = use_simd ? 4 : 1; // More threads generally means more SIMD usage
-    libvroom::index result = global_parser->init(data.size(), n_threads);
-    
+    libvroom::Parser parser(n_threads);
+
     for (auto _ : state) {
-      global_parser->parse(data.data(), result, data.size());
+      auto result = parser.parse(data.data(), data.size());
       benchmark::DoNotOptimize(result);
     }
-    
+
     state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
     state.counters["PatternType"] = static_cast<double>(pattern_type);
     state.counters["UseSIMD"] = static_cast<double>(use_simd);
     state.counters["FileSize"] = static_cast<double>(data.size());
     state.counters["Threads"] = static_cast<double>(n_threads);
-    
+
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
   }
@@ -163,22 +158,18 @@ static void BM_VectorWidth_Effectiveness(benchmark::State& state) {
   for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
-  
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
-  libvroom::index result = global_parser->init(data_size, 1);
-  
+
+  libvroom::Parser parser(1);
+
   for (auto _ : state) {
-    global_parser->parse(data, result, data_size);
+    auto result = parser.parse(data, data_size);
     benchmark::DoNotOptimize(result);
   }
-  
+
   state.SetBytesProcessed(static_cast<int64_t>(data_size * state.iterations()));
   state.counters["ChunkSize"] = static_cast<double>(chunk_size);
   state.counters["DataSize"] = static_cast<double>(data_size);
-  
+
   // Estimate vector width efficiency
   if (chunk_size <= 16) {
     state.counters["VectorWidth"] = 128.0; // SSE/NEON
@@ -187,7 +178,7 @@ static void BM_VectorWidth_Effectiveness(benchmark::State& state) {
   } else {
     state.counters["VectorWidth"] = 512.0; // AVX-512
   }
-  
+
   aligned_free(data);
 }
 
@@ -240,22 +231,18 @@ static void BM_QuoteDetection_SIMD(benchmark::State& state) {
   for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
-  
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
-  libvroom::index result = global_parser->init(data_size, 1);
-  
+
+  libvroom::Parser parser(1);
+
   for (auto _ : state) {
-    global_parser->parse(data, result, data_size);
+    auto result = parser.parse(data, data_size);
     benchmark::DoNotOptimize(result);
   }
-  
+
   state.SetBytesProcessed(static_cast<int64_t>(data_size * state.iterations()));
   state.counters["QuoteDensity%"] = quote_density * 100.0;
   state.counters["DataSize"] = static_cast<double>(data_size);
-  
+
   aligned_free(data);
 }
 
@@ -289,22 +276,18 @@ static void BM_SeparatorDetection_SIMD(benchmark::State& state) {
   for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
-  
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
-  libvroom::index result = global_parser->init(data_size, 1);
-  
+
+  libvroom::Parser parser(1);
+
   for (auto _ : state) {
-    global_parser->parse(data, result, data_size);
+    auto result = parser.parse(data, data_size);
     benchmark::DoNotOptimize(result);
   }
-  
+
   state.SetBytesProcessed(static_cast<int64_t>(data_size * state.iterations()));
   state.counters["SeparatorASCII"] = static_cast<double>(separator);
   state.counters["DataSize"] = static_cast<double>(data_size);
-  
+
   aligned_free(data);
 }
 
@@ -357,22 +340,18 @@ static void BM_MemoryAccess_SIMD(benchmark::State& state) {
   for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
     data[i] = '\0';
   }
-  
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
-  libvroom::index result = global_parser->init(data_size, 1);
-  
+
+  libvroom::Parser parser(1);
+
   for (auto _ : state) {
-    global_parser->parse(data, result, data_size);
+    auto result = parser.parse(data, data_size);
     benchmark::DoNotOptimize(result);
   }
-  
+
   state.SetBytesProcessed(static_cast<int64_t>(data_size * state.iterations()));
   state.counters["AccessPattern"] = static_cast<double>(access_pattern);
   state.counters["DataSize"] = static_cast<double>(data_size);
-  
+
   aligned_free(data);
 }
 
@@ -407,18 +386,14 @@ static void BM_Branchless_vs_Standard(benchmark::State& state) {
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
 
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
+    libvroom::Parser parser(1);
+    libvroom::ParseOptions options;
+    if (use_branchless) {
+      options.algorithm = libvroom::ParseAlgorithm::BRANCHLESS;
     }
 
-    libvroom::index result = global_parser->init(data.size(), 1);
-
     for (auto _ : state) {
-      if (use_branchless) {
-        global_parser->parse_branchless(data.data(), result, data.size());
-      } else {
-        global_parser->parse(data.data(), result, data.size());
-      }
+      auto result = parser.parse(data.data(), data.size(), options);
       benchmark::DoNotOptimize(result);
     }
 
@@ -447,18 +422,14 @@ static void BM_Branchless_Scalability(benchmark::State& state) {
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
 
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
+    libvroom::Parser parser(1);
+    libvroom::ParseOptions options;
+    if (use_branchless) {
+      options.algorithm = libvroom::ParseAlgorithm::BRANCHLESS;
     }
 
-    libvroom::index result = global_parser->init(data.size(), 1);
-
     for (auto _ : state) {
-      if (use_branchless) {
-        global_parser->parse_branchless(data.data(), result, data.size());
-      } else {
-        global_parser->parse(data.data(), result, data.size());
-      }
+      auto result = parser.parse(data.data(), data.size(), options);
       benchmark::DoNotOptimize(result);
     }
 
@@ -493,18 +464,14 @@ static void BM_Branchless_Multithreaded(benchmark::State& state) {
   try {
     auto data = get_corpus(temp_file.path().c_str(), LIBVROOM_PADDING);
 
-    if (!global_parser) {
-      global_parser = new libvroom::two_pass();
+    libvroom::Parser parser(n_threads);
+    libvroom::ParseOptions options;
+    if (use_branchless) {
+      options.algorithm = libvroom::ParseAlgorithm::BRANCHLESS;
     }
 
-    libvroom::index result = global_parser->init(data.size(), n_threads);
-
     for (auto _ : state) {
-      if (use_branchless) {
-        global_parser->parse_branchless(data.data(), result, data.size());
-      } else {
-        global_parser->parse(data.data(), result, data.size());
-      }
+      auto result = parser.parse(data.data(), data.size(), options);
       benchmark::DoNotOptimize(result);
     }
 
@@ -592,18 +559,14 @@ static void BM_Branchless_BranchSensitive(benchmark::State& state) {
     data[i] = '\0';
   }
 
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
+  libvroom::Parser parser(1);
+  libvroom::ParseOptions options;
+  if (use_branchless) {
+    options.algorithm = libvroom::ParseAlgorithm::BRANCHLESS;
   }
 
-  libvroom::index result = global_parser->init(data_size, 1);
-
   for (auto _ : state) {
-    if (use_branchless) {
-      global_parser->parse_branchless(data, result, data_size);
-    } else {
-      global_parser->parse(data, result, data_size);
-    }
+    auto result = parser.parse(data, data_size, options);
     benchmark::DoNotOptimize(result);
   }
 

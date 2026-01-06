@@ -19,7 +19,7 @@
 
 namespace libvroom {
 
-class index;
+class ParseIndex;
 
 template <typename IntType>
 really_inline ExtractResult<IntType> parse_integer(const char* str, size_t len,
@@ -188,7 +188,7 @@ ExtractResult<double> parse_double_simd(const char* str, size_t len, const Extra
 
 class ValueExtractor {
 public:
-    ValueExtractor(const uint8_t* buf, size_t len, const index& idx,
+    ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx,
                    const Dialect& dialect = Dialect::csv(),
                    const ExtractionConfig& config = ExtractionConfig::defaults());
 
@@ -243,7 +243,7 @@ public:
 private:
     const uint8_t* buf_;
     size_t len_;
-    const index& idx_;
+    const ParseIndex& idx_;
     Dialect dialect_;
     ExtractionConfig config_;
     size_t num_rows_ = 0;

@@ -12,13 +12,13 @@ const char* error_code_to_string(ErrorCode code) {
         case ErrorCode::INCONSISTENT_FIELD_COUNT: return "INCONSISTENT_FIELD_COUNT";
         case ErrorCode::FIELD_TOO_LARGE: return "FIELD_TOO_LARGE";
         case ErrorCode::MIXED_LINE_ENDINGS: return "MIXED_LINE_ENDINGS";
-        case ErrorCode::INVALID_LINE_ENDING: return "INVALID_LINE_ENDING";
         case ErrorCode::INVALID_UTF8: return "INVALID_UTF8";
         case ErrorCode::NULL_BYTE: return "NULL_BYTE";
         case ErrorCode::EMPTY_HEADER: return "EMPTY_HEADER";
         case ErrorCode::DUPLICATE_COLUMN_NAMES: return "DUPLICATE_COLUMN_NAMES";
         case ErrorCode::AMBIGUOUS_SEPARATOR: return "AMBIGUOUS_SEPARATOR";
         case ErrorCode::FILE_TOO_LARGE: return "FILE_TOO_LARGE";
+        case ErrorCode::INDEX_ALLOCATION_OVERFLOW: return "INDEX_ALLOCATION_OVERFLOW";
         case ErrorCode::IO_ERROR: return "IO_ERROR";
         case ErrorCode::INTERNAL_ERROR: return "INTERNAL_ERROR";
         default: return "UNKNOWN";

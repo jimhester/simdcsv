@@ -4,6 +4,7 @@
 #include "dialect.h"
 #include "two_pass.h"
 #include "io_util.h"
+#include "libvroom.h"
 
 // ============================================================================
 // DIALECT DETECTION TESTS
@@ -445,6 +446,7 @@ TEST_F(DialectDetectionTest, ParseAutoWithCommaCSV) {
     EXPECT_EQ(detected.dialect.delimiter, ',');
     EXPECT_EQ(detected.detected_columns, 3);
     EXPECT_EQ(errors.error_count(), 0) << "Should have no errors for valid CSV";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(DialectDetectionTest, ParseAutoWithSemicolonCSV) {
@@ -467,6 +469,7 @@ TEST_F(DialectDetectionTest, ParseAutoWithSemicolonCSV) {
     size_t total_fields = 0;
     for (int t = 0; t < idx.n_threads; ++t) {
         total_fields += idx.n_indexes[t];
+    libvroom::free_buffer(data);
     }
     // Should have found field separators with the semicolon delimiter
     EXPECT_GT(total_fields, 0) << "Should find field separators with detected dialect";
@@ -517,6 +520,7 @@ TEST_F(DialectDetectionTest, ParseWithTSVDialect) {
 
     EXPECT_TRUE(success) << "Should parse TSV successfully";
     EXPECT_GT(idx.n_indexes[0], 0) << "Should find tab separators";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(DialectDetectionTest, ParseWithSemicolonDialect) {
@@ -531,6 +535,7 @@ TEST_F(DialectDetectionTest, ParseWithSemicolonDialect) {
 
     EXPECT_TRUE(success) << "Should parse semicolon-separated successfully";
     EXPECT_GT(idx.n_indexes[0], 0) << "Should find semicolon separators";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(DialectDetectionTest, ParseWithPipeDialect) {
@@ -545,6 +550,7 @@ TEST_F(DialectDetectionTest, ParseWithPipeDialect) {
 
     EXPECT_TRUE(success) << "Should parse pipe-separated successfully";
     EXPECT_GT(idx.n_indexes[0], 0) << "Should find pipe separators";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(DialectDetectionTest, ParseWithErrorsDialect) {

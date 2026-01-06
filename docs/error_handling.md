@@ -79,7 +79,7 @@ ErrorCollector errors(ErrorMode::BEST_EFFORT);
 
 ## Error Types
 
-libvroom defines 16 error types in `include/error.h` as the `ErrorCode` enum. Error types marked with **[RESERVED]** are defined for future compatibility but not yet implemented in the current parser.
+libvroom defines 15 error types in `include/error.h` as the `ErrorCode` enum.
 
 ### Quote-Related Errors
 
@@ -107,7 +107,7 @@ field"with"quotes
 | Error Code | Severity | Status | Description |
 |------------|----------|--------|-------------|
 | `INCONSISTENT_FIELD_COUNT` | ERROR | Implemented | Row has different field count than header |
-| `FIELD_TOO_LARGE` | ERROR | [RESERVED] | Field exceeds maximum size limit |
+| `FIELD_TOO_LARGE` | ERROR | Implemented | Field exceeds maximum size limit |
 
 **Example:**
 
@@ -123,13 +123,12 @@ A,B,C
 | Error Code | Severity | Status | Description |
 |------------|----------|--------|-------------|
 | `MIXED_LINE_ENDINGS` | WARNING | Implemented | File uses inconsistent line endings |
-| `INVALID_LINE_ENDING` | ERROR | [RESERVED] | Invalid line ending sequence |
 
 ### Character Encoding Errors
 
 | Error Code | Severity | Status | Description |
 |------------|----------|--------|-------------|
-| `INVALID_UTF8` | ERROR | [RESERVED] | Invalid UTF-8 byte sequence |
+| `INVALID_UTF8` | ERROR | Implemented | Invalid UTF-8 byte sequence |
 | `NULL_BYTE` | ERROR | Implemented | Unexpected null byte in data |
 
 ### Structure Errors
@@ -155,14 +154,14 @@ A,B,A,C
 
 | Error Code | Severity | Status | Description |
 |------------|----------|--------|-------------|
-| `AMBIGUOUS_SEPARATOR` | ERROR | [RESERVED] | Cannot reliably determine field separator |
+| `AMBIGUOUS_SEPARATOR` | ERROR | Implemented | Cannot reliably determine field separator |
 
 ### General Errors
 
 | Error Code | Severity | Status | Description |
 |------------|----------|--------|-------------|
-| `FILE_TOO_LARGE` | FATAL | [RESERVED] | File exceeds maximum size limit |
-| `IO_ERROR` | FATAL | [RESERVED] | File I/O error |
+| `FILE_TOO_LARGE` | FATAL | Implemented | File exceeds maximum size limit |
+| `IO_ERROR` | FATAL | Implemented | File I/O error |
 | `INTERNAL_ERROR` | FATAL | Implemented | Internal parser error (bug in libvroom) |
 
 ## Error Severity Levels
@@ -389,14 +388,13 @@ This section describes how libvroom attempts to recover from different error typ
 | Error | Recovery Strategy |
 |-------|-------------------|
 | `INCONSISTENT_FIELD_COUNT` | Parser records the error and continues to the next row. The affected row is parsed with whatever fields are present. Missing fields appear as empty; extra fields may be ignored. |
-| `FIELD_TOO_LARGE` | [RESERVED] Would truncate the field at the limit and continue. |
+| `FIELD_TOO_LARGE` | Parser records the error and skips the oversized field. Used in streaming API to prevent DoS attacks. |
 
 ### Line Ending Error Recovery
 
 | Error | Recovery Strategy |
 |-------|-------------------|
 | `MIXED_LINE_ENDINGS` | Parser normalizes all line endings during parsing. A warning is recorded but parsing continues normally. Data integrity is not affected. |
-| `INVALID_LINE_ENDING` | [RESERVED] Would treat as literal characters or skip. |
 
 ### Structure Error Recovery
 
@@ -410,7 +408,7 @@ This section describes how libvroom attempts to recover from different error typ
 | Error | Recovery Strategy |
 |-------|-------------------|
 | `NULL_BYTE` | Parser records the error at the null byte location. In recovery mode, the null byte is typically treated as end-of-field or skipped. |
-| `INVALID_UTF8` | [RESERVED] Would replace invalid sequences with replacement character (U+FFFD) or skip. |
+| `INVALID_UTF8` | Parser records the error at the invalid byte sequence location. Validation continues to find additional errors. Enable via `ValidationLimits::validate_utf8`. |
 
 ### Recovery Example
 

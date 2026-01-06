@@ -95,6 +95,31 @@ When adding new test files:
 - **Parallel builds**: CMake uses multiple cores by default
 - **Test parallelization**: CTest can run tests in parallel
 
+### fuzz.yml - Fuzz Testing
+
+Continuous fuzz testing using libFuzzer with sanitizers.
+
+**Triggers:**
+- **Scheduled**: Weekly on Sundays at 2:00 UTC
+- **Manual**: On-demand via workflow_dispatch
+
+**Fuzz Targets:**
+- `fuzz_csv_parser` - Core two-pass CSV parser
+- `fuzz_dialect_detection` - Dialect detection
+- `fuzz_parse_auto` - Integrated parse_auto()
+
+**Configuration:**
+- Default duration: 10 minutes per target (scheduled runs)
+- Manual runs: Configurable 1-30 minutes
+- Sanitizers: AddressSanitizer, UndefinedBehaviorSanitizer
+
+**On Crash Detection:**
+1. Workflow fails with error message
+2. Crash artifacts uploaded (30-day retention)
+3. Details in workflow logs
+
+See `fuzz/README.md` for local fuzzing instructions.
+
 ## Future Enhancements
 
 Potential workflow additions:
@@ -102,8 +127,7 @@ Potential workflow additions:
 1. **Coverage reporting**: Add code coverage with lcov/gcov
 2. **Benchmarking**: Performance regression testing
 3. **Static analysis**: clang-tidy, cppcheck
-4. **Sanitizers**: AddressSanitizer, UndefinedBehaviorSanitizer
-5. **Format checking**: clang-format validation
-6. **Windows builds**: MSVC support
-7. **ARM64 builds**: Native ARM testing
-8. **Release automation**: Automatic tagging and releases
+4. **Format checking**: clang-format validation
+5. **Windows builds**: MSVC support
+6. **ARM64 builds**: Native ARM testing
+7. **Release automation**: Automatic tagging and releases

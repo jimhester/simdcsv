@@ -4,6 +4,7 @@
 #include "two_pass.h"
 #include "error.h"
 #include "io_util.h"
+#include "libvroom.h"
 
 // ============================================================================
 // PARSER INTEGRATION TESTS (portable SIMD via Highway)
@@ -29,6 +30,7 @@ TEST_F(CSVParserTest, ParseSimpleCSV) {
     EXPECT_TRUE(success) << "Parser should successfully parse simple.csv";
     // Note: Column detection not yet implemented in experimental parser
     // EXPECT_GT(idx.columns, 0) << "Should detect at least one column";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseSimpleCSVColumnCount) {
@@ -45,6 +47,7 @@ TEST_F(CSVParserTest, ParseSimpleCSVColumnCount) {
     // Note: Column detection not yet implemented in experimental parser
     // simple.csv has 3 columns: A,B,C (will verify when column detection added)
     // EXPECT_EQ(idx.columns, 3) << "simple.csv should have 3 columns";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseWideColumnsCSV) {
@@ -60,6 +63,7 @@ TEST_F(CSVParserTest, ParseWideColumnsCSV) {
     EXPECT_TRUE(success) << "Parser should handle wide CSV";
     // Note: Column detection not yet implemented in experimental parser
     // EXPECT_EQ(idx.columns, 20) << "wide_columns.csv should have 20 columns";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseSingleColumnCSV) {
@@ -75,6 +79,7 @@ TEST_F(CSVParserTest, ParseSingleColumnCSV) {
     EXPECT_TRUE(success) << "Parser should handle single column CSV";
     // Note: Column detection not yet implemented in experimental parser
     // EXPECT_EQ(idx.columns, 1) << "single_column.csv should have 1 column";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseQuotedFieldsCSV) {
@@ -90,6 +95,7 @@ TEST_F(CSVParserTest, ParseQuotedFieldsCSV) {
     EXPECT_TRUE(success) << "Parser should handle quoted fields";
     // Note: Column detection not yet implemented in experimental parser
     // EXPECT_EQ(idx.columns, 3) << "quoted_fields.csv should have 3 columns";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseEscapedQuotesCSV) {
@@ -105,6 +111,7 @@ TEST_F(CSVParserTest, ParseEscapedQuotesCSV) {
     EXPECT_TRUE(success) << "Parser should handle escaped quotes";
     // Note: Column detection not yet implemented in experimental parser
     // EXPECT_GT(idx.columns, 0) << "Should detect columns in escaped_quotes.csv";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseNewlinesInQuotesCSV) {
@@ -120,6 +127,7 @@ TEST_F(CSVParserTest, ParseNewlinesInQuotesCSV) {
     EXPECT_TRUE(success) << "Parser should handle newlines in quoted fields";
     // Note: Column detection not yet implemented in experimental parser
     // EXPECT_EQ(idx.columns, 3) << "newlines_in_quotes.csv should have 3 columns";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseFinancialDataCSV) {
@@ -135,6 +143,7 @@ TEST_F(CSVParserTest, ParseFinancialDataCSV) {
     EXPECT_TRUE(success) << "Parser should handle financial data";
     // Note: Column detection not yet implemented in experimental parser
     // EXPECT_EQ(idx.columns, 6) << "financial.csv should have 6 columns (Date,Open,High,Low,Close,Volume)";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseUnicodeCSV) {
@@ -150,6 +159,7 @@ TEST_F(CSVParserTest, ParseUnicodeCSV) {
     EXPECT_TRUE(success) << "Parser should handle UTF-8 data";
     // Note: Column detection not yet implemented in experimental parser
     // EXPECT_GT(idx.columns, 0) << "Should detect columns in unicode.csv";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseEmptyFieldsCSV) {
@@ -165,6 +175,7 @@ TEST_F(CSVParserTest, ParseEmptyFieldsCSV) {
     EXPECT_TRUE(success) << "Parser should handle empty fields";
     // Note: Column detection not yet implemented in experimental parser
     // EXPECT_EQ(idx.columns, 3) << "empty_fields.csv should have 3 columns";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, IndexStructureValid) {
@@ -180,6 +191,7 @@ TEST_F(CSVParserTest, IndexStructureValid) {
     ASSERT_NE(idx.indexes, nullptr) << "Index array should be allocated";
     ASSERT_NE(idx.n_indexes, nullptr) << "n_indexes array should be allocated";
     EXPECT_EQ(idx.n_threads, 1) << "Should use 1 thread as requested";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, MultiThreadedParsing) {
@@ -196,6 +208,7 @@ TEST_F(CSVParserTest, MultiThreadedParsing) {
     EXPECT_EQ(idx.n_threads, 2) << "Should use 2 threads";
     // Note: Column detection not yet implemented in experimental parser
     // EXPECT_GT(idx.columns, 0) << "Should detect columns";
+    libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -217,6 +230,7 @@ TEST_F(CSVParserTest, ParseMalformedUnclosedQuote) {
     // Should detect the unclosed quote error
     EXPECT_FALSE(success) << "Parser should fail on unclosed quote";
     EXPECT_TRUE(errors.has_errors()) << "Should have detected errors";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedUnclosedQuoteEOF) {
@@ -234,6 +248,7 @@ TEST_F(CSVParserTest, ParseMalformedUnclosedQuoteEOF) {
     // Should detect the unclosed quote at EOF
     EXPECT_FALSE(success) << "Parser should fail on unclosed quote at EOF";
     EXPECT_TRUE(errors.has_errors()) << "Should have detected errors";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedQuoteInUnquotedField) {
@@ -250,6 +265,7 @@ TEST_F(CSVParserTest, ParseMalformedQuoteInUnquotedField) {
 
     // Should detect quote in unquoted field error
     EXPECT_TRUE(errors.has_errors()) << "Should have detected quote in unquoted field";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedInconsistentColumns) {
@@ -266,6 +282,7 @@ TEST_F(CSVParserTest, ParseMalformedInconsistentColumns) {
 
     // Should detect inconsistent column count
     EXPECT_TRUE(errors.has_errors()) << "Should have detected inconsistent column count";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedTripleQuote) {
@@ -283,6 +300,7 @@ TEST_F(CSVParserTest, ParseMalformedTripleQuote) {
     // This is valid CSV, should parse successfully
     EXPECT_TRUE(success) << "Triple quote is valid RFC 4180 CSV";
     EXPECT_FALSE(errors.has_errors()) << "Should have no errors for valid CSV";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedMixedLineEndings) {
@@ -297,6 +315,7 @@ TEST_F(CSVParserTest, ParseMalformedMixedLineEndings) {
 
     // Mixed line endings should be parseable, just potentially warned about
     EXPECT_TRUE(success) << "Parser should successfully parse mixed line endings";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedNullByte) {
@@ -313,6 +332,7 @@ TEST_F(CSVParserTest, ParseMalformedNullByte) {
 
     // Should detect null byte in data
     EXPECT_TRUE(errors.has_errors()) << "Should have detected null byte error";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedMultipleErrors) {
@@ -330,6 +350,7 @@ TEST_F(CSVParserTest, ParseMalformedMultipleErrors) {
     // Should detect multiple errors
     EXPECT_TRUE(errors.has_errors()) << "Should have detected multiple errors";
     EXPECT_GE(errors.error_count(), 2) << "Should have at least 2 errors";
+    libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -583,6 +604,7 @@ TEST_F(CSVParserTest, ParseMultiThreadedMalformed) {
     // Should detect unclosed quote error
     EXPECT_FALSE(success) << "Parser should fail on malformed CSV with multiple threads";
     EXPECT_TRUE(errors.has_errors()) << "Should detect errors in malformed CSV";
+    libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -765,6 +787,7 @@ TEST_F(CSVParserTest, ParseSemicolonSeparator) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success || !success) << "Parser should handle semicolon separator";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseTabSeparator) {
@@ -778,6 +801,7 @@ TEST_F(CSVParserTest, ParseTabSeparator) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success || !success) << "Parser should handle tab separator";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParsePipeSeparator) {
@@ -791,6 +815,7 @@ TEST_F(CSVParserTest, ParsePipeSeparator) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success || !success) << "Parser should handle pipe separator";
+    libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -808,6 +833,7 @@ TEST_F(CSVParserTest, ParseCRLFLineEndings) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Parser should handle CRLF line endings";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseCRLineEndings) {
@@ -821,6 +847,7 @@ TEST_F(CSVParserTest, ParseCRLineEndings) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success || !success) << "Parser should handle CR line endings";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseLFLineEndings) {
@@ -834,6 +861,7 @@ TEST_F(CSVParserTest, ParseLFLineEndings) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Parser should handle LF line endings";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseNoFinalNewline) {
@@ -847,6 +875,7 @@ TEST_F(CSVParserTest, ParseNoFinalNewline) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Parser should handle file with no final newline";
+    libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -864,6 +893,7 @@ TEST_F(CSVParserTest, Parse8Threads) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Parser should handle 8 threads";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, Parse16ThreadsLargeData) {
@@ -902,6 +932,7 @@ TEST_F(CSVParserTest, ParseQuotedFieldsMultiThreaded) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Parser should handle quoted fields multi-threaded";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseEscapedQuotesMultiThreaded) {
@@ -916,6 +947,7 @@ TEST_F(CSVParserTest, ParseEscapedQuotesMultiThreaded) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Parser should handle escaped quotes multi-threaded";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseNewlinesInQuotesMultiThreaded) {
@@ -930,6 +962,7 @@ TEST_F(CSVParserTest, ParseNewlinesInQuotesMultiThreaded) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Parser should handle newlines in quotes multi-threaded";
+    libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -947,6 +980,7 @@ TEST_F(CSVParserTest, ParseEmptyFile) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success || !success) << "Parser should handle empty file";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseSingleCell) {
@@ -960,6 +994,7 @@ TEST_F(CSVParserTest, ParseSingleCell) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Parser should handle single cell";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseSingleRowHeaderOnly) {
@@ -973,6 +1008,7 @@ TEST_F(CSVParserTest, ParseSingleRowHeaderOnly) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Parser should handle single row (header only)";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseWhitespaceFields) {
@@ -986,6 +1022,7 @@ TEST_F(CSVParserTest, ParseWhitespaceFields) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Parser should handle whitespace fields";
+    libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -1061,6 +1098,7 @@ TEST_F(CSVParserTest, ParseOddThreadCount) {
     bool success = parser.parse(data.data(), idx, data.size());
 
     EXPECT_TRUE(success) << "Parser should handle odd thread count";
+    libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseVariedFieldLengths) {

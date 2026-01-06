@@ -4,7 +4,7 @@
  */
 
 #include "libvroom_c.h"
-#include "two_pass.h"
+#include "libvroom.h"
 #include "error.h"
 #include "dialect.h"
 #include "io_util.h"
@@ -19,20 +19,18 @@
 
 // Internal structures wrapping C++ objects
 struct libvroom_parser {
-    libvroom::two_pass parser;
+    libvroom::Parser parser;
+
+    libvroom_parser(size_t num_threads = 1) : parser(num_threads) {}
 };
 
 struct libvroom_index {
-    libvroom::index idx;
+    libvroom::ParseIndex idx;
     size_t num_threads;
 
-    libvroom_index(size_t buffer_length, size_t threads)
-        : idx(), num_threads(threads) {
-        // Pre-allocate the index arrays
-        idx.n_threads = threads;
-        idx.n_indexes = new uint64_t[threads]();  // Zero-initialize
-        idx.indexes = new uint64_t[buffer_length];
-    }
+    // Default constructor - index will be populated by Parser::parse()
+    libvroom_index(size_t threads)
+        : idx(), num_threads(threads) {}
 
     // Note: No explicit destructor needed - libvroom::index has its own destructor
     // that handles cleanup of n_indexes and indexes arrays
@@ -98,7 +96,6 @@ static libvroom_error_t to_c_error(libvroom::ErrorCode code) {
         case libvroom::ErrorCode::INCONSISTENT_FIELD_COUNT: return LIBVROOM_ERROR_INCONSISTENT_FIELDS;
         case libvroom::ErrorCode::FIELD_TOO_LARGE: return LIBVROOM_ERROR_FIELD_TOO_LARGE;
         case libvroom::ErrorCode::MIXED_LINE_ENDINGS: return LIBVROOM_ERROR_MIXED_LINE_ENDINGS;
-        case libvroom::ErrorCode::INVALID_LINE_ENDING: return LIBVROOM_ERROR_INVALID_LINE_ENDING;
         case libvroom::ErrorCode::INVALID_UTF8: return LIBVROOM_ERROR_INVALID_UTF8;
         case libvroom::ErrorCode::NULL_BYTE: return LIBVROOM_ERROR_NULL_BYTE;
         case libvroom::ErrorCode::EMPTY_HEADER: return LIBVROOM_ERROR_EMPTY_HEADER;
@@ -136,7 +133,6 @@ const char* libvroom_error_string(libvroom_error_t error) {
         case LIBVROOM_ERROR_INCONSISTENT_FIELDS: return "Inconsistent field count";
         case LIBVROOM_ERROR_FIELD_TOO_LARGE: return "Field too large";
         case LIBVROOM_ERROR_MIXED_LINE_ENDINGS: return "Mixed line endings";
-        case LIBVROOM_ERROR_INVALID_LINE_ENDING: return "Invalid line ending";
         case LIBVROOM_ERROR_INVALID_UTF8: return "Invalid UTF-8";
         case LIBVROOM_ERROR_NULL_BYTE: return "Null byte in data";
         case LIBVROOM_ERROR_EMPTY_HEADER: return "Empty header";
@@ -302,10 +298,12 @@ void libvroom_error_collector_destroy(libvroom_error_collector_t* collector) {
 
 // Index Structure
 libvroom_index_t* libvroom_index_create(size_t buffer_length, size_t num_threads) {
-    if (buffer_length == 0 || num_threads == 0) return nullptr;
+    // Note: buffer_length is now ignored since Parser allocates the index internally
+    (void)buffer_length;  // Suppress unused parameter warning
+    if (num_threads == 0) return nullptr;
 
     try {
-        return new (std::nothrow) libvroom_index(buffer_length, num_threads);
+        return new (std::nothrow) libvroom_index(num_threads);
     } catch (...) {
         return nullptr;
     }
@@ -350,7 +348,7 @@ void libvroom_index_destroy(libvroom_index_t* index) {
 // Parser
 libvroom_parser_t* libvroom_parser_create(void) {
     try {
-        return new (std::nothrow) libvroom_parser();
+        return new (std::nothrow) libvroom_parser(1);
     } catch (...) {
         return nullptr;
     }
@@ -363,15 +361,22 @@ libvroom_error_t libvroom_parse(libvroom_parser_t* parser, const libvroom_buffer
 
     try {
         libvroom::Dialect d = dialect ? dialect->dialect : libvroom::Dialect::csv();
-        index->idx = parser->parser.init(buffer->data.size(), index->num_threads);
 
-        bool success;
+        // Configure parser with the number of threads from the index
+        parser->parser.set_num_threads(index->num_threads);
+
+        // Build parse options
+        libvroom::ParseOptions options;
+        options.dialect = d;
         if (errors) {
-            success = parser->parser.parse_with_errors(buffer->data.data(), index->idx,
-                                             buffer->data.size(), errors->collector, d);
-        } else {
-            success = parser->parser.parse(buffer->data.data(), index->idx, buffer->data.size(), d);
+            options.errors = &errors->collector;
         }
+
+        // Parse using the unified Parser API
+        auto result = parser->parser.parse(buffer->data.data(), buffer->data.size(), options);
+
+        // Move the index from the result
+        index->idx = std::move(result.idx);
 
         if (errors && errors->collector.has_fatal_errors()) {
             const auto& errs = errors->collector.errors();
@@ -382,7 +387,7 @@ libvroom_error_t libvroom_parse(libvroom_parser_t* parser, const libvroom_buffer
             }
         }
 
-        return success ? LIBVROOM_OK : LIBVROOM_ERROR_INTERNAL;
+        return result.success() ? LIBVROOM_OK : LIBVROOM_ERROR_INTERNAL;
     } catch (...) {
         return LIBVROOM_ERROR_INTERNAL;
     }
@@ -457,29 +462,33 @@ libvroom_error_t libvroom_parse_auto(libvroom_parser_t* parser, const libvroom_b
     if (!parser || !buffer || !index) return LIBVROOM_ERROR_NULL_POINTER;
 
     try {
-        // First detect the dialect
-        libvroom::DialectDetector detector;
-        auto result = detector.detect(buffer->data.data(), buffer->data.size());
+        // Configure parser with the number of threads from the index
+        parser->parser.set_num_threads(index->num_threads);
 
-        if (detected) {
-            *detected = new (std::nothrow) libvroom_detection_result(result);
+        // Build parse options for auto-detection (dialect = nullopt)
+        libvroom::ParseOptions options;
+        // Leave dialect as nullopt for auto-detection
+        if (errors) {
+            options.errors = &errors->collector;
         }
 
-        if (!result.success()) {
+        // Parse using the unified Parser API with auto-detection
+        auto result = parser->parser.parse(buffer->data.data(), buffer->data.size(), options);
+
+        // Store detection result if requested
+        if (detected) {
+            *detected = new (std::nothrow) libvroom_detection_result(result.detection);
+        }
+
+        // Check if detection succeeded
+        if (!result.detection.success()) {
             return LIBVROOM_ERROR_AMBIGUOUS_SEPARATOR;
         }
 
-        // Parse with detected dialect
-        index->idx = parser->parser.init(buffer->data.size(), index->num_threads);
+        // Move the index from the result
+        index->idx = std::move(result.idx);
 
-        if (errors) {
-            parser->parser.parse_with_errors(buffer->data.data(), index->idx,
-                                             buffer->data.size(), errors->collector, result.dialect);
-        } else {
-            parser->parser.parse(buffer->data.data(), index->idx, buffer->data.size(), result.dialect);
-        }
-
-        return LIBVROOM_OK;
+        return result.success() ? LIBVROOM_OK : LIBVROOM_ERROR_INTERNAL;
     } catch (...) {
         return LIBVROOM_ERROR_INTERNAL;
     }

@@ -2,16 +2,15 @@
 #include "common_defs.h"
 #include "io_util.h"
 #include "mem_util.h"
-#include "two_pass.h"
+#include "libvroom.h"
 #include <memory>
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern libvroom::two_pass* global_parser;
 
 // Basic parsing benchmark for different file sizes
 static void BM_ParseFile(benchmark::State& state, const std::string& filename) {
   std::basic_string_view<uint8_t> data;
-  
+
   // Try to load the file if not already loaded
   if (test_data.find(filename) == test_data.end()) {
     try {
@@ -24,19 +23,15 @@ static void BM_ParseFile(benchmark::State& state, const std::string& filename) {
   } else {
     data = test_data[filename];
   }
-  
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
+
   int n_threads = static_cast<int>(state.range(0));
-  libvroom::index result = global_parser->init(data.size(), n_threads);
-  
+  libvroom::Parser parser(n_threads);
+
   for (auto _ : state) {
-    global_parser->parse(data.data(), result, data.size());
+    auto result = parser.parse(data.data(), data.size());
     benchmark::DoNotOptimize(result);
   }
-  
+
   // Performance metrics are calculated automatically by Google Benchmark
   state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
   state.counters["FileSize"] = static_cast<double>(data.size());
@@ -109,18 +104,16 @@ BENCHMARK(BM_MemoryAllocation)
 
 // Index creation benchmark
 static void BM_IndexCreation(benchmark::State& state) {
-  if (!global_parser) {
-    global_parser = new libvroom::two_pass();
-  }
-  
   size_t file_size = static_cast<size_t>(state.range(0));
   int n_threads = static_cast<int>(state.range(1));
-  
+
+  libvroom::two_pass tp;
+
   for (auto _ : state) {
-    auto result = global_parser->init(file_size, n_threads);
+    auto result = tp.init(file_size, n_threads);
     benchmark::DoNotOptimize(result);
   }
-  
+
   state.counters["FileSize"] = static_cast<double>(file_size);
   state.counters["Threads"] = static_cast<double>(n_threads);
 }

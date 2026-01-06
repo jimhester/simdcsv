@@ -916,8 +916,8 @@ TEST_F(CliTest, TailNoHeader) {
 
 TEST_F(CliTest, TailManyRows) {
   // Test with file that has 20 data rows
-  // Use single-threaded parsing (-t 1) to avoid platform-specific threading differences
-  auto result = CliRunner::run("tail -n 5 -t 1 " + testDataPath("basic/many_rows.csv"));
+  // Uses default multi-threaded parsing (PR #303 fixed SIMD delimiter masking on macOS)
+  auto result = CliRunner::run("tail -n 5 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have header
   EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos);
@@ -1029,8 +1029,8 @@ TEST_F(CliTest, SampleNoHeader) {
 
 TEST_F(CliTest, SampleManyRows) {
   // Sample from file with 20 data rows
-  // Use single-threaded parsing (-t 1) to avoid platform-specific threading differences
-  auto result = CliRunner::run("sample -n 5 -s 42 -t 1 " + testDataPath("basic/many_rows.csv"));
+  // Uses default multi-threaded parsing (PR #303 fixed SIMD delimiter masking on macOS)
+  auto result = CliRunner::run("sample -n 5 -s 42 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have header
   EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos);
