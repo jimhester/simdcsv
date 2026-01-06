@@ -155,9 +155,8 @@ spawn_in_new_tab_wsl() {
 
     # Use Windows Terminal to create a new tab running WSL
     # -w 0 = use current window, nt = new tab
-    # -p specifies the profile name (use the distro name)
-    # Use -lic (login + interactive + command) to ensure PATH is set up properly
-    "$WT_EXE" -w 0 nt -p "$distro" -d "$(wslpath -w "$current_dir")" -- "$user_shell" -lic "$cmd"
+    # Use wsl.exe to run the command - this avoids Windows Terminal's argument parsing issues
+    "$WT_EXE" -w 0 nt wsl.exe -d "$distro" --cd "$current_dir" -- "$user_shell" -lic "$cmd"
 }
 
 # Spawn a single issue in a new terminal tab (dispatches based on environment)
