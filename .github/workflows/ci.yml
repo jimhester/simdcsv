@@ -132,9 +132,9 @@ jobs:
     - name: Verify expected artifacts exist
       run: |
         echo "Checking for library..."
-        if ls build/liblibvroom_lib.* 1>/dev/null 2>&1; then
+        if ls build/libvroom.* 1>/dev/null 2>&1; then
           echo "✓ Library found:"
-          ls -la build/liblibvroom_lib.*
+          ls -la build/libvroom.*
         else
           echo "✗ Library not found!"
           exit 1
@@ -227,9 +227,9 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         echo "Checking for shared library (.so)..."
-        if ls build/liblibvroom_lib.so* 1>/dev/null 2>&1; then
+        if ls build/libvroom.so* 1>/dev/null 2>&1; then
           echo "✓ Shared library found:"
-          ls -la build/liblibvroom_lib.so*
+          ls -la build/libvroom.so*
         else
           echo "✗ Shared library not found!"
           ls -la build/
@@ -240,9 +240,9 @@ jobs:
       if: runner.os == 'macOS'
       run: |
         echo "Checking for shared library (.dylib)..."
-        if ls build/liblibvroom_lib.dylib* 1>/dev/null 2>&1; then
+        if ls build/libvroom.dylib* 1>/dev/null 2>&1; then
           echo "✓ Shared library found:"
-          ls -la build/liblibvroom_lib.dylib*
+          ls -la build/libvroom.dylib*
         else
           echo "✗ Shared library not found!"
           ls -la build/
