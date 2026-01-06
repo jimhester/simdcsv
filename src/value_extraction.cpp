@@ -6,7 +6,7 @@
 
 namespace libvroom {
 
-ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const index& idx,
+ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx,
                                const Dialect& dialect, const ExtractionConfig& config)
     : buf_(buf), len_(len), idx_(idx), dialect_(dialect), config_(config) {
     uint64_t total_indexes = 0;

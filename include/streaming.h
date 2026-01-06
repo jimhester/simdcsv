@@ -55,6 +55,17 @@
 #include "dialect.h"
 #include "error.h"
 
+// Deprecation macro for cross-compiler support (guarded to avoid redefinition)
+#ifndef LIBVROOM_DEPRECATED
+    #if defined(__GNUC__) || defined(__clang__)
+        #define LIBVROOM_DEPRECATED(msg) __attribute__((deprecated(msg)))
+    #elif defined(_MSC_VER)
+        #define LIBVROOM_DEPRECATED(msg) __declspec(deprecated(msg))
+    #else
+        #define LIBVROOM_DEPRECATED(msg)
+    #endif
+#endif
+
 namespace libvroom {
 
 /**
@@ -344,7 +355,12 @@ public:
     size_t bytes_processed() const;
 
     /// Get error collector for inspecting accumulated errors
-    const ErrorCollector& errors() const;
+    const ErrorCollector& error_collector() const;
+
+    /// @brief Backward-compatible alias for error_collector().
+    /// @deprecated Use error_collector() instead to avoid confusion with ErrorCollector::errors().
+    LIBVROOM_DEPRECATED("Use error_collector() instead")
+    const ErrorCollector& errors() const { return error_collector(); }
 
     /// Check if the parser has finished (finish() was called)
     bool is_finished() const;
@@ -359,7 +375,7 @@ private:
  *
  * This is an input iterator that reads rows from a StreamReader.
  */
-class RowIterator {
+class StreamRowIterator {
 public:
     using iterator_category = std::input_iterator_tag;
     using value_type = Row;
@@ -368,19 +384,19 @@ public:
     using reference = const Row&;
 
     /// Create end iterator
-    RowIterator();
+    StreamRowIterator();
 
     /// Create iterator from StreamReader
-    explicit RowIterator(class StreamReader* reader);
+    explicit StreamRowIterator(class StreamReader* reader);
 
     reference operator*() const;
     pointer operator->() const;
 
-    RowIterator& operator++();
-    RowIterator operator++(int);
+    StreamRowIterator& operator++();
+    StreamRowIterator operator++(int);
 
-    bool operator==(const RowIterator& other) const;
-    bool operator!=(const RowIterator& other) const;
+    bool operator==(const StreamRowIterator& other) const;
+    bool operator!=(const StreamRowIterator& other) const;
 
 private:
     class StreamReader* reader_ = nullptr;
@@ -466,7 +482,12 @@ public:
     int column_index(const std::string& name) const;
 
     /// Get error collector for inspecting errors
-    const ErrorCollector& errors() const;
+    const ErrorCollector& error_collector() const;
+
+    /// @brief Backward-compatible alias for error_collector().
+    /// @deprecated Use error_collector() instead to avoid confusion with ErrorCollector::errors().
+    LIBVROOM_DEPRECATED("Use error_collector() instead")
+    const ErrorCollector& errors() const { return error_collector(); }
 
     /// Number of rows read (excluding header)
     size_t rows_read() const;
@@ -478,14 +499,14 @@ public:
     bool eof() const;
 
     /// Iterator support for range-based for
-    RowIterator begin();
-    RowIterator end();
+    StreamRowIterator begin();
+    StreamRowIterator end();
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 
-    friend class RowIterator;
+    friend class StreamRowIterator;
 };
 
 }  // namespace libvroom
