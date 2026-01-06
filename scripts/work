@@ -390,16 +390,12 @@ Repeat until the PR is ready to merge:
 4. **Address critical feedback**: Fix any issues marked as "REQUEST_CHANGES" or critical comments. Respond to review comments as you address them.
 5. **Re-request review if needed**: After addressing feedback, re-request review if appropriate
 
-### Phase 4: Merge (from main repo)
+### Phase 4: Merge
 Once CI passes and there are no blocking reviews:
-1. **FIRST navigate to the main repo directory**: \`cd ${REPO_ROOT}\`
-   - This is CRITICAL: \`gh pr merge\` can invalidate the worktree directory (see https://github.com/cli/cli/issues/3442)
-   - All subsequent commands MUST be run from the main repo directory
-2. Merge the PR using \`gh pr merge <PR-NUMBER> --squash\` (use explicit PR number, do NOT use --delete-branch)
-3. Confirm the merge succeeded
+1. Merge the PR using \`gh pr merge <PR-NUMBER> --squash\`
+2. Confirm the merge succeeded
 
 ### Phase 5: Follow-up Issues (REQUIRED)
-**IMPORTANT: You should already be in the main repo directory (${REPO_ROOT}) from Phase 4.**
 **After merging, you MUST review for follow-up issues.** This is a critical step that ensures technical debt and improvements are tracked.
 
 **Check these sources for follow-up items:**
@@ -417,7 +413,7 @@ Once CI passes and there are no blocking reviews:
 - Specific problem or improvement
 - Proposed solution if known
 
-**Example command (run from main repo directory):**
+**Example command:**
 \`\`\`bash
 gh issue create --title "Add SIMD support to ValueExtractor" --label "feature" --label "simd ⚡" --body "Background: PR #93 added SIMD parsers but ValueExtractor still uses scalar..."
 \`\`\`
