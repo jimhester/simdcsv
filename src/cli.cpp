@@ -998,6 +998,11 @@ int cmdDialect(const char* filename, bool json_output) {
 }
 
 int main(int argc, char* argv[]) {
+  // Disable buffering for stdout to ensure output is written immediately.
+  // This fixes flaky test failures on macOS where popen() may not capture
+  // all output if the process exits before buffers are flushed.
+  setvbuf(stdout, nullptr, _IONBF, 0);
+
   if (argc < 2) {
     printUsage(argv[0]);
     return 1;
