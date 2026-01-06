@@ -1,7 +1,9 @@
+// Tests intentionally use deprecated two_pass methods for backward compatibility verification
+#include "two_pass.h"
+LIBVROOM_SUPPRESS_DEPRECATION_START
+
 #include <gtest/gtest.h>
 #include <string>
-
-#include "two_pass.h"
 #include "error.h"
 #include "io_util.h"
 

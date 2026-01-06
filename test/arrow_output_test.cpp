@@ -1,4 +1,8 @@
 #ifdef LIBVROOM_ENABLE_ARROW
+// Tests intentionally use deprecated two_pass methods for backward compatibility verification
+#include "two_pass.h"
+LIBVROOM_SUPPRESS_DEPRECATION_START
+
 #include <gtest/gtest.h>
 #include <arrow/api.h>
 #include "arrow_output.h"
