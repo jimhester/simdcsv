@@ -650,7 +650,7 @@ static void BM_arrow_quoted(benchmark::State& state) {
 // ============================================================================
 
 enum class ParserType {
-    SIMDCSV = 0,
+    LIBVROOM = 0,
     ZSV = 1,
     DUCKDB = 2,
     ARROW = 3
@@ -671,7 +671,7 @@ static void BM_fair_comparison(benchmark::State& state) {
     const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(csv_data.data());
 
     switch (parser_type) {
-        case ParserType::SIMDCSV: {
+        case ParserType::LIBVROOM: {
             for (auto _ : state) {
                 size_t result = parse_libvroom(padded_buffer, csv_data.size());
                 benchmark::DoNotOptimize(result);
@@ -720,7 +720,7 @@ static void BM_fair_comparison(benchmark::State& state) {
 // Helper to get parser name for labels
 static std::string GetParserName(int parser_id) {
     switch (static_cast<ParserType>(parser_id)) {
-        case ParserType::SIMDCSV: return "libvroom";
+        case ParserType::LIBVROOM: return "libvroom";
         case ParserType::ZSV: return "zsv";
         case ParserType::DUCKDB: return "duckdb";
         case ParserType::ARROW: return "arrow";
@@ -818,7 +818,7 @@ static void RegisterFairComparisonBenchmarks() {
                     const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(csv_data.data());
 
                     switch (static_cast<ParserType>(parser)) {
-                        case ParserType::SIMDCSV: {
+                        case ParserType::LIBVROOM: {
                             for (auto _ : state) {
                                 size_t result = parse_libvroom(padded_buffer, csv_data.size());
                                 benchmark::DoNotOptimize(result);

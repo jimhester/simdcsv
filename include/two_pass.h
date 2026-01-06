@@ -1227,14 +1227,14 @@ class two_pass {
 
     auto st = first_pass_fut[0].get();
     size_t n_quotes = st.n_quotes;
-#ifndef SIMDCSV_BENCHMARK_MODE
+#ifndef LIBVROOM_BENCHMARK_MODE
     printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
            st.first_even_nl, st.first_odd_nl, st.n_quotes);
 #endif
     chunk_pos[0] = 0;
     for (int i = 1; i < n_threads; ++i) {
       auto st = first_pass_fut[i].get();
-#ifndef SIMDCSV_BENCHMARK_MODE
+#ifndef LIBVROOM_BENCHMARK_MODE
       printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
              st.first_even_nl, st.first_odd_nl, st.n_quotes);
 #endif
