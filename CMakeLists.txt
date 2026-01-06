@@ -228,9 +228,6 @@ target_link_libraries(vroom-cli PRIVATE
     pthread
 )
 
-# Suppress debug output for CLI
-target_compile_definitions(vroom-cli PRIVATE LIBVROOM_BENCHMARK_MODE)
-
 # =============================================================================
 # Testing (optional, controlled by BUILD_TESTING)
 # =============================================================================
@@ -789,9 +786,6 @@ target_include_directories(libvroom_benchmark PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Define benchmark mode to suppress debug output during benchmarking
-target_compile_definitions(libvroom_benchmark PRIVATE LIBVROOM_BENCHMARK_MODE)
-
 # Conditionally link external CSV parsers
 if(HAVE_ZSV)
     target_link_libraries(libvroom_benchmark PRIVATE zsv_lib)
@@ -850,21 +844,18 @@ if(ENABLE_FUZZING)
     target_include_directories(fuzz_csv_parser PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(fuzz_csv_parser PRIVATE ${FUZZ_FLAGS})
     target_link_options(fuzz_csv_parser PRIVATE ${FUZZ_LINK_FLAGS})
-    target_compile_definitions(fuzz_csv_parser PRIVATE LIBVROOM_BENCHMARK_MODE)
 
     add_executable(fuzz_dialect_detection fuzz/fuzz_dialect_detection.cpp)
     target_link_libraries(fuzz_dialect_detection PRIVATE vroom)
     target_include_directories(fuzz_dialect_detection PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(fuzz_dialect_detection PRIVATE ${FUZZ_FLAGS})
     target_link_options(fuzz_dialect_detection PRIVATE ${FUZZ_LINK_FLAGS})
-    target_compile_definitions(fuzz_dialect_detection PRIVATE LIBVROOM_BENCHMARK_MODE)
 
     add_executable(fuzz_parse_auto fuzz/fuzz_parse_auto.cpp)
     target_link_libraries(fuzz_parse_auto PRIVATE vroom)
     target_include_directories(fuzz_parse_auto PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(fuzz_parse_auto PRIVATE ${FUZZ_FLAGS})
     target_link_options(fuzz_parse_auto PRIVATE ${FUZZ_LINK_FLAGS})
-    target_compile_definitions(fuzz_parse_auto PRIVATE LIBVROOM_BENCHMARK_MODE)
 
     add_custom_command(TARGET fuzz_csv_parser POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/fuzz_corpus
