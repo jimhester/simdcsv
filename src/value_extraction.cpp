@@ -19,7 +19,9 @@ ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const index& idx,
     size_t first_nl = 0;
     for (size_t i = 0; i < linear_indexes_.size(); ++i) {
         if (linear_indexes_[i] >= len_) continue;  // Bounds check
-        if (buf_[linear_indexes_[i]] == '\n') { first_nl = i; break; }
+        // Support LF, CRLF, and CR-only line endings
+        uint8_t c = buf_[linear_indexes_[i]];
+        if (c == '\n' || c == '\r') { first_nl = i; break; }
     }
     num_columns_ = first_nl + 1;
     recalculate_num_rows();

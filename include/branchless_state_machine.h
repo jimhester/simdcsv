@@ -167,10 +167,24 @@ public:
     }
 
     /**
-     * @brief Create 64-bit bitmask for newline characters.
+     * @brief Create 64-bit bitmask for line ending characters.
+     *
+     * Supports LF (\n), CRLF (\r\n), and CR-only (\r) line endings:
+     * - LF positions are always included
+     * - CR positions are included only if NOT immediately followed by LF
+     *
+     * For CRLF sequences, only the LF is marked as the line ending.
+     * The CR in CRLF is handled during value extraction (stripped from field end).
      */
     really_inline uint64_t newline_mask(const simd_input& in) const {
-        return cmp_mask_against_input(in, '\n');
+        return compute_line_ending_mask_simple(in, ~0ULL);
+    }
+
+    /**
+     * @brief Create 64-bit bitmask for line endings with validity mask.
+     */
+    really_inline uint64_t newline_mask(const simd_input& in, uint64_t valid_mask) const {
+        return compute_line_ending_mask_simple(in, valid_mask);
     }
 
     /**
@@ -391,7 +405,8 @@ really_inline size_t process_block_simd_branchless(
     // Get bitmasks for special characters using SIMD
     uint64_t quotes = sm.quote_mask(in) & valid_mask;
     uint64_t delimiters = sm.delimiter_mask(in) & valid_mask;
-    uint64_t newlines = sm.newline_mask(in) & valid_mask;
+    // Use newline_mask with valid_mask for proper CR/CRLF handling
+    uint64_t newlines = sm.newline_mask(in, valid_mask);
 
     // Compute quote mask: positions that are inside quotes
     // Uses XOR prefix sum to track quote parity
