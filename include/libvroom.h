@@ -559,8 +559,7 @@ public:
 
         // Select parsing implementation based on algorithm and error collection
         if (options.errors != nullptr) {
-            // Error collection mode - uses two_pass_with_errors regardless of algorithm
-            // (accurate error tracking requires the error-aware implementation)
+            // Error collection mode - algorithm selection determines implementation
             if (!options.dialect.has_value()) {
                 // Auto-detect path with errors
                 result.successful = parser_.parse_auto(
@@ -568,9 +567,16 @@ public:
                     options.detection_options);
                 result.dialect = result.detection.dialect;
             } else {
-                // Explicit dialect with errors
-                result.successful = parser_.parse_with_errors(
-                    buf, result.idx, len, *options.errors, result.dialect);
+                // Explicit dialect with errors - respect algorithm selection
+                if (options.algorithm == ParseAlgorithm::BRANCHLESS) {
+                    // Use branchless implementation with error collection
+                    result.successful = parser_.parse_branchless_with_errors(
+                        buf, result.idx, len, *options.errors, result.dialect);
+                } else {
+                    // Default to switch-based implementation (faster for error collection)
+                    result.successful = parser_.parse_with_errors(
+                        buf, result.idx, len, *options.errors, result.dialect);
+                }
             }
         } else {
             // Fast path (throws on error) - respects algorithm selection

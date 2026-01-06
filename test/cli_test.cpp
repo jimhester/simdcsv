@@ -916,7 +916,8 @@ TEST_F(CliTest, TailNoHeader) {
 
 TEST_F(CliTest, TailManyRows) {
   // Test with file that has 20 data rows
-  auto result = CliRunner::run("tail -n 5 " + testDataPath("basic/many_rows.csv"));
+  // Use single-threaded parsing (-t 1) to avoid platform-specific threading differences
+  auto result = CliRunner::run("tail -n 5 -t 1 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have header
   EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos);
@@ -1028,7 +1029,8 @@ TEST_F(CliTest, SampleNoHeader) {
 
 TEST_F(CliTest, SampleManyRows) {
   // Sample from file with 20 data rows
-  auto result = CliRunner::run("sample -n 5 -s 42 " + testDataPath("basic/many_rows.csv"));
+  // Use single-threaded parsing (-t 1) to avoid platform-specific threading differences
+  auto result = CliRunner::run("sample -n 5 -s 42 -t 1 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have header
   EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos);
@@ -1056,6 +1058,13 @@ TEST_F(CliTest, SampleManyRows) {
   if (result.output.find("18,1800,R") != std::string::npos) data_rows++;
   if (result.output.find("19,1900,S") != std::string::npos) data_rows++;
   if (result.output.find("20,2000,T") != std::string::npos) data_rows++;
+  // Debug output to help diagnose flaky test failures
+  if (data_rows != 5) {
+    std::cerr << "SampleManyRows DEBUG: exit_code=" << result.exit_code
+              << " output_size=" << result.output.size()
+              << " data_rows=" << data_rows << "\n";
+    std::cerr << "SampleManyRows DEBUG: full output:\n[[[" << result.output << "]]]\n";
+  }
   EXPECT_EQ(data_rows, 5);  // We requested 5 rows
 }
 

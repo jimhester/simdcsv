@@ -557,7 +557,7 @@ class two_pass {
       uint64_t quotes = cmp_mask_against_input(in, static_cast<uint8_t>(quote_char)) & mask;
 
       uint64_t quote_mask = find_quote_mask2(quotes, prev_iter_inside_quote);
-      uint64_t sep = cmp_mask_against_input(in, static_cast<uint8_t>(delimiter));
+      uint64_t sep = cmp_mask_against_input(in, static_cast<uint8_t>(delimiter)) & mask;
       // Support LF, CRLF, and CR-only line endings
       uint64_t end_mask = compute_line_ending_mask_simple(in, mask);
       uint64_t field_sep = (end_mask | sep) & ~quote_mask;
@@ -1122,6 +1122,167 @@ class two_pass {
     LIBVROOM_SUPPRESS_DEPRECATION_END
   }
 
+  // Result from multi-threaded branchless parsing with error collection
+  struct branchless_chunk_result {
+    uint64_t n_indexes;
+    ErrorCollector errors;
+
+    branchless_chunk_result() : n_indexes(0), errors(ErrorMode::PERMISSIVE) {}
+  };
+
+  /**
+   * @brief Static wrapper for thread-safe branchless parsing with error collection.
+   */
+  static branchless_chunk_result second_pass_branchless_chunk_with_errors(
+      const BranchlessStateMachine& sm,
+      const uint8_t* buf, size_t start, size_t end,
+      index* out, size_t thread_id, size_t total_len, ErrorMode mode) {
+    branchless_chunk_result result;
+    result.errors.set_mode(mode);
+    result.n_indexes = second_pass_branchless_with_errors(
+        sm, buf, start, end, out->indexes, thread_id, out->n_threads,
+        &result.errors, total_len);
+    return result;
+  }
+
+  /**
+   * @brief Parse a CSV buffer using branchless state machine with error collection.
+   *
+   * This method combines the performance benefits of the branchless state machine
+   * with comprehensive error collection. It uses the unified branchless implementation
+   * for all parsing paths.
+   *
+   * The method performs the following checks:
+   * - Empty header detection
+   * - Duplicate column name detection
+   * - Mixed line ending warnings
+   * - Quote errors (unclosed quotes, quotes in unquoted fields)
+   * - Inconsistent field counts across rows
+   * - Null byte detection
+   *
+   * @param buf Pointer to the CSV data buffer. Must remain valid during parsing.
+   * @param out The index structure to populate. Must be initialized via init().
+   * @param len Length of the CSV data in bytes.
+   * @param errors ErrorCollector to accumulate parsing errors.
+   * @param dialect The dialect to use for parsing (default: CSV with comma and double-quote).
+   *
+   * @return true if parsing completed without fatal errors, false if fatal
+   *         errors occurred.
+   */
+  bool parse_branchless_with_errors(const uint8_t* buf, index& out, size_t len,
+                                    ErrorCollector& errors,
+                                    const Dialect& dialect = Dialect::csv()) {
+    char delim = dialect.delimiter;
+    char quote = dialect.quote_char;
+
+    // Handle empty input
+    if (len == 0) return true;
+
+    // Check structural issues first (single-threaded, fast)
+    check_empty_header(buf, len, errors);
+    if (errors.should_stop()) return false;
+
+    check_duplicate_columns(buf, len, errors, delim, quote);
+    if (errors.should_stop()) return false;
+
+    check_line_endings(buf, len, errors);
+    if (errors.should_stop()) return false;
+
+    BranchlessStateMachine sm(delim, quote);
+    uint8_t n_threads = out.n_threads;
+
+    // Validate n_threads: treat 0 as single-threaded to avoid division by zero
+    if (n_threads == 0) n_threads = 1;
+
+    // For single-threaded, use the simpler path
+    if (n_threads == 1) {
+      out.n_indexes[0] = second_pass_branchless_with_errors(
+          sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
+      check_field_counts(buf, len, errors, delim, quote);
+      return !errors.has_fatal_errors();
+    }
+
+    size_t chunk_size = len / n_threads;
+
+    // If chunk size is too small, fall back to single-threaded
+    if (chunk_size < 64) {
+      out.n_threads = 1;
+      out.n_indexes[0] = second_pass_branchless_with_errors(
+          sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
+      check_field_counts(buf, len, errors, delim, quote);
+      return !errors.has_fatal_errors();
+    }
+
+    std::vector<uint64_t> chunk_pos(n_threads + 1);
+    std::vector<std::future<stats>> first_pass_fut(n_threads);
+    std::vector<std::future<branchless_chunk_result>> second_pass_fut(n_threads);
+
+    // First pass: find chunk boundaries
+    for (int i = 0; i < n_threads; ++i) {
+      first_pass_fut[i] = std::async(std::launch::async,
+          [buf, chunk_size, i, quote]() {
+            return first_pass_chunk(buf, chunk_size * i, chunk_size * (i + 1), quote);
+          });
+    }
+
+    auto st = first_pass_fut[0].get();
+    size_t n_quotes = st.n_quotes;
+#ifndef SIMDCSV_BENCHMARK_MODE
+    printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", 0,
+           st.first_even_nl, st.first_odd_nl, st.n_quotes);
+#endif
+    chunk_pos[0] = 0;
+    for (int i = 1; i < n_threads; ++i) {
+      auto st = first_pass_fut[i].get();
+#ifndef SIMDCSV_BENCHMARK_MODE
+      printf("i: %i\teven: %" PRIu64 "\todd: %" PRIu64 "\tquotes: %" PRIu64 "\n", i,
+             st.first_even_nl, st.first_odd_nl, st.n_quotes);
+#endif
+      chunk_pos[i] = (n_quotes % 2) == 0 ? st.first_even_nl : st.first_odd_nl;
+      n_quotes += st.n_quotes;
+    }
+    chunk_pos[n_threads] = len;
+
+    // Safety check: if any chunk_pos is null_pos, fall back to single-threaded
+    for (int i = 1; i < n_threads; ++i) {
+      if (chunk_pos[i] == null_pos) {
+        out.n_threads = 1;
+        out.n_indexes[0] = second_pass_branchless_with_errors(
+            sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
+        check_field_counts(buf, len, errors, delim, quote);
+        return !errors.has_fatal_errors();
+      }
+    }
+
+    // Second pass: parse with thread-local error collectors using branchless
+    ErrorMode mode = errors.mode();
+    for (int i = 0; i < n_threads; ++i) {
+      second_pass_fut[i] = std::async(std::launch::async,
+          [sm, buf, &out, &chunk_pos, i, len, mode]() {
+            return second_pass_branchless_chunk_with_errors(
+                sm, buf, chunk_pos[i], chunk_pos[i + 1], &out, i, len, mode);
+          });
+    }
+
+    // Collect results and merge errors
+    std::vector<ErrorCollector> thread_errors;
+    thread_errors.reserve(n_threads);
+
+    for (int i = 0; i < n_threads; ++i) {
+      auto result = second_pass_fut[i].get();
+      out.n_indexes[i] = result.n_indexes;
+      thread_errors.push_back(std::move(result.errors));
+    }
+
+    // Merge all thread-local errors, sorted by byte offset
+    errors.merge_sorted(thread_errors);
+
+    // Check field counts after parsing (single-threaded, scans file linearly)
+    check_field_counts(buf, len, errors, delim, quote);
+
+    return !errors.has_fatal_errors();
+  }
+
   /**
    * @brief Parse a CSV buffer using branchless state machine (optimized).
    *
@@ -1145,9 +1306,9 @@ class two_pass {
    * @note This method is optimized for performance over error reporting.
    *       It does NOT collect errors like unclosed quotes, null bytes, or
    *       invalid escape sequences. For detailed error information, use
-   *       parse_with_errors() instead.
+   *       parse_branchless_with_errors() instead.
    *
-   * @warning When parsing untrusted input, consider using parse_with_errors()
+   * @warning When parsing untrusted input, consider using parse_branchless_with_errors()
    *          to detect malformed CSV that this method may silently accept.
    *
    * @deprecated Use Parser::parse() with ParseOptions::branchless() instead.
@@ -1817,6 +1978,8 @@ class two_pass {
    */
   index init(size_t len, size_t n_threads) {
     index out;
+    // Ensure at least 1 thread for valid memory allocation
+    if (n_threads == 0) n_threads = 1;
     out.n_threads = n_threads;
     out.n_indexes = new uint64_t[n_threads];
 

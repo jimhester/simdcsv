@@ -14,6 +14,10 @@ option(BUILD_SHARED_LIBS "Build shared library instead of static" OFF)
 # Code coverage option
 option(ENABLE_COVERAGE "Enable code coverage reporting" OFF)
 
+# Sanitizer options
+option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+
 # Compiler flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-O0 -g)
@@ -30,6 +34,28 @@ if(ENABLE_COVERAGE)
         add_link_options(--coverage)
     else()
         message(WARNING "Code coverage not supported for compiler: ${CMAKE_CXX_COMPILER_ID}")
+    endif()
+endif()
+
+# Sanitizer flags
+if(ENABLE_ASAN OR ENABLE_UBSAN)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        # Common sanitizer flags
+        add_compile_options(-fno-omit-frame-pointer -g)
+
+        if(ENABLE_ASAN)
+            message(STATUS "AddressSanitizer enabled")
+            add_compile_options(-fsanitize=address)
+            add_link_options(-fsanitize=address)
+        endif()
+
+        if(ENABLE_UBSAN)
+            message(STATUS "UndefinedBehaviorSanitizer enabled")
+            add_compile_options(-fsanitize=undefined)
+            add_link_options(-fsanitize=undefined)
+        endif()
+    else()
+        message(WARNING "Sanitizers not supported for compiler: ${CMAKE_CXX_COMPILER_ID}")
     endif()
 endif()
 
