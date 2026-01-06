@@ -6,6 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 simdcsv is a high-performance CSV parser library using portable SIMD instructions (via Google Highway), designed for future integration with R's [vroom](https://github.com/tidyverse/vroom) package. The parser uses a speculative multi-threaded two-pass algorithm based on research by Chang et al. (SIGMOD 2019) and SIMD techniques from Langdale & Lemire (simdjson).
 
+## Naming and Authorship
+
+This project is authored by Jim Hester, the original author of [vroom](https://github.com/tidyverse/vroom). The project is planned to be renamed to **libvroom** to:
+
+1. Clearly indicate its relationship to vroom as the native SIMD parsing engine
+2. Avoid confusion with abandoned simdjson-adjacent projects (e.g., geofflangdale/simdcsv)
+3. Use conventional `lib*` naming for C/C++ libraries
+
+Until the rename is complete, the codebase uses "simdcsv" naming internally.
+
 ## Build Commands
 
 ```bash
