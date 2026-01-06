@@ -1,8 +1,11 @@
+// Benchmarks intentionally test deprecated two_pass methods for performance comparison
+#include "two_pass.h"
+LIBVROOM_SUPPRESS_DEPRECATION_START
+
 #include <benchmark/benchmark.h>
 #include "common_defs.h"
 #include "io_util.h"
 #include "mem_util.h"
-#include "two_pass.h"
 
 // Global variables for shared test data
 std::map<std::string, std::basic_string_view<uint8_t>> test_data;
@@ -43,5 +46,7 @@ static void CleanupBenchmarkData() {
   delete global_parser;
   global_parser = nullptr;
 }
+
+LIBVROOM_SUPPRESS_DEPRECATION_END
 
 BENCHMARK_MAIN();
