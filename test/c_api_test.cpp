@@ -268,8 +268,9 @@ TEST_F(CAPITest, IndexCreate) {
 TEST_F(CAPITest, IndexCreateInvalid) {
     // Note: buffer_length=0 is now valid since it's ignored (Parser allocates internally)
     // Only num_threads=0 should return nullptr
-    EXPECT_NE(libvroom_index_create(0, 1), nullptr);  // Valid: buffer_length ignored
-    libvroom_index_destroy(libvroom_index_create(0, 1));  // Clean up
+    libvroom_index_t* idx = libvroom_index_create(0, 1);
+    EXPECT_NE(idx, nullptr);  // Valid: buffer_length ignored
+    libvroom_index_destroy(idx);  // Clean up
     EXPECT_EQ(libvroom_index_create(1000, 0), nullptr);   // Invalid: num_threads=0
 }
 

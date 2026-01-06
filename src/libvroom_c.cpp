@@ -170,7 +170,9 @@ libvroom_buffer_t* libvroom_buffer_load_file(const char* filename) {
             return nullptr;
         }
 
-        // Copy from string_view into vector
+        // Store the original length (data size without padding)
+        buffer->original_length = corpus.size();
+        // Copy from string_view into vector (includes padding from get_corpus)
         buffer->data.assign(corpus.begin(), corpus.end());
         // Free the original aligned buffer
         aligned_free(const_cast<uint8_t*>(corpus.data()));

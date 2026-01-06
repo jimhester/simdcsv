@@ -1138,9 +1138,13 @@ ParseIndex TwoPass::init_safe(size_t len, size_t n_threads, ErrorCollector* erro
         }
     }
 
-    // Safe to allocate - Note: init_safe uses raw new[] for backward compatibility
-    out.n_indexes = new uint64_t[n_threads];
-    out.indexes = new uint64_t[allocation_size];
+    // Safe to allocate - use RAII to ensure proper cleanup
+    out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+    out.n_indexes = out.n_indexes_ptr_.get();
+
+    out.indexes_ptr_ = std::make_unique<uint64_t[]>(allocation_size);
+    out.indexes = out.indexes_ptr_.get();
+
     return out;
 }
 
