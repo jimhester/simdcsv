@@ -24,7 +24,7 @@ NC='\033[0m' # No Color
 # Check for dependencies
 if [ ! -f "$SCSV" ]; then
     echo -e "${RED}Error: vroom not found at $SCSV${NC}"
-    echo "Build with: cmake -B build && cmake --build build --target vroom"
+    echo "Build with: cmake -B build && cmake --build build --target vroom-cli"
     exit 1
 fi
 
