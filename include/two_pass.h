@@ -1817,6 +1817,8 @@ class two_pass {
    */
   index init(size_t len, size_t n_threads) {
     index out;
+    // Ensure at least 1 thread for valid memory allocation
+    if (n_threads == 0) n_threads = 1;
     out.n_threads = n_threads;
     out.n_indexes = new uint64_t[n_threads];
 
