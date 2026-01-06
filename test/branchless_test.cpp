@@ -3,11 +3,14 @@
  * @brief Unit tests for the branchless CSV state machine implementation.
  */
 
+// Tests intentionally use deprecated two_pass methods for backward compatibility verification
+// libvroom.h includes two_pass.h which defines the suppression macro
+#include "libvroom.h"
+LIBVROOM_SUPPRESS_DEPRECATION_START
+
 #include <gtest/gtest.h>
 #include <string>
 #include <cstring>
-
-#include "libvroom.h"
 
 using namespace libvroom;
 

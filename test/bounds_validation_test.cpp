@@ -12,10 +12,13 @@
  * 3. Debug assertion tests - verify assertions catch intentionally corrupted data
  */
 
+// Tests intentionally use deprecated two_pass methods for backward compatibility verification
+#include "two_pass.h"
+LIBVROOM_SUPPRESS_DEPRECATION_START
+
 #include <gtest/gtest.h>
 #include <cstring>
 #include <vector>
-#include "two_pass.h"
 #include "value_extraction.h"
 #include "dialect.h"
 #include "type_detector.h"
