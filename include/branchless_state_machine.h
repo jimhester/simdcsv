@@ -30,6 +30,7 @@
 #include <cstddef>
 #include "common_defs.h"
 #include "simd_highway.h"
+#include "error.h"
 
 namespace simdcsv {
 
@@ -512,6 +513,189 @@ inline uint64_t second_pass_simd_branchless(
             sm, in, len - pos, prev_quote_state,
             indexes, start + pos, idx, n_threads
         );
+    }
+
+    return count;
+}
+
+/**
+ * @brief Convert BranchlessError to ErrorCode.
+ *
+ * Maps the compact branchless error codes to the full ErrorCode enum for
+ * compatibility with the error collection framework.
+ */
+really_inline ErrorCode branchless_error_to_error_code(BranchlessError err) {
+    switch (err) {
+        case ERR_NONE:
+            return ErrorCode::NONE;
+        case ERR_QUOTE_IN_UNQUOTED:
+            return ErrorCode::QUOTE_IN_UNQUOTED_FIELD;
+        case ERR_INVALID_AFTER_QUOTE:
+            return ErrorCode::INVALID_QUOTE_ESCAPE;
+        default:
+            return ErrorCode::INTERNAL_ERROR;
+    }
+}
+
+/**
+ * @brief Helper to get context around an error position.
+ *
+ * Returns a string representation of the buffer content near the given position.
+ */
+inline std::string get_error_context(const uint8_t* buf, size_t len, size_t pos,
+                                     size_t context_size = 20) {
+    if (len == 0 || buf == nullptr) return "";
+    size_t safe_pos = pos < len ? pos : len - 1;
+    size_t ctx_start = safe_pos > context_size ? safe_pos - context_size : 0;
+    size_t ctx_end = std::min(safe_pos + context_size, len);
+
+    std::string ctx;
+    ctx.reserve((ctx_end - ctx_start) * 2);
+
+    for (size_t i = ctx_start; i < ctx_end; ++i) {
+        char c = static_cast<char>(buf[i]);
+        if (c == '\n') ctx += "\\n";
+        else if (c == '\r') ctx += "\\r";
+        else if (c == '\0') ctx += "\\0";
+        else if (c >= 32 && c < 127) ctx += c;
+        else ctx += "?";
+    }
+    return ctx;
+}
+
+/**
+ * @brief Helper to calculate line and column from byte offset.
+ */
+inline void get_error_line_column(const uint8_t* buf, size_t buf_len, size_t offset,
+                                  size_t& line, size_t& column) {
+    line = 1;
+    column = 1;
+    size_t safe_offset = offset < buf_len ? offset : buf_len;
+    for (size_t i = 0; i < safe_offset; ++i) {
+        if (buf[i] == '\n') {
+            ++line;
+            column = 1;
+        } else if (buf[i] != '\r') {
+            ++column;
+        }
+    }
+}
+
+/**
+ * @brief Second pass using branchless state machine with error collection.
+ *
+ * This function processes the buffer using the branchless state machine
+ * for character classification and state transitions, while collecting
+ * errors in the provided ErrorCollector.
+ *
+ * @param sm The branchless state machine
+ * @param buf Input buffer
+ * @param start Start position
+ * @param end End position
+ * @param indexes Output array
+ * @param thread_id Thread ID for interleaved storage
+ * @param n_threads Total number of threads
+ * @param errors ErrorCollector to accumulate errors (may be nullptr)
+ * @param total_len Total buffer length for bounds checking
+ * @return Number of field separators found
+ */
+inline uint64_t second_pass_branchless_with_errors(
+    const BranchlessStateMachine& sm,
+    const uint8_t* buf,
+    size_t start,
+    size_t end,
+    uint64_t* indexes,
+    size_t thread_id,
+    size_t n_threads,
+    ErrorCollector* errors,
+    size_t total_len
+) {
+    BranchlessState state = STATE_RECORD_START;
+    size_t idx = thread_id;
+    uint64_t count = 0;
+
+    // Use effective buffer length for bounds checking
+    size_t buf_len = total_len > 0 ? total_len : end;
+    char quote_char = sm.quote_char();
+
+    for (size_t pos = start; pos < end; ++pos) {
+        uint8_t value = buf[pos];
+
+        // Check for null bytes
+        if (value == '\0' && errors) {
+            size_t line, col;
+            get_error_line_column(buf, buf_len, pos, line, col);
+            errors->add_error(ErrorCode::NULL_BYTE, ErrorSeverity::ERROR,
+                              line, col, pos, "Null byte in data",
+                              get_error_context(buf, buf_len, pos));
+            if (errors->should_stop()) return count;
+            continue;
+        }
+
+        PackedResult result = sm.process(state, value);
+        BranchlessState new_state = result.state();
+        BranchlessError err = result.error();
+
+        // Handle errors
+        if (err != ERR_NONE && errors) {
+            size_t line, col;
+            get_error_line_column(buf, buf_len, pos, line, col);
+            ErrorCode error_code = branchless_error_to_error_code(err);
+
+            std::string msg;
+            if (err == ERR_QUOTE_IN_UNQUOTED) {
+                msg = "Quote character '";
+                msg += quote_char;
+                msg += "' in unquoted field";
+            } else if (err == ERR_INVALID_AFTER_QUOTE) {
+                msg = "Invalid character after closing quote '";
+                msg += quote_char;
+                msg += "'";
+            }
+
+            errors->add_error(error_code, ErrorSeverity::ERROR,
+                              line, col, pos, msg,
+                              get_error_context(buf, buf_len, pos));
+            if (errors->should_stop()) return count;
+        }
+
+        // Handle CR specially for CRLF sequences
+        if (value == '\r') {
+            // CR is a line ending only if not followed by LF
+            bool is_line_ending = (pos + 1 >= end || buf[pos + 1] != '\n');
+            if (is_line_ending && state != STATE_QUOTED_FIELD) {
+                indexes[idx] = pos;
+                idx += n_threads;
+                count++;
+                state = STATE_RECORD_START;
+                continue;
+            }
+            // If CR is followed by LF (CRLF), treat CR as regular character
+            // The LF will be the line ending
+            state = new_state;
+            continue;
+        }
+
+        state = new_state;
+
+        if (result.is_separator()) {
+            indexes[idx] = pos;
+            idx += n_threads;
+            count++;
+        }
+    }
+
+    // Check for unclosed quote at end of chunk
+    if (state == STATE_QUOTED_FIELD && errors && end == buf_len) {
+        size_t line, col;
+        size_t error_pos = end > 0 ? end - 1 : 0;
+        get_error_line_column(buf, buf_len, error_pos, line, col);
+        std::string msg = "Unclosed quote '";
+        msg += quote_char;
+        msg += "' at end of file";
+        errors->add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL,
+                          line, col, end, msg,
+                          get_error_context(buf, buf_len, error_pos > 20 ? error_pos - 20 : 0));
     }
 
     return count;
