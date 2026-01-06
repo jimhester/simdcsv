@@ -105,6 +105,15 @@ endif()
 # Apache Arrow output integration (optional)
 option(LIBVROOM_ENABLE_ARROW "Enable Apache Arrow output integration" OFF)
 
+# Type detection module (optional, but ON by default for backward compatibility)
+option(LIBVROOM_ENABLE_TYPE_DETECTION "Enable type detection module (libvroom_types.h)" ON)
+
+if(LIBVROOM_ENABLE_TYPE_DETECTION)
+    message(STATUS "Type detection module enabled")
+else()
+    message(STATUS "Type detection module disabled (libvroom_types.h excluded)")
+endif()
+
 # External benchmark parsers (only built if benchmarks enabled)
 if(BUILD_BENCHMARKS)
     # zsv integration (lightweight, SIMD CSV parser)
@@ -401,30 +410,32 @@ add_custom_command(TARGET dialect_detection_test POST_BUILD
 # Register dialect detection tests with CTest
 gtest_discover_tests(dialect_detection_test)
 
-# Type detection test executable
-add_executable(type_detection_test
-    test/type_detection_test.cpp
-)
+# Type detection test executable (only if type detection is enabled)
+if(LIBVROOM_ENABLE_TYPE_DETECTION)
+    add_executable(type_detection_test
+        test/type_detection_test.cpp
+    )
 
-target_link_libraries(type_detection_test PRIVATE
-    vroom
-    GTest::gtest_main
-    pthread
-)
+    target_link_libraries(type_detection_test PRIVATE
+        vroom
+        GTest::gtest_main
+        pthread
+    )
 
-target_include_directories(type_detection_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
+    target_include_directories(type_detection_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
 
-# Copy test data to build directory for type detection tests
-add_custom_command(TARGET type_detection_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+    # Copy test data to build directory for type detection tests
+    add_custom_command(TARGET type_detection_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+        ${CMAKE_CURRENT_BINARY_DIR}/test/data
+    )
 
-# Register type detection tests with CTest
-gtest_discover_tests(type_detection_test)
+    # Register type detection tests with CTest
+    gtest_discover_tests(type_detection_test)
+endif()
 
 # C API test executable
 add_executable(c_api_test
@@ -746,6 +757,11 @@ target_include_directories(bounds_validation_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# Pass type detection enable flag to bounds validation test
+if(LIBVROOM_ENABLE_TYPE_DETECTION)
+    target_compile_definitions(bounds_validation_test PRIVATE LIBVROOM_ENABLE_TYPE_DETECTION)
+endif()
+
 # Copy test data to build directory for bounds validation tests
 add_custom_command(TARGET bounds_validation_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -860,6 +876,14 @@ target_link_libraries(libvroom_benchmark PRIVATE
 target_include_directories(libvroom_benchmark PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+# Define benchmark mode to suppress debug output during benchmarking
+target_compile_definitions(libvroom_benchmark PRIVATE LIBVROOM_BENCHMARK_MODE)
+
+# Pass type detection enable flag to benchmarks
+if(LIBVROOM_ENABLE_TYPE_DETECTION)
+    target_compile_definitions(libvroom_benchmark PRIVATE LIBVROOM_ENABLE_TYPE_DETECTION)
+endif()
 
 # Conditionally link external CSV parsers
 if(HAVE_ZSV)
