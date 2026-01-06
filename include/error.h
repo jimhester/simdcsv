@@ -47,7 +47,7 @@ enum class ErrorCode {
 
     // Field structure errors
     INCONSISTENT_FIELD_COUNT,    ///< Row has different number of fields than header
-    FIELD_TOO_LARGE,             ///< [RESERVED] Field exceeds maximum size limit
+    FIELD_TOO_LARGE,             ///< Field exceeds maximum size limit
 
     // Line ending errors
     MIXED_LINE_ENDINGS,          ///< File uses inconsistent line endings (warning)
@@ -65,7 +65,8 @@ enum class ErrorCode {
     AMBIGUOUS_SEPARATOR,         ///< [RESERVED] Cannot determine separator reliably
 
     // General errors
-    FILE_TOO_LARGE,              ///< [RESERVED] File exceeds maximum size
+    FILE_TOO_LARGE,              ///< File exceeds maximum size limit
+    INDEX_ALLOCATION_OVERFLOW,   ///< Index allocation would overflow
     IO_ERROR,                    ///< [RESERVED] File I/O error
     INTERNAL_ERROR               ///< Internal parser error
 };

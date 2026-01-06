@@ -144,19 +144,22 @@ struct StreamParser::Impl {
 
     // Emit a completed field - stores boundaries, not actual data
     void emit_field(const uint8_t* /*data*/, size_t start, size_t end) {
-        // Check max field size to prevent DoS
-        if (end > start && (end - start) > config.max_field_size) {
+        // Check max field size to prevent DoS (only if limit is enabled)
+        size_t field_size = (end > start) ? (end - start) : 0;
+        if (config.max_field_size > 0 && field_size > config.max_field_size) {
+            std::string msg = "Field size " + std::to_string(field_size) +
+                " bytes exceeds maximum " + std::to_string(config.max_field_size) + " bytes";
             if (error_callback) {
-                ParseError err(ErrorCode::IO_ERROR, ErrorSeverity::ERROR,
+                ParseError err(ErrorCode::FIELD_TOO_LARGE, ErrorSeverity::ERROR,
                               row_count + 1, current_field_bounds.size() + 1,
-                              total_bytes, "Field exceeds maximum size");
+                              total_bytes, msg);
                 if (!error_callback(err)) {
                     stopped = true;
                 }
             }
-            errors.add_error(ErrorCode::IO_ERROR, ErrorSeverity::ERROR,
+            errors.add_error(ErrorCode::FIELD_TOO_LARGE, ErrorSeverity::ERROR,
                             row_count + 1, current_field_bounds.size() + 1,
-                            total_bytes, "Field exceeds maximum size");
+                            total_bytes, msg);
             return;
         }
 
