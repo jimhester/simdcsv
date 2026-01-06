@@ -42,8 +42,6 @@ jobs:
     needs: eligibility
     if: needs.eligibility.outputs.eligible == 'true'
     runs-on: ubuntu-latest
-    outputs:
-      issues: ${{ steps.review.outputs.result }}
     permissions:
       contents: read
       pull-requests: read
@@ -66,28 +64,24 @@ jobs:
             2. Get the PR description and any linked issue - do changes address what was requested?
             3. Read inline code comments in modified files - do changes comply with guidance in comments?
 
-            Return a JSON array of issues found. Each issue should have:
-            - "description": brief description
-            - "source": where the requirement came from (e.g., "CLAUDE.md", "issue #123", "code comment in foo.cpp:42")
-            - "file": affected file path
-            - "line": line number (if applicable, or null)
-
-            If no issues, return: []
-
-            IMPORTANT: Only return the JSON array, nothing else.
+            Write your findings to a file at /tmp/requirements-issues.json as a JSON array.
+            Each issue should have: "description", "source", "file", "line" (or null).
+            If no issues, write: []
           claude_args: |
-            --print
-            --output-format json
             --max-turns 10
-            --allowedTools "Read,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*)"
+            --allowedTools "Read,Write,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*)"
+      - name: Upload findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: requirements-issues
+          path: /tmp/requirements-issues.json
+          if-no-files-found: ignore
 
   # Parallel review job 2: Bug detection
   review-bugs:
     needs: eligibility
     if: needs.eligibility.outputs.eligible == 'true'
     runs-on: ubuntu-latest
-    outputs:
-      issues: ${{ steps.review.outputs.result }}
     permissions:
       contents: read
       pull-requests: read
@@ -117,28 +111,24 @@ jobs:
             - Pre-existing issues not introduced by this PR
             - Nitpicks a senior engineer wouldn't flag
 
-            Return a JSON array of issues found. Each issue should have:
-            - "description": brief description of the bug
-            - "source": "bug detection"
-            - "file": affected file path
-            - "line": line number
-
-            If no issues, return: []
-
-            IMPORTANT: Only return the JSON array, nothing else.
+            Write your findings to a file at /tmp/bug-issues.json as a JSON array.
+            Each issue should have: "description", "source" (always "bug detection"), "file", "line".
+            If no issues, write: []
           claude_args: |
-            --print
-            --output-format json
             --max-turns 10
-            --allowedTools "Read,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*)"
+            --allowedTools "Read,Write,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*)"
+      - name: Upload findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: bug-issues
+          path: /tmp/bug-issues.json
+          if-no-files-found: ignore
 
   # Parallel review job 3: Historical context
   review-history:
     needs: eligibility
     if: needs.eligibility.outputs.eligible == 'true'
     runs-on: ubuntu-latest
-    outputs:
-      issues: ${{ steps.review.outputs.result }}
     permissions:
       contents: read
       pull-requests: read
@@ -163,20 +153,18 @@ jobs:
             2. Search for previous PRs that touched these files - any relevant comments that apply here?
             3. Look for patterns that were intentionally established and might be broken
 
-            Return a JSON array of issues found. Each issue should have:
-            - "description": brief description
-            - "source": historical context (e.g., "git blame shows...", "PR #99 comment said...")
-            - "file": affected file path
-            - "line": line number (if applicable, or null)
-
-            If no issues, return: []
-
-            IMPORTANT: Only return the JSON array, nothing else.
+            Write your findings to a file at /tmp/history-issues.json as a JSON array.
+            Each issue should have: "description", "source" (e.g., "git blame shows...", "PR #99 comment said..."), "file", "line" (or null).
+            If no issues, write: []
           claude_args: |
-            --print
-            --output-format json
             --max-turns 15
-            --allowedTools "Read,Glob,Grep,Bash(git blame:*),Bash(git log:*),Bash(git show:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*)"
+            --allowedTools "Read,Write,Glob,Grep,Bash(git blame:*),Bash(git log:*),Bash(git show:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*)"
+      - name: Upload findings
+        uses: actions/upload-artifact@v4
+        with:
+          name: history-issues
+          path: /tmp/history-issues.json
+          if-no-files-found: ignore
 
   # Aggregation job: Score, filter, and post comment
   aggregate:
@@ -190,6 +178,17 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+      - name: Download all findings
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/findings
+          merge-multiple: true
+        continue-on-error: true
+      - name: List downloaded files
+        run: |
+          echo "Downloaded findings:"
+          ls -la /tmp/findings/ 2>/dev/null || echo "No findings directory"
+          cat /tmp/findings/*.json 2>/dev/null || echo "No JSON files found"
       - name: Aggregate and post review
         uses: anthropics/claude-code-action@v1
         with:
@@ -200,18 +199,14 @@ jobs:
             PR: #${{ github.event.pull_request.number }}
             COMMIT: ${{ github.event.pull_request.head.sha }}
 
-            Aggregate these code review findings and post a comment.
+            Aggregate code review findings and post a comment.
 
-            REQUIREMENTS ISSUES (from review-requirements job):
-            ${{ needs.review-requirements.outputs.issues }}
+            First, read the JSON files from /tmp/findings/ directory (if they exist):
+            - requirements-issues.json
+            - bug-issues.json
+            - history-issues.json
 
-            BUG ISSUES (from review-bugs job):
-            ${{ needs.review-bugs.outputs.issues }}
-
-            HISTORICAL ISSUES (from review-history job):
-            ${{ needs.review-history.outputs.issues }}
-
-            For each issue from the inputs above, assign a confidence score (0-100):
+            For each issue found, assign a confidence score (0-100):
             - 0: False positive, doesn't hold up to scrutiny
             - 25: Might be real, but unverified
             - 50: Real but minor/nitpick
@@ -238,7 +233,7 @@ jobs:
 
             ---
 
-            If no issues score 80+, post:
+            If no issues score 80+ (or no findings files exist), post:
 
             ### Code review
 
@@ -247,4 +242,4 @@ jobs:
             Generated with [Claude Code](https://claude.ai/code)
           claude_args: |
             --max-turns 5
-            --allowedTools "Bash(gh pr comment:*),Bash(gh pr view:*)"
+            --allowedTools "Read,Glob,Bash(gh pr comment:*),Bash(gh pr view:*)"
