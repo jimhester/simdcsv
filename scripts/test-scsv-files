@@ -93,9 +93,10 @@ while IFS= read -r file; do
         TOTAL=$((TOTAL + 1))
 
         # Run test with timeout (command name first, then args, then file)
-        # Write output to temp file to avoid bash null byte issues
+        # Capture stdout and stderr separately to avoid false positives from CSV content
         tmpfile="/tmp/scsv_test_$$"
-        timeout 10 "$SCSV" "$cmd_name" "${args[@]}" "$file" >"$tmpfile" 2>&1 || exit_code=$?
+        stderrfile="/tmp/scsv_test_stderr_$$"
+        timeout 10 "$SCSV" "$cmd_name" "${args[@]}" "$file" >"$tmpfile" 2>"$stderrfile" || exit_code=$?
         exit_code=${exit_code:-0}
 
         if [[ $exit_code -gt 128 ]]; then
@@ -111,8 +112,9 @@ while IFS= read -r file; do
             # Timeout
             $VERBOSE && echo -e "${YELLOW}TIMEOUT${NC}: $cmd_name"
             WARNINGS=$((WARNINGS + 1))
-        elif grep -qi "segmentation fault\|segfault\|core dumped\|SIGSEGV\|SIGABRT" "$tmpfile" 2>/dev/null; then
-            echo -e "\n${RED}CRASH${NC}: $cmd_name on $(basename "$file") (crash indicator in output)"
+        elif grep -qi "segmentation fault\|core dumped\|SIGSEGV\|SIGABRT" "$stderrfile" 2>/dev/null; then
+            # Only check stderr for crash indicators to avoid false positives from CSV content
+            echo -e "\n${RED}CRASH${NC}: $cmd_name on $(basename "$file") (crash indicator in stderr)"
             FAILED=$((FAILED + 1))
             file_failed=$((file_failed + 1))
             FAILURES="$FAILURES  - $cmd_name: $file (crash)\n"
@@ -124,7 +126,7 @@ while IFS= read -r file; do
             PASSED=$((PASSED + 1))
         fi
 
-        rm -f "$tmpfile"
+        rm -f "$tmpfile" "$stderrfile"
         exit_code=0
     done <<< "$CMDS"
 
