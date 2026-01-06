@@ -11,8 +11,8 @@
  * @see Dialect for dialect configuration
  */
 
-#ifndef SIMDCSV_DIALECT_H
-#define SIMDCSV_DIALECT_H
+#ifndef LIBVROOM_DIALECT_H
+#define LIBVROOM_DIALECT_H
 
 #include <cstdint>
 #include <cstddef>
@@ -21,7 +21,7 @@
 #include <string_view>
 #include <vector>
 
-namespace simdcsv {
+namespace libvroom {
 
 /**
  * @brief CSV dialect configuration.
@@ -202,7 +202,7 @@ struct DetectionResult {
  * #include "io_util.h"
  *
  * auto corpus = get_corpus("data.csv", 64);
- * simdcsv::DialectDetector detector;
+ * libvroom::DialectDetector detector;
  * auto result = detector.detect(corpus.data(), corpus.size());
  *
  * if (result.success()) {
@@ -295,6 +295,6 @@ private:
         const uint8_t* row_start, size_t row_len) const;
 };
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
-#endif  // SIMDCSV_DIALECT_H
+#endif  // LIBVROOM_DIALECT_H

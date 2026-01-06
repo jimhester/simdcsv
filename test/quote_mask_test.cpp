@@ -4,7 +4,7 @@
 
 #include "simd_highway.h"
 
-namespace simdcsv {
+namespace libvroom {
 namespace {
 
 // Reference scalar implementation for verification
@@ -213,5 +213,5 @@ TEST_F(QuoteMaskTest, RandomPatternsFuzz) {
 }
 
 }  // namespace
-}  // namespace simdcsv
+}  // namespace libvroom
 

@@ -1,14 +1,14 @@
 ---
-title: "simdcsv"
+title: "libvroom"
 subtitle: "High-performance CSV parser using SIMD instructions"
 ---
 
-[![CI](https://github.com/jimhester/simdcsv/workflows/CI/badge.svg)](https://github.com/jimhester/simdcsv/actions)
-[![codecov](https://codecov.io/gh/jimhester/simdcsv/branch/main/graph/badge.svg)](https://codecov.io/gh/jimhester/simdcsv)
+[![CI](https://github.com/jimhester/libvroom/workflows/CI/badge.svg)](https://github.com/jimhester/libvroom/actions)
+[![codecov](https://codecov.io/gh/jimhester/libvroom/branch/main/graph/badge.svg)](https://codecov.io/gh/jimhester/libvroom)
 
 ## Overview
 
-simdcsv is a high-performance CSV parser library using portable SIMD instructions via [Google Highway](https://github.com/google/highway), designed for future integration with R's [vroom](https://github.com/tidyverse/vroom) package.
+libvroom is a high-performance CSV parser library using portable SIMD instructions via [Google Highway](https://github.com/google/highway), designed for future integration with R's [vroom](https://github.com/tidyverse/vroom) package.
 
 The parser uses a speculative multi-threaded two-pass algorithm based on research by Chang et al. (SIGMOD 2019) and SIMD techniques from Langdale & Lemire (simdjson).
 
@@ -23,8 +23,8 @@ The parser uses a speculative multi-threaded two-pass algorithm based on researc
 
 ```bash
 # Clone the repository
-git clone https://github.com/jimhester/simdcsv.git
-cd simdcsv
+git clone https://github.com/jimhester/libvroom.git
+cd libvroom
 
 # Configure and build
 cmake -B build -DCMAKE_BUILD_TYPE=Release

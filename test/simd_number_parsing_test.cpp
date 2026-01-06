@@ -11,7 +11,7 @@
 
 #include "simd_number_parsing.h"
 
-using namespace simdcsv;
+using namespace libvroom;
 
 // =============================================================================
 // SIMD Integer Parser Tests

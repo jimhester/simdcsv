@@ -1,6 +1,6 @@
-# Error Handling in simdcsv
+# Error Handling in libvroom
 
-This document describes the error handling framework for simdcsv, including error modes, error types, the ErrorCollector API, recovery behavior, and practical usage examples.
+This document describes the error handling framework for libvroom, including error modes, error types, the ErrorCollector API, recovery behavior, and practical usage examples.
 
 ## Table of Contents
 
@@ -18,7 +18,7 @@ This document describes the error handling framework for simdcsv, including erro
 
 ## Overview
 
-simdcsv provides comprehensive error detection and reporting for malformed CSV files. The error handling system is designed to:
+libvroom provides comprehensive error detection and reporting for malformed CSV files. The error handling system is designed to:
 
 1. **Detect common CSV errors** - Quote escaping, field count mismatches, invalid characters
 2. **Provide precise location information** - Line, column, and byte offset
@@ -29,7 +29,7 @@ simdcsv provides comprehensive error detection and reporting for malformed CSV f
 
 ## Error Modes
 
-simdcsv supports three error handling modes via the `ErrorMode` enum. Choose the appropriate mode based on your use case:
+libvroom supports three error handling modes via the `ErrorMode` enum. Choose the appropriate mode based on your use case:
 
 ### STRICT Mode
 
@@ -79,7 +79,7 @@ ErrorCollector errors(ErrorMode::BEST_EFFORT);
 
 ## Error Types
 
-simdcsv defines 16 error types in `include/error.h` as the `ErrorCode` enum. Error types marked with **[RESERVED]** are defined for future compatibility but not yet implemented in the current parser.
+libvroom defines 16 error types in `include/error.h` as the `ErrorCode` enum. Error types marked with **[RESERVED]** are defined for future compatibility but not yet implemented in the current parser.
 
 ### Quote-Related Errors
 
@@ -163,7 +163,7 @@ A,B,A,C
 |------------|----------|--------|-------------|
 | `FILE_TOO_LARGE` | FATAL | [RESERVED] | File exceeds maximum size limit |
 | `IO_ERROR` | FATAL | [RESERVED] | File I/O error |
-| `INTERNAL_ERROR` | FATAL | Implemented | Internal parser error (bug in simdcsv) |
+| `INTERNAL_ERROR` | FATAL | Implemented | Internal parser error (bug in libvroom) |
 
 ## Error Severity Levels
 
@@ -202,7 +202,7 @@ Errors are classified into three severity levels that determine parser behavior:
 
 ## ErrorCollector API
 
-The `ErrorCollector` class is the primary interface for error handling in simdcsv. It accumulates errors during parsing and provides methods to query and manage them.
+The `ErrorCollector` class is the primary interface for error handling in libvroom. It accumulates errors during parsing and provides methods to query and manage them.
 
 ### Construction
 
@@ -374,7 +374,7 @@ const char* sev = error_severity_to_string(ErrorSeverity::FATAL);
 
 ## Error Recovery Behavior
 
-This section describes how simdcsv attempts to recover from different error types in PERMISSIVE and BEST_EFFORT modes.
+This section describes how libvroom attempts to recover from different error types in PERMISSIVE and BEST_EFFORT modes.
 
 ### Quote-Related Error Recovery
 
@@ -415,9 +415,9 @@ This section describes how simdcsv attempts to recover from different error type
 ### Recovery Example
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 
-using namespace simdcsv;
+using namespace libvroom;
 
 // Parse a file with known issues
 FileBuffer buf = load_file("messy_data.csv");
@@ -450,7 +450,7 @@ if (errors.has_errors()) {
 
 ## Exception-Based Error Handling
 
-simdcsv provides `ParseException` for traditional exception-based error handling workflows.
+libvroom provides `ParseException` for traditional exception-based error handling workflows.
 
 ### ParseException Class
 
@@ -476,9 +476,9 @@ public:
 ### Catching Parse Exceptions
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 
-using namespace simdcsv;
+using namespace libvroom;
 
 try {
     // Some operations that may throw ParseException
@@ -501,7 +501,7 @@ try {
 
 ### Throwing ParseException
 
-When building custom parsing logic that integrates with simdcsv's error handling:
+When building custom parsing logic that integrates with libvroom's error handling:
 
 ```cpp
 // Throw for a single error
@@ -526,10 +526,10 @@ This section provides complete examples demonstrating common error handling patt
 Use STRICT mode when CSV files must be perfectly formatted:
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 #include <iostream>
 
-using namespace simdcsv;
+using namespace libvroom;
 
 bool parse_production_csv(const std::string& filepath) {
     // Load file
@@ -562,11 +562,11 @@ bool parse_production_csv(const std::string& filepath) {
 Use PERMISSIVE mode to generate a complete validation report:
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 #include <iostream>
 #include <fstream>
 
-using namespace simdcsv;
+using namespace libvroom;
 
 void validate_csv_report(const std::string& filepath, const std::string& report_path) {
     FileBuffer buffer = load_file(filepath);
@@ -607,10 +607,10 @@ void validate_csv_report(const std::string& filepath, const std::string& report_
 Use BEST_EFFORT mode to extract whatever data is available:
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 #include <iostream>
 
-using namespace simdcsv;
+using namespace libvroom;
 
 void import_messy_data(const std::string& filepath) {
     FileBuffer buffer = load_file(filepath);
@@ -647,10 +647,10 @@ void import_messy_data(const std::string& filepath) {
 Filter and handle specific error types differently:
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 #include <iostream>
 
-using namespace simdcsv;
+using namespace libvroom;
 
 void process_with_error_handling(const std::string& filepath) {
     FileBuffer buffer = load_file(filepath);
@@ -697,10 +697,10 @@ void process_with_error_handling(const std::string& filepath) {
 The `Parser` class handles multi-threaded parsing with error collection automatically:
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 #include <thread>
 
-using namespace simdcsv;
+using namespace libvroom;
 
 void parallel_parse_with_errors(const uint8_t* data, size_t len) {
     const size_t num_threads = std::thread::hardware_concurrency();
@@ -834,7 +834,7 @@ All test files are validated by `test/error_handling_test.cpp`.
 ## See Also
 
 - `include/error.h` - Error handling API with detailed documentation
-- `include/simdcsv.h` - **Main public header** with unified `Parser` class
+- `include/libvroom.h` - **Main public header** with unified `Parser` class
 - `src/error.cpp` - Error handling implementation
 - `test/error_handling_test.cpp` - Error handling unit tests (37 tests)
 - `test/data/malformed/` - Malformed CSV test files for error detection

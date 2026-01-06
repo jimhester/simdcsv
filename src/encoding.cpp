@@ -3,7 +3,7 @@
 #include <cstring>
 #include <algorithm>
 
-namespace simdcsv {
+namespace libvroom {
 
 const char* encoding_to_string(Encoding enc) {
     switch (enc) {
@@ -511,4 +511,4 @@ TranscodeResult transcode_to_utf8(const uint8_t* buf, size_t len,
     }
 }
 
-}  // namespace simdcsv
+}  // namespace libvroom

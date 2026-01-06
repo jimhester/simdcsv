@@ -1,8 +1,8 @@
-# simdcsv Production Readiness Plan
+# libvroom Production Readiness Plan
 
 ## Project Status
 
-simdcsv is a high-performance CSV parser using portable SIMD instructions via Google Highway. The core parsing functionality is implemented and tested across x86-64 (SSE/AVX2) and ARM64 (NEON) architectures.
+libvroom is a high-performance CSV parser using portable SIMD instructions via Google Highway. The core parsing functionality is implemented and tested across x86-64 (SSE/AVX2) and ARM64 (NEON) architectures.
 
 ### Completed
 
@@ -22,22 +22,22 @@ The remaining work is tracked as GitHub issues:
 
 | Category | Issue | Description |
 |----------|-------|-------------|
-| API | [#26](https://github.com/jimhester/simdcsv/issues/26) | Simplify public API |
-| API | [#35](https://github.com/jimhester/simdcsv/issues/35) | C vs C++ API design |
-| Features | [#27](https://github.com/jimhester/simdcsv/issues/27) | Streaming API (chunked parsing) |
-| Features | [#29](https://github.com/jimhester/simdcsv/issues/29) | Apache Arrow output |
-| Features | [#37](https://github.com/jimhester/simdcsv/issues/37) | Field type detection |
-| Features | [#38](https://github.com/jimhester/simdcsv/issues/38) | Value extraction |
-| Testing | [#31](https://github.com/jimhester/simdcsv/issues/31) | Fuzz testing |
-| Testing | [#32](https://github.com/jimhester/simdcsv/issues/32) | Verify tests check behavior, not just non-failure |
-| Performance | [#28](https://github.com/jimhester/simdcsv/issues/28) | Benchmark comparison CI job |
-| Performance | [#33](https://github.com/jimhester/simdcsv/issues/33) | Regression detection |
-| Research | [#34](https://github.com/jimhester/simdcsv/issues/34) | Review literature review for accuracy |
-| Developer | [#36](https://github.com/jimhester/simdcsv/issues/36) | Debug mode |
+| API | [#26](https://github.com/jimhester/libvroom/issues/26) | Simplify public API |
+| API | [#35](https://github.com/jimhester/libvroom/issues/35) | C vs C++ API design |
+| Features | [#27](https://github.com/jimhester/libvroom/issues/27) | Streaming API (chunked parsing) |
+| Features | [#29](https://github.com/jimhester/libvroom/issues/29) | Apache Arrow output |
+| Features | [#37](https://github.com/jimhester/libvroom/issues/37) | Field type detection |
+| Features | [#38](https://github.com/jimhester/libvroom/issues/38) | Value extraction |
+| Testing | [#31](https://github.com/jimhester/libvroom/issues/31) | Fuzz testing |
+| Testing | [#32](https://github.com/jimhester/libvroom/issues/32) | Verify tests check behavior, not just non-failure |
+| Performance | [#28](https://github.com/jimhester/libvroom/issues/28) | Benchmark comparison CI job |
+| Performance | [#33](https://github.com/jimhester/libvroom/issues/33) | Regression detection |
+| Research | [#34](https://github.com/jimhester/libvroom/issues/34) | Review literature review for accuracy |
+| Developer | [#36](https://github.com/jimhester/libvroom/issues/36) | Debug mode |
 
 ## Primary Goal
 
-Integrate simdcsv as the parsing backend for R's [vroom](https://github.com/tidyverse/vroom) package, targeting 2-3x faster indexing than the current implementation.
+Integrate libvroom as the parsing backend for R's [vroom](https://github.com/tidyverse/vroom) package, targeting 2-3x faster indexing than the current implementation.
 
 ### vroom Integration Tasks (Not Yet GitHub Issues)
 
@@ -50,7 +50,7 @@ These tasks are specific to vroom integration and may be created as issues when 
 
 ## Architecture Overview
 
-See the [Architecture documentation](https://jimhester.github.io/simdcsv/architecture.html) for details on the two-pass algorithm.
+See the [Architecture documentation](https://jimhester.github.io/libvroom/architecture.html) for details on the two-pass algorithm.
 
 ## References
 

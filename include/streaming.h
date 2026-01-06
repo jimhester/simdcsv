@@ -12,8 +12,8 @@
  *
  * @example Push Model
  * @code
- * simdcsv::StreamParser parser;
- * parser.set_row_handler([](const simdcsv::Row& row) {
+ * libvroom::StreamParser parser;
+ * parser.set_row_handler([](const libvroom::Row& row) {
  *     std::cout << row[0].data << "\n";
  *     return true;  // continue parsing
  * });
@@ -28,7 +28,7 @@
  *
  * @example Pull Model
  * @code
- * simdcsv::StreamReader reader("large.csv");
+ * libvroom::StreamReader reader("large.csv");
  * for (const auto& row : reader) {
  *     std::cout << row[0].data << "\n";
  * }
@@ -39,8 +39,8 @@
  * @see error.h for error handling
  */
 
-#ifndef SIMDCSV_STREAMING_H
-#define SIMDCSV_STREAMING_H
+#ifndef LIBVROOM_STREAMING_H
+#define LIBVROOM_STREAMING_H
 
 #include <cstdint>
 #include <cstddef>
@@ -55,7 +55,7 @@
 #include "dialect.h"
 #include "error.h"
 
-namespace simdcsv {
+namespace libvroom {
 
 /**
  * @brief Status codes returned by streaming operations.
@@ -197,8 +197,8 @@ using ErrorCallback = std::function<bool(const ParseError& error)>;
  *
  * Set a row handler callback and feed data chunks:
  * @code
- * simdcsv::StreamParser parser;
- * parser.set_row_handler([](const simdcsv::Row& row) {
+ * libvroom::StreamParser parser;
+ * parser.set_row_handler([](const libvroom::Row& row) {
  *     process(row);
  *     return true;
  * });
@@ -213,10 +213,10 @@ using ErrorCallback = std::function<bool(const ParseError& error)>;
  *
  * Call next_row() and access current_row():
  * @code
- * simdcsv::StreamParser parser;
+ * libvroom::StreamParser parser;
  * parser.parse_chunk(data, size);
  *
- * while (parser.next_row() == simdcsv::StreamStatus::ROW_READY) {
+ * while (parser.next_row() == libvroom::StreamStatus::ROW_READY) {
  *     const auto& row = parser.current_row();
  *     process(row);
  * }
@@ -395,7 +395,7 @@ private:
  *
  * @example
  * @code
- * simdcsv::StreamReader reader("data.csv");
+ * libvroom::StreamReader reader("data.csv");
  *
  * // Method 1: Range-based for loop
  * for (const auto& row : reader) {
@@ -403,7 +403,7 @@ private:
  * }
  *
  * // Method 2: Explicit iteration
- * simdcsv::StreamReader reader2("data.csv");
+ * libvroom::StreamReader reader2("data.csv");
  * while (reader2.next_row()) {
  *     const auto& row = reader2.row();
  *     std::cout << row[0].data << "\n";
@@ -488,6 +488,6 @@ private:
     friend class RowIterator;
 };
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
-#endif  // SIMDCSV_STREAMING_H
+#endif  // LIBVROOM_STREAMING_H

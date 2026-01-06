@@ -23,7 +23,7 @@ title: "Getting Started"
 
 ### Supported SIMD Architectures
 
-simdcsv uses [Google Highway](https://github.com/google/highway) for portable SIMD acceleration:
+libvroom uses [Google Highway](https://github.com/google/highway) for portable SIMD acceleration:
 
 - **x86-64**: SSE4.2, AVX2
 - **ARM64**: NEON
@@ -36,8 +36,8 @@ The library automatically detects and uses the best available SIMD instruction s
 
 ```bash
 # Clone the repository
-git clone https://github.com/jimhester/simdcsv.git
-cd simdcsv
+git clone https://github.com/jimhester/libvroom.git
+cd libvroom
 
 # Configure and build (Release mode)
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -46,35 +46,35 @@ cmake --build build
 
 The build produces:
 
-- `build/libsimdcsv_lib.a` - Static library
-- `build/scsv` - Command-line tool
+- `build/liblibvroom_lib.a` - Static library
+- `build/vroom` - Command-line tool
 
 ### Method 2: CMake FetchContent (Recommended for Projects)
 
-Add simdcsv as a dependency in your CMakeLists.txt:
+Add libvroom as a dependency in your CMakeLists.txt:
 
 ```cmake
 include(FetchContent)
-FetchContent_Declare(simdcsv
-  GIT_REPOSITORY https://github.com/jimhester/simdcsv.git
+FetchContent_Declare(libvroom
+  GIT_REPOSITORY https://github.com/jimhester/libvroom.git
   GIT_TAG main  # or a specific version tag
 )
-FetchContent_MakeAvailable(simdcsv)
+FetchContent_MakeAvailable(libvroom)
 
-target_link_libraries(your_target PRIVATE simdcsv_lib)
+target_link_libraries(your_target PRIVATE libvroom_lib)
 ```
 
 ### Method 3: Add as Git Submodule
 
 ```bash
-git submodule add https://github.com/jimhester/simdcsv.git external/simdcsv
+git submodule add https://github.com/jimhester/libvroom.git external/libvroom
 ```
 
 Then in your CMakeLists.txt:
 
 ```cmake
-add_subdirectory(external/simdcsv)
-target_link_libraries(your_target PRIVATE simdcsv_lib)
+add_subdirectory(external/libvroom)
+target_link_libraries(your_target PRIVATE libvroom_lib)
 ```
 
 ## Build Options
@@ -87,7 +87,7 @@ target_link_libraries(your_target PRIVATE simdcsv_lib)
 | `BUILD_BENCHMARKS` | ON | Build benchmark executables |
 | `BUILD_SHARED_LIBS` | OFF | Build shared library instead of static |
 | `ENABLE_COVERAGE` | OFF | Enable code coverage reporting |
-| `SIMDCSV_ENABLE_ARROW` | OFF | Enable Apache Arrow output integration |
+| `LIBVROOM_ENABLE_ARROW` | OFF | Enable Apache Arrow output integration |
 
 ### Build Configurations
 
@@ -138,8 +138,8 @@ sudo apt-get update
 sudo apt-get install -y cmake build-essential git
 
 # Clone and build
-git clone https://github.com/jimhester/simdcsv.git
-cd simdcsv
+git clone https://github.com/jimhester/libvroom.git
+cd libvroom
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
@@ -154,8 +154,8 @@ xcode-select --install
 brew install cmake
 
 # Clone and build
-git clone https://github.com/jimhester/simdcsv.git
-cd simdcsv
+git clone https://github.com/jimhester/libvroom.git
+cd libvroom
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
@@ -169,7 +169,7 @@ The test suite includes comprehensive coverage across multiple test executables:
 cd build && ctest --output-on-failure
 
 # Run specific test executables
-./build/simdcsv_test           # Well-formed CSV parsing tests
+./build/libvroom_test           # Well-formed CSV parsing tests
 ./build/error_handling_test    # Error handling tests
 ./build/csv_parsing_test       # Integration tests
 ./build/dialect_detection_test # Dialect auto-detection tests
@@ -183,12 +183,12 @@ cd build && ctest --output-on-failure
 To benchmark parser performance:
 
 ```bash
-./build/simdcsv_benchmark
+./build/libvroom_benchmark
 ```
 
 ### Optional External Parser Benchmarks
 
-Compare simdcsv against other CSV parsers:
+Compare libvroom against other CSV parsers:
 
 ```bash
 # Enable zsv comparison
@@ -202,26 +202,26 @@ cmake --build build
 
 ## Command Line Tool
 
-The build produces an `scsv` command line tool for working with CSV files:
+The build produces an `vroom` command line tool for working with CSV files:
 
 ```bash
 # Count rows in a CSV file
-./build/scsv count data.csv
+./build/vroom count data.csv
 
 # Display first 10 rows
-./build/scsv head data.csv
+./build/vroom head data.csv
 
 # Select specific columns by name or index
-./build/scsv select -c name,age data.csv
+./build/vroom select -c name,age data.csv
 
 # Pretty-print with aligned columns
-./build/scsv pretty data.csv
+./build/vroom pretty data.csv
 
 # Get file info (rows, columns, detected dialect)
-./build/scsv info data.csv
+./build/vroom info data.csv
 
 # Detect CSV dialect (delimiter, quoting, line endings)
-./build/scsv dialect data.csv
+./build/vroom dialect data.csv
 ```
 
 See the [CLI Documentation](cli.qmd) for complete usage information.
@@ -243,26 +243,26 @@ All dependencies are automatically fetched via CMake's FetchContent:
 Include the main header to access all public functionality:
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 ```
 
 ### Basic Parsing Example
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 #include <iostream>
 
 int main() {
     // Load CSV file into SIMD-aligned buffer
-    simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
+    libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
     if (!buffer.valid()) {
         std::cerr << "Failed to load file\n";
         return 1;
     }
 
     // Create parser and error collector
-    simdcsv::Parser parser;
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::Parser parser;
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
     // Parse with automatic dialect detection
     auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
@@ -285,16 +285,16 @@ int main() {
 If you know the CSV dialect in advance:
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 
 int main() {
-    simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
+    libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
 
-    simdcsv::Parser parser;
-    simdcsv::Dialect dialect = simdcsv::Dialect::csv();  // Standard CSV
-    // Or: simdcsv::Dialect::tsv() for tab-separated
-    // Or: simdcsv::Dialect::semicolon() for semicolon-separated
-    // Or: simdcsv::Dialect::pipe() for pipe-separated
+    libvroom::Parser parser;
+    libvroom::Dialect dialect = libvroom::Dialect::csv();  // Standard CSV
+    // Or: libvroom::Dialect::tsv() for tab-separated
+    // Or: libvroom::Dialect::semicolon() for semicolon-separated
+    // Or: libvroom::Dialect::pipe() for pipe-separated
 
     auto result = parser.parse(buffer.data(), buffer.size(), dialect);
 
@@ -307,11 +307,11 @@ int main() {
 Detect the dialect of a CSV file without parsing:
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 #include <iostream>
 
 int main() {
-    auto detection = simdcsv::detect_dialect_file("data.csv");
+    auto detection = libvroom::detect_dialect_file("data.csv");
 
     if (detection.success()) {
         std::cout << "Delimiter: '" << detection.dialect.delimiter << "'\n";
@@ -325,19 +325,19 @@ int main() {
 
 ## Error Handling
 
-simdcsv provides three error handling modes for different use cases:
+libvroom provides three error handling modes for different use cases:
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 
 // Strict mode - stop on first error
-simdcsv::ErrorCollector strict_errors(simdcsv::ErrorMode::STRICT);
+libvroom::ErrorCollector strict_errors(libvroom::ErrorMode::STRICT);
 
 // Permissive mode - collect all errors, try to recover
-simdcsv::ErrorCollector permissive_errors(simdcsv::ErrorMode::PERMISSIVE);
+libvroom::ErrorCollector permissive_errors(libvroom::ErrorMode::PERMISSIVE);
 
 // Best-effort mode - ignore errors, parse what's possible
-simdcsv::ErrorCollector best_effort(simdcsv::ErrorMode::BEST_EFFORT);
+libvroom::ErrorCollector best_effort(libvroom::ErrorMode::BEST_EFFORT);
 ```
 
 See [Error Handling](error-handling.qmd) for detailed documentation.
@@ -353,10 +353,10 @@ project(my_csv_app LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Fetch simdcsv
+# Fetch libvroom
 include(FetchContent)
-FetchContent_Declare(simdcsv
-  GIT_REPOSITORY https://github.com/jimhester/simdcsv.git
+FetchContent_Declare(libvroom
+  GIT_REPOSITORY https://github.com/jimhester/libvroom.git
   GIT_TAG main
 )
 
@@ -364,19 +364,19 @@ FetchContent_Declare(simdcsv
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(simdcsv)
+FetchContent_MakeAvailable(libvroom)
 
 # Your application
 add_executable(my_app main.cpp)
-target_link_libraries(my_app PRIVATE simdcsv_lib)
+target_link_libraries(my_app PRIVATE libvroom_lib)
 ```
 
 ### Linking to the Library
 
-The library target is `simdcsv_lib`. It exports the include directories automatically:
+The library target is `libvroom_lib`. It exports the include directories automatically:
 
 ```cmake
-target_link_libraries(your_target PRIVATE simdcsv_lib)
+target_link_libraries(your_target PRIVATE libvroom_lib)
 ```
 
 ### Available Headers
@@ -385,8 +385,8 @@ After linking, you can include:
 
 | Header | Description |
 |--------|-------------|
-| `<simdcsv.h>` | Main header - includes everything |
-| `<simdcsv_c.h>` | C API header |
+| `<libvroom.h>` | Main header - includes everything |
+| `<libvroom_c.h>` | C API header |
 | `<error.h>` | Error types and ErrorCollector |
 | `<dialect.h>` | Dialect detection and types |
 | `<streaming.h>` | Streaming parser for large files |

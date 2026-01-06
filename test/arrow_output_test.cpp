@@ -1,4 +1,4 @@
-#ifdef SIMDCSV_ENABLE_ARROW
+#ifdef LIBVROOM_ENABLE_ARROW
 #include <gtest/gtest.h>
 #include <arrow/api.h>
 #include "arrow_output.h"
@@ -6,7 +6,7 @@
 #include "mem_util.h"
 #include <cstring>
 
-namespace simdcsv {
+namespace libvroom {
 
 struct TestBuffer {
     uint8_t* data;
@@ -482,7 +482,7 @@ TEST_F(ArrowOutputTest, FromMemoryConversion) {
     EXPECT_EQ(result.num_rows, 2);
 }
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
 #else
 #include <gtest/gtest.h>

@@ -9,7 +9,7 @@
 #include <vector>
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern simdcsv::two_pass* global_parser;
+extern libvroom::two_pass* global_parser;
 
 // Simple CSV parser for comparison (naive implementation)
 class NaiveCSVParser {
@@ -54,13 +54,13 @@ public:
   }
 };
 
-// Benchmark simdcsv vs naive parser
-static void BM_simdcsv_vs_naive(benchmark::State& state, const std::string& filename) {
+// Benchmark libvroom vs naive parser
+static void BM_libvroom_vs_naive(benchmark::State& state, const std::string& filename) {
   std::basic_string_view<uint8_t> data;
   
   if (test_data.find(filename) == test_data.end()) {
     try {
-      data = get_corpus(filename.c_str(), SIMDCSV_PADDING);
+      data = get_corpus(filename.c_str(), LIBVROOM_PADDING);
       test_data[filename] = data;
     } catch (const std::exception& e) {
       state.SkipWithError(("Failed to load " + filename + ": " + e.what()).c_str());
@@ -71,13 +71,13 @@ static void BM_simdcsv_vs_naive(benchmark::State& state, const std::string& file
   }
   
   if (!global_parser) {
-    global_parser = new simdcsv::two_pass();
+    global_parser = new libvroom::two_pass();
   }
   
-  bool use_simdcsv = state.range(0) == 1;
+  bool use_libvroom = state.range(0) == 1;
   
-  if (use_simdcsv) {
-    simdcsv::index result = global_parser->init(data.size(), 1);
+  if (use_libvroom) {
+    libvroom::index result = global_parser->init(data.size(), 1);
     
     for (auto _ : state) {
       global_parser->parse(data.data(), result, data.size());
@@ -94,23 +94,23 @@ static void BM_simdcsv_vs_naive(benchmark::State& state, const std::string& file
   }
   
   state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
-  state.counters["Parser"] = use_simdcsv ? 1.0 : 0.0; // 1 = simdcsv, 0 = naive
+  state.counters["Parser"] = use_libvroom ? 1.0 : 0.0; // 1 = libvroom, 0 = naive
 }
 
-static void BM_simdcsv_vs_naive_simple(benchmark::State& state) {
-  BM_simdcsv_vs_naive(state, "test/data/basic/simple.csv");
+static void BM_libvroom_vs_naive_simple(benchmark::State& state) {
+  BM_libvroom_vs_naive(state, "test/data/basic/simple.csv");
 }
-BENCHMARK(BM_simdcsv_vs_naive_simple)
+BENCHMARK(BM_libvroom_vs_naive_simple)
   ->Arg(0) // Naive parser
-  ->Arg(1) // simdcsv
+  ->Arg(1) // libvroom
   ->Unit(benchmark::kMillisecond);
 
-static void BM_simdcsv_vs_naive_many_rows(benchmark::State& state) {
-  BM_simdcsv_vs_naive(state, "test/data/basic/many_rows.csv");
+static void BM_libvroom_vs_naive_many_rows(benchmark::State& state) {
+  BM_libvroom_vs_naive(state, "test/data/basic/many_rows.csv");
 }
-BENCHMARK(BM_simdcsv_vs_naive_many_rows)
+BENCHMARK(BM_libvroom_vs_naive_many_rows)
   ->Arg(0) // Naive parser
-  ->Arg(1) // simdcsv
+  ->Arg(1) // libvroom
   ->Unit(benchmark::kMillisecond);
 
 // Benchmark different parsing approaches
@@ -119,7 +119,7 @@ static void BM_parsing_approaches(benchmark::State& state, const std::string& fi
   
   if (test_data.find(filename) == test_data.end()) {
     try {
-      data = get_corpus(filename.c_str(), SIMDCSV_PADDING);
+      data = get_corpus(filename.c_str(), LIBVROOM_PADDING);
       test_data[filename] = data;
     } catch (const std::exception& e) {
       state.SkipWithError(("Failed to load " + filename + ": " + e.what()).c_str());
@@ -154,11 +154,11 @@ static void BM_parsing_approaches(benchmark::State& state, const std::string& fi
       }
       break;
     }
-    case 3: { // simdcsv indexing
+    case 3: { // libvroom indexing
       if (!global_parser) {
-        global_parser = new simdcsv::two_pass();
+        global_parser = new libvroom::two_pass();
       }
-      simdcsv::index result = global_parser->init(data.size(), 1);
+      libvroom::index result = global_parser->init(data.size(), 1);
       
       for (auto _ : state) {
         global_parser->parse(data.data(), result, data.size());

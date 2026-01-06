@@ -31,16 +31,16 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     std::memcpy(buf, data, size);
     std::memset(buf + size, 0, 64);
 
-    simdcsv::two_pass parser;
+    libvroom::two_pass parser;
 
     { // Single-threaded parsing
-        simdcsv::index idx = parser.init(size, 1);
+        libvroom::index idx = parser.init(size, 1);
         parser.parse(buf, idx, size);
     }
 
     { // Error collection mode
-        simdcsv::index idx = parser.init(size, 1);
-        simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+        libvroom::index idx = parser.init(size, 1);
+        libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
         parser.parse_with_errors(buf, idx, size, errors);
     }
 

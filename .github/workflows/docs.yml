@@ -47,10 +47,10 @@ jobs:
           sudo mv /tmp/doxybook2/bin/doxybook2 /usr/local/bin/
           sudo chmod +x /usr/local/bin/doxybook2
 
-      - name: Build scsv binary
+      - name: Build vroom binary
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --target scsv
+          cmake --build build --target vroom-cli
 
       - name: Build documentation
         working-directory: docs

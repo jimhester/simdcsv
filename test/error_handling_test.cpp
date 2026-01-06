@@ -5,7 +5,7 @@
 #include <filesystem>
 
 namespace fs = std::filesystem;
-using namespace simdcsv;
+using namespace libvroom;
 
 // ============================================================================
 // ERROR CODE AND SEVERITY TESTS

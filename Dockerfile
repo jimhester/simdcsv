@@ -1,7 +1,7 @@
 # build with
-#    docker build -t simdcsv .
+#    docker build -t libvroom .
 # run with
-#    docker run -it --privileged -v $(pwd):/project:Z simdcsv /bin/bash
+#    docker run -it --privileged -v $(pwd):/project:Z libvroom /bin/bash
 
 FROM ubuntu:20.10
 

@@ -1,8 +1,8 @@
-# simdcsv
+# libvroom
 
 <!-- badges: start -->
-[![CI](https://github.com/jimhester/simdcsv/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jimhester/simdcsv/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/jimhester/simdcsv/branch/main/graph/badge.svg)](https://codecov.io/gh/jimhester/simdcsv)
+[![CI](https://github.com/jimhester/libvroom/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jimhester/libvroom/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/jimhester/libvroom/branch/main/graph/badge.svg)](https://codecov.io/gh/jimhester/libvroom)
 <!-- badges: end -->
 
 High-performance CSV parser using SIMD instructions. Uses multi-threaded speculative parsing to process large files in parallel.
@@ -10,8 +10,8 @@ High-performance CSV parser using SIMD instructions. Uses multi-threaded specula
 ## Installation
 
 ```bash
-git clone https://github.com/jimhester/simdcsv.git
-cd simdcsv
+git clone https://github.com/jimhester/libvroom.git
+cd libvroom
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
@@ -20,24 +20,24 @@ cmake --build build
 
 ### Command Line
 
-The build produces an `scsv` command line tool:
+The build produces a `vroom` command line tool:
 
 ```bash
-scsv count data.csv              # Count rows
-scsv head data.csv               # Display first 10 rows
-scsv select -c name,age data.csv # Select columns
-scsv pretty data.csv             # Pretty-print with aligned columns
-scsv info data.csv               # Get file info (rows, columns, dialect)
+vroom count data.csv              # Count rows
+vroom head data.csv               # Display first 10 rows
+vroom select -c name,age data.csv # Select columns
+vroom pretty data.csv             # Pretty-print with aligned columns
+vroom info data.csv               # Get file info (rows, columns, dialect)
 ```
 
 ### C++ Library
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 
-simdcsv::FileBuffer buffer = simdcsv::load_file("data.csv");
-simdcsv::Parser parser;
-simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
+libvroom::Parser parser;
+libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
 // result.num_columns(), result.dialect.delimiter, etc.
 ```
@@ -46,12 +46,12 @@ auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
 
 ```cmake
 include(FetchContent)
-FetchContent_Declare(simdcsv
-  GIT_REPOSITORY https://github.com/jimhester/simdcsv.git
+FetchContent_Declare(libvroom
+  GIT_REPOSITORY https://github.com/jimhester/libvroom.git
   GIT_TAG main)
-FetchContent_MakeAvailable(simdcsv)
+FetchContent_MakeAvailable(libvroom)
 
-target_link_libraries(your_target PRIVATE simdcsv_lib)
+target_link_libraries(your_target PRIVATE vroom)
 ```
 
 ## Features
@@ -64,14 +64,14 @@ target_link_libraries(your_target PRIVATE simdcsv_lib)
 
 ## Documentation
 
-- [Getting Started](https://jimhester.github.io/simdcsv/getting-started.html) - Build instructions and basic usage
-- [CLI Reference](https://jimhester.github.io/simdcsv/cli.html) - Command line tool options
-- [Architecture](https://jimhester.github.io/simdcsv/architecture.html) - Two-pass algorithm details
-- [API Reference](https://jimhester.github.io/simdcsv/api/) - Full API documentation
+- [Getting Started](https://jimhester.github.io/libvroom/getting-started.html) - Build instructions and basic usage
+- [CLI Reference](https://jimhester.github.io/libvroom/cli.html) - Command line tool options
+- [Architecture](https://jimhester.github.io/libvroom/architecture.html) - Two-pass algorithm details
+- [API Reference](https://jimhester.github.io/libvroom/api/) - Full API documentation
 
 ## How It Works
 
-simdcsv uses a two-pass algorithm based on [Chang et al. (SIGMOD 2019)](https://www.microsoft.com/en-us/research/uploads/prod/2019/04/chunker-sigmod19.pdf):
+libvroom uses a two-pass algorithm based on [Chang et al. (SIGMOD 2019)](https://www.microsoft.com/en-us/research/uploads/prod/2019/04/chunker-sigmod19.pdf):
 
 1. **First pass**: Scan for line boundaries while tracking quote parity to find safe split points
 2. **Second pass**: SIMD-accelerated field indexing, processing 64 bytes at a time

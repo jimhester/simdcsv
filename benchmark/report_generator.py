@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark report generator and regression detection for simdcsv.
+Benchmark report generator and regression detection for libvroom.
 Processes Google Benchmark JSON output and generates reports.
 """
 
@@ -24,7 +24,7 @@ class BenchmarkReporter:
     def generate_markdown_report(self, output_file='benchmark_report.md'):
         """Generate a comprehensive markdown report."""
         with open(output_file, 'w') as f:
-            f.write(f"# simdcsv Benchmark Report\n\n")
+            f.write(f"# libvroom Benchmark Report\n\n")
             f.write(f"Generated: {datetime.now().isoformat()}\n\n")
             
             # System information

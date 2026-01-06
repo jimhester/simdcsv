@@ -1,7 +1,7 @@
 /**
- * CLI Integration Tests for scsv (cli.cpp)
+ * CLI Integration Tests for vroom (cli.cpp)
  *
- * Tests the scsv command-line tool by spawning the process with various
+ * Tests the vroom command-line tool by spawning the process with various
  * arguments and validating exit codes and output.
  *
  * SECURITY NOTE: The CliRunner class uses popen() with shell execution.
@@ -30,13 +30,13 @@ class CliRunner {
     std::string output;  // Combined stdout/stderr output
   };
 
-  // Run scsv with given arguments
+  // Run vroom with given arguments
   // Note: stderr is redirected to stdout for simpler output capture
   static Result run(const std::string& args) {
     Result result;
 
-    // Build command - scsv binary is in the build directory
-    std::string cmd = "./scsv " + args + " 2>&1";
+    // Build command - vroom binary is in the build directory
+    std::string cmd = "./vroom " + args + " 2>&1";
 
     // Open pipe to command
     std::array<char, 4096> buffer;
@@ -70,7 +70,7 @@ class CliRunner {
   // Note: file_path is expected to be a trusted path from test fixtures
   static Result runWithFileStdin(const std::string& args, const std::string& file_path) {
     Result result;
-    std::string cmd = "./scsv " + args + " < " + file_path + " 2>&1";
+    std::string cmd = "./vroom " + args + " < " + file_path + " 2>&1";
 
     std::array<char, 4096> buffer;
     std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"), pclose);
@@ -132,13 +132,13 @@ TEST_F(CliTest, HelpFlagLong) {
 TEST_F(CliTest, VersionFlagShort) {
   auto result = CliRunner::run("-v");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.output.find("scsv version") != std::string::npos);
+  EXPECT_TRUE(result.output.find("vroom version") != std::string::npos);
 }
 
 TEST_F(CliTest, VersionFlagLong) {
   auto result = CliRunner::run("--version");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.output.find("scsv version") != std::string::npos);
+  EXPECT_TRUE(result.output.find("vroom version") != std::string::npos);
 }
 
 TEST_F(CliTest, UnknownCommandShowsError) {
@@ -552,7 +552,7 @@ TEST_F(CliTest, HelpAfterCommand) {
 TEST_F(CliTest, VersionAfterCommand) {
   auto result = CliRunner::run("head -v");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.output.find("scsv version") != std::string::npos);
+  EXPECT_TRUE(result.output.find("vroom version") != std::string::npos);
 }
 
 // =============================================================================

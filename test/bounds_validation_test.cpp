@@ -22,7 +22,7 @@
 #include "branchless_state_machine.h"
 #include "mem_util.h"
 
-using namespace simdcsv;
+using namespace libvroom;
 
 // Helper class to create test buffers with proper SIMD padding
 class TestBuffer {
@@ -48,8 +48,8 @@ private:
 class ValueExtractorBoundsTest : public ::testing::Test {
 protected:
     std::unique_ptr<TestBuffer> buffer_;
-    simdcsv::two_pass parser_;
-    simdcsv::index idx_;
+    libvroom::two_pass parser_;
+    libvroom::index idx_;
 
     void ParseCSV(const std::string& csv) {
         buffer_ = std::make_unique<TestBuffer>(csv);
@@ -157,13 +157,13 @@ TEST_F(ValueExtractorBoundsTest, SingleColumnMultipleRows) {
 
 class TwoPassBoundsTest : public ::testing::Test {
 protected:
-    simdcsv::two_pass parser_;
+    libvroom::two_pass parser_;
 };
 
 // Test first_pass_simd with valid range
 TEST_F(TwoPassBoundsTest, FirstPassSIMDValidRange) {
     TestBuffer buf("a,b\n1,2\n");
-    auto stats = simdcsv::two_pass::first_pass_simd(buf.data(), 0, buf.size());
+    auto stats = libvroom::two_pass::first_pass_simd(buf.data(), 0, buf.size());
 
     // Should complete without assertion failure
     EXPECT_GE(stats.n_quotes, 0u);
@@ -172,7 +172,7 @@ TEST_F(TwoPassBoundsTest, FirstPassSIMDValidRange) {
 // Test first_pass_simd with zero-length range
 TEST_F(TwoPassBoundsTest, FirstPassSIMDZeroLength) {
     TestBuffer buf("a,b\n1,2\n");
-    auto stats = simdcsv::two_pass::first_pass_simd(buf.data(), 5, 5);
+    auto stats = libvroom::two_pass::first_pass_simd(buf.data(), 5, 5);
 
     // Zero-length range should be valid (start == end)
     EXPECT_GE(stats.n_quotes, 0u);
@@ -181,7 +181,7 @@ TEST_F(TwoPassBoundsTest, FirstPassSIMDZeroLength) {
 // Test first_pass_simd with start at end of buffer
 TEST_F(TwoPassBoundsTest, FirstPassSIMDStartAtEnd) {
     TestBuffer buf("a,b\n");
-    auto stats = simdcsv::two_pass::first_pass_simd(buf.data(), buf.size(), buf.size());
+    auto stats = libvroom::two_pass::first_pass_simd(buf.data(), buf.size(), buf.size());
 
     // Edge case: start == end == buffer size
     EXPECT_EQ(stats.n_quotes, 0u);
@@ -190,9 +190,9 @@ TEST_F(TwoPassBoundsTest, FirstPassSIMDStartAtEnd) {
 // Test second_pass_simd with valid range
 TEST_F(TwoPassBoundsTest, SecondPassSIMDValidRange) {
     TestBuffer buf("a,b\n1,2\n");
-    simdcsv::index idx = parser_.init(buf.size(), 1);
+    libvroom::index idx = parser_.init(buf.size(), 1);
 
-    uint64_t count = simdcsv::two_pass::second_pass_simd(
+    uint64_t count = libvroom::two_pass::second_pass_simd(
         buf.data(), 0, buf.size(), &idx, 0);
 
     // Should find field separators
@@ -202,9 +202,9 @@ TEST_F(TwoPassBoundsTest, SecondPassSIMDValidRange) {
 // Test second_pass_simd with zero-length range
 TEST_F(TwoPassBoundsTest, SecondPassSIMDZeroLength) {
     TestBuffer buf("a,b\n1,2\n");
-    simdcsv::index idx = parser_.init(buf.size(), 1);
+    libvroom::index idx = parser_.init(buf.size(), 1);
 
-    uint64_t count = simdcsv::two_pass::second_pass_simd(
+    uint64_t count = libvroom::two_pass::second_pass_simd(
         buf.data(), 5, 5, &idx, 0);
 
     // Zero-length range should return 0 separators
@@ -214,7 +214,7 @@ TEST_F(TwoPassBoundsTest, SecondPassSIMDZeroLength) {
 // Test parse with empty buffer
 TEST_F(TwoPassBoundsTest, ParseEmptyBuffer) {
     TestBuffer buf("");
-    simdcsv::index idx = parser_.init(1, 1);  // Size 1 to avoid zero allocation
+    libvroom::index idx = parser_.init(1, 1);  // Size 1 to avoid zero allocation
 
     // Should handle gracefully
     bool result = parser_.parse(buf.data(), idx, buf.size());
@@ -224,7 +224,7 @@ TEST_F(TwoPassBoundsTest, ParseEmptyBuffer) {
 // Test parse with single newline
 TEST_F(TwoPassBoundsTest, ParseSingleNewline) {
     TestBuffer buf("\n");
-    simdcsv::index idx = parser_.init(buf.size(), 1);
+    libvroom::index idx = parser_.init(buf.size(), 1);
 
     bool result = parser_.parse(buf.data(), idx, buf.size());
     EXPECT_TRUE(result);
@@ -236,13 +236,13 @@ TEST_F(TwoPassBoundsTest, ParseSingleNewline) {
 
 class BranchlessBoundsTest : public ::testing::Test {
 protected:
-    simdcsv::two_pass parser_;
+    libvroom::two_pass parser_;
 };
 
 // Test second_pass_simd_branchless with valid range (via parse_branchless)
 TEST_F(BranchlessBoundsTest, SecondPassBranchlessValidRange) {
     TestBuffer buf("a,b\n1,2\n");
-    simdcsv::index idx = parser_.init(buf.size(), 1);
+    libvroom::index idx = parser_.init(buf.size(), 1);
 
     // Use parse_branchless which properly manages memory
     bool result = parser_.parse_branchless(buf.data(), idx, buf.size());
@@ -254,7 +254,7 @@ TEST_F(BranchlessBoundsTest, SecondPassBranchlessValidRange) {
 // Test second_pass_simd_branchless with minimal input
 TEST_F(BranchlessBoundsTest, SecondPassBranchlessMinimal) {
     TestBuffer buf("a\n");
-    simdcsv::index idx = parser_.init(buf.size(), 1);
+    libvroom::index idx = parser_.init(buf.size(), 1);
 
     bool result = parser_.parse_branchless(buf.data(), idx, buf.size());
 
@@ -264,7 +264,7 @@ TEST_F(BranchlessBoundsTest, SecondPassBranchlessMinimal) {
 // Test branchless parsing with empty field at start
 TEST_F(BranchlessBoundsTest, SecondPassBranchlessEmptyField) {
     TestBuffer buf(",a\n");
-    simdcsv::index idx = parser_.init(buf.size(), 1);
+    libvroom::index idx = parser_.init(buf.size(), 1);
 
     bool result = parser_.parse_branchless(buf.data(), idx, buf.size());
 
@@ -277,7 +277,7 @@ TEST_F(BranchlessBoundsTest, SecondPassBranchlessEmptyField) {
 
 class DialectBoundsTest : public ::testing::Test {
 protected:
-    simdcsv::DialectDetector detector_;
+    libvroom::DialectDetector detector_;
 };
 
 // Test dialect detection with empty buffer
@@ -316,49 +316,49 @@ TEST_F(DialectBoundsTest, DetectInconsistentRows) {
 
 class TypeDetectorBoundsTest : public ::testing::Test {
 protected:
-    simdcsv::TypeDetectionOptions options_;
+    libvroom::TypeDetectionOptions options_;
 };
 
 // Test detect_field with empty input
 TEST_F(TypeDetectorBoundsTest, DetectFieldEmpty) {
-    auto type = simdcsv::TypeDetector::detect_field(
+    auto type = libvroom::TypeDetector::detect_field(
         reinterpret_cast<const uint8_t*>(""), 0, options_);
-    EXPECT_EQ(type, simdcsv::FieldType::EMPTY);
+    EXPECT_EQ(type, libvroom::FieldType::EMPTY);
 }
 
 // Test detect_field with whitespace only (triggers trimming path)
 TEST_F(TypeDetectorBoundsTest, DetectFieldWhitespaceOnly) {
     const char* ws = "   ";
-    auto type = simdcsv::TypeDetector::detect_field(
+    auto type = libvroom::TypeDetector::detect_field(
         reinterpret_cast<const uint8_t*>(ws), 3, options_);
-    EXPECT_EQ(type, simdcsv::FieldType::EMPTY);
+    EXPECT_EQ(type, libvroom::FieldType::EMPTY);
 }
 
 // Test detect_field with whitespace trimming enabled
 TEST_F(TypeDetectorBoundsTest, DetectFieldTrimmedToEmpty) {
     options_.trim_whitespace = true;
     const char* ws = "\t\t";
-    auto type = simdcsv::TypeDetector::detect_field(
+    auto type = libvroom::TypeDetector::detect_field(
         reinterpret_cast<const uint8_t*>(ws), 2, options_);
-    EXPECT_EQ(type, simdcsv::FieldType::EMPTY);
+    EXPECT_EQ(type, libvroom::FieldType::EMPTY);
 }
 
 // Test detect_field with leading and trailing whitespace
 TEST_F(TypeDetectorBoundsTest, DetectFieldWithWhitespace) {
     options_.trim_whitespace = true;
     const char* field = "  123  ";
-    auto type = simdcsv::TypeDetector::detect_field(
+    auto type = libvroom::TypeDetector::detect_field(
         reinterpret_cast<const uint8_t*>(field), 7, options_);
-    EXPECT_EQ(type, simdcsv::FieldType::INTEGER);
+    EXPECT_EQ(type, libvroom::FieldType::INTEGER);
 }
 
 // Test detect_field with all whitespace characters
 TEST_F(TypeDetectorBoundsTest, DetectFieldAllWhitespaceTypes) {
     options_.trim_whitespace = true;
     const char* ws = " \t\r\n";
-    auto type = simdcsv::TypeDetector::detect_field(
+    auto type = libvroom::TypeDetector::detect_field(
         reinterpret_cast<const uint8_t*>(ws), 4, options_);
-    EXPECT_EQ(type, simdcsv::FieldType::EMPTY);
+    EXPECT_EQ(type, libvroom::FieldType::EMPTY);
 }
 
 // =============================================================================
@@ -367,7 +367,7 @@ TEST_F(TypeDetectorBoundsTest, DetectFieldAllWhitespaceTypes) {
 
 class IntegrationBoundsTest : public ::testing::Test {
 protected:
-    simdcsv::two_pass parser_;
+    libvroom::two_pass parser_;
 };
 
 // Test complete parsing workflow with edge case CSV
@@ -375,7 +375,7 @@ TEST_F(IntegrationBoundsTest, ParseAndExtractEdgeCaseCSV) {
     // CSV with empty fields, quotes, and CRLF
     TestBuffer buf("a,b,c\r\n,\"\",\r\n1,,3\r\n");
 
-    simdcsv::index idx = parser_.init(buf.size(), 1);
+    libvroom::index idx = parser_.init(buf.size(), 1);
     parser_.parse(buf.data(), idx, buf.size());
 
     ValueExtractor extractor(buf.data(), buf.size(), idx);
@@ -399,7 +399,7 @@ TEST_F(IntegrationBoundsTest, MultiThreadedSmallBuffer) {
     // Small buffer that may cause chunk size < 64 (falls back to single-threaded)
     TestBuffer buf("a,b\n1,2\n");
 
-    simdcsv::index idx = parser_.init(buf.size(), 4);  // Request 4 threads
+    libvroom::index idx = parser_.init(buf.size(), 4);  // Request 4 threads
     parser_.parse(buf.data(), idx, buf.size());
 
     ValueExtractor extractor(buf.data(), buf.size(), idx);
@@ -410,7 +410,7 @@ TEST_F(IntegrationBoundsTest, MultiThreadedSmallBuffer) {
 TEST_F(IntegrationBoundsTest, BranchlessParseEdgeCase) {
     TestBuffer buf("a,b\n,\n");
 
-    simdcsv::index idx = parser_.init(buf.size(), 1);
+    libvroom::index idx = parser_.init(buf.size(), 1);
     parser_.parse_branchless(buf.data(), idx, buf.size());
 
     ValueExtractor extractor(buf.data(), buf.size(), idx);
@@ -423,8 +423,8 @@ TEST_F(IntegrationBoundsTest, BranchlessParseEdgeCase) {
 TEST_F(IntegrationBoundsTest, ParseWithErrorsEdgeCase) {
     TestBuffer buf("a,b\n,\n");
 
-    simdcsv::index idx = parser_.init(buf.size(), 1);
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::index idx = parser_.init(buf.size(), 1);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
     parser_.parse_with_errors(buf.data(), idx, buf.size(), errors);
 
@@ -443,8 +443,8 @@ TEST(ReleaseModeBoundsTest, NormalizationPreventsCrash) {
     // logic (if end < start then end = start) prevents issues
     TestBuffer buf("a,b\n,\n");
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(buf.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(buf.size(), 1);
     parser.parse(buf.data(), idx, buf.size());
 
     ValueExtractor extractor(buf.data(), buf.size(), idx);
@@ -465,8 +465,8 @@ TEST(ReleaseModeBoundsTest, NormalizationPreventsCrash) {
 TEST(AssertionVerificationTest, ValidBoundsNoAssertionFailure) {
     TestBuffer buf("name,age,city\nAlice,30,NYC\nBob,25,LA\n");
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(buf.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(buf.size(), 1);
     parser.parse(buf.data(), idx, buf.size());
 
     ValueExtractor extractor(buf.data(), buf.size(), idx);
@@ -485,14 +485,14 @@ TEST(AssertionVerificationTest, TwoPassValidBounds) {
     TestBuffer buf("a,b,c\n1,2,3\n");
 
     // first_pass_simd should work with valid bounds
-    auto stats = simdcsv::two_pass::first_pass_simd(buf.data(), 0, buf.size());
+    auto stats = libvroom::two_pass::first_pass_simd(buf.data(), 0, buf.size());
     EXPECT_EQ(stats.n_quotes, 0u);
 
     // second_pass_simd should work with valid bounds
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(buf.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(buf.size(), 1);
 
-    uint64_t count = simdcsv::two_pass::second_pass_simd(
+    uint64_t count = libvroom::two_pass::second_pass_simd(
         buf.data(), 0, buf.size(), &idx, 0);
     EXPECT_GT(count, 0u);
 }
@@ -500,8 +500,8 @@ TEST(AssertionVerificationTest, TwoPassValidBounds) {
 // Test that valid bounds work in branchless state machine
 TEST(AssertionVerificationTest, BranchlessValidBounds) {
     TestBuffer buf("a,b,c\n1,2,3\n");
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(buf.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(buf.size(), 1);
 
     bool result = parser.parse_branchless(buf.data(), idx, buf.size());
 
@@ -512,7 +512,7 @@ TEST(AssertionVerificationTest, BranchlessValidBounds) {
 // Test dialect detection with valid data doesn't trigger assertions
 TEST(AssertionVerificationTest, DialectDetectionValidData) {
     TestBuffer buf("col1,col2,col3\n1,2,3\n4,5,6\n7,8,9\n");
-    simdcsv::DialectDetector detector;
+    libvroom::DialectDetector detector;
 
     auto result = detector.detect(buf.data(), buf.size());
 
@@ -522,20 +522,20 @@ TEST(AssertionVerificationTest, DialectDetectionValidData) {
 
 // Test type detection with valid data doesn't trigger assertions
 TEST(AssertionVerificationTest, TypeDetectionValidData) {
-    simdcsv::TypeDetectionOptions options;
+    libvroom::TypeDetectionOptions options;
 
     // Test various valid inputs
-    auto int_type = simdcsv::TypeDetector::detect_field(
+    auto int_type = libvroom::TypeDetector::detect_field(
         reinterpret_cast<const uint8_t*>("12345"), 5, options);
-    EXPECT_EQ(int_type, simdcsv::FieldType::INTEGER);
+    EXPECT_EQ(int_type, libvroom::FieldType::INTEGER);
 
-    auto float_type = simdcsv::TypeDetector::detect_field(
+    auto float_type = libvroom::TypeDetector::detect_field(
         reinterpret_cast<const uint8_t*>("3.14"), 4, options);
-    EXPECT_EQ(float_type, simdcsv::FieldType::FLOAT);
+    EXPECT_EQ(float_type, libvroom::FieldType::FLOAT);
 
-    auto bool_type = simdcsv::TypeDetector::detect_field(
+    auto bool_type = libvroom::TypeDetector::detect_field(
         reinterpret_cast<const uint8_t*>("true"), 4, options);
-    EXPECT_EQ(bool_type, simdcsv::FieldType::BOOLEAN);
+    EXPECT_EQ(bool_type, libvroom::FieldType::BOOLEAN);
 }
 
 int main(int argc, char** argv) {

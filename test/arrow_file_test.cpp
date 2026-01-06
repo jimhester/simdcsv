@@ -9,7 +9,7 @@
  * Issue #86: Add Arrow conversion tests using real CSV test data
  */
 
-#ifdef SIMDCSV_ENABLE_ARROW
+#ifdef LIBVROOM_ENABLE_ARROW
 #include <gtest/gtest.h>
 #include <arrow/api.h>
 #include "arrow_output.h"
@@ -17,7 +17,7 @@
 #include "dialect.h"
 #include <string>
 
-namespace simdcsv {
+namespace libvroom {
 
 class ArrowFileTest : public ::testing::Test {
 protected:
@@ -418,7 +418,7 @@ TEST_F(ArrowFileTest, ValidateColumnChunking) {
     }
 }
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
 #else
 #include <gtest/gtest.h>

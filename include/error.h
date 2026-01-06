@@ -1,5 +1,5 @@
-#ifndef SIMDCSV_ERROR_H
-#define SIMDCSV_ERROR_H
+#ifndef LIBVROOM_ERROR_H
+#define LIBVROOM_ERROR_H
 
 #include <algorithm>
 #include <cstdint>
@@ -9,10 +9,10 @@
 
 /**
  * @file error.h
- * @brief Error handling framework for the simdcsv CSV parser.
+ * @brief Error handling framework for the libvroom CSV parser.
  *
  * This header defines the error types, severity levels, and error collection
- * mechanisms used throughout the simdcsv library. The framework supports three
+ * mechanisms used throughout the libvroom library. The framework supports three
  * error handling modes (STRICT, PERMISSIVE, BEST_EFFORT) to accommodate different
  * use cases from strict validation to best-effort parsing.
  *
@@ -20,7 +20,7 @@
  * @see ErrorMode for configuring error handling behavior
  */
 
-namespace simdcsv {
+namespace libvroom {
 
 /**
  * @brief Error codes representing different types of CSV parsing errors.
@@ -174,10 +174,10 @@ enum class ErrorMode {
  * @example
  * @code
  * // Create collector in permissive mode
- * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+ * libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
  *
  * // Parse CSV with error collection
- * simdcsv::two_pass parser;
+ * libvroom::two_pass parser;
  * auto idx = parser.init(data_len, 1);
  * parser.parse_with_errors(data, idx, data_len, errors);
  *
@@ -379,7 +379,7 @@ private:
  * @code
  * try {
  *     parser.parse(data, idx, len);
- * } catch (const simdcsv::ParseException& e) {
+ * } catch (const libvroom::ParseException& e) {
  *     std::cerr << "Parse failed: " << e.what() << std::endl;
  *     for (const auto& err : e.errors()) {
  *         std::cerr << "  " << err.to_string() << std::endl;
@@ -441,6 +441,6 @@ const char* error_code_to_string(ErrorCode code);
  */
 const char* error_severity_to_string(ErrorSeverity severity);
 
-} // namespace simdcsv
+} // namespace libvroom
 
-#endif // SIMDCSV_ERROR_H
+#endif // LIBVROOM_ERROR_H

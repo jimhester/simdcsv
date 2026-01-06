@@ -1,12 +1,12 @@
-#ifndef SIMDCSV_COMMON_DEFS_H
-#define SIMDCSV_COMMON_DEFS_H
+#ifndef LIBVROOM_COMMON_DEFS_H
+#define LIBVROOM_COMMON_DEFS_H
 
 #include <cassert>
 
-// The input buffer must be readable up to buf + SIMDCSV_PADDING.
+// The input buffer must be readable up to buf + LIBVROOM_PADDING.
 // This must be at least 64 bytes since SIMD operations load 64-byte blocks
 // and may read past the logical end of the data (masked results are discarded).
-#define SIMDCSV_PADDING  64
+#define LIBVROOM_PADDING  64
 
 
 // Align to N-byte boundary

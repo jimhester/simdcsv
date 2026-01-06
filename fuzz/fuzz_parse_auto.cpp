@@ -32,10 +32,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     std::memcpy(buf, data, size);
     std::memset(buf + size, 0, 64);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(size, 1);
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
-    simdcsv::DetectionResult detected;
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(size, 1);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::DetectionResult detected;
     bool success = parser.parse_auto(buf, idx, size, errors, &detected);
 
     // Use the results to exercise different code paths

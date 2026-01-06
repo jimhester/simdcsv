@@ -1,9 +1,9 @@
-# Doxyfile for simdcsv
+# Doxyfile for libvroom
 
 #---------------------------------------------------------------------------
 # Project related configuration options
 #---------------------------------------------------------------------------
-PROJECT_NAME           = "simdcsv"
+PROJECT_NAME           = "libvroom"
 PROJECT_NUMBER         =
 PROJECT_BRIEF          = "High-performance CSV parser using SIMD instructions"
 PROJECT_LOGO           =

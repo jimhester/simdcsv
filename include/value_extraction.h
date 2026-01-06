@@ -1,5 +1,5 @@
-#ifndef SIMDCSV_VALUE_EXTRACTION_H
-#define SIMDCSV_VALUE_EXTRACTION_H
+#ifndef LIBVROOM_VALUE_EXTRACTION_H
+#define LIBVROOM_VALUE_EXTRACTION_H
 
 #include <cstdint>
 #include <cstddef>
@@ -17,7 +17,7 @@
 #include "dialect.h"
 #include "extraction_config.h"
 
-namespace simdcsv {
+namespace libvroom {
 
 class index;
 
@@ -285,10 +285,10 @@ private:
 inline RowIterator begin(const ValueExtractor& ve) { return RowIterator(&ve, 0); }
 inline RowIterator end(const ValueExtractor& ve) { return RowIterator(&ve, ve.num_rows()); }
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
 // Include SIMD number parsing after all types are defined
 // This provides the implementations for parse_integer_simd and parse_double_simd
 #include "simd_number_parsing.h"
 
-#endif  // SIMDCSV_VALUE_EXTRACTION_H
+#endif  // LIBVROOM_VALUE_EXTRACTION_H

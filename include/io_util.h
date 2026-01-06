@@ -14,8 +14,8 @@
  * @see mem_util.h for aligned memory allocation and deallocation functions.
  */
 
-#ifndef SIMDCSV_JSONIOUTIL_H
-#define SIMDCSV_JSONIOUTIL_H
+#ifndef LIBVROOM_JSONIOUTIL_H
+#define LIBVROOM_JSONIOUTIL_H
 
 #include "common_defs.h"
 #include "encoding.h"
@@ -230,7 +230,7 @@ std::basic_string_view<uint8_t>  get_corpus(const std::string& filename, size_t 
  */
 struct LoadResult {
     std::basic_string_view<uint8_t> data;  ///< The loaded/transcoded data
-    simdcsv::EncodingResult encoding;       ///< Detected encoding information
+    libvroom::EncodingResult encoding;       ///< Detected encoding information
 
     /// Returns true if loading was successful
     operator bool() const { return data.data() != nullptr; }

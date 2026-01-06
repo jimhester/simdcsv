@@ -5,7 +5,7 @@
 
 #include "type_detector.h"
 
-using namespace simdcsv;
+using namespace libvroom;
 
 class TypeDetectorTest : public ::testing::Test {
 protected:

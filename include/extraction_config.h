@@ -1,5 +1,5 @@
-#ifndef SIMDCSV_EXTRACTION_CONFIG_H
-#define SIMDCSV_EXTRACTION_CONFIG_H
+#ifndef LIBVROOM_EXTRACTION_CONFIG_H
+#define LIBVROOM_EXTRACTION_CONFIG_H
 
 #include <cstddef>
 #include <optional>
@@ -9,7 +9,7 @@
 
 #include "common_defs.h"
 
-namespace simdcsv {
+namespace libvroom {
 
 /**
  * Result structure for value extraction operations.
@@ -91,6 +91,6 @@ really_inline bool is_na(const char* str, size_t len, const ExtractionConfig& co
     return false;
 }
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
-#endif  // SIMDCSV_EXTRACTION_CONFIG_H
+#endif  // LIBVROOM_EXTRACTION_CONFIG_H

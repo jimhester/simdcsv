@@ -4,7 +4,7 @@
 #include <cassert>
 #include <stdexcept>
 
-namespace simdcsv {
+namespace libvroom {
 
 ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const index& idx,
                                const Dialect& dialect, const ExtractionConfig& config)
@@ -120,4 +120,4 @@ bool ValueExtractor::get_field_bounds(size_t row, size_t col, size_t& start, siz
     return true;
 }
 
-}  // namespace simdcsv
+}  // namespace libvroom

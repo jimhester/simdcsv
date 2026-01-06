@@ -1,5 +1,5 @@
 /**
- * scsv - Command-line utility for CSV processing using simdcsv
+ * vroom - Command-line utility for CSV processing using libvroom
  * Inspired by zsv (https://github.com/liquidaty/zsv)
  *
  * Note: The pretty command truncates long fields for display. This truncation
@@ -26,7 +26,7 @@
 #include "io_util.h"
 #include "mem_util.h"
 #include "simd_highway.h"
-#include "simdcsv.h"
+#include "libvroom.h"
 
 using namespace std;
 
@@ -48,7 +48,7 @@ constexpr size_t MIN_PARALLEL_SIZE = 1024 * 1024;   // Minimum size for parallel
  */
 class CsvIterator {
  public:
-  CsvIterator(const uint8_t* buf, const simdcsv::index& idx)
+  CsvIterator(const uint8_t* buf, const libvroom::index& idx)
       : buf_(buf), idx_(idx) {
     // Merge indexes from all threads into sorted order
     mergeIndexes();
@@ -141,16 +141,16 @@ class CsvIterator {
   }
 
   const uint8_t* buf_;
-  const simdcsv::index& idx_;
+  const libvroom::index& idx_;
   std::vector<uint64_t> merged_indexes_;
 };
 
 void printVersion() {
-  cout << "scsv version " << VERSION << '\n';
+  cout << "vroom version " << VERSION << '\n';
 }
 
 void printUsage(const char* prog) {
-  cerr << "scsv - High-performance CSV processing tool\n\n";
+  cerr << "vroom - High-performance CSV processing tool\n\n";
   cerr << "Usage: " << prog << " <command> [options] [csvfile]\n\n";
   cerr << "Commands:\n";
   cerr << "  count         Count the number of rows\n";
@@ -177,7 +177,7 @@ void printUsage(const char* prog) {
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
   cerr << "\nDialect Detection:\n";
-  cerr << "  By default, scsv auto-detects the CSV dialect (delimiter, quote character,\n";
+  cerr << "  By default, vroom auto-detects the CSV dialect (delimiter, quote character,\n";
   cerr << "  escape style). Use -d to explicitly specify a delimiter and disable\n";
   cerr << "  auto-detection.\n";
   cerr << "\nExamples:\n";
@@ -207,16 +207,16 @@ static bool isStdinInput(const char* filename) {
 // Caller is responsible for freeing data with aligned_free()
 // If detected_encoding is provided, the detected encoding will be stored there
 bool parseFile(const char* filename, int n_threads,
-               std::basic_string_view<uint8_t>& data, simdcsv::index& idx,
-               const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+               std::basic_string_view<uint8_t>& data, libvroom::index& idx,
+               const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
                bool auto_detect = false,
-               simdcsv::EncodingResult* detected_encoding = nullptr) {
+               libvroom::EncodingResult* detected_encoding = nullptr) {
   try {
     LoadResult load_result;
     if (isStdinInput(filename)) {
-      load_result = get_corpus_stdin_with_encoding(SIMDCSV_PADDING);
+      load_result = get_corpus_stdin_with_encoding(LIBVROOM_PADDING);
     } else {
-      load_result = get_corpus_with_encoding(filename, SIMDCSV_PADDING);
+      load_result = get_corpus_with_encoding(filename, LIBVROOM_PADDING);
     }
     data = load_result.data;
 
@@ -228,7 +228,7 @@ bool parseFile(const char* filename, int n_threads,
     // Report encoding if transcoding occurred
     if (load_result.encoding.needs_transcoding) {
       cerr << "Transcoded from "
-           << simdcsv::encoding_to_string(load_result.encoding.encoding)
+           << libvroom::encoding_to_string(load_result.encoding.encoding)
            << " to UTF-8" << endl;
     }
   } catch (const std::exception& e) {
@@ -241,10 +241,10 @@ bool parseFile(const char* filename, int n_threads,
   }
 
   // Use the unified Parser API
-  simdcsv::Parser parser(n_threads);
+  libvroom::Parser parser(n_threads);
 
   // Build ParseOptions based on auto_detect flag
-  simdcsv::ParseOptions options;
+  libvroom::ParseOptions options;
   if (!auto_detect) {
     options.dialect = dialect;
   }
@@ -262,8 +262,8 @@ bool parseFile(const char* filename, int n_threads,
 }
 
 // Helper function to parse delimiter string
-simdcsv::Dialect parseDialect(const std::string& delimiter_str, char quote_char) {
-  simdcsv::Dialect dialect;
+libvroom::Dialect parseDialect(const std::string& delimiter_str, char quote_char) {
+  libvroom::Dialect dialect;
   dialect.quote_char = quote_char;
 
   if (delimiter_str == "comma" || delimiter_str == ",") {
@@ -302,20 +302,20 @@ size_t countRowsSimd(const uint8_t* buf, size_t len) {
 
   // Process 64 bytes at a time using SIMD
   for (; idx + 64 <= len; idx += 64) {
-    simdcsv::simd_input in = simdcsv::fill_input(buf + idx);
+    libvroom::simd_input in = libvroom::fill_input(buf + idx);
 
     // Find all quotes and newlines in this 64-byte block
-    uint64_t quotes = simdcsv::cmp_mask_against_input(in, '"');
-    uint64_t newlines = simdcsv::cmp_mask_against_input(in, '\n');
+    uint64_t quotes = libvroom::cmp_mask_against_input(in, '"');
+    uint64_t newlines = libvroom::cmp_mask_against_input(in, '\n');
 
     // Build quote mask (1 = inside quote, 0 = outside)
-    uint64_t quote_mask = simdcsv::find_quote_mask2(quotes, prev_iter_inside_quote);
+    uint64_t quote_mask = libvroom::find_quote_mask2(quotes, prev_iter_inside_quote);
 
     // Newlines outside quotes
     uint64_t valid_newlines = newlines & ~quote_mask;
 
     // Count the newlines
-    row_count += simdcsv::count_ones(valid_newlines);
+    row_count += libvroom::count_ones(valid_newlines);
   }
 
   // Handle remaining bytes with scalar code (properly handles escaped quotes "")
@@ -468,15 +468,15 @@ size_t countRowsDirectParallel(const uint8_t* buf, size_t len, int n_threads) {
 
 // Command: count
 int cmdCount(const char* filename, int n_threads, bool has_header,
-             const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+             const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
              bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
 
   try {
     if (isStdinInput(filename)) {
-      data = get_corpus_stdin(SIMDCSV_PADDING);
+      data = get_corpus_stdin(LIBVROOM_PADDING);
     } else {
-      data = get_corpus(filename, SIMDCSV_PADDING);
+      data = get_corpus(filename, LIBVROOM_PADDING);
     }
   } catch (const std::exception& e) {
     if (isStdinInput(filename)) {
@@ -504,7 +504,7 @@ int cmdCount(const char* filename, int n_threads, bool has_header,
 }
 
 // Helper function to output a row with proper quoting
-static void outputRow(const std::vector<std::string>& row, const simdcsv::Dialect& dialect) {
+static void outputRow(const std::vector<std::string>& row, const libvroom::Dialect& dialect) {
   for (size_t i = 0; i < row.size(); ++i) {
     if (i > 0) cout << dialect.delimiter;
     bool needs_quote =
@@ -528,10 +528,10 @@ static void outputRow(const std::vector<std::string>& row, const simdcsv::Dialec
 
 // Command: head
 int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_header,
-            const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+            const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
             bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
-  simdcsv::index idx;
+  libvroom::index idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
 
@@ -549,10 +549,10 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
 
 // Command: tail
 int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_header,
-            const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+            const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
             bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
-  simdcsv::index idx;
+  libvroom::index idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
 
@@ -591,10 +591,10 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
 
 // Command: sample
 int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_header,
-              const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+              const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
               bool auto_detect = false, unsigned int seed = 0) {
   std::basic_string_view<uint8_t> data;
-  simdcsv::index idx;
+  libvroom::index idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
 
@@ -659,10 +659,10 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
 
 // Command: select
 int cmdSelect(const char* filename, int n_threads, const string& columns,
-              bool has_header, const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+              bool has_header, const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
               bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
-  simdcsv::index idx;
+  libvroom::index idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
 
@@ -751,10 +751,10 @@ int cmdSelect(const char* filename, int n_threads, const string& columns,
 
 // Command: info
 int cmdInfo(const char* filename, int n_threads, bool has_header,
-            const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+            const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
             bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
-  simdcsv::index idx;
+  libvroom::index idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
 
@@ -788,10 +788,10 @@ int cmdInfo(const char* filename, int n_threads, bool has_header,
 
 // Command: pretty
 int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_header,
-              const simdcsv::Dialect& dialect = simdcsv::Dialect::csv(),
+              const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
               bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
-  simdcsv::index idx;
+  libvroom::index idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
 
@@ -883,12 +883,12 @@ static std::string formatQuoteChar(char quote) {
 }
 
 // Helper: format line ending for display
-static std::string formatLineEnding(simdcsv::Dialect::LineEnding le) {
+static std::string formatLineEnding(libvroom::Dialect::LineEnding le) {
   switch (le) {
-    case simdcsv::Dialect::LineEnding::LF: return "LF";
-    case simdcsv::Dialect::LineEnding::CRLF: return "CRLF";
-    case simdcsv::Dialect::LineEnding::CR: return "CR";
-    case simdcsv::Dialect::LineEnding::MIXED: return "mixed";
+    case libvroom::Dialect::LineEnding::LF: return "LF";
+    case libvroom::Dialect::LineEnding::CRLF: return "CRLF";
+    case libvroom::Dialect::LineEnding::CR: return "CR";
+    case libvroom::Dialect::LineEnding::MIXED: return "mixed";
     default: return "unknown";
   }
 }
@@ -918,14 +918,14 @@ static std::string escapeJsonChar(char c) {
 // Command: dialect - detect and output CSV dialect in human-readable or JSON format
 int cmdDialect(const char* filename, bool json_output) {
   std::basic_string_view<uint8_t> data;
-  simdcsv::EncodingResult enc_result;
+  libvroom::EncodingResult enc_result;
 
   try {
     LoadResult load_result;
     if (isStdinInput(filename)) {
-      load_result = get_corpus_stdin_with_encoding(SIMDCSV_PADDING);
+      load_result = get_corpus_stdin_with_encoding(LIBVROOM_PADDING);
     } else {
-      load_result = get_corpus_with_encoding(filename, SIMDCSV_PADDING);
+      load_result = get_corpus_with_encoding(filename, LIBVROOM_PADDING);
     }
     data = load_result.data;
     enc_result = load_result.encoding;
@@ -938,7 +938,7 @@ int cmdDialect(const char* filename, bool json_output) {
     return 1;
   }
 
-  simdcsv::DialectDetector detector;
+  libvroom::DialectDetector detector;
   auto result = detector.detect(data.data(), data.size());
 
   if (!result.success()) {
@@ -964,7 +964,7 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "\",\n";
     cout << "  \"escape\": \"" << (d.double_quote ? "double" : "backslash") << "\",\n";
     cout << "  \"line_ending\": \"" << formatLineEnding(d.line_ending) << "\",\n";
-    cout << "  \"encoding\": \"" << simdcsv::encoding_to_string(enc_result.encoding) << "\",\n";
+    cout << "  \"encoding\": \"" << libvroom::encoding_to_string(enc_result.encoding) << "\",\n";
     cout << "  \"has_header\": " << (result.has_header ? "true" : "false") << ",\n";
     cout << "  \"columns\": " << result.detected_columns << ",\n";
     cout << "  \"confidence\": " << result.confidence << "\n";
@@ -976,7 +976,7 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "  Quote:        " << formatQuoteChar(d.quote_char) << "\n";
     cout << "  Escape:       " << (d.double_quote ? "double-quote (\"\")" : "backslash (\\)") << "\n";
     cout << "  Line ending:  " << formatLineEnding(d.line_ending) << "\n";
-    cout << "  Encoding:     " << simdcsv::encoding_to_string(enc_result.encoding) << "\n";
+    cout << "  Encoding:     " << libvroom::encoding_to_string(enc_result.encoding) << "\n";
     cout << "  Has header:   " << (result.has_header ? "yes" : "no") << "\n";
     cout << "  Columns:      " << result.detected_columns << "\n";
     cout << "  Confidence:   " << static_cast<int>(result.confidence * 100) << "%\n";
@@ -1110,7 +1110,7 @@ int main(int argc, char* argv[]) {
   if (optind < argc) {
     filename = argv[optind];
   }
-  simdcsv::Dialect dialect = parseDialect(delimiter_str, quote_char);
+  libvroom::Dialect dialect = parseDialect(delimiter_str, quote_char);
 
   // Dispatch to command handlers
   int result = 0;

@@ -85,7 +85,7 @@ protected:
         return "test/data/" + category + "/" + filename;
     }
 
-    simdcsv::DialectDetector detector;
+    libvroom::DialectDetector detector;
 };
 
 // ============================================================================
@@ -183,7 +183,7 @@ TEST_F(DialectDetectionTest, DetectLFLineEnding) {
     auto result = detector.detect_file(path);
 
     EXPECT_TRUE(result.success()) << "Detection should succeed for lf.csv";
-    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::LF);
+    EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::LF);
 }
 
 TEST_F(DialectDetectionTest, DetectCRLFLineEnding) {
@@ -191,7 +191,7 @@ TEST_F(DialectDetectionTest, DetectCRLFLineEnding) {
     auto result = detector.detect_file(path);
 
     EXPECT_TRUE(result.success()) << "Detection should succeed for crlf.csv";
-    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::CRLF);
+    EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::CRLF);
 }
 
 TEST_F(DialectDetectionTest, DetectCRLineEnding) {
@@ -199,7 +199,7 @@ TEST_F(DialectDetectionTest, DetectCRLineEnding) {
     auto result = detector.detect_file(path);
 
     EXPECT_TRUE(result.success()) << "Detection should succeed for cr.csv";
-    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::CR);
+    EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::CR);
 }
 
 // ============================================================================
@@ -207,72 +207,72 @@ TEST_F(DialectDetectionTest, DetectCRLineEnding) {
 // ============================================================================
 
 TEST_F(DialectDetectionTest, InferIntegerType) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("123"), CellType::INTEGER);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("-456"), CellType::INTEGER);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("+789"), CellType::INTEGER);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("0"), CellType::INTEGER);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("123"), CellType::INTEGER);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("-456"), CellType::INTEGER);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("+789"), CellType::INTEGER);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("0"), CellType::INTEGER);
 }
 
 TEST_F(DialectDetectionTest, InferFloatType) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("3.14"), CellType::FLOAT);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("-2.718"), CellType::FLOAT);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1e10"), CellType::FLOAT);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1.5E-3"), CellType::FLOAT);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type(".5"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("3.14"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("-2.718"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("1e10"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("1.5E-3"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type(".5"), CellType::FLOAT);
 }
 
 TEST_F(DialectDetectionTest, InferBooleanType) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("true"), CellType::BOOLEAN);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("false"), CellType::BOOLEAN);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("TRUE"), CellType::BOOLEAN);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("FALSE"), CellType::BOOLEAN);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("True"), CellType::BOOLEAN);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("False"), CellType::BOOLEAN);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("true"), CellType::BOOLEAN);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("false"), CellType::BOOLEAN);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("TRUE"), CellType::BOOLEAN);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("FALSE"), CellType::BOOLEAN);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("True"), CellType::BOOLEAN);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("False"), CellType::BOOLEAN);
 }
 
 TEST_F(DialectDetectionTest, InferDateType) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15"), CellType::DATE);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024/01/15"), CellType::DATE);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("15-01-2024"), CellType::DATE);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("15/01/2024"), CellType::DATE);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024-01-15"), CellType::DATE);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024/01/15"), CellType::DATE);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("15-01-2024"), CellType::DATE);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("15/01/2024"), CellType::DATE);
 }
 
 TEST_F(DialectDetectionTest, InferTimeType) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("14:30"), CellType::TIME);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("14:30:59"), CellType::TIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("14:30"), CellType::TIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("14:30:59"), CellType::TIME);
 }
 
 TEST_F(DialectDetectionTest, InferDateTimeType) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15T14:30:00"), CellType::DATETIME);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15 14:30:00"), CellType::DATETIME);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15T14:30:00Z"), CellType::DATETIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024-01-15T14:30:00"), CellType::DATETIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024-01-15 14:30:00"), CellType::DATETIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024-01-15T14:30:00Z"), CellType::DATETIME);
 }
 
 TEST_F(DialectDetectionTest, InferEmptyType) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type(""), CellType::EMPTY);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("   "), CellType::EMPTY);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type(""), CellType::EMPTY);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("   "), CellType::EMPTY);
 }
 
 TEST_F(DialectDetectionTest, InferStringType) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("hello"), CellType::STRING);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("John Doe"), CellType::STRING);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("123abc"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("hello"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("John Doe"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("123abc"), CellType::STRING);
 }
 
 // ============================================================================
@@ -280,33 +280,33 @@ TEST_F(DialectDetectionTest, InferStringType) {
 // ============================================================================
 
 TEST_F(DialectDetectionTest, DialectFactories) {
-    auto csv = simdcsv::Dialect::csv();
+    auto csv = libvroom::Dialect::csv();
     EXPECT_EQ(csv.delimiter, ',');
     EXPECT_EQ(csv.quote_char, '"');
     EXPECT_TRUE(csv.double_quote);
 
-    auto tsv = simdcsv::Dialect::tsv();
+    auto tsv = libvroom::Dialect::tsv();
     EXPECT_EQ(tsv.delimiter, '\t');
     EXPECT_EQ(tsv.quote_char, '"');
 
-    auto semicolon = simdcsv::Dialect::semicolon();
+    auto semicolon = libvroom::Dialect::semicolon();
     EXPECT_EQ(semicolon.delimiter, ';');
 
-    auto pipe = simdcsv::Dialect::pipe();
+    auto pipe = libvroom::Dialect::pipe();
     EXPECT_EQ(pipe.delimiter, '|');
 }
 
 TEST_F(DialectDetectionTest, DialectEquality) {
-    auto d1 = simdcsv::Dialect::csv();
-    auto d2 = simdcsv::Dialect::csv();
-    auto d3 = simdcsv::Dialect::tsv();
+    auto d1 = libvroom::Dialect::csv();
+    auto d2 = libvroom::Dialect::csv();
+    auto d3 = libvroom::Dialect::tsv();
 
     EXPECT_EQ(d1, d2);
     EXPECT_NE(d1, d3);
 }
 
 TEST_F(DialectDetectionTest, DialectToString) {
-    auto csv = simdcsv::Dialect::csv();
+    auto csv = libvroom::Dialect::csv();
     std::string str = csv.to_string();
 
     EXPECT_NE(str.find("','"), std::string::npos) << "Should contain comma repr";
@@ -390,10 +390,10 @@ TEST_F(DialectDetectionTest, ZeroLength) {
 // ============================================================================
 
 TEST_F(DialectDetectionTest, CustomDelimiters) {
-    simdcsv::DetectionOptions opts;
+    libvroom::DetectionOptions opts;
     opts.delimiters = {'#'};  // Only test hash
 
-    simdcsv::DialectDetector custom_detector(opts);
+    libvroom::DialectDetector custom_detector(opts);
 
     const std::string csv_data = "a#b#c\n1#2#3\n4#5#6\n7#8#9\n";
     auto result = custom_detector.detect(
@@ -431,12 +431,12 @@ TEST_F(DialectDetectionTest, RealWorldContacts) {
 
 TEST_F(DialectDetectionTest, ParseAutoWithCommaCSV) {
     std::string path = getTestDataPath("basic", "simple.csv");
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
-    simdcsv::DetectionResult detected;
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::DetectionResult detected;
 
     bool success = parser.parse_auto(data.data(), idx, data.size(), errors, &detected);
 
@@ -449,12 +449,12 @@ TEST_F(DialectDetectionTest, ParseAutoWithCommaCSV) {
 
 TEST_F(DialectDetectionTest, ParseAutoWithSemicolonCSV) {
     std::string path = getTestDataPath("separators", "semicolon.csv");
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
-    simdcsv::DetectionResult detected;
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::DetectionResult detected;
 
     bool success = parser.parse_auto(data.data(), idx, data.size(), errors, &detected);
 
@@ -475,7 +475,7 @@ TEST_F(DialectDetectionTest, ParseAutoWithSemicolonCSV) {
 
 TEST_F(DialectDetectionTest, DetectDialectStatic) {
     const std::string csv_data = "a;b;c\n1;2;3\n4;5;6\n7;8;9\n";
-    auto result = simdcsv::two_pass::detect_dialect(
+    auto result = libvroom::two_pass::detect_dialect(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
         csv_data.size()
     );
@@ -488,10 +488,10 @@ TEST_F(DialectDetectionTest, DetectDialectStatic) {
 TEST_F(DialectDetectionTest, DetectDialectWithOptions) {
     const std::string csv_data = "a#b#c\n1#2#3\n4#5#6\n7#8#9\n";
 
-    simdcsv::DetectionOptions opts;
+    libvroom::DetectionOptions opts;
     opts.delimiters = {'#'};
 
-    auto result = simdcsv::two_pass::detect_dialect(
+    auto result = libvroom::two_pass::detect_dialect(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
         csv_data.size(),
         opts
@@ -507,11 +507,11 @@ TEST_F(DialectDetectionTest, DetectDialectWithOptions) {
 
 TEST_F(DialectDetectionTest, ParseWithTSVDialect) {
     std::string path = getTestDataPath("separators", "tab.csv");
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
-    simdcsv::Dialect tsv = simdcsv::Dialect::tsv();
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+    libvroom::Dialect tsv = libvroom::Dialect::tsv();
 
     bool success = parser.parse(data.data(), idx, data.size(), tsv);
 
@@ -521,11 +521,11 @@ TEST_F(DialectDetectionTest, ParseWithTSVDialect) {
 
 TEST_F(DialectDetectionTest, ParseWithSemicolonDialect) {
     std::string path = getTestDataPath("separators", "semicolon.csv");
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
-    simdcsv::Dialect semicolon = simdcsv::Dialect::semicolon();
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+    libvroom::Dialect semicolon = libvroom::Dialect::semicolon();
 
     bool success = parser.parse(data.data(), idx, data.size(), semicolon);
 
@@ -535,11 +535,11 @@ TEST_F(DialectDetectionTest, ParseWithSemicolonDialect) {
 
 TEST_F(DialectDetectionTest, ParseWithPipeDialect) {
     std::string path = getTestDataPath("separators", "pipe.csv");
-    auto data = get_corpus(path, SIMDCSV_PADDING);
+    auto data = get_corpus(path, LIBVROOM_PADDING);
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(data.size(), 1);
-    simdcsv::Dialect pipe = simdcsv::Dialect::pipe();
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(data.size(), 1);
+    libvroom::Dialect pipe = libvroom::Dialect::pipe();
 
     bool success = parser.parse(data.data(), idx, data.size(), pipe);
 
@@ -551,10 +551,10 @@ TEST_F(DialectDetectionTest, ParseWithErrorsDialect) {
     // Test parse_with_errors with semicolon dialect
     const std::string csv_data = "name;age;city\nAlice;30;Paris\nBob;25;London\n";
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(csv_data.size(), 1);
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
-    simdcsv::Dialect semicolon = simdcsv::Dialect::semicolon();
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(csv_data.size(), 1);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::Dialect semicolon = libvroom::Dialect::semicolon();
 
     bool success = parser.parse_with_errors(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
@@ -568,10 +568,10 @@ TEST_F(DialectDetectionTest, ParseValidateDialect) {
     // Test parse_validate with tab dialect
     const std::string tsv_data = "name\tage\tcity\nAlice\t30\tParis\nBob\t25\tLondon\n";
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(tsv_data.size(), 1);
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
-    simdcsv::Dialect tsv = simdcsv::Dialect::tsv();
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(tsv_data.size(), 1);
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::Dialect tsv = libvroom::Dialect::tsv();
 
     bool success = parser.parse_validate(
         reinterpret_cast<const uint8_t*>(tsv_data.data()),
@@ -585,12 +585,12 @@ TEST_F(DialectDetectionTest, ParseWithSingleQuote) {
     // Test parsing with single-quote as quote character
     const std::string csv_data = "name,description\nAlice,'Hello, World'\nBob,'Test \"quote\"'\n";
 
-    simdcsv::Dialect single_quote;
+    libvroom::Dialect single_quote;
     single_quote.delimiter = ',';
     single_quote.quote_char = '\'';
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(csv_data.size(), 1);
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(csv_data.size(), 1);
 
     bool success = parser.parse(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
@@ -603,10 +603,10 @@ TEST_F(DialectDetectionTest, ParseTwoPassWithErrorsDialect) {
     // Test parse_two_pass_with_errors with semicolon dialect
     const std::string csv_data = "name;age;city\nAlice;30;Paris\nBob;25;London\nCharlie;35;Berlin\n";
 
-    simdcsv::two_pass parser;
-    simdcsv::index idx = parser.init(csv_data.size(), 2);  // 2 threads
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
-    simdcsv::Dialect semicolon = simdcsv::Dialect::semicolon();
+    libvroom::two_pass parser;
+    libvroom::index idx = parser.init(csv_data.size(), 2);  // 2 threads
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::Dialect semicolon = libvroom::Dialect::semicolon();
 
     bool success = parser.parse_two_pass_with_errors(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
@@ -621,21 +621,21 @@ TEST_F(DialectDetectionTest, ParseTwoPassWithErrorsDialect) {
 // ============================================================================
 
 TEST_F(DialectDetectionTest, DialectValidation_Valid) {
-    simdcsv::Dialect csv = simdcsv::Dialect::csv();
+    libvroom::Dialect csv = libvroom::Dialect::csv();
     EXPECT_TRUE(csv.is_valid()) << "Standard CSV should be valid";
 
-    simdcsv::Dialect tsv = simdcsv::Dialect::tsv();
+    libvroom::Dialect tsv = libvroom::Dialect::tsv();
     EXPECT_TRUE(tsv.is_valid()) << "TSV should be valid";
 
-    simdcsv::Dialect semicolon = simdcsv::Dialect::semicolon();
+    libvroom::Dialect semicolon = libvroom::Dialect::semicolon();
     EXPECT_TRUE(semicolon.is_valid()) << "Semicolon-separated should be valid";
 
-    simdcsv::Dialect pipe = simdcsv::Dialect::pipe();
+    libvroom::Dialect pipe = libvroom::Dialect::pipe();
     EXPECT_TRUE(pipe.is_valid()) << "Pipe-separated should be valid";
 }
 
 TEST_F(DialectDetectionTest, DialectValidation_SameDelimiterAndQuote) {
-    simdcsv::Dialect invalid;
+    libvroom::Dialect invalid;
     invalid.delimiter = '"';
     invalid.quote_char = '"';
     EXPECT_FALSE(invalid.is_valid()) << "Same delimiter and quote should be invalid";
@@ -644,7 +644,7 @@ TEST_F(DialectDetectionTest, DialectValidation_SameDelimiterAndQuote) {
 }
 
 TEST_F(DialectDetectionTest, DialectValidation_NewlineDelimiter) {
-    simdcsv::Dialect invalid;
+    libvroom::Dialect invalid;
     invalid.delimiter = '\n';
     invalid.quote_char = '"';
     EXPECT_FALSE(invalid.is_valid()) << "Newline delimiter should be invalid";
@@ -653,7 +653,7 @@ TEST_F(DialectDetectionTest, DialectValidation_NewlineDelimiter) {
 }
 
 TEST_F(DialectDetectionTest, DialectValidation_NewlineQuote) {
-    simdcsv::Dialect invalid;
+    libvroom::Dialect invalid;
     invalid.delimiter = ',';
     invalid.quote_char = '\n';
     EXPECT_FALSE(invalid.is_valid()) << "Newline quote should be invalid";
@@ -725,10 +725,10 @@ TEST_F(DialectDetectionTest, BackslashEscapedDelimiter) {
 
 TEST_F(DialectDetectionTest, EscapeCharOptions) {
     // Test with custom escape character options
-    simdcsv::DetectionOptions opts;
+    libvroom::DetectionOptions opts;
     opts.escape_chars = {'\\', '~'};  // Test backslash and tilde
 
-    simdcsv::DialectDetector custom_detector(opts);
+    libvroom::DialectDetector custom_detector(opts);
 
     const std::string csv_data =
         "A,B\n"
@@ -939,7 +939,7 @@ TEST_F(DialectDetectionTest, DetectMixedLineEndings) {
     );
 
     EXPECT_TRUE(result.success());
-    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::MIXED);
+    EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::MIXED);
 }
 
 TEST_F(DialectDetectionTest, DetectMixedLineEndingsWithCR) {
@@ -951,7 +951,7 @@ TEST_F(DialectDetectionTest, DetectMixedLineEndingsWithCR) {
     );
 
     EXPECT_TRUE(result.success());
-    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::MIXED);
+    EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::MIXED);
 }
 
 TEST_F(DialectDetectionTest, DetectUnknownLineEnding) {
@@ -963,7 +963,7 @@ TEST_F(DialectDetectionTest, DetectUnknownLineEnding) {
     );
 
     // May not have enough rows, but should detect UNKNOWN line ending
-    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::UNKNOWN);
+    EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::UNKNOWN);
 }
 
 // ============================================================================
@@ -1042,9 +1042,9 @@ TEST_F(DialectDetectionTest, HeaderDetectionSingleRow) {
     // Only one row - can't detect header
     const std::string csv_data = "name,value,count\n";
 
-    simdcsv::DetectionOptions opts;
+    libvroom::DetectionOptions opts;
     opts.min_rows = 1;  // Allow single row
-    simdcsv::DialectDetector single_row_detector(opts);
+    libvroom::DialectDetector single_row_detector(opts);
 
     auto result = single_row_detector.detect(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
@@ -1104,28 +1104,28 @@ TEST_F(DialectDetectionTest, AllDifferentFieldCounts) {
 // ============================================================================
 
 TEST_F(DialectDetectionTest, DialectToStringTab) {
-    simdcsv::Dialect tsv = simdcsv::Dialect::tsv();
+    libvroom::Dialect tsv = libvroom::Dialect::tsv();
     std::string str = tsv.to_string();
 
     EXPECT_NE(str.find("'\\t'"), std::string::npos) << "Should contain tab representation";
 }
 
 TEST_F(DialectDetectionTest, DialectToStringSemicolon) {
-    simdcsv::Dialect semi = simdcsv::Dialect::semicolon();
+    libvroom::Dialect semi = libvroom::Dialect::semicolon();
     std::string str = semi.to_string();
 
     EXPECT_NE(str.find("';'"), std::string::npos) << "Should contain semicolon";
 }
 
 TEST_F(DialectDetectionTest, DialectToStringPipe) {
-    simdcsv::Dialect pipe = simdcsv::Dialect::pipe();
+    libvroom::Dialect pipe = libvroom::Dialect::pipe();
     std::string str = pipe.to_string();
 
     EXPECT_NE(str.find("'|'"), std::string::npos) << "Should contain pipe";
 }
 
 TEST_F(DialectDetectionTest, DialectToStringColon) {
-    simdcsv::Dialect colon;
+    libvroom::Dialect colon;
     colon.delimiter = ':';
     colon.quote_char = '"';
     std::string str = colon.to_string();
@@ -1134,7 +1134,7 @@ TEST_F(DialectDetectionTest, DialectToStringColon) {
 }
 
 TEST_F(DialectDetectionTest, DialectToStringSingleQuote) {
-    simdcsv::Dialect d;
+    libvroom::Dialect d;
     d.delimiter = ',';
     d.quote_char = '\'';
     std::string str = d.to_string();
@@ -1143,7 +1143,7 @@ TEST_F(DialectDetectionTest, DialectToStringSingleQuote) {
 }
 
 TEST_F(DialectDetectionTest, DialectToStringNoQuote) {
-    simdcsv::Dialect d;
+    libvroom::Dialect d;
     d.delimiter = ',';
     d.quote_char = '\0';
     std::string str = d.to_string();
@@ -1152,7 +1152,7 @@ TEST_F(DialectDetectionTest, DialectToStringNoQuote) {
 }
 
 TEST_F(DialectDetectionTest, DialectToStringBackslashEscape) {
-    simdcsv::Dialect d;
+    libvroom::Dialect d;
     d.delimiter = ',';
     d.quote_char = '"';
     d.escape_char = '\\';
@@ -1163,7 +1163,7 @@ TEST_F(DialectDetectionTest, DialectToStringBackslashEscape) {
 }
 
 TEST_F(DialectDetectionTest, DialectToStringDoubleQuoteEscape) {
-    simdcsv::Dialect d;
+    libvroom::Dialect d;
     d.delimiter = ',';
     d.quote_char = '"';
     d.double_quote = true;
@@ -1173,7 +1173,7 @@ TEST_F(DialectDetectionTest, DialectToStringDoubleQuoteEscape) {
 }
 
 TEST_F(DialectDetectionTest, DialectToStringOtherEscape) {
-    simdcsv::Dialect d;
+    libvroom::Dialect d;
     d.delimiter = ',';
     d.quote_char = '"';
     d.escape_char = '~';
@@ -1185,7 +1185,7 @@ TEST_F(DialectDetectionTest, DialectToStringOtherEscape) {
 
 TEST_F(DialectDetectionTest, DialectToStringOtherDelimiter) {
     // Test an unusual delimiter character
-    simdcsv::Dialect d;
+    libvroom::Dialect d;
     d.delimiter = '#';
     d.quote_char = '"';
     std::string str = d.to_string();
@@ -1195,7 +1195,7 @@ TEST_F(DialectDetectionTest, DialectToStringOtherDelimiter) {
 
 TEST_F(DialectDetectionTest, DialectToStringOtherQuote) {
     // Test an unusual quote character
-    simdcsv::Dialect d;
+    libvroom::Dialect d;
     d.delimiter = ',';
     d.quote_char = '`';
     std::string str = d.to_string();
@@ -1236,9 +1236,9 @@ TEST_F(DialectDetectionTest, NoValidDialectWarning) {
     // Data that doesn't form valid CSV structure
     const std::string csv_data = "x\ny\n";  // Only 2 rows, may not meet min_rows
 
-    simdcsv::DetectionOptions opts;
+    libvroom::DetectionOptions opts;
     opts.min_rows = 5;  // Require more rows than we have
-    simdcsv::DialectDetector strict_detector(opts);
+    libvroom::DialectDetector strict_detector(opts);
 
     auto result = strict_detector.detect(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
@@ -1394,90 +1394,90 @@ TEST_F(DialectDetectionTest, TypeScoreMixedTypes) {
 // ============================================================================
 
 TEST_F(DialectDetectionTest, InferCellTypeWhitespace) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
     // Whitespace-padded values
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("  123  "), CellType::INTEGER);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("\t3.14\t"), CellType::FLOAT);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("  true  "), CellType::BOOLEAN);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("\n"), CellType::EMPTY);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("  123  "), CellType::INTEGER);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("\t3.14\t"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("  true  "), CellType::BOOLEAN);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("\n"), CellType::EMPTY);
 }
 
 TEST_F(DialectDetectionTest, InferCellTypeDateFormats) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
     // Various date formats
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-12-31"), CellType::DATE);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024/12/31"), CellType::DATE);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("31-12-2024"), CellType::DATE);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("31/12/2024"), CellType::DATE);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024-12-31"), CellType::DATE);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024/12/31"), CellType::DATE);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("31-12-2024"), CellType::DATE);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("31/12/2024"), CellType::DATE);
 
     // Invalid date-like strings
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-1-5"), CellType::STRING);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("24-12-31"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024-1-5"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("24-12-31"), CellType::STRING);
 }
 
 TEST_F(DialectDetectionTest, InferCellTypeTimeFormats) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("00:00"), CellType::TIME);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("23:59"), CellType::TIME);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("00:00:00"), CellType::TIME);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("23:59:59"), CellType::TIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("00:00"), CellType::TIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("23:59"), CellType::TIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("00:00:00"), CellType::TIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("23:59:59"), CellType::TIME);
 
     // Invalid time formats
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1:30"), CellType::STRING);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("12:3"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("1:30"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("12:3"), CellType::STRING);
 }
 
 TEST_F(DialectDetectionTest, InferCellTypeDateTimeFormats) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
     // ISO 8601 datetime
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15T00:00:00"), CellType::DATETIME);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15T23:59:59"), CellType::DATETIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024-01-15T00:00:00"), CellType::DATETIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024-01-15T23:59:59"), CellType::DATETIME);
 
     // With timezone
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15T10:30:00+05:00"), CellType::DATETIME);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15T10:30:00-08:00"), CellType::DATETIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024-01-15T10:30:00+05:00"), CellType::DATETIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024-01-15T10:30:00-08:00"), CellType::DATETIME);
 
     // Space separator
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("2024-01-15 10:30:00"), CellType::DATETIME);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("2024-01-15 10:30:00"), CellType::DATETIME);
 }
 
 TEST_F(DialectDetectionTest, InferCellTypeIntegerEdgeCases) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("+0"), CellType::INTEGER);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("-0"), CellType::INTEGER);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("0000"), CellType::INTEGER);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("999999999"), CellType::INTEGER);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("+0"), CellType::INTEGER);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("-0"), CellType::INTEGER);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("0000"), CellType::INTEGER);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("999999999"), CellType::INTEGER);
 
     // Not integers
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("+"), CellType::STRING);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("-"), CellType::STRING);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("+-1"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("+"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("-"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("+-1"), CellType::STRING);
 }
 
 TEST_F(DialectDetectionTest, InferCellTypeFloatEdgeCases) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("0.0"), CellType::FLOAT);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type(".0"), CellType::FLOAT);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("0."), CellType::FLOAT);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("+.5"), CellType::FLOAT);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("-.5"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("0.0"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type(".0"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("0."), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("+.5"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("-.5"), CellType::FLOAT);
 
     // Exponent edge cases
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1e0"), CellType::FLOAT);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1E+0"), CellType::FLOAT);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1E-0"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("1e0"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("1E+0"), CellType::FLOAT);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("1E-0"), CellType::FLOAT);
 
     // Invalid floats
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1e"), CellType::STRING);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("1E+"), CellType::STRING);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("."), CellType::STRING);
-    EXPECT_EQ(simdcsv::DialectDetector::infer_cell_type("..5"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("1e"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("1E+"), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("."), CellType::STRING);
+    EXPECT_EQ(libvroom::DialectDetector::infer_cell_type("..5"), CellType::STRING);
 }
 
 // ============================================================================
@@ -1485,16 +1485,16 @@ TEST_F(DialectDetectionTest, InferCellTypeFloatEdgeCases) {
 // ============================================================================
 
 TEST_F(DialectDetectionTest, CellTypeToString) {
-    using CellType = simdcsv::DialectDetector::CellType;
+    using CellType = libvroom::DialectDetector::CellType;
 
-    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::EMPTY), "EMPTY");
-    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::INTEGER), "INTEGER");
-    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::FLOAT), "FLOAT");
-    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::DATE), "DATE");
-    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::DATETIME), "DATETIME");
-    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::TIME), "TIME");
-    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::BOOLEAN), "BOOLEAN");
-    EXPECT_STREQ(simdcsv::DialectDetector::cell_type_to_string(CellType::STRING), "STRING");
+    EXPECT_STREQ(libvroom::DialectDetector::cell_type_to_string(CellType::EMPTY), "EMPTY");
+    EXPECT_STREQ(libvroom::DialectDetector::cell_type_to_string(CellType::INTEGER), "INTEGER");
+    EXPECT_STREQ(libvroom::DialectDetector::cell_type_to_string(CellType::FLOAT), "FLOAT");
+    EXPECT_STREQ(libvroom::DialectDetector::cell_type_to_string(CellType::DATE), "DATE");
+    EXPECT_STREQ(libvroom::DialectDetector::cell_type_to_string(CellType::DATETIME), "DATETIME");
+    EXPECT_STREQ(libvroom::DialectDetector::cell_type_to_string(CellType::TIME), "TIME");
+    EXPECT_STREQ(libvroom::DialectDetector::cell_type_to_string(CellType::BOOLEAN), "BOOLEAN");
+    EXPECT_STREQ(libvroom::DialectDetector::cell_type_to_string(CellType::STRING), "STRING");
 }
 
 // ============================================================================
@@ -1502,7 +1502,7 @@ TEST_F(DialectDetectionTest, CellTypeToString) {
 // ============================================================================
 
 TEST_F(DialectDetectionTest, DialectValidation_CarriageReturnDelimiter) {
-    simdcsv::Dialect invalid;
+    libvroom::Dialect invalid;
     invalid.delimiter = '\r';
     invalid.quote_char = '"';
     EXPECT_FALSE(invalid.is_valid()) << "CR delimiter should be invalid";
@@ -1511,7 +1511,7 @@ TEST_F(DialectDetectionTest, DialectValidation_CarriageReturnDelimiter) {
 }
 
 TEST_F(DialectDetectionTest, DialectValidation_CarriageReturnQuote) {
-    simdcsv::Dialect invalid;
+    libvroom::Dialect invalid;
     invalid.delimiter = ',';
     invalid.quote_char = '\r';
     EXPECT_FALSE(invalid.is_valid()) << "CR quote should be invalid";
@@ -1520,21 +1520,21 @@ TEST_F(DialectDetectionTest, DialectValidation_CarriageReturnQuote) {
 }
 
 TEST_F(DialectDetectionTest, DialectValidation_ControlCharDelimiter) {
-    simdcsv::Dialect invalid;
+    libvroom::Dialect invalid;
     invalid.delimiter = '\x01';  // Control character
     invalid.quote_char = '"';
     EXPECT_FALSE(invalid.is_valid()) << "Control char delimiter should be invalid";
 }
 
 TEST_F(DialectDetectionTest, DialectValidation_ControlCharQuote) {
-    simdcsv::Dialect invalid;
+    libvroom::Dialect invalid;
     invalid.delimiter = ',';
     invalid.quote_char = '\x1F';  // Control character
     EXPECT_FALSE(invalid.is_valid()) << "Control char quote should be invalid";
 }
 
 TEST_F(DialectDetectionTest, DialectValidation_HighByteDelimiter) {
-    simdcsv::Dialect invalid;
+    libvroom::Dialect invalid;
     invalid.delimiter = static_cast<char>(200);  // > 126
     invalid.quote_char = '"';
     EXPECT_FALSE(invalid.is_valid()) << "High-byte delimiter should be invalid";
@@ -1548,9 +1548,9 @@ TEST_F(DialectDetectionTest, PatternScoreTooFewRows) {
     // Less than min_rows (when explicitly set higher than available rows)
     const std::string csv_data = "a,b,c\n1,2,3\n";
 
-    simdcsv::DetectionOptions opts;
+    libvroom::DetectionOptions opts;
     opts.min_rows = 5;
-    simdcsv::DialectDetector strict_detector(opts);
+    libvroom::DialectDetector strict_detector(opts);
 
     auto result = strict_detector.detect(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
@@ -1586,9 +1586,9 @@ TEST_F(DialectDetectionTest, PatternScoreMaxRows) {
         csv_data += std::to_string(i) + ",x,y\n";
     }
 
-    simdcsv::DetectionOptions opts;
+    libvroom::DetectionOptions opts;
     opts.max_rows = 50;
-    simdcsv::DialectDetector limited_detector(opts);
+    libvroom::DialectDetector limited_detector(opts);
 
     auto result = limited_detector.detect(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
@@ -1656,7 +1656,7 @@ TEST_F(DialectDetectionTest, ExtractFieldsTrailingDelimiter) {
 
 TEST_F(DialectDetectionTest, CandidateTieBreakColumns) {
     // Test that more columns wins in tie-break
-    simdcsv::DialectCandidate c1, c2;
+    libvroom::DialectCandidate c1, c2;
     c1.consistency_score = 0.8;
     c1.num_columns = 5;
     c1.dialect.quote_char = '"';
@@ -1674,7 +1674,7 @@ TEST_F(DialectDetectionTest, CandidateTieBreakColumns) {
 
 TEST_F(DialectDetectionTest, CandidateTieBreakQuoteChar) {
     // Test that double quote wins in tie-break
-    simdcsv::DialectCandidate c1, c2;
+    libvroom::DialectCandidate c1, c2;
     c1.consistency_score = 0.8;
     c1.num_columns = 3;
     c1.dialect.quote_char = '"';
@@ -1692,7 +1692,7 @@ TEST_F(DialectDetectionTest, CandidateTieBreakQuoteChar) {
 
 TEST_F(DialectDetectionTest, CandidateTieBreakDoubleQuote) {
     // Test that double_quote=true wins in tie-break
-    simdcsv::DialectCandidate c1, c2;
+    libvroom::DialectCandidate c1, c2;
     c1.consistency_score = 0.8;
     c1.num_columns = 3;
     c1.dialect.quote_char = '"';
@@ -1710,7 +1710,7 @@ TEST_F(DialectDetectionTest, CandidateTieBreakDoubleQuote) {
 
 TEST_F(DialectDetectionTest, CandidateTieBreakDelimiter) {
     // Test that comma delimiter wins in tie-break
-    simdcsv::DialectCandidate c1, c2;
+    libvroom::DialectCandidate c1, c2;
     c1.consistency_score = 0.8;
     c1.num_columns = 3;
     c1.dialect.quote_char = '"';
@@ -1728,7 +1728,7 @@ TEST_F(DialectDetectionTest, CandidateTieBreakDelimiter) {
 
 TEST_F(DialectDetectionTest, CandidateEqualScores) {
     // Test completely equal candidates
-    simdcsv::DialectCandidate c1, c2;
+    libvroom::DialectCandidate c1, c2;
     c1.consistency_score = 0.8;
     c1.num_columns = 3;
     c1.dialect.quote_char = '"';
@@ -1750,12 +1750,12 @@ TEST_F(DialectDetectionTest, CandidateEqualScores) {
 // ============================================================================
 
 TEST_F(DialectDetectionTest, GenerateCandidatesCustomOptions) {
-    simdcsv::DetectionOptions opts;
+    libvroom::DetectionOptions opts;
     opts.delimiters = {','};
     opts.quote_chars = {'"'};
     opts.escape_chars = {};  // No escape chars beyond double-quote
 
-    simdcsv::DialectDetector custom_detector(opts);
+    libvroom::DialectDetector custom_detector(opts);
 
     const std::string csv_data = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
     auto result = custom_detector.detect(
@@ -1769,12 +1769,12 @@ TEST_F(DialectDetectionTest, GenerateCandidatesCustomOptions) {
 }
 
 TEST_F(DialectDetectionTest, GenerateCandidatesMultipleEscapes) {
-    simdcsv::DetectionOptions opts;
+    libvroom::DetectionOptions opts;
     opts.delimiters = {','};
     opts.quote_chars = {'"'};
     opts.escape_chars = {'\\', '~', '^'};
 
-    simdcsv::DialectDetector custom_detector(opts);
+    libvroom::DialectDetector custom_detector(opts);
 
     const std::string csv_data = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
     auto result = custom_detector.detect(
@@ -1798,7 +1798,7 @@ TEST_F(DialectDetectionTest, FindRowsCRLFProper) {
     );
 
     EXPECT_TRUE(result.success());
-    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::CRLF);
+    EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::CRLF);
     EXPECT_EQ(result.detected_columns, 3);
 }
 
@@ -1811,7 +1811,7 @@ TEST_F(DialectDetectionTest, FindRowsCROnly) {
     );
 
     EXPECT_TRUE(result.success());
-    EXPECT_EQ(result.dialect.line_ending, simdcsv::Dialect::LineEnding::CR);
+    EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::CR);
 }
 
 TEST_F(DialectDetectionTest, FindRowsCRAtEndOfBuffer) {
@@ -1903,9 +1903,9 @@ TEST_F(DialectDetectionTest, SampleSizeLimit) {
         csv_data += std::to_string(i) + ",data,value\n";
     }
 
-    simdcsv::DetectionOptions opts;
+    libvroom::DetectionOptions opts;
     opts.sample_size = 1024;  // Only sample 1KB
-    simdcsv::DialectDetector limited_detector(opts);
+    libvroom::DialectDetector limited_detector(opts);
 
     auto result = limited_detector.detect(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
@@ -1923,7 +1923,7 @@ TEST_F(DialectDetectionTest, SampleSizeLimit) {
 
 TEST_F(DialectDetectionTest, EscapeCharInFindRows) {
     // Backslash escape affecting row boundaries
-    simdcsv::Dialect d;
+    libvroom::Dialect d;
     d.delimiter = ',';
     d.quote_char = '"';
     d.escape_char = '\\';
@@ -2028,7 +2028,7 @@ TEST_F(DialectDetectionTest, WideCSVAdaptiveSampleSize) {
     }
 
     // Use default options (10KB sample size, min_rows=2)
-    simdcsv::DialectDetector default_detector;
+    libvroom::DialectDetector default_detector;
     auto result = default_detector.detect(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
         csv_data.size()

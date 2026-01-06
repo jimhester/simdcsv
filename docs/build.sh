@@ -19,7 +19,7 @@ cat > api-reference/index.qmd << 'EOF'
 title: "API Reference"
 ---
 
-Complete API documentation for simdcsv, generated from source code comments.
+Complete API documentation for libvroom, generated from source code comments.
 
 ## Quick Links
 
@@ -27,17 +27,17 @@ Complete API documentation for simdcsv, generated from source code comments.
 
 | Class | Description |
 |-------|-------------|
-| [two_pass](/api-reference/Classes/classsimdcsv_1_1two__pass.qmd) | Main CSV parser using speculative two-pass algorithm |
-| [index](/api-reference/Classes/classsimdcsv_1_1index.qmd) | Result structure containing parsed field positions |
-| [ErrorCollector](/api-reference/Classes/classsimdcsv_1_1ErrorCollector.qmd) | Collects and manages parse errors |
-| [parser](/api-reference/Classes/classsimdcsv_1_1parser.qmd) | Convenience wrapper for parsing operations |
+| [two_pass](/api-reference/Classes/classlibvroom_1_1two__pass.qmd) | Main CSV parser using speculative two-pass algorithm |
+| [index](/api-reference/Classes/classlibvroom_1_1index.qmd) | Result structure containing parsed field positions |
+| [ErrorCollector](/api-reference/Classes/classlibvroom_1_1ErrorCollector.qmd) | Collects and manages parse errors |
+| [parser](/api-reference/Classes/classlibvroom_1_1parser.qmd) | Convenience wrapper for parsing operations |
 
 ### Error Handling
 
 | Type | Description |
 |------|-------------|
-| [ParseError](/api-reference/Classes/structsimdcsv_1_1ParseError.qmd) | Structure representing a single parse error |
-| [ParseException](/api-reference/Classes/classsimdcsv_1_1ParseException.qmd) | Exception thrown in STRICT error mode |
+| [ParseError](/api-reference/Classes/structlibvroom_1_1ParseError.qmd) | Structure representing a single parse error |
+| [ParseException](/api-reference/Classes/classlibvroom_1_1ParseException.qmd) | Exception thrown in STRICT error mode |
 
 ## Full Reference
 

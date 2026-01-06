@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-using namespace simdcsv;
+using namespace libvroom;
 
 // ============================================================================
 // BOM Detection Tests

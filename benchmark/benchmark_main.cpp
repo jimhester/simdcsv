@@ -6,12 +6,12 @@
 
 // Global variables for shared test data
 std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-simdcsv::two_pass* global_parser = nullptr;
+libvroom::two_pass* global_parser = nullptr;
 
 // Initialize test data and parser
 static void InitializeBenchmarkData() {
   if (global_parser == nullptr) {
-    global_parser = new simdcsv::two_pass();
+    global_parser = new libvroom::two_pass();
   }
   
   // Load common test files if they exist
@@ -26,7 +26,7 @@ static void InitializeBenchmarkData() {
   
   for (const auto& file : test_files) {
     try {
-      auto data = get_corpus(file.c_str(), SIMDCSV_PADDING);
+      auto data = get_corpus(file.c_str(), LIBVROOM_PADDING);
       test_data[file] = data;
     } catch (...) {
       // File doesn't exist, skip it

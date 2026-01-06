@@ -12,7 +12,7 @@
 #undef HWY_TARGET_INCLUDE
 #include "hwy/highway.h"
 
-namespace simdcsv {
+namespace libvroom {
 
 // Namespace alias for Highway operations
 namespace hn = hwy::HWY_NAMESPACE;
@@ -249,6 +249,6 @@ really_inline int write(uint64_t* base_ptr, uint64_t& base, uint64_t idx, int st
   return cnt;
 }
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
 #endif  // SIMD_HIGHWAY_H

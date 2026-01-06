@@ -6,7 +6,7 @@
 #include "two_pass.h"
 #include "mem_util.h"
 
-using namespace simdcsv;
+using namespace libvroom;
 
 class TestBuffer {
 public:
@@ -533,8 +533,8 @@ TEST_F(ExtractionConfigTest, NoWhitespaceTrimmingNA) {
 class ValueExtractorTest : public ::testing::Test {
 protected:
     std::unique_ptr<TestBuffer> buffer_;
-    simdcsv::two_pass parser_;
-    simdcsv::index idx_;
+    libvroom::two_pass parser_;
+    libvroom::index idx_;
 
     void ParseCSV(const std::string& csv) {
         buffer_ = std::make_unique<TestBuffer>(csv);

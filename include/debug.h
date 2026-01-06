@@ -1,10 +1,10 @@
 /**
  * @file debug.h
- * @brief Debug mode framework for the simdcsv CSV parser.
+ * @brief Debug mode framework for the libvroom CSV parser.
  */
 
-#ifndef SIMDCSV_DEBUG_H
-#define SIMDCSV_DEBUG_H
+#ifndef LIBVROOM_DEBUG_H
+#define LIBVROOM_DEBUG_H
 
 #include <chrono>
 #include <cstdarg>
@@ -14,7 +14,7 @@
 #include <vector>
 #include <cstring>
 
-namespace simdcsv {
+namespace libvroom {
 
 struct DebugConfig {
     bool verbose = false;
@@ -80,7 +80,7 @@ public:
     void log(const char* fmt, ...) const {
         if (!config_.verbose) return;
         FILE* out = config_.output ? config_.output : stdout;
-        fprintf(out, "[simdcsv] ");
+        fprintf(out, "[libvroom] ");
         va_list args;
         va_start(args, fmt);
         vfprintf(out, fmt, args);
@@ -94,21 +94,21 @@ public:
     void log_str(const char* msg) const {
         if (!config_.verbose) return;
         FILE* out = config_.output ? config_.output : stdout;
-        fprintf(out, "[simdcsv] %s\n", msg);
+        fprintf(out, "[libvroom] %s\n", msg);
         fflush(out);
     }
 
     void log_decision(const char* decision, const char* reason) const {
         if (!config_.verbose) return;
         FILE* out = config_.output ? config_.output : stdout;
-        fprintf(out, "[simdcsv] DECISION: %s | Reason: %s\n", decision, reason);
+        fprintf(out, "[libvroom] DECISION: %s | Reason: %s\n", decision, reason);
         fflush(out);
     }
 
     void log_simd_path(const char* path_name, size_t lanes) const {
         if (!config_.verbose) return;
         FILE* out = config_.output ? config_.output : stdout;
-        fprintf(out, "[simdcsv] SIMD: Using %s path (vector width: %zu bytes)\n",
+        fprintf(out, "[libvroom] SIMD: Using %s path (vector width: %zu bytes)\n",
                 path_name, lanes);
         fflush(out);
     }
@@ -116,7 +116,7 @@ public:
     void log_threading(size_t n_threads, size_t chunk_size) const {
         if (!config_.verbose) return;
         FILE* out = config_.output ? config_.output : stdout;
-        fprintf(out, "[simdcsv] Threading: %zu threads, chunk size %zu bytes\n",
+        fprintf(out, "[libvroom] Threading: %zu threads, chunk size %zu bytes\n",
                 n_threads, chunk_size);
         fflush(out);
     }
@@ -124,7 +124,7 @@ public:
     void dump_mask(const char* name, uint64_t mask, size_t offset = 0) const {
         if (!config_.dump_masks) return;
         FILE* out = config_.output ? config_.output : stdout;
-        fprintf(out, "[simdcsv] MASK %s @ offset %zu:\n", name, offset);
+        fprintf(out, "[libvroom] MASK %s @ offset %zu:\n", name, offset);
         fprintf(out, "  hex: 0x%016llx\n", (unsigned long long)mask);
         fprintf(out, "  bin: ");
         for (int i = 63; i >= 0; --i) {
@@ -139,7 +139,7 @@ public:
         if (!config_.dump_masks) return;
         FILE* out = config_.output ? config_.output : stdout;
         size_t dump_len = (len < config_.dump_context_bytes) ? len : config_.dump_context_bytes;
-        fprintf(out, "[simdcsv] BUFFER %s @ offset %zu (showing %zu of %zu bytes):\n",
+        fprintf(out, "[libvroom] BUFFER %s @ offset %zu (showing %zu of %zu bytes):\n",
                 name, offset, dump_len, len);
         fprintf(out, "  hex: ");
         for (size_t i = 0; i < dump_len; ++i) {
@@ -159,7 +159,7 @@ public:
         if (!config_.dump_masks) return;
         FILE* out = config_.output ? config_.output : stdout;
         size_t dump_count = (count < config_.max_indexes_dump) ? count : config_.max_indexes_dump;
-        fprintf(out, "[simdcsv] INDEXES thread %zu (showing %zu of %zu):\n",
+        fprintf(out, "[libvroom] INDEXES thread %zu (showing %zu of %zu):\n",
                 thread_id, dump_count, count);
         fprintf(out, "  ");
         for (size_t i = 0; i < dump_count; ++i) {
@@ -177,7 +177,7 @@ public:
     void dump_chunk_boundaries(const std::vector<uint64_t>& chunk_pos, size_t n_threads) const {
         if (!config_.verbose) return;
         FILE* out = config_.output ? config_.output : stdout;
-        fprintf(out, "[simdcsv] CHUNK BOUNDARIES:\n");
+        fprintf(out, "[libvroom] CHUNK BOUNDARIES:\n");
         for (size_t i = 0; i <= n_threads; ++i) {
             fprintf(out, "  chunk[%zu]: %llu", i, (unsigned long long)chunk_pos[i]);
             if (i > 0) {
@@ -208,7 +208,7 @@ public:
     void print_timing_summary() const {
         if (!config_.timing || phase_times_.empty()) return;
         FILE* out = config_.output ? config_.output : stdout;
-        fprintf(out, "\n[simdcsv] TIMING SUMMARY:\n");
+        fprintf(out, "\n[libvroom] TIMING SUMMARY:\n");
         fprintf(out, "  %-30s %12s %12s %12s\n",
                 "Phase", "Time (ms)", "Bytes", "Throughput");
         fprintf(out, "  %s\n", std::string(70, '-').c_str());
@@ -251,7 +251,7 @@ public:
                                uint64_t first_even_nl, uint64_t first_odd_nl) const {
         if (!config_.verbose) return;
         FILE* out = config_.output ? config_.output : stdout;
-        fprintf(out, "[simdcsv] FIRST PASS chunk %zu: quotes=%zu, first_even_nl=%llu, first_odd_nl=%llu\n",
+        fprintf(out, "[libvroom] FIRST PASS chunk %zu: quotes=%zu, first_even_nl=%llu, first_odd_nl=%llu\n",
                 chunk_id, n_quotes,
                 (unsigned long long)first_even_nl,
                 (unsigned long long)first_odd_nl);
@@ -264,7 +264,7 @@ public:
         char delim_str[8], quote_str[8];
         format_char(delimiter, delim_str, sizeof(delim_str));
         format_char(quote_char, quote_str, sizeof(quote_str));
-        fprintf(out, "[simdcsv] DIALECT: delimiter='%s', quote='%s', confidence=%.2f%%\n",
+        fprintf(out, "[libvroom] DIALECT: delimiter='%s', quote='%s', confidence=%.2f%%\n",
                 delim_str, quote_str, confidence * 100);
         fflush(out);
     }
@@ -283,7 +283,7 @@ public:
         } else {
             snprintf(trigger_str, sizeof(trigger_str), "\\x%02x", (unsigned char)trigger);
         }
-        fprintf(out, "[simdcsv] STATE @ %zu: %s -> %s (trigger: '%s')\n",
+        fprintf(out, "[libvroom] STATE @ %zu: %s -> %s (trigger: '%s')\n",
                 pos, from_state, to_state, trigger_str);
         fflush(out);
     }
@@ -321,8 +321,8 @@ private:
     size_t bytes_;
 };
 
-#define SIMDCSV_TIMED_PHASE(trace, name, bytes) \
-    simdcsv::ScopedPhaseTimer _phase_timer_##__LINE__(trace, name, bytes)
+#define LIBVROOM_TIMED_PHASE(trace, name, bytes) \
+    libvroom::ScopedPhaseTimer _phase_timer_##__LINE__(trace, name, bytes)
 
 namespace debug {
 
@@ -346,6 +346,6 @@ inline bool enabled() {
 
 }  // namespace debug
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
-#endif  // SIMDCSV_DEBUG_H
+#endif  // LIBVROOM_DEBUG_H

@@ -82,11 +82,11 @@ static LoadResult process_with_encoding(uint8_t* raw_buf, size_t raw_len, size_t
     LoadResult result;
 
     // Detect encoding
-    result.encoding = simdcsv::detect_encoding(raw_buf, raw_len);
+    result.encoding = libvroom::detect_encoding(raw_buf, raw_len);
 
     // If transcoding is needed, transcode and free original buffer
     if (result.encoding.needs_transcoding) {
-        auto transcoded = simdcsv::transcode_to_utf8(
+        auto transcoded = libvroom::transcode_to_utf8(
             raw_buf, raw_len,
             result.encoding.encoding,
             result.encoding.bom_length,
@@ -103,7 +103,7 @@ static LoadResult process_with_encoding(uint8_t* raw_buf, size_t raw_len, size_t
         result.data = std::basic_string_view<uint8_t>(transcoded.data, transcoded.length);
     } else if (result.encoding.bom_length > 0) {
         // UTF-8 with BOM - need to strip the BOM
-        auto stripped = simdcsv::transcode_to_utf8(
+        auto stripped = libvroom::transcode_to_utf8(
             raw_buf, raw_len,
             result.encoding.encoding,
             result.encoding.bom_length,

@@ -18,15 +18,15 @@
  * @see transcode_to_utf8() for transcoding
  */
 
-#ifndef SIMDCSV_ENCODING_H
-#define SIMDCSV_ENCODING_H
+#ifndef LIBVROOM_ENCODING_H
+#define LIBVROOM_ENCODING_H
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
 
-namespace simdcsv {
+namespace libvroom {
 
 /**
  * @brief Character encodings supported by the parser.
@@ -159,6 +159,6 @@ size_t utf16_to_utf8_length(const uint8_t* buf, size_t len, bool is_big_endian);
  */
 size_t utf32_to_utf8_length(const uint8_t* buf, size_t len, bool is_big_endian);
 
-}  // namespace simdcsv
+}  // namespace libvroom
 
-#endif  // SIMDCSV_ENCODING_H
+#endif  // LIBVROOM_ENCODING_H

@@ -2,11 +2,11 @@
 title: "Integration Guide"
 ---
 
-This guide covers how to integrate simdcsv into your own projects using various build systems and configurations.
+This guide covers how to integrate libvroom into your own projects using various build systems and configurations.
 
 ## CMake FetchContent (Recommended)
 
-The simplest way to integrate simdcsv is using CMake's FetchContent module. This automatically downloads and builds simdcsv and its dependencies.
+The simplest way to integrate libvroom is using CMake's FetchContent module. This automatically downloads and builds libvroom and its dependencies.
 
 ```cmake
 cmake_minimum_required(VERSION 3.14)
@@ -15,8 +15,8 @@ project(my_project)
 include(FetchContent)
 
 FetchContent_Declare(
-  simdcsv
-  GIT_REPOSITORY https://github.com/jimhester/simdcsv.git
+  libvroom
+  GIT_REPOSITORY https://github.com/jimhester/libvroom.git
   GIT_TAG main  # Or use a specific version tag
 )
 
@@ -24,23 +24,23 @@ FetchContent_Declare(
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(simdcsv)
+FetchContent_MakeAvailable(libvroom)
 
 add_executable(my_app main.cpp)
-target_link_libraries(my_app PRIVATE simdcsv_lib)
+target_link_libraries(my_app PRIVATE libvroom_lib)
 ```
 
 This approach handles all dependencies (Google Highway for SIMD) automatically.
 
 ## Pre-built Static Library
 
-To use simdcsv as a pre-built static library:
+To use libvroom as a pre-built static library:
 
 ### 1. Build the Static Library
 
 ```bash
-git clone https://github.com/jimhester/simdcsv.git
-cd simdcsv
+git clone https://github.com/jimhester/libvroom.git
+cd libvroom
 
 # Build static library only (no tests/benchmarks)
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
@@ -49,20 +49,20 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
 cmake --build build
 ```
 
-This produces `build/libsimdcsv_lib.a` (or `simdcsv_lib.lib` on Windows).
+This produces `build/liblibvroom_lib.a` (or `libvroom_lib.lib` on Windows).
 
 ### 2. Install Headers and Library
 
 ```bash
 # Create installation directories
-mkdir -p /usr/local/include/simdcsv
+mkdir -p /usr/local/include/libvroom
 mkdir -p /usr/local/lib
 
 # Copy headers
-cp include/*.h /usr/local/include/simdcsv/
+cp include/*.h /usr/local/include/libvroom/
 
 # Copy library
-cp build/libsimdcsv_lib.a /usr/local/lib/
+cp build/liblibvroom_lib.a /usr/local/lib/
 ```
 
 ### 3. Link in Your Project
@@ -70,25 +70,25 @@ cp build/libsimdcsv_lib.a /usr/local/lib/
 **CMake:**
 
 ```cmake
-find_library(SIMDCSV_LIB simdcsv_lib PATHS /usr/local/lib)
+find_library(LIBVROOM_LIB libvroom_lib PATHS /usr/local/lib)
 find_package(hwy REQUIRED)  # Highway must also be installed
 
 add_executable(my_app main.cpp)
-target_include_directories(my_app PRIVATE /usr/local/include/simdcsv)
-target_link_libraries(my_app PRIVATE ${SIMDCSV_LIB} hwy pthread)
+target_include_directories(my_app PRIVATE /usr/local/include/libvroom)
+target_link_libraries(my_app PRIVATE ${LIBVROOM_LIB} hwy pthread)
 ```
 
 **Manual compilation:**
 
 ```bash
-g++ -std=c++17 -O3 -I/usr/local/include/simdcsv \
+g++ -std=c++17 -O3 -I/usr/local/include/libvroom \
     main.cpp -o my_app \
-    -L/usr/local/lib -lsimdcsv_lib -lhwy -lpthread
+    -L/usr/local/lib -llibvroom_lib -lhwy -lpthread
 ```
 
 ## Shared Library Build
 
-To build simdcsv as a shared library (`.so`/`.dylib`/`.dll`):
+To build libvroom as a shared library (`.so`/`.dylib`/`.dll`):
 
 ### 1. Build the Shared Library
 
@@ -100,29 +100,29 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
 cmake --build build
 ```
 
-This produces `build/libsimdcsv_lib.so` (Linux), `build/libsimdcsv_lib.dylib` (macOS), or `build/simdcsv_lib.dll` (Windows).
+This produces `build/liblibvroom_lib.so` (Linux), `build/liblibvroom_lib.dylib` (macOS), or `build/libvroom_lib.dll` (Windows).
 
 ### 2. Install and Link
 
 ```bash
 # Install (adjust path as needed)
-cp build/libsimdcsv_lib.so /usr/local/lib/
+cp build/liblibvroom_lib.so /usr/local/lib/
 ldconfig  # Linux only: update library cache
 ```
 
 **CMake:**
 
 ```cmake
-find_library(SIMDCSV_LIB simdcsv_lib PATHS /usr/local/lib)
+find_library(LIBVROOM_LIB libvroom_lib PATHS /usr/local/lib)
 
 add_executable(my_app main.cpp)
-target_include_directories(my_app PRIVATE /usr/local/include/simdcsv)
-target_link_libraries(my_app PRIVATE ${SIMDCSV_LIB})
+target_include_directories(my_app PRIVATE /usr/local/include/libvroom)
+target_link_libraries(my_app PRIVATE ${LIBVROOM_LIB})
 ```
 
 ## Embedding as a Subdirectory
 
-If you want to include simdcsv directly in your project's source tree:
+If you want to include libvroom directly in your project's source tree:
 
 ```
 my_project/
@@ -130,21 +130,21 @@ my_project/
 ├── src/
 │   └── main.cpp
 └── third_party/
-    └── simdcsv/    # Clone or copy simdcsv here
+    └── libvroom/    # Clone or copy libvroom here
 ```
 
 ```cmake
 cmake_minimum_required(VERSION 3.14)
 project(my_project)
 
-# Disable simdcsv extras
+# Disable libvroom extras
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 
-add_subdirectory(third_party/simdcsv)
+add_subdirectory(third_party/libvroom)
 
 add_executable(my_app src/main.cpp)
-target_link_libraries(my_app PRIVATE simdcsv_lib)
+target_link_libraries(my_app PRIVATE libvroom_lib)
 ```
 
 ## Minimal Example Project
@@ -163,22 +163,22 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(FetchContent)
 
 FetchContent_Declare(
-  simdcsv
-  GIT_REPOSITORY https://github.com/jimhester/simdcsv.git
+  libvroom
+  GIT_REPOSITORY https://github.com/jimhester/libvroom.git
   GIT_TAG main
 )
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(simdcsv)
+FetchContent_MakeAvailable(libvroom)
 
 add_executable(csv_example main.cpp)
-target_link_libraries(csv_example PRIVATE simdcsv_lib pthread)
+target_link_libraries(csv_example PRIVATE libvroom_lib pthread)
 ```
 
 **main.cpp:**
 
 ```cpp
-#include <simdcsv.h>
+#include <libvroom.h>
 #include <iostream>
 
 int main(int argc, char* argv[]) {
@@ -188,15 +188,15 @@ int main(int argc, char* argv[]) {
     }
 
     // Load CSV file with SIMD-aligned memory
-    simdcsv::FileBuffer buffer = simdcsv::load_file(argv[1]);
+    libvroom::FileBuffer buffer = libvroom::load_file(argv[1]);
     if (!buffer.valid()) {
         std::cerr << "Failed to load file\n";
         return 1;
     }
 
     // Create parser and error collector
-    simdcsv::Parser parser(4);  // Use 4 threads
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+    libvroom::Parser parser(4);  // Use 4 threads
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
     // Parse with automatic dialect detection
     auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
@@ -228,12 +228,12 @@ cmake --build build
 
 ## C API Usage
 
-simdcsv also provides a C API for integration with C projects or other languages via FFI:
+libvroom also provides a C API for integration with C projects or other languages via FFI:
 
 **c_example.c:**
 
 ```c
-#include <simdcsv_c.h>
+#include <libvroom_c.h>
 #include <stdio.h>
 
 int main(int argc, char* argv[]) {
@@ -243,49 +243,49 @@ int main(int argc, char* argv[]) {
     }
 
     // Load file
-    simdcsv_buffer_t* buffer = simdcsv_buffer_load_file(argv[1]);
+    libvroom_buffer_t* buffer = libvroom_buffer_load_file(argv[1]);
     if (!buffer) {
         fprintf(stderr, "Failed to load file\n");
         return 1;
     }
 
     // Create parser components
-    simdcsv_parser_t* parser = simdcsv_parser_create();
-    simdcsv_error_collector_t* errors = simdcsv_error_collector_create(
-        SIMDCSV_MODE_PERMISSIVE, 100);
-    simdcsv_index_t* index = simdcsv_index_create(
-        simdcsv_buffer_length(buffer),
-        simdcsv_recommended_threads());
+    libvroom_parser_t* parser = libvroom_parser_create();
+    libvroom_error_collector_t* errors = libvroom_error_collector_create(
+        LIBVROOM_MODE_PERMISSIVE, 100);
+    libvroom_index_t* index = libvroom_index_create(
+        libvroom_buffer_length(buffer),
+        libvroom_recommended_threads());
 
     // Auto-detect dialect and parse
-    simdcsv_detection_result_t* detection = NULL;
-    simdcsv_error_t err = simdcsv_parse_auto(
+    libvroom_detection_result_t* detection = NULL;
+    libvroom_error_t err = libvroom_parse_auto(
         parser, buffer, index, errors, &detection);
 
-    if (err == SIMDCSV_OK && detection) {
+    if (err == LIBVROOM_OK && detection) {
         printf("Parsed successfully!\n");
-        printf("Columns: %zu\n", simdcsv_detection_result_columns(detection));
-        printf("Confidence: %.2f\n", simdcsv_detection_result_confidence(detection));
+        printf("Columns: %zu\n", libvroom_detection_result_columns(detection));
+        printf("Confidence: %.2f\n", libvroom_detection_result_confidence(detection));
         printf("Has header: %s\n",
-               simdcsv_detection_result_has_header(detection) ? "yes" : "no");
+               libvroom_detection_result_has_header(detection) ? "yes" : "no");
     } else {
-        fprintf(stderr, "Parse failed: %s\n", simdcsv_error_string(err));
+        fprintf(stderr, "Parse failed: %s\n", libvroom_error_string(err));
     }
 
     // Cleanup
-    simdcsv_detection_result_destroy(detection);
-    simdcsv_index_destroy(index);
-    simdcsv_error_collector_destroy(errors);
-    simdcsv_parser_destroy(parser);
-    simdcsv_buffer_destroy(buffer);
+    libvroom_detection_result_destroy(detection);
+    libvroom_index_destroy(index);
+    libvroom_error_collector_destroy(errors);
+    libvroom_parser_destroy(parser);
+    libvroom_buffer_destroy(buffer);
 
-    return (err == SIMDCSV_OK) ? 0 : 1;
+    return (err == LIBVROOM_OK) ? 0 : 1;
 }
 ```
 
 ## Linking Requirements
 
-simdcsv requires the following when linking:
+libvroom requires the following when linking:
 
 | Dependency | Notes |
 |------------|-------|
@@ -296,7 +296,7 @@ When using FetchContent or add_subdirectory, these are handled automatically. Fo
 
 ## Build Options Reference
 
-simdcsv provides several CMake options to customize your build:
+libvroom provides several CMake options to customize your build:
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -304,7 +304,7 @@ simdcsv provides several CMake options to customize your build:
 | `BUILD_BENCHMARKS` | `ON` | Build benchmark executables |
 | `BUILD_SHARED_LIBS` | `OFF` | Build shared library instead of static |
 | `ENABLE_COVERAGE` | `OFF` | Enable code coverage reporting |
-| `SIMDCSV_ENABLE_ARROW` | `OFF` | Enable Apache Arrow output integration |
+| `LIBVROOM_ENABLE_ARROW` | `OFF` | Enable Apache Arrow output integration |
 | `ENABLE_FUZZING` | `OFF` | Enable fuzz testing targets (requires Clang) |
 
 For production use, disable tests and benchmarks for faster builds:
@@ -318,7 +318,7 @@ cmake -B build \
 
 ## Platform Support
 
-simdcsv supports the following platforms and SIMD instruction sets:
+libvroom supports the following platforms and SIMD instruction sets:
 
 | Platform | Architecture | SIMD Support | CI Tested |
 |----------|--------------|--------------|-----------|
@@ -341,7 +341,7 @@ The library uses [Google Highway](https://github.com/google/highway) for portabl
 
 ### "Highway not found" error
 
-Ensure Highway is being built along with simdcsv. When using FetchContent, this happens automatically. For manual builds, install Highway first:
+Ensure Highway is being built along with libvroom. When using FetchContent, this happens automatically. For manual builds, install Highway first:
 
 ```bash
 git clone https://github.com/google/highway.git
@@ -363,4 +363,4 @@ This may indicate a CPU that doesn't support the compiled SIMD instructions. Hig
 
 ### Undefined symbols
 
-Ensure all headers from `include/` are accessible and that you're linking against `simdcsv_lib` (not just `simdcsv`).
+Ensure all headers from `include/` are accessible and that you're linking against `libvroom_lib` (not just `libvroom`).

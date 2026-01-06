@@ -1,4 +1,4 @@
-# Fuzz Testing for simdcsv
+# Fuzz Testing for libvroom
 
 Fuzz testing infrastructure using libFuzzer.
 
