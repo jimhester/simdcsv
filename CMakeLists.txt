@@ -582,6 +582,24 @@ add_custom_command(TARGET branchless_test POST_BUILD
 # Register branchless tests with CTest
 gtest_discover_tests(branchless_test)
 
+# Size limits test executable (security feature from issue #270)
+add_executable(size_limits_test
+    test/size_limits_test.cpp
+)
+
+target_link_libraries(size_limits_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(size_limits_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Register size limits tests with CTest
+gtest_discover_tests(size_limits_test)
+
 # SIMD number parsing test executable
 add_executable(simd_number_parsing_test
     test/simd_number_parsing_test.cpp

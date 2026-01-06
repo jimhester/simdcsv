@@ -72,6 +72,120 @@ enum class ParseAlgorithm {
 };
 
 /**
+ * @brief Size limits for secure CSV parsing.
+ *
+ * These limits prevent denial-of-service attacks through excessive memory
+ * allocation. They can be configured based on the expected data and available
+ * system resources.
+ *
+ * ## Security Considerations
+ *
+ * Without size limits, a malicious CSV file could cause:
+ * - **Memory exhaustion**: The parser allocates index arrays proportional to
+ *   file size. A 1GB file allocates ~8GB for indexes (one uint64_t per byte).
+ * - **Integer overflow**: Unchecked size calculations could overflow, leading
+ *   to undersized allocations and buffer overflows.
+ *
+ * ## Defaults
+ *
+ * Default limits are chosen to handle most legitimate use cases while
+ * providing protection against malicious inputs:
+ * - max_file_size: 10GB (handles very large datasets)
+ * - max_field_size: 16MB (larger than most legitimate fields)
+ *
+ * @example
+ * @code
+ * // Use default limits
+ * libvroom::Parser parser;
+ * auto result = parser.parse(buf, len);
+ *
+ * // Use custom limits for large file processing
+ * libvroom::SizeLimits limits;
+ * limits.max_file_size = 50ULL * 1024 * 1024 * 1024;  // 50GB
+ * auto result = parser.parse(buf, len, {.limits = limits});
+ *
+ * // Disable limits (NOT RECOMMENDED for untrusted input)
+ * auto result = parser.parse(buf, len, {.limits = SizeLimits::unlimited()});
+ * @endcode
+ */
+struct SizeLimits {
+    /**
+     * @brief Maximum file size in bytes (default: 10GB).
+     *
+     * Files larger than this limit will be rejected with FILE_TOO_LARGE error.
+     * Set to 0 to disable the file size check (not recommended).
+     */
+    size_t max_file_size = 10ULL * 1024 * 1024 * 1024;  // 10GB default
+
+    /**
+     * @brief Maximum field size in bytes (default: 16MB).
+     *
+     * Individual fields larger than this will trigger FIELD_TOO_LARGE error.
+     * Set to 0 to disable field size checks.
+     */
+    size_t max_field_size = 16ULL * 1024 * 1024;  // 16MB default
+
+    /**
+     * @brief Factory for default limits (10GB file, 16MB field).
+     */
+    static SizeLimits defaults() { return SizeLimits{}; }
+
+    /**
+     * @brief Factory for unlimited parsing (disables all size checks).
+     *
+     * @warning Using unlimited limits with untrusted input is dangerous
+     *          and may lead to denial-of-service through memory exhaustion.
+     */
+    static SizeLimits unlimited() {
+        SizeLimits limits;
+        limits.max_file_size = 0;
+        limits.max_field_size = 0;
+        return limits;
+    }
+
+    /**
+     * @brief Factory for strict limits (suitable for web services).
+     *
+     * @param max_file Maximum file size in bytes (default: 100MB)
+     * @param max_field Maximum field size in bytes (default: 1MB)
+     */
+    static SizeLimits strict(size_t max_file = 100ULL * 1024 * 1024,
+                             size_t max_field = 1ULL * 1024 * 1024) {
+        SizeLimits limits;
+        limits.max_file_size = max_file;
+        limits.max_field_size = max_field;
+        return limits;
+    }
+};
+
+/**
+ * @brief Check if a size multiplication would overflow.
+ *
+ * This function safely checks if multiplying two size_t values would overflow
+ * before performing the multiplication. Used internally to prevent integer
+ * overflow in memory allocation calculations.
+ *
+ * @param a First operand
+ * @param b Second operand
+ * @return true if multiplication would overflow, false if safe
+ */
+inline bool would_overflow_multiply(size_t a, size_t b) {
+    if (a == 0 || b == 0) return false;
+    return a > std::numeric_limits<size_t>::max() / b;
+}
+
+/**
+ * @brief Check if a size addition would overflow.
+ *
+ * @param a First operand
+ * @param b Second operand
+ * @return true if addition would overflow, false if safe
+ */
+inline bool would_overflow_add(size_t a, size_t b) {
+    return a > std::numeric_limits<size_t>::max() - b;
+}
+
+/**
  * @brief Configuration options for parsing.
  *
  * ParseOptions provides a unified way to configure CSV parsing, combining
@@ -164,6 +278,17 @@ struct ParseOptions {
      * implementations to ensure accurate error position tracking.
      */
     ParseAlgorithm algorithm = ParseAlgorithm::AUTO;
+
+    /**
+     * @brief Size limits for secure parsing.
+     *
+     * Controls maximum file and field sizes to prevent denial-of-service attacks.
+     * Default limits are 10GB for files and 16MB for fields, which handles
+     * most legitimate use cases while providing security protection.
+     *
+     * @see SizeLimits for configuration options
+     */
+    SizeLimits limits = SizeLimits::defaults();
 
     /**
      * @brief Factory for default options (auto-detect dialect, fast path).
@@ -540,7 +665,28 @@ public:
     Result parse(const uint8_t* buf, size_t len,
                  const ParseOptions& options = ParseOptions{}) {
         Result result;
-        result.idx = parser_.init(len, num_threads_);
+
+        // SECURITY: Validate file size limits before any allocation
+        if (options.limits.max_file_size > 0 && len > options.limits.max_file_size) {
+            if (options.errors != nullptr) {
+                options.errors->add_error(ErrorCode::FILE_TOO_LARGE, ErrorSeverity::FATAL,
+                    1, 1, 0, "File size " + std::to_string(len) +
+                    " bytes exceeds maximum " + std::to_string(options.limits.max_file_size) + " bytes");
+                result.successful = false;
+                return result;
+            } else {
+                throw std::runtime_error("File size " + std::to_string(len) +
+                    " bytes exceeds maximum " + std::to_string(options.limits.max_file_size) + " bytes");
+            }
+        }
+
+        // Initialize index with size limits (will validate overflow internally)
+        result.idx = parser_.init_safe(len, num_threads_, options.errors);
+        if (result.idx.indexes == nullptr) {
+            // Allocation failed or would overflow
+            result.successful = false;
+            return result;
+        }
 
         // Determine dialect (explicit or auto-detect)
         if (options.dialect.has_value()) {

@@ -27,6 +27,7 @@ TEST(ErrorHandlingTest, ErrorCodeToString) {
     EXPECT_STREQ(error_code_to_string(ErrorCode::DUPLICATE_COLUMN_NAMES), "DUPLICATE_COLUMN_NAMES");
     EXPECT_STREQ(error_code_to_string(ErrorCode::AMBIGUOUS_SEPARATOR), "AMBIGUOUS_SEPARATOR");
     EXPECT_STREQ(error_code_to_string(ErrorCode::FILE_TOO_LARGE), "FILE_TOO_LARGE");
+    EXPECT_STREQ(error_code_to_string(ErrorCode::INDEX_ALLOCATION_OVERFLOW), "INDEX_ALLOCATION_OVERFLOW");
     EXPECT_STREQ(error_code_to_string(ErrorCode::IO_ERROR), "IO_ERROR");
     EXPECT_STREQ(error_code_to_string(ErrorCode::INTERNAL_ERROR), "INTERNAL_ERROR");
 
