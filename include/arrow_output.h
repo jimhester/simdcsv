@@ -80,10 +80,10 @@ public:
     ArrowConverter(const std::vector<ColumnSpec>& columns,
                    const ArrowConvertOptions& options = ArrowConvertOptions());
 
-    ArrowConvertResult convert(const uint8_t* buf, size_t len, const index& idx,
+    ArrowConvertResult convert(const uint8_t* buf, size_t len, const ParseIndex& idx,
                                const Dialect& dialect = Dialect::csv());
 
-    std::vector<ColumnType> infer_types(const uint8_t* buf, size_t len, const index& idx,
+    std::vector<ColumnType> infer_types(const uint8_t* buf, size_t len, const ParseIndex& idx,
                                         const Dialect& dialect = Dialect::csv());
 
     std::shared_ptr<arrow::Schema> build_schema(const std::vector<std::string>& column_names,
@@ -97,7 +97,7 @@ private:
     struct FieldRange { size_t start; size_t end; };
 
     std::vector<std::vector<FieldRange>> extract_field_ranges(
-        const uint8_t* buf, size_t len, const index& idx, const Dialect& dialect);
+        const uint8_t* buf, size_t len, const ParseIndex& idx, const Dialect& dialect);
 
     /**
      * @brief Extract a field from the buffer as a string_view.

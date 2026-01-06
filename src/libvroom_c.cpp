@@ -25,7 +25,7 @@ struct libvroom_parser {
 };
 
 struct libvroom_index {
-    libvroom::index idx;
+    libvroom::ParseIndex idx;
     size_t num_threads;
 
     // Default constructor - index will be populated by Parser::parse()

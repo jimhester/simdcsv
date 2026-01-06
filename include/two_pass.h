@@ -98,7 +98,7 @@ constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
 /**
  * @brief Result structure containing parsed CSV field positions.
  *
- * The index class stores the byte offsets of field separators (commas and newlines)
+ * The ParseIndex class stores the byte offsets of field separators (commas and newlines)
  * found during CSV parsing. These positions enable efficient random access to
  * individual fields without re-parsing the entire file.
  *
@@ -115,18 +115,15 @@ constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
  * @example
  * @code
  * // Create parser and initialize index
- * libvroom::two_pass parser;
- * libvroom::index idx = parser.init(buffer_length, num_threads);
+ * libvroom::Parser parser(num_threads);
+ * auto result = parser.parse(buffer, length);
  *
- * // Parse the CSV data
- * parser.parse(buffer, idx, buffer_length);
- *
- * // Access field positions
- * // For single-threaded: positions are at idx.indexes[0], idx.indexes[1], ...
- * // For multi-threaded: use stride of idx.n_threads
+ * // Access field positions from result.idx
+ * // For single-threaded: positions are at result.idx.indexes[0], result.idx.indexes[1], ...
+ * // For multi-threaded: use stride of result.idx.n_threads
  * @endcode
  */
-class index {
+class ParseIndex {
  public:
   /// Number of columns detected in the CSV (set after parsing header).
   uint64_t columns{0};
@@ -141,16 +138,16 @@ class index {
   uint64_t* indexes{nullptr};
 
   /// Default constructor. Creates an empty, uninitialized index.
-  index() = default;
+  ParseIndex() = default;
 
   /**
    * @brief Move constructor.
    *
-   * Transfers ownership of index arrays from another index object.
+   * Transfers ownership of index arrays from another ParseIndex object.
    *
-   * @param other The index to move from. Will be left in a valid but empty state.
+   * @param other The ParseIndex to move from. Will be left in a valid but empty state.
    */
-  index(index&& other) noexcept
+  ParseIndex(ParseIndex&& other) noexcept
       : columns(other.columns),
         n_threads(other.n_threads),
         n_indexes(other.n_indexes),
@@ -162,12 +159,12 @@ class index {
   /**
    * @brief Move assignment operator.
    *
-   * Releases current resources and takes ownership from another index.
+   * Releases current resources and takes ownership from another ParseIndex.
    *
-   * @param other The index to move from. Will be left in a valid but empty state.
-   * @return Reference to this index.
+   * @param other The ParseIndex to move from. Will be left in a valid but empty state.
+   * @return Reference to this ParseIndex.
    */
-  index& operator=(index&& other) noexcept {
+  ParseIndex& operator=(ParseIndex&& other) noexcept {
     if (this != &other) {
       delete[] indexes;
       delete[] n_indexes;
@@ -182,8 +179,8 @@ class index {
   }
 
   // Delete copy operations to prevent accidental copies
-  index(const index&) = delete;
-  index& operator=(const index&) = delete;
+  ParseIndex(const ParseIndex&) = delete;
+  ParseIndex& operator=(const ParseIndex&) = delete;
 
   /**
    * @brief Serialize the index to a binary file.
@@ -243,7 +240,7 @@ class index {
   /**
    * @brief Destructor. Releases allocated index arrays.
    */
-  ~index() {
+  ~ParseIndex() {
     if (indexes) {
       delete[] indexes;
     }
@@ -252,6 +249,10 @@ class index {
     }
   }
 };
+
+/// @brief Backward-compatible alias for ParseIndex.
+/// @deprecated Use ParseIndex instead. This alias will be removed in a future version.
+using index [[deprecated("Use ParseIndex instead")]] = ParseIndex;
 
 /**
  * @brief High-performance CSV parser using a speculative two-pass algorithm.
@@ -305,18 +306,18 @@ class index {
  * @see index For the result structure containing field positions
  * @see ErrorCollector For error handling during parsing
  */
-class two_pass {
+class TwoPass {
  public:
   /**
    * @brief Statistics from the first pass of parsing.
    *
-   * The stats structure contains information gathered during the first pass
+   * The Stats structure contains information gathered during the first pass
    * that is used to determine safe chunk boundaries for multi-threaded parsing.
    *
    * @note These statistics are primarily for internal use by the parser's
    *       multi-threading logic.
    */
-  struct stats {
+  struct Stats {
     /// Total number of quote characters found in the chunk.
     uint64_t n_quotes{0};
 
@@ -331,9 +332,9 @@ class two_pass {
   /**
    * @brief First pass SIMD scan with dialect-aware quote character.
    */
-  static stats first_pass_simd(const uint8_t* buf, size_t start, size_t end,
+  static Stats first_pass_simd(const uint8_t* buf, size_t start, size_t end,
                                char quote_char = '"') {
-    stats out;
+    Stats out;
     assert(end >= start && "Invalid range: end must be >= start");
     size_t len = end - start;
     size_t idx = 0;
@@ -385,9 +386,9 @@ class two_pass {
   /**
    * @brief First pass scalar scan with dialect-aware quote character.
    */
-  static stats first_pass_chunk(const uint8_t* buf, size_t start, size_t end,
+  static Stats first_pass_chunk(const uint8_t* buf, size_t start, size_t end,
                                 char quote_char = '"') {
-    stats out;
+    Stats out;
     uint64_t i = start;
     bool needs_even = out.first_even_nl == null_pos;
     bool needs_odd = out.first_odd_nl == null_pos;
@@ -422,8 +423,8 @@ class two_pass {
     return out;
   }
 
-  static stats first_pass_naive(const uint8_t* buf, size_t start, size_t end) {
-    stats out;
+  static Stats first_pass_naive(const uint8_t* buf, size_t start, size_t end) {
+    Stats out;
     uint64_t i = start;
     while (i < end) {
       // Support LF, CRLF, and CR-only line endings
@@ -494,7 +495,7 @@ class two_pass {
   /**
    * @brief Speculative first pass with dialect-aware quote character.
    */
-  static stats first_pass_speculate(const uint8_t* buf, size_t start, size_t end,
+  static Stats first_pass_speculate(const uint8_t* buf, size_t start, size_t end,
                                     char delimiter = ',', char quote_char = '"') {
     auto is_quoted = get_quotation_state(buf, start, delimiter, quote_char);
 
@@ -527,7 +528,7 @@ class two_pass {
    * @brief Second pass SIMD scan with dialect-aware delimiter and quote character.
    */
   static uint64_t second_pass_simd(const uint8_t* buf, size_t start, size_t end,
-                                   index* out, size_t thread_id,
+                                   ParseIndex* out, size_t thread_id,
                                    char delimiter = ',', char quote_char = '"') {
     bool is_quoted = false;
     assert(end >= start && "Invalid range: end must be >= start");
@@ -585,7 +586,7 @@ class two_pass {
    */
   static uint64_t second_pass_simd_branchless(const BranchlessStateMachine& sm,
                                                const uint8_t* buf, size_t start, size_t end,
-                                               index* out, size_t thread_id) {
+                                               ParseIndex* out, size_t thread_id) {
     return libvroom::second_pass_simd_branchless(
         sm, buf, start, end, out->indexes, thread_id, out->n_threads);
   }
@@ -616,12 +617,12 @@ class two_pass {
   };
 
   // Error result from state transitions
-  struct state_result {
+  struct StateResult {
     csv_state state;
     ErrorCode error;
   };
 
-  really_inline static state_result quoted_state(csv_state in) {
+  really_inline static StateResult quoted_state(csv_state in) {
     // LCOV_EXCL_BR_START - State machine branches are covered by integration tests
     switch (in) {
       case RECORD_START:
@@ -640,7 +641,7 @@ class two_pass {
     return {in, ErrorCode::INTERNAL_ERROR};  // LCOV_EXCL_LINE - unreachable
   }
 
-  really_inline static state_result comma_state(csv_state in) {
+  really_inline static StateResult comma_state(csv_state in) {
     // LCOV_EXCL_BR_START - State machine branches are covered by integration tests
     switch (in) {
       case RECORD_START:
@@ -658,7 +659,7 @@ class two_pass {
     return {in, ErrorCode::INTERNAL_ERROR};  // LCOV_EXCL_LINE - unreachable
   }
 
-  really_inline static state_result newline_state(csv_state in) {
+  really_inline static StateResult newline_state(csv_state in) {
     // LCOV_EXCL_BR_START - State machine branches are covered by integration tests
     switch (in) {
       case RECORD_START:
@@ -676,7 +677,7 @@ class two_pass {
     return {in, ErrorCode::INTERNAL_ERROR};  // LCOV_EXCL_LINE - unreachable
   }
 
-  really_inline static state_result other_state(csv_state in) {
+  really_inline static StateResult other_state(csv_state in) {
     // LCOV_EXCL_BR_START - State machine branches are covered by integration tests
     switch (in) {
       case RECORD_START:
@@ -695,7 +696,7 @@ class two_pass {
     return {in, ErrorCode::INTERNAL_ERROR};  // LCOV_EXCL_LINE - unreachable
   }
 
-  really_inline static size_t add_position(index* out, size_t i, size_t pos) {
+  really_inline static size_t add_position(ParseIndex* out, size_t i, size_t pos) {
     out->indexes[i] = pos;
     return i + out->n_threads;
   }
@@ -751,7 +752,7 @@ class two_pass {
    * @brief Second pass with error collection and dialect support.
    */
   static uint64_t second_pass_chunk(const uint8_t* buf, size_t start, size_t end,
-                                    index* out, size_t thread_id,
+                                    ParseIndex* out, size_t thread_id,
                                     ErrorCollector* errors = nullptr,
                                     size_t total_len = 0,
                                     char delimiter = ',', char quote_char = '"') {
@@ -778,7 +779,7 @@ class two_pass {
         continue;
       }
 
-      state_result result;
+      StateResult result;
       if (value == static_cast<uint8_t>(quote_char)) {
         result = quoted_state(s);
         if (result.error != ErrorCode::NONE && errors) {
@@ -858,7 +859,7 @@ class two_pass {
    * @brief Second pass that throws on error (backward compatible), with dialect support.
    */
   static uint64_t second_pass_chunk_throwing(const uint8_t* buf, size_t start, size_t end,
-                                             index* out, size_t thread_id,
+                                             ParseIndex* out, size_t thread_id,
                                              char delimiter = ',', char quote_char = '"') {
     uint64_t pos = start;
     size_t n_indexes = 0;
@@ -867,7 +868,7 @@ class two_pass {
 
     while (pos < end) {
       uint8_t value = buf[pos];
-      state_result result;
+      StateResult result;
       if (value == static_cast<uint8_t>(quote_char)) {
         result = quoted_state(s);
         if (result.error != ErrorCode::NONE) {
@@ -920,7 +921,7 @@ class two_pass {
    *             instead. This method will be made private in a future version.
    */
   LIBVROOM_DEPRECATED("Use Parser::parse() with ParseAlgorithm::SPECULATIVE instead")
-  bool parse_speculate(const uint8_t* buf, index& out, size_t len,
+  bool parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
                        const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
     char quote = dialect.quote_char;
@@ -941,7 +942,7 @@ class two_pass {
       return true;
     }
     std::vector<uint64_t> chunk_pos(n_threads + 1);
-    std::vector<std::future<stats>> first_pass_fut(n_threads);
+    std::vector<std::future<Stats>> first_pass_fut(n_threads);
     std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
 
     for (int i = 0; i < n_threads; ++i) {
@@ -990,7 +991,7 @@ class two_pass {
    *             instead. This method will be made private in a future version.
    */
   LIBVROOM_DEPRECATED("Use Parser::parse() with ParseAlgorithm::TWO_PASS instead")
-  bool parse_two_pass(const uint8_t* buf, index& out, size_t len,
+  bool parse_two_pass(const uint8_t* buf, ParseIndex& out, size_t len,
                       const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
     char quote = dialect.quote_char;
@@ -1011,7 +1012,7 @@ class two_pass {
       return true;
     }
     std::vector<uint64_t> chunk_pos(n_threads + 1);
-    std::vector<std::future<stats>> first_pass_fut(n_threads);
+    std::vector<std::future<Stats>> first_pass_fut(n_threads);
     std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
 
     for (int i = 0; i < n_threads; ++i) {
@@ -1094,7 +1095,7 @@ class two_pass {
    * @see parse_two_pass_with_errors() For multi-threaded parsing with error collection.
    */
   LIBVROOM_DEPRECATED("Use Parser::parse() from libvroom.h instead")
-  bool parse(const uint8_t* buf, index& out, size_t len,
+  bool parse(const uint8_t* buf, ParseIndex& out, size_t len,
              const Dialect& dialect = Dialect::csv()) {
     LIBVROOM_SUPPRESS_DEPRECATION_START
     return parse_speculate(buf, out, len, dialect);
@@ -1115,7 +1116,7 @@ class two_pass {
   static branchless_chunk_result second_pass_branchless_chunk_with_errors(
       const BranchlessStateMachine& sm,
       const uint8_t* buf, size_t start, size_t end,
-      index* out, size_t thread_id, size_t total_len, ErrorMode mode) {
+      ParseIndex* out, size_t thread_id, size_t total_len, ErrorMode mode) {
     branchless_chunk_result result;
     result.errors.set_mode(mode);
     result.n_indexes = second_pass_branchless_with_errors(
@@ -1148,7 +1149,7 @@ class two_pass {
    * @return true if parsing completed without fatal errors, false if fatal
    *         errors occurred.
    */
-  bool parse_branchless_with_errors(const uint8_t* buf, index& out, size_t len,
+  bool parse_branchless_with_errors(const uint8_t* buf, ParseIndex& out, size_t len,
                                     ErrorCollector& errors,
                                     const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
@@ -1193,7 +1194,7 @@ class two_pass {
     }
 
     std::vector<uint64_t> chunk_pos(n_threads + 1);
-    std::vector<std::future<stats>> first_pass_fut(n_threads);
+    std::vector<std::future<Stats>> first_pass_fut(n_threads);
     std::vector<std::future<branchless_chunk_result>> second_pass_fut(n_threads);
 
     // First pass: find chunk boundaries
@@ -1293,7 +1294,7 @@ class two_pass {
    * @see ParseAlgorithm::BRANCHLESS For algorithm selection.
    */
   LIBVROOM_DEPRECATED("Use Parser::parse() with ParseOptions::branchless() instead")
-  bool parse_branchless(const uint8_t* buf, index& out, size_t len,
+  bool parse_branchless(const uint8_t* buf, ParseIndex& out, size_t len,
                         const Dialect& dialect = Dialect::csv()) {
     BranchlessStateMachine sm(dialect.delimiter, dialect.quote_char);
     uint8_t n_threads = out.n_threads;
@@ -1317,7 +1318,7 @@ class two_pass {
     }
 
     std::vector<uint64_t> chunk_pos(n_threads + 1);
-    std::vector<std::future<stats>> first_pass_fut(n_threads);
+    std::vector<std::future<Stats>> first_pass_fut(n_threads);
     std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
 
     char delim = dialect.delimiter;
@@ -1396,7 +1397,7 @@ class two_pass {
    * @see Dialect For dialect configuration options.
    */
   LIBVROOM_DEPRECATED("Use Parser::parse() with {.errors = &errors} instead (auto-detects dialect)")
-  bool parse_auto(const uint8_t* buf, index& out, size_t len,
+  bool parse_auto(const uint8_t* buf, ParseIndex& out, size_t len,
                   ErrorCollector& errors, DetectionResult* detected = nullptr,
                   const DetectionOptions& detection_options = DetectionOptions()) {
     // Perform dialect detection
@@ -1470,7 +1471,7 @@ class two_pass {
    */
   static chunk_result second_pass_chunk_with_errors(
       const uint8_t* buf, size_t start, size_t end,
-      index* out, size_t thread_id, size_t total_len, ErrorMode mode,
+      ParseIndex* out, size_t thread_id, size_t total_len, ErrorMode mode,
       char delimiter = ',', char quote_char = '"') {
     chunk_result result;
     result.errors.set_mode(mode);
@@ -1531,7 +1532,7 @@ class two_pass {
    * @see ErrorCollector::merge_sorted() For error merging details.
    */
   LIBVROOM_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
-  bool parse_two_pass_with_errors(const uint8_t* buf, index& out, size_t len,
+  bool parse_two_pass_with_errors(const uint8_t* buf, ParseIndex& out, size_t len,
                                   ErrorCollector& errors,
                                   const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
@@ -1564,7 +1565,7 @@ class two_pass {
 
     size_t chunk_size = len / n_threads;
     std::vector<uint64_t> chunk_pos(n_threads + 1);
-    std::vector<std::future<stats>> first_pass_fut(n_threads);
+    std::vector<std::future<Stats>> first_pass_fut(n_threads);
     std::vector<std::future<chunk_result>> second_pass_fut(n_threads);
 
     // First pass: find chunk boundaries
@@ -1689,7 +1690,7 @@ class two_pass {
    * @see ErrorMode For different error handling strategies.
    */
   LIBVROOM_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
-  bool parse_with_errors(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors,
+  bool parse_with_errors(const uint8_t* buf, ParseIndex& out, size_t len, ErrorCollector& errors,
                          const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
     char quote = dialect.quote_char;
@@ -1880,7 +1881,7 @@ class two_pass {
    * @see ErrorCollector For accessing validation results
    */
   LIBVROOM_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
-  bool parse_validate(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors,
+  bool parse_validate(const uint8_t* buf, ParseIndex& out, size_t len, ErrorCollector& errors,
                       const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
     char quote = dialect.quote_char;
@@ -1939,8 +1940,8 @@ class two_pass {
    *                                   std::thread::hardware_concurrency());
    * @endcode
    */
-  index init(size_t len, size_t n_threads) {
-    index out;
+  ParseIndex init(size_t len, size_t n_threads) {
+    ParseIndex out;
     // Ensure at least 1 thread for valid memory allocation
     if (n_threads == 0) n_threads = 1;
     out.n_threads = n_threads;
@@ -2005,8 +2006,8 @@ class two_pass {
    * @see init() For the non-validating version (deprecated for untrusted input).
    * @see SizeLimits For file size limits that should be checked before calling this.
    */
-  index init_safe(size_t len, size_t n_threads, ErrorCollector* errors = nullptr) {
-    index out;
+  ParseIndex init_safe(size_t len, size_t n_threads, ErrorCollector* errors = nullptr) {
+    ParseIndex out;
     // Ensure at least 1 thread for valid memory allocation
     if (n_threads == 0) n_threads = 1;
     out.n_threads = n_threads;
@@ -2064,6 +2065,10 @@ class two_pass {
     return out;
   }
 };
+
+/// @brief Backward-compatible alias for TwoPass.
+/// @deprecated Use TwoPass instead. This alias will be removed in a future version.
+using two_pass [[deprecated("Use TwoPass instead")]] = TwoPass;
 
 }  // namespace libvroom
 

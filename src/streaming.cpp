@@ -609,7 +609,7 @@ size_t StreamParser::bytes_processed() const {
     return impl_->total_bytes;
 }
 
-const ErrorCollector& StreamParser::errors() const {
+const ErrorCollector& StreamParser::error_collector() const {
     return impl_->errors;
 }
 
@@ -770,8 +770,8 @@ int StreamReader::column_index(const std::string& name) const {
     return impl_->parser.column_index(name);
 }
 
-const ErrorCollector& StreamReader::errors() const {
-    return impl_->parser.errors();
+const ErrorCollector& StreamReader::error_collector() const {
+    return impl_->parser.error_collector();
 }
 
 size_t StreamReader::rows_read() const {

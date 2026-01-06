@@ -305,8 +305,20 @@ struct ParseOptions {
 
     /**
      * @brief Factory for default options (auto-detect dialect, fast path).
+     *
+     * Equivalent to standard(). Both methods create identical options.
      */
     static ParseOptions defaults() { return ParseOptions{}; }
+
+    /**
+     * @brief Factory for standard options (auto-detect dialect, fast path).
+     *
+     * Creates default parsing options: auto-detect dialect, no error collection.
+     * This is the recommended entry point for simple parsing use cases.
+     *
+     * Equivalent to defaults(). Both methods create identical options.
+     */
+    static ParseOptions standard() { return ParseOptions{}; }
 
     /**
      * @brief Factory for options with explicit dialect.
@@ -667,7 +679,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
 /**
  * @brief High-level CSV parser with automatic index management.
  *
- * Parser provides a simplified interface over the lower-level two_pass class.
+ * Parser provides a simplified interface over the lower-level TwoPass class.
  * It manages index allocation internally and returns a Result object containing
  * the parsed index, dialect information, and success status.
  *
@@ -676,7 +688,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
  * - Explicit dialect specification or auto-detection
  * - Error collection in permissive mode
  *
- * @note For maximum performance with manual control, use two_pass directly.
+ * @note For maximum performance with manual control, use TwoPass directly.
  *       Parser is designed for convenience and typical use cases.
  *
  * @example
@@ -715,7 +727,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
  * }
  * @endcode
  *
- * @see two_pass For lower-level parsing with full control.
+ * @see TwoPass For lower-level parsing with full control.
  * @see FileBuffer For loading CSV files.
  * @see Dialect For dialect configuration options.
  */
@@ -933,7 +945,7 @@ public:
      * @endcode
      */
     struct Result {
-        index idx;               ///< The parsed field index.
+        ParseIndex idx;               ///< The parsed field index.
         bool successful{false};  ///< Whether parsing completed without fatal errors.
         Dialect dialect;         ///< The dialect used for parsing.
         DetectionResult detection;  ///< Detection result (populated by parse_auto).
@@ -1350,7 +1362,7 @@ public:
                 ? result.detection.dialect : Dialect::csv();
         }
 
-        // Suppress deprecation warnings for internal calls to two_pass methods
+        // Suppress deprecation warnings for internal calls to TwoPass methods
         // (Parser is the public API that wraps these deprecated methods)
         LIBVROOM_SUPPRESS_DEPRECATION_START
 
@@ -1462,7 +1474,7 @@ public:
     size_t num_threads() const { return num_threads_; }
 
 private:
-    two_pass parser_;
+    TwoPass parser_;
     size_t num_threads_;
 };
 
