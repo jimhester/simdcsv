@@ -147,14 +147,14 @@ struct StreamParser::Impl {
         // Check max field size to prevent DoS
         if (end > start && (end - start) > config.max_field_size) {
             if (error_callback) {
-                ParseError err(ErrorCode::IO_ERROR, ErrorSeverity::ERROR,
+                ParseError err(ErrorCode::FIELD_TOO_LARGE, ErrorSeverity::ERROR,
                               row_count + 1, current_field_bounds.size() + 1,
                               total_bytes, "Field exceeds maximum size");
                 if (!error_callback(err)) {
                     stopped = true;
                 }
             }
-            errors.add_error(ErrorCode::IO_ERROR, ErrorSeverity::ERROR,
+            errors.add_error(ErrorCode::FIELD_TOO_LARGE, ErrorSeverity::ERROR,
                             row_count + 1, current_field_bounds.size() + 1,
                             total_bytes, "Field exceeds maximum size");
             return;

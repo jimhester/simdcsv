@@ -20,7 +20,6 @@ TEST(ErrorHandlingTest, ErrorCodeToString) {
     EXPECT_STREQ(error_code_to_string(ErrorCode::INCONSISTENT_FIELD_COUNT), "INCONSISTENT_FIELD_COUNT");
     EXPECT_STREQ(error_code_to_string(ErrorCode::FIELD_TOO_LARGE), "FIELD_TOO_LARGE");
     EXPECT_STREQ(error_code_to_string(ErrorCode::MIXED_LINE_ENDINGS), "MIXED_LINE_ENDINGS");
-    EXPECT_STREQ(error_code_to_string(ErrorCode::INVALID_LINE_ENDING), "INVALID_LINE_ENDING");
     EXPECT_STREQ(error_code_to_string(ErrorCode::INVALID_UTF8), "INVALID_UTF8");
     EXPECT_STREQ(error_code_to_string(ErrorCode::NULL_BYTE), "NULL_BYTE");
     EXPECT_STREQ(error_code_to_string(ErrorCode::EMPTY_HEADER), "EMPTY_HEADER");

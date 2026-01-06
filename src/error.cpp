@@ -12,7 +12,6 @@ const char* error_code_to_string(ErrorCode code) {
         case ErrorCode::INCONSISTENT_FIELD_COUNT: return "INCONSISTENT_FIELD_COUNT";
         case ErrorCode::FIELD_TOO_LARGE: return "FIELD_TOO_LARGE";
         case ErrorCode::MIXED_LINE_ENDINGS: return "MIXED_LINE_ENDINGS";
-        case ErrorCode::INVALID_LINE_ENDING: return "INVALID_LINE_ENDING";
         case ErrorCode::INVALID_UTF8: return "INVALID_UTF8";
         case ErrorCode::NULL_BYTE: return "NULL_BYTE";
         case ErrorCode::EMPTY_HEADER: return "EMPTY_HEADER";

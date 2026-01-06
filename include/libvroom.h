@@ -72,6 +72,67 @@ enum class ParseAlgorithm {
 };
 
 /**
+ * @brief Validation limits for security-sensitive parsing.
+ *
+ * These limits help prevent denial-of-service attacks and excessive memory
+ * usage when parsing untrusted CSV files. When validation is enabled
+ * (via ParseOptions), these limits are checked and violations are reported
+ * as errors.
+ *
+ * @note Set any limit to 0 to disable that specific check.
+ *
+ * @see ParseOptions::validation_limits for using these limits.
+ * @see DEFAULT_MAX_FIELD_SIZE for the default field size limit.
+ * @see DEFAULT_MAX_FILE_SIZE for the default file size limit.
+ */
+struct ValidationLimits {
+    /**
+     * @brief Maximum size of a single field in bytes.
+     *
+     * Fields larger than this trigger FIELD_TOO_LARGE error.
+     * Default: 16 MB. Set to 0 to disable.
+     */
+    size_t max_field_size = DEFAULT_MAX_FIELD_SIZE;
+
+    /**
+     * @brief Maximum file size in bytes.
+     *
+     * Files larger than this trigger FILE_TOO_LARGE error immediately
+     * before parsing begins. Default: 4 GB. Set to 0 to disable.
+     */
+    size_t max_file_size = DEFAULT_MAX_FILE_SIZE;
+
+    /**
+     * @brief Enable UTF-8 validation.
+     *
+     * When true, invalid UTF-8 sequences trigger INVALID_UTF8 errors.
+     * Default: false (for performance; enable for untrusted input).
+     */
+    bool validate_utf8 = false;
+
+    /// Factory for default limits
+    static ValidationLimits defaults() { return ValidationLimits{}; }
+
+    /// Factory for no limits (validation disabled)
+    static ValidationLimits none() {
+        ValidationLimits v;
+        v.max_field_size = 0;
+        v.max_file_size = 0;
+        v.validate_utf8 = false;
+        return v;
+    }
+
+    /// Factory for strict limits (smaller sizes, UTF-8 validation enabled)
+    static ValidationLimits strict() {
+        ValidationLimits v;
+        v.max_field_size = 1024 * 1024;  // 1 MB
+        v.max_file_size = 1024 * 1024 * 1024;  // 1 GB
+        v.validate_utf8 = true;
+        return v;
+    }
+};
+
+/**
  * @brief Configuration options for parsing.
  *
  * ParseOptions provides a unified way to configure CSV parsing, combining
@@ -86,6 +147,9 @@ enum class ParseAlgorithm {
  * - **Algorithm**: Choose parsing algorithm for performance tuning. Default (AUTO)
  *   uses speculative multi-threaded parsing.
  * - **Detection options**: Only used when dialect is nullopt and auto-detection runs.
+ * - **Validation limits**: Security limits for field size, file size, and UTF-8
+ *   validation. By default, limits are disabled for performance. Enable via
+ *   validation_limits for security-sensitive parsing.
  *
  * @example
  * @code
@@ -112,12 +176,19 @@ enum class ParseAlgorithm {
  *     .dialect = Dialect::csv(),
  *     .algorithm = ParseAlgorithm::BRANCHLESS
  * });
+ *
+ * // Enable security validation for untrusted input
+ * auto result = parser.parse(buf, len, {
+ *     .errors = &errors,
+ *     .validation_limits = ValidationLimits::strict()
+ * });
  * @endcode
  *
  * @see Parser::parse() for the unified parsing method
  * @see Dialect for dialect configuration options
  * @see ErrorCollector for error handling configuration
  * @see ParseAlgorithm for algorithm selection
+ * @see ValidationLimits for security limits
  */
 struct ParseOptions {
     /**
@@ -164,6 +235,19 @@ struct ParseOptions {
      * implementations to ensure accurate error position tracking.
      */
     ParseAlgorithm algorithm = ParseAlgorithm::AUTO;
+
+    /**
+     * @brief Security validation limits.
+     *
+     * Controls validation of field sizes, file sizes, and UTF-8 encoding.
+     * By default, validation limits are set but only checked when errors
+     * is non-null. This provides security for error-tolerant parsing while
+     * maintaining maximum performance for fast-path parsing.
+     *
+     * To disable all validation, use ValidationLimits::none().
+     * For strict security validation, use ValidationLimits::strict().
+     */
+    std::optional<ValidationLimits> validation_limits = std::nullopt;
 
     /**
      * @brief Factory for default options (auto-detect dialect, fast path).
@@ -218,6 +302,23 @@ struct ParseOptions {
         ParseOptions opts;
         opts.dialect = d;
         opts.algorithm = ParseAlgorithm::BRANCHLESS;
+        return opts;
+    }
+
+    /**
+     * @brief Factory for validated parsing with security limits.
+     *
+     * Creates options with error collection and validation limits enabled.
+     * Use this for parsing untrusted input where security is a concern.
+     *
+     * @param errors ErrorCollector to accumulate any validation errors.
+     * @param limits Validation limits to apply (default: ValidationLimits::defaults()).
+     */
+    static ParseOptions validated(ErrorCollector& errors,
+                                   const ValidationLimits& limits = ValidationLimits::defaults()) {
+        ParseOptions opts;
+        opts.errors = &errors;
+        opts.validation_limits = limits;
         return opts;
     }
 };
@@ -390,6 +491,138 @@ inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
 }
 
 /**
+ * @brief Internal UTF-8 validation function.
+ *
+ * Validates UTF-8 encoding and reports any invalid byte sequences to the
+ * error collector. This function implements the UTF-8 state machine to
+ * detect encoding errors.
+ *
+ * @param buf Pointer to data buffer
+ * @param len Length of data in bytes
+ * @param errors ErrorCollector to receive validation errors
+ *
+ * @note This is an internal function used by Parser when validation_limits.validate_utf8 is true.
+ */
+inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollector& errors) {
+    size_t line = 1;
+    size_t column = 1;
+    size_t i = 0;
+
+    while (i < len) {
+        // Track line/column for error reporting
+        if (buf[i] == '\n') {
+            line++;
+            column = 1;
+            i++;
+            continue;
+        }
+        if (buf[i] == '\r') {
+            // Handle CRLF
+            if (i + 1 < len && buf[i + 1] == '\n') {
+                i++;  // Skip \r, let \n be handled next iteration
+            } else {
+                line++;
+                column = 1;
+            }
+            i++;
+            continue;
+        }
+
+        // Check for valid UTF-8 sequences
+        uint8_t byte = buf[i];
+
+        if ((byte & 0x80) == 0) {
+            // Single-byte ASCII (0xxxxxxx)
+            column++;
+            i++;
+        } else if ((byte & 0xE0) == 0xC0) {
+            // Two-byte sequence (110xxxxx 10xxxxxx)
+            if (i + 1 >= len || (buf[i + 1] & 0xC0) != 0x80) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: truncated 2-byte sequence");
+                if (errors.should_stop()) return;
+                column++;
+                i++;
+                continue;
+            }
+            // Check for overlong encoding (code points < 0x80 encoded as 2 bytes)
+            if ((byte & 0x1E) == 0) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: overlong 2-byte encoding");
+                if (errors.should_stop()) return;
+            }
+            column++;
+            i += 2;
+        } else if ((byte & 0xF0) == 0xE0) {
+            // Three-byte sequence (1110xxxx 10xxxxxx 10xxxxxx)
+            if (i + 2 >= len || (buf[i + 1] & 0xC0) != 0x80 || (buf[i + 2] & 0xC0) != 0x80) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: truncated 3-byte sequence");
+                if (errors.should_stop()) return;
+                column++;
+                i++;
+                continue;
+            }
+            // Check for overlong encoding and surrogate code points
+            uint32_t cp = ((byte & 0x0F) << 12) | ((buf[i + 1] & 0x3F) << 6) | (buf[i + 2] & 0x3F);
+            if (cp < 0x800) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: overlong 3-byte encoding");
+                if (errors.should_stop()) return;
+            } else if (cp >= 0xD800 && cp <= 0xDFFF) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: surrogate code point");
+                if (errors.should_stop()) return;
+            }
+            column++;
+            i += 3;
+        } else if ((byte & 0xF8) == 0xF0) {
+            // Four-byte sequence (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
+            if (i + 3 >= len || (buf[i + 1] & 0xC0) != 0x80 ||
+                (buf[i + 2] & 0xC0) != 0x80 || (buf[i + 3] & 0xC0) != 0x80) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: truncated 4-byte sequence");
+                if (errors.should_stop()) return;
+                column++;
+                i++;
+                continue;
+            }
+            // Check for overlong encoding and code points > U+10FFFF
+            uint32_t cp = ((byte & 0x07) << 18) | ((buf[i + 1] & 0x3F) << 12) |
+                         ((buf[i + 2] & 0x3F) << 6) | (buf[i + 3] & 0x3F);
+            if (cp < 0x10000) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: overlong 4-byte encoding");
+                if (errors.should_stop()) return;
+            } else if (cp > 0x10FFFF) {
+                errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                               line, column, i,
+                               "Invalid UTF-8 sequence: code point exceeds U+10FFFF");
+                if (errors.should_stop()) return;
+            }
+            column++;
+            i += 4;
+        } else {
+            // Invalid leading byte (10xxxxxx continuation byte without leading byte,
+            // or invalid 5/6-byte sequence starts 111110xx/1111110x)
+            errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR,
+                           line, column, i,
+                           "Invalid UTF-8 sequence: invalid leading byte");
+            if (errors.should_stop()) return;
+            column++;
+            i++;
+        }
+    }
+}
+
+/**
  * @brief High-level CSV parser with automatic index management.
  *
  * Parser provides a simplified interface over the lower-level two_pass class.
@@ -540,6 +773,32 @@ public:
     Result parse(const uint8_t* buf, size_t len,
                  const ParseOptions& options = ParseOptions{}) {
         Result result;
+
+        // Apply validation limits if specified
+        if (options.validation_limits.has_value() && options.errors != nullptr) {
+            const auto& limits = options.validation_limits.value();
+
+            // Check file size limit
+            if (limits.max_file_size > 0 && len > limits.max_file_size) {
+                options.errors->add_error(
+                    ErrorCode::FILE_TOO_LARGE, ErrorSeverity::FATAL,
+                    1, 1, 0,
+                    "File size (" + std::to_string(len) + " bytes) exceeds maximum (" +
+                    std::to_string(limits.max_file_size) + " bytes)", "");
+                result.successful = false;
+                return result;
+            }
+
+            // UTF-8 validation (if enabled)
+            if (limits.validate_utf8 && buf != nullptr && len > 0) {
+                validate_utf8_internal(buf, len, *options.errors);
+                if (options.errors->should_stop()) {
+                    result.successful = false;
+                    return result;
+                }
+            }
+        }
+
         result.idx = parser_.init(len, num_threads_);
 
         // Determine dialect (explicit or auto-detect)

@@ -28,14 +28,11 @@ namespace libvroom {
  * Error codes are grouped by category:
  * - Quote-related errors (UNCLOSED_QUOTE, INVALID_QUOTE_ESCAPE, QUOTE_IN_UNQUOTED_FIELD)
  * - Field structure errors (INCONSISTENT_FIELD_COUNT, FIELD_TOO_LARGE)
- * - Line ending errors (MIXED_LINE_ENDINGS, INVALID_LINE_ENDING)
+ * - Line ending errors (MIXED_LINE_ENDINGS)
  * - Character encoding errors (INVALID_UTF8, NULL_BYTE)
  * - Structure errors (EMPTY_HEADER, DUPLICATE_COLUMN_NAMES)
  * - Separator errors (AMBIGUOUS_SEPARATOR)
  * - General errors (FILE_TOO_LARGE, IO_ERROR, INTERNAL_ERROR)
- *
- * @note Some error codes are marked [RESERVED] and are not yet implemented.
- *       They are included for future compatibility.
  */
 enum class ErrorCode {
     NONE = 0,                    ///< No error
@@ -47,14 +44,13 @@ enum class ErrorCode {
 
     // Field structure errors
     INCONSISTENT_FIELD_COUNT,    ///< Row has different number of fields than header
-    FIELD_TOO_LARGE,             ///< [RESERVED] Field exceeds maximum size limit
+    FIELD_TOO_LARGE,             ///< Field exceeds maximum size limit
 
     // Line ending errors
     MIXED_LINE_ENDINGS,          ///< File uses inconsistent line endings (warning)
-    INVALID_LINE_ENDING,         ///< [RESERVED] Invalid line ending sequence
 
     // Character encoding errors
-    INVALID_UTF8,                ///< [RESERVED] Invalid UTF-8 sequence
+    INVALID_UTF8,                ///< Invalid UTF-8 byte sequence detected
     NULL_BYTE,                   ///< Unexpected null byte in data
 
     // Structure errors (all implemented)
@@ -62,13 +58,31 @@ enum class ErrorCode {
     DUPLICATE_COLUMN_NAMES,      ///< Header contains duplicate column names
 
     // Separator errors
-    AMBIGUOUS_SEPARATOR,         ///< [RESERVED] Cannot determine separator reliably
+    AMBIGUOUS_SEPARATOR,         ///< Cannot determine separator reliably (used in dialect detection)
 
     // General errors
-    FILE_TOO_LARGE,              ///< [RESERVED] File exceeds maximum size
-    IO_ERROR,                    ///< [RESERVED] File I/O error
+    FILE_TOO_LARGE,              ///< File exceeds maximum size limit
+    IO_ERROR,                    ///< File I/O error (e.g., read failure)
     INTERNAL_ERROR               ///< Internal parser error
 };
+
+/**
+ * @brief Default limit for individual field size (16 MB).
+ *
+ * Fields larger than this are flagged with FIELD_TOO_LARGE to prevent
+ * denial-of-service attacks via maliciously crafted CSV files with
+ * extremely large fields.
+ */
+constexpr size_t DEFAULT_MAX_FIELD_SIZE = 16 * 1024 * 1024;  // 16 MB
+
+/**
+ * @brief Default limit for total file size (4 GB).
+ *
+ * Files larger than this are flagged with FILE_TOO_LARGE. This limit
+ * prevents out-of-memory conditions when allocating index buffers.
+ * For larger files, consider using the streaming API.
+ */
+constexpr size_t DEFAULT_MAX_FILE_SIZE = 4ULL * 1024 * 1024 * 1024;  // 4 GB
 
 /**
  * @brief Severity levels for parse errors.

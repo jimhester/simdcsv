@@ -496,3 +496,191 @@ TEST_F(AlgorithmSelectionTest, BranchlessWithQuotedFields) {
     EXPECT_TRUE(result.success());
     EXPECT_GT(result.total_indexes(), 0);
 }
+
+// ============================================================================
+// Tests for ValidationLimits
+// ============================================================================
+
+class ValidationLimitsTest : public ::testing::Test {
+protected:
+    static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
+        size_t len = content.size();
+        uint8_t* buf = allocate_padded_buffer(len, 64);
+        std::memcpy(buf, content.data(), len);
+        return {buf, len};
+    }
+};
+
+// Test: ValidationLimits factories
+TEST_F(ValidationLimitsTest, Factories) {
+    // defaults()
+    auto defaults = libvroom::ValidationLimits::defaults();
+    EXPECT_EQ(defaults.max_field_size, libvroom::DEFAULT_MAX_FIELD_SIZE);
+    EXPECT_EQ(defaults.max_file_size, libvroom::DEFAULT_MAX_FILE_SIZE);
+    EXPECT_FALSE(defaults.validate_utf8);
+
+    // none()
+    auto none = libvroom::ValidationLimits::none();
+    EXPECT_EQ(none.max_field_size, 0);
+    EXPECT_EQ(none.max_file_size, 0);
+    EXPECT_FALSE(none.validate_utf8);
+
+    // strict()
+    auto strict = libvroom::ValidationLimits::strict();
+    EXPECT_EQ(strict.max_field_size, 1024 * 1024);  // 1 MB
+    EXPECT_EQ(strict.max_file_size, 1024 * 1024 * 1024);  // 1 GB
+    EXPECT_TRUE(strict.validate_utf8);
+}
+
+// Test: FILE_TOO_LARGE error
+TEST_F(ValidationLimitsTest, FileTooLarge) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::ValidationLimits limits;
+    limits.max_file_size = 5;  // 5 bytes - smaller than the file
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               libvroom::ParseOptions::validated(errors, limits));
+    EXPECT_FALSE(result.success());
+    EXPECT_TRUE(errors.has_fatal_errors());
+    EXPECT_EQ(errors.errors()[0].code, libvroom::ErrorCode::FILE_TOO_LARGE);
+}
+
+// Test: FILE_TOO_LARGE disabled when limit is 0
+TEST_F(ValidationLimitsTest, FileSizeLimitDisabled) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::ValidationLimits limits;
+    limits.max_file_size = 0;  // Disabled
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               libvroom::ParseOptions::validated(errors, limits));
+    EXPECT_TRUE(result.success());
+    EXPECT_FALSE(errors.has_errors());
+}
+
+// Test: INVALID_UTF8 error detection
+TEST_F(ValidationLimitsTest, InvalidUTF8) {
+    // Create buffer with invalid UTF-8 sequence (0xFF is never valid in UTF-8)
+    std::string content = "a,b,c\n1,\xFF,3\n";
+    auto [data, len] = make_buffer(content);
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::ValidationLimits limits;
+    limits.validate_utf8 = true;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               libvroom::ParseOptions::validated(errors, limits));
+    EXPECT_TRUE(errors.has_errors());
+    bool found_utf8_error = false;
+    for (const auto& err : errors.errors()) {
+        if (err.code == libvroom::ErrorCode::INVALID_UTF8) {
+            found_utf8_error = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_utf8_error);
+}
+
+// Test: Valid UTF-8 passes validation
+TEST_F(ValidationLimitsTest, ValidUTF8) {
+    // Valid UTF-8 content with multi-byte characters
+    std::string content = "name,city\nAlice,Zürich\nBob,日本\n";
+    auto [data, len] = make_buffer(content);
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::ValidationLimits limits;
+    limits.validate_utf8 = true;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               libvroom::ParseOptions::validated(errors, limits));
+    EXPECT_TRUE(result.success());
+    // Check no UTF-8 errors
+    for (const auto& err : errors.errors()) {
+        EXPECT_NE(err.code, libvroom::ErrorCode::INVALID_UTF8);
+    }
+}
+
+// Test: UTF-8 validation disabled by default
+TEST_F(ValidationLimitsTest, UTF8ValidationDisabledByDefault) {
+    std::string content = "a,b,c\n1,\xFF,3\n";  // Invalid UTF-8
+    auto [data, len] = make_buffer(content);
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::ValidationLimits limits = libvroom::ValidationLimits::defaults();
+    // validate_utf8 is false by default
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               libvroom::ParseOptions::validated(errors, limits));
+    // No UTF-8 error because validation is disabled
+    for (const auto& err : errors.errors()) {
+        EXPECT_NE(err.code, libvroom::ErrorCode::INVALID_UTF8);
+    }
+}
+
+// Test: ParseOptions::validated factory
+TEST_F(ValidationLimitsTest, ValidatedFactory) {
+    auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               libvroom::ParseOptions::validated(errors));
+    EXPECT_TRUE(result.success());
+}
+
+// Test: Truncated UTF-8 sequences
+TEST_F(ValidationLimitsTest, TruncatedUTF8Sequences) {
+    // Truncated 2-byte sequence (starts with 110xxxxx but no continuation byte)
+    std::string content = "a,b\n1,\xC0\n";
+    auto [data, len] = make_buffer(content);
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::ValidationLimits limits;
+    limits.validate_utf8 = true;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               libvroom::ParseOptions::validated(errors, limits));
+    EXPECT_TRUE(errors.has_errors());
+    bool found_utf8_error = false;
+    for (const auto& err : errors.errors()) {
+        if (err.code == libvroom::ErrorCode::INVALID_UTF8) {
+            found_utf8_error = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_utf8_error);
+}
+
+// Test: Overlong UTF-8 encoding
+TEST_F(ValidationLimitsTest, OverlongUTF8Encoding) {
+    // Overlong encoding of ASCII 'A' (0x41) as 2 bytes: C0 C1 would be overlong
+    // 0xC0 0x80 encodes NUL as 2 bytes (overlong)
+    std::string content = "a,b\n1,\xC0\x80\n";
+    auto [data, len] = make_buffer(content);
+    libvroom::FileBuffer buffer(data, len);
+    libvroom::Parser parser;
+
+    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    libvroom::ValidationLimits limits;
+    limits.validate_utf8 = true;
+
+    auto result = parser.parse(buffer.data(), buffer.size(),
+                               libvroom::ParseOptions::validated(errors, limits));
+    EXPECT_TRUE(errors.has_errors());
+}
