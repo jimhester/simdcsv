@@ -1999,3 +1999,144 @@ TEST_F(DialectDetectionTest, ScoreLowPatternHighType) {
     // May or may not succeed depending on score thresholds
     EXPECT_EQ(result.dialect.delimiter, ',');
 }
+
+// ============================================================================
+// Wide CSV Tests (Issue #260)
+// Tests adaptive sample size for files with many columns where rows are very long
+// ============================================================================
+
+TEST_F(DialectDetectionTest, WideCSVAdaptiveSampleSize) {
+    // Create a wide CSV with 500 columns - each row is ~2000+ bytes
+    // With default 10KB sample size and min_rows=3, this would fail
+    // without adaptive sample size adjustment
+    std::string csv_data;
+
+    // Header row with 500 columns
+    for (int i = 0; i < 500; ++i) {
+        if (i > 0) csv_data += ",";
+        csv_data += "col" + std::to_string(i);
+    }
+    csv_data += "\n";
+
+    // Data rows with 500 columns each
+    for (int row = 0; row < 5; ++row) {
+        for (int col = 0; col < 500; ++col) {
+            if (col > 0) csv_data += ",";
+            csv_data += std::to_string(row * 500 + col);
+        }
+        csv_data += "\n";
+    }
+
+    // Use default options (10KB sample size, min_rows=3)
+    simdcsv::DialectDetector default_detector;
+    auto result = default_detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // Should succeed with adaptive sample size
+    EXPECT_TRUE(result.success()) << "Wide CSV detection should succeed with adaptive sample size";
+    EXPECT_EQ(result.dialect.delimiter, ',') << "Should detect comma delimiter";
+    EXPECT_EQ(result.detected_columns, 500) << "Should detect 500 columns";
+    EXPECT_GE(result.rows_analyzed, 3) << "Should analyze at least 3 rows";
+}
+
+TEST_F(DialectDetectionTest, VeryWideCSV1000Columns) {
+    // Create an extremely wide CSV with 1000 columns
+    // Simulates files like COVID-19 time series data
+    std::string csv_data;
+
+    // Header row
+    for (int i = 0; i < 1000; ++i) {
+        if (i > 0) csv_data += ",";
+        csv_data += "date_" + std::to_string(i);
+    }
+    csv_data += "\n";
+
+    // Data rows
+    for (int row = 0; row < 5; ++row) {
+        for (int col = 0; col < 1000; ++col) {
+            if (col > 0) csv_data += ",";
+            csv_data += std::to_string(100 + row * col % 1000);
+        }
+        csv_data += "\n";
+    }
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success()) << "Very wide CSV (1000 cols) should succeed";
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.detected_columns, 1000);
+}
+
+TEST_F(DialectDetectionTest, WideCSVWithQuotedFields) {
+    // Wide CSV with some quoted fields containing commas
+    std::string csv_data;
+
+    // Header with 200 columns
+    for (int i = 0; i < 200; ++i) {
+        if (i > 0) csv_data += ",";
+        csv_data += "\"Column " + std::to_string(i) + "\"";
+    }
+    csv_data += "\n";
+
+    // Data rows
+    for (int row = 0; row < 5; ++row) {
+        for (int col = 0; col < 200; ++col) {
+            if (col > 0) csv_data += ",";
+            if (col % 10 == 0) {
+                // Every 10th column has a quoted field with embedded comma
+                csv_data += "\"value" + std::to_string(col) + ", extra\"";
+            } else {
+                csv_data += std::to_string(row * 200 + col);
+            }
+        }
+        csv_data += "\n";
+    }
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success()) << "Wide CSV with quoted fields should succeed";
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.detected_columns, 200);
+}
+
+TEST_F(DialectDetectionTest, WideCSVRowLongerThanDefaultSample) {
+    // Create a CSV where a single row is longer than default 10KB sample
+    std::string csv_data;
+
+    // Create header with enough columns to exceed 10KB per row
+    // Each column name "column_XXXX" is ~12 chars + comma = ~13 chars
+    // 10240 / 13 ≈ 788 columns needed
+    const int num_cols = 900;  // Ensure row > 10KB
+
+    for (int i = 0; i < num_cols; ++i) {
+        if (i > 0) csv_data += ",";
+        csv_data += "column_" + std::to_string(1000 + i);  // column_1000, column_1001, etc.
+    }
+    csv_data += "\n";
+
+    // Add data rows
+    for (int row = 0; row < 4; ++row) {
+        for (int col = 0; col < num_cols; ++col) {
+            if (col > 0) csv_data += ",";
+            csv_data += std::to_string(row * 1000 + col);
+        }
+        csv_data += "\n";
+    }
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success()) << "CSV with rows > 10KB should succeed";
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.detected_columns, static_cast<size_t>(num_cols));
+}

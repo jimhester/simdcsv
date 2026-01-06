@@ -87,8 +87,41 @@ DetectionResult DialectDetector::detect(const uint8_t* buf, size_t len) const {
         return result;
     }
 
-    // Limit to sample size
-    size_t sample_len = std::min(len, options_.sample_size);
+    // Calculate adaptive sample size based on first row length.
+    // For wide CSV files (many columns), rows can be very long.
+    // We need at least min_rows complete rows for pattern detection.
+    size_t effective_sample_size = options_.sample_size;
+
+    // Find the first newline to estimate row length
+    size_t first_newline = 0;
+    for (size_t i = 0; i < std::min(len, options_.sample_size); ++i) {
+        if (buf[i] == '\n') {
+            first_newline = i + 1;  // Include the newline
+            break;
+        }
+    }
+
+    // If we found a newline and the row is long, increase sample size
+    // to ensure we can get at least min_rows complete rows
+    if (first_newline > 0) {
+        // Estimate bytes needed: first_row_len * (min_rows + 1) to be safe
+        // The +1 accounts for potential variation in row lengths
+        size_t estimated_needed = first_newline * (options_.min_rows + 1);
+        if (estimated_needed > effective_sample_size) {
+            // Cap at a reasonable maximum (1MB) to avoid excessive memory use
+            constexpr size_t MAX_ADAPTIVE_SAMPLE = 1024 * 1024;
+            effective_sample_size = std::min(estimated_needed, MAX_ADAPTIVE_SAMPLE);
+        }
+    } else if (len > options_.sample_size) {
+        // No newline found in initial sample - this means rows are very long
+        // Expand sample to try to capture at least one complete row
+        // Use 4x the default sample size as a heuristic
+        constexpr size_t MAX_ADAPTIVE_SAMPLE = 1024 * 1024;
+        effective_sample_size = std::min(options_.sample_size * 4, MAX_ADAPTIVE_SAMPLE);
+    }
+
+    // Limit to actual data size and effective sample size
+    size_t sample_len = std::min(len, effective_sample_size);
 
     // Detect line ending style
     result.dialect.line_ending = detect_line_ending(buf, sample_len);
