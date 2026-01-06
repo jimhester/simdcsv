@@ -1545,7 +1545,7 @@ TEST_F(DialectDetectionTest, DialectValidation_HighByteDelimiter) {
 // ============================================================================
 
 TEST_F(DialectDetectionTest, PatternScoreTooFewRows) {
-    // Less than min_rows (default 3)
+    // Less than min_rows (when explicitly set higher than available rows)
     const std::string csv_data = "a,b,c\n1,2,3\n";
 
     simdcsv::DetectionOptions opts;
@@ -2007,7 +2007,7 @@ TEST_F(DialectDetectionTest, ScoreLowPatternHighType) {
 
 TEST_F(DialectDetectionTest, WideCSVAdaptiveSampleSize) {
     // Create a wide CSV with 500 columns - each row is ~2000+ bytes
-    // With default 10KB sample size and min_rows=3, this would fail
+    // With default 10KB sample size and min_rows=2, this would fail
     // without adaptive sample size adjustment
     std::string csv_data;
 
@@ -2027,7 +2027,7 @@ TEST_F(DialectDetectionTest, WideCSVAdaptiveSampleSize) {
         csv_data += "\n";
     }
 
-    // Use default options (10KB sample size, min_rows=3)
+    // Use default options (10KB sample size, min_rows=2)
     simdcsv::DialectDetector default_detector;
     auto result = default_detector.detect(
         reinterpret_cast<const uint8_t*>(csv_data.data()),
@@ -2038,7 +2038,7 @@ TEST_F(DialectDetectionTest, WideCSVAdaptiveSampleSize) {
     EXPECT_TRUE(result.success()) << "Wide CSV detection should succeed with adaptive sample size";
     EXPECT_EQ(result.dialect.delimiter, ',') << "Should detect comma delimiter";
     EXPECT_EQ(result.detected_columns, 500) << "Should detect 500 columns";
-    EXPECT_GE(result.rows_analyzed, 3) << "Should analyze at least 3 rows";
+    EXPECT_GE(result.rows_analyzed, 2) << "Should analyze at least min_rows (2) rows";
 }
 
 TEST_F(DialectDetectionTest, VeryWideCSV1000Columns) {
@@ -2139,4 +2139,80 @@ TEST_F(DialectDetectionTest, WideCSVRowLongerThanDefaultSample) {
     EXPECT_TRUE(result.success()) << "CSV with rows > 10KB should succeed";
     EXPECT_EQ(result.dialect.delimiter, ',');
     EXPECT_EQ(result.detected_columns, static_cast<size_t>(num_cols));
+}
+
+// ============================================================================
+// Two-Row CSV Detection Tests (Issue #293)
+// Tests that files with header + 1 data row can be detected with min_rows=2
+// ============================================================================
+
+TEST_F(DialectDetectionTest, TwoRowCSVDetection) {
+    // Exact example from issue #293: header + single data row
+    const std::string csv_data = "\"source id\",\"target id\",\"label\"\n\"60\",\"59\",\"Bob rel\"\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success()) << "Two-row CSV should be detected with min_rows=2";
+    EXPECT_EQ(result.dialect.delimiter, ',') << "Should detect comma delimiter";
+    EXPECT_EQ(result.dialect.quote_char, '"') << "Should detect double-quote";
+    EXPECT_EQ(result.detected_columns, 3) << "Should detect 3 columns";
+    EXPECT_EQ(result.rows_analyzed, 2) << "Should analyze 2 rows";
+}
+
+TEST_F(DialectDetectionTest, TwoRowCSVSemicolonDelimited) {
+    // Two-row CSV with semicolon delimiter
+    const std::string csv_data = "name;age;city\nAlice;30;Boston\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success()) << "Two-row semicolon CSV should succeed";
+    EXPECT_EQ(result.dialect.delimiter, ';') << "Should detect semicolon delimiter";
+    EXPECT_EQ(result.detected_columns, 3);
+}
+
+TEST_F(DialectDetectionTest, TwoRowCSVTabDelimited) {
+    // Two-row TSV
+    const std::string csv_data = "col1\tcol2\tcol3\nval1\tval2\tval3\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success()) << "Two-row TSV should succeed";
+    EXPECT_EQ(result.dialect.delimiter, '\t') << "Should detect tab delimiter";
+    EXPECT_EQ(result.detected_columns, 3);
+}
+
+TEST_F(DialectDetectionTest, TwoRowCSVWithMixedQuoting) {
+    // Header + data row with some quoted and some unquoted fields
+    const std::string csv_data = "id,\"full name\",active\n1,\"John Doe\",true\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    EXPECT_TRUE(result.success()) << "Two-row CSV with mixed quoting should succeed";
+    EXPECT_EQ(result.dialect.delimiter, ',');
+    EXPECT_EQ(result.detected_columns, 3);
+}
+
+TEST_F(DialectDetectionTest, SingleRowStillFailsWithDefaultMinRows) {
+    // Single row (no data) should still fail with default min_rows=2
+    const std::string csv_data = "a,b,c\n";
+
+    auto result = detector.detect(
+        reinterpret_cast<const uint8_t*>(csv_data.data()),
+        csv_data.size()
+    );
+
+    // Should fail because we only have 1 row, less than min_rows=2
+    EXPECT_FALSE(result.success()) << "Single row should fail with default min_rows=2";
 }

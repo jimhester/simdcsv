@@ -110,7 +110,7 @@ struct Dialect {
  */
 struct DetectionOptions {
     size_t sample_size = 10240;   ///< Bytes to sample (default 10KB)
-    size_t min_rows = 3;          ///< Minimum rows needed for detection
+    size_t min_rows = 2;          ///< Minimum rows needed for detection
     size_t max_rows = 100;        ///< Maximum rows to analyze
 
     /// Candidate delimiter characters to test
