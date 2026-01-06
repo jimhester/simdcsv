@@ -1,13 +1,36 @@
 /**
  * @file two_pass.h
- * @brief High-performance CSV parser using a speculative two-pass algorithm.
+ * @brief Internal implementation of the high-performance CSV parser.
+ *
+ * @warning **Do not include this header directly.** Use `#include "simdcsv.h"`
+ *          and the `Parser` class instead. This header contains internal
+ *          implementation details that may change without notice.
  *
  * This header provides the core parsing functionality of the simdcsv library.
  * The parser uses a speculative multi-threaded two-pass algorithm based on
  * research by Chang et al. (SIGMOD 2019) combined with SIMD techniques from
  * Langdale & Lemire (simdjson).
  *
- * The algorithm works as follows:
+ * ## Recommended Usage
+ *
+ * ```cpp
+ * #include "simdcsv.h"
+ *
+ * simdcsv::Parser parser(num_threads);
+ *
+ * // Auto-detect dialect, throw on errors (simplest)
+ * auto result = parser.parse(buf, len);
+ *
+ * // With error collection
+ * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+ * auto result = parser.parse(buf, len, {.errors = &errors});
+ *
+ * // Explicit dialect
+ * auto result = parser.parse(buf, len, {.dialect = simdcsv::Dialect::tsv()});
+ * ```
+ *
+ * ## Algorithm Overview
+ *
  * 1. **First Pass**: Scans for line boundaries while tracking quote parity.
  *    Finds safe split points where the file can be divided for parallel processing.
  *
@@ -17,9 +40,9 @@
  * 3. **Second Pass**: SIMD-based field indexing using a state machine. Processes
  *    64 bytes at a time using Google Highway portable SIMD intrinsics.
  *
- * @see index for the result structure containing field positions
- * @see two_pass for the main parser class
- * @see ErrorCollector for error handling during parsing
+ * @see simdcsv::Parser for the unified public API
+ * @see simdcsv::ParseOptions for configuration options
+ * @see simdcsv::index for the result structure containing field positions
  */
 
 #include <unistd.h>  // for getopt
@@ -36,6 +59,34 @@
 #include "error.h"
 #include "dialect.h"
 #include "branchless_state_machine.h"
+
+// Deprecation macro for cross-compiler support
+#if defined(__GNUC__) || defined(__clang__)
+    #define SIMDCSV_DEPRECATED(msg) __attribute__((deprecated(msg)))
+#elif defined(_MSC_VER)
+    #define SIMDCSV_DEPRECATED(msg) __declspec(deprecated(msg))
+#else
+    #define SIMDCSV_DEPRECATED(msg)
+#endif
+
+// Macro to suppress deprecation warnings for internal use
+// (Parser class needs to call deprecated methods)
+#ifdef __GNUC__
+    #define SIMDCSV_SUPPRESS_DEPRECATION_START \
+        _Pragma("GCC diagnostic push") \
+        _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+    #define SIMDCSV_SUPPRESS_DEPRECATION_END \
+        _Pragma("GCC diagnostic pop")
+#elif defined(_MSC_VER)
+    #define SIMDCSV_SUPPRESS_DEPRECATION_START \
+        __pragma(warning(push)) \
+        __pragma(warning(disable: 4996))
+    #define SIMDCSV_SUPPRESS_DEPRECATION_END \
+        __pragma(warning(pop))
+#else
+    #define SIMDCSV_SUPPRESS_DEPRECATION_START
+    #define SIMDCSV_SUPPRESS_DEPRECATION_END
+#endif
 
 namespace simdcsv {
 
@@ -807,7 +858,11 @@ class two_pass {
 
   /**
    * @brief Parse using speculative multi-threading with dialect support.
+   *
+   * @deprecated Use Parser::parse() with ParseOptions{.algorithm = ParseAlgorithm::SPECULATIVE}
+   *             instead. This method will be made private in a future version.
    */
+  SIMDCSV_DEPRECATED("Use Parser::parse() with ParseAlgorithm::SPECULATIVE instead")
   bool parse_speculate(const uint8_t* buf, index& out, size_t len,
                        const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
@@ -881,7 +936,11 @@ class two_pass {
 
   /**
    * @brief Parse using two-pass algorithm with dialect support.
+   *
+   * @deprecated Use Parser::parse() with ParseOptions{.algorithm = ParseAlgorithm::TWO_PASS}
+   *             instead. This method will be made private in a future version.
    */
+  SIMDCSV_DEPRECATED("Use Parser::parse() with ParseAlgorithm::TWO_PASS instead")
   bool parse_two_pass(const uint8_t* buf, index& out, size_t len,
                       const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
@@ -981,27 +1040,24 @@ class two_pass {
    * @note The buffer should be loaded using io_util.h functions which ensure
    *       proper SIMD-aligned padding.
    *
-   * @example
-   * @code
-   * simdcsv::two_pass parser;
-   * simdcsv::index idx = parser.init(length, 4);
+   * @deprecated Use Parser::parse() from simdcsv.h instead. The Parser class
+   *             provides a simpler, unified API with automatic index management.
+   *             Example:
+   *             ```cpp
+   *             simdcsv::Parser parser(num_threads);
+   *             auto result = parser.parse(buf, len, {.dialect = dialect});
+   *             ```
    *
-   * // Parse standard CSV
-   * parser.parse(buffer, idx, length);
-   *
-   * // Parse tab-separated values
-   * parser.parse(buffer, idx, length, simdcsv::Dialect::tsv());
-   *
-   * // Parse semicolon-separated (European style)
-   * parser.parse(buffer, idx, length, simdcsv::Dialect::semicolon());
-   * @endcode
-   *
+   * @see Parser For the recommended high-level API.
    * @see parse_with_errors() For single-threaded parsing with error collection.
    * @see parse_two_pass_with_errors() For multi-threaded parsing with error collection.
    */
+  SIMDCSV_DEPRECATED("Use Parser::parse() from simdcsv.h instead")
   bool parse(const uint8_t* buf, index& out, size_t len,
              const Dialect& dialect = Dialect::csv()) {
+    SIMDCSV_SUPPRESS_DEPRECATION_START
     return parse_speculate(buf, out, len, dialect);
+    SIMDCSV_SUPPRESS_DEPRECATION_END
   }
 
   /**
@@ -1032,10 +1088,17 @@ class two_pass {
    * @warning When parsing untrusted input, consider using parse_with_errors()
    *          to detect malformed CSV that this method may silently accept.
    *
-   * @see parse() For the standard parsing method
-   * @see parse_with_errors() For parsing with error collection
-   * @see BranchlessStateMachine For implementation details
+   * @deprecated Use Parser::parse() with ParseOptions::branchless() instead.
+   *             Example:
+   *             ```cpp
+   *             simdcsv::Parser parser(num_threads);
+   *             auto result = parser.parse(buf, len, ParseOptions::branchless());
+   *             ```
+   *
+   * @see Parser For the recommended high-level API.
+   * @see ParseAlgorithm::BRANCHLESS For algorithm selection.
    */
+  SIMDCSV_DEPRECATED("Use Parser::parse() with ParseOptions::branchless() instead")
   bool parse_branchless(const uint8_t* buf, index& out, size_t len,
                         const Dialect& dialect = Dialect::csv()) {
     BranchlessStateMachine sm(dialect.delimiter, dialect.quote_char);
@@ -1127,25 +1190,18 @@ class two_pass {
    *
    * @return true if parsing completed successfully, false otherwise.
    *
-   * @example
-   * @code
-   * simdcsv::two_pass parser;
-   * simdcsv::index idx = parser.init(length, 4);
-   * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
-   * simdcsv::DetectionResult detected;
+   * @deprecated Use Parser::parse() with default ParseOptions (auto-detects dialect):
+   *             ```cpp
+   *             simdcsv::Parser parser(num_threads);
+   *             simdcsv::ErrorCollector errors(ErrorMode::PERMISSIVE);
+   *             auto result = parser.parse(buf, len, {.errors = &errors});
+   *             // result.detection contains dialect detection info
+   *             ```
    *
-   * bool success = parser.parse_auto(buffer, idx, length, errors, &detected);
-   *
-   * if (detected.success()) {
-   *     std::cout << "Detected: " << detected.dialect.to_string() << "\n";
-   *     std::cout << "Columns: " << detected.detected_columns << "\n";
-   * }
-   * @endcode
-   *
+   * @see Parser For the recommended high-level API.
    * @see Dialect For dialect configuration options.
-   * @see DialectDetector For standalone dialect detection.
-   * @see parse() For parsing without auto-detection.
    */
+  SIMDCSV_DEPRECATED("Use Parser::parse() with {.errors = &errors} instead (auto-detects dialect)")
   bool parse_auto(const uint8_t* buf, index& out, size_t len,
                   ErrorCollector& errors, DetectionResult* detected = nullptr,
                   const DetectionOptions& detection_options = DetectionOptions()) {
@@ -1173,7 +1229,10 @@ class two_pass {
     }
 
     // Parse with detected dialect
+    // Suppress internal deprecation warning (parse_auto is itself deprecated)
+    SIMDCSV_SUPPRESS_DEPRECATION_START
     return parse_two_pass_with_errors(buf, out, len, errors, dialect);
+    SIMDCSV_SUPPRESS_DEPRECATION_END
   }
 
   /**
@@ -1264,24 +1323,20 @@ class two_pass {
    *          discovered in file order during parsing. However, the final
    *          error list is sorted by byte offset for consistent output.
    *
-   * @example
-   * @code
-   * simdcsv::two_pass parser;
-   * size_t num_threads = std::thread::hardware_concurrency();
-   * simdcsv::index idx = parser.init(length, num_threads);
-   * simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
+   * @deprecated Use Parser::parse() with error collection instead:
+   *             ```cpp
+   *             simdcsv::Parser parser(num_threads);
+   *             simdcsv::ErrorCollector errors(ErrorMode::PERMISSIVE);
+   *             auto result = parser.parse(buf, len, {
+   *                 .dialect = dialect,
+   *                 .errors = &errors
+   *             });
+   *             ```
    *
-   * // Parse with default CSV dialect
-   * bool success = parser.parse_two_pass_with_errors(buffer, idx, length, errors);
-   *
-   * // Parse with tab-separated values
-   * bool success = parser.parse_two_pass_with_errors(buffer, idx, length, errors,
-   *                                                   simdcsv::Dialect::tsv());
-   * @endcode
-   *
-   * @see parse_with_errors() For single-threaded parsing with precise ordering.
+   * @see Parser For the recommended high-level API.
    * @see ErrorCollector::merge_sorted() For error merging details.
    */
+  SIMDCSV_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
   bool parse_two_pass_with_errors(const uint8_t* buf, index& out, size_t len,
                                   ErrorCollector& errors,
                                   const Dialect& dialect = Dialect::csv()) {
@@ -1433,13 +1488,21 @@ class two_pass {
    * }
    * @endcode
    *
-   * @see parse_two_pass_with_errors() For multi-threaded parsing with errors.
+   * @deprecated Use Parser::parse() with error collection instead:
+   *             ```cpp
+   *             simdcsv::Parser parser(1);  // single-threaded
+   *             simdcsv::ErrorCollector errors(ErrorMode::PERMISSIVE);
+   *             auto result = parser.parse(buf, len, {
+   *                 .dialect = dialect,
+   *                 .errors = &errors
+   *             });
+   *             ```
+   *
+   * @see Parser For the recommended high-level API.
    * @see ErrorCollector For error handling configuration and access.
    * @see ErrorMode For different error handling strategies.
    */
-  /**
-   * @brief Parse a CSV buffer with detailed error collection (single-threaded).
-   */
+  SIMDCSV_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
   bool parse_with_errors(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors,
                          const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;
@@ -1617,9 +1680,20 @@ class two_pass {
    *
    * @return true if validation passed without fatal errors, false otherwise.
    *
-   * @see parse_with_errors() Equivalent functionality
+   * @deprecated Use Parser::parse() with error collection instead (same functionality):
+   *             ```cpp
+   *             simdcsv::Parser parser;
+   *             simdcsv::ErrorCollector errors(ErrorMode::PERMISSIVE);
+   *             auto result = parser.parse(buf, len, {
+   *                 .dialect = dialect,
+   *                 .errors = &errors
+   *             });
+   *             ```
+   *
+   * @see Parser For the recommended high-level API.
    * @see ErrorCollector For accessing validation results
    */
+  SIMDCSV_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
   bool parse_validate(const uint8_t* buf, index& out, size_t len, ErrorCollector& errors,
                       const Dialect& dialect = Dialect::csv()) {
     char delim = dialect.delimiter;

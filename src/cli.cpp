@@ -22,12 +22,11 @@
 #include <vector>
 
 #include "common_defs.h"
-#include "dialect.h"
 #include "encoding.h"
 #include "io_util.h"
 #include "mem_util.h"
 #include "simd_highway.h"
-#include "two_pass.h"
+#include "simdcsv.h"
 
 using namespace std;
 
@@ -240,20 +239,24 @@ bool parseFile(const char* filename, int n_threads,
     return false;
   }
 
-  simdcsv::two_pass parser;
-  idx = parser.init(data.size(), n_threads);
+  // Use the unified Parser API
+  simdcsv::Parser parser(n_threads);
 
-  // Skip auto-detection for empty files - nothing to detect
-  if (auto_detect && data.size() > 0) {
-    simdcsv::ErrorCollector errors(simdcsv::ErrorMode::PERMISSIVE);
-    simdcsv::DetectionResult detected;
-    parser.parse_auto(data.data(), idx, data.size(), errors, &detected);
-    if (detected.success()) {
-      cerr << "Auto-detected: " << detected.dialect.to_string() << endl;
-    }
-  } else {
-    parser.parse(data.data(), idx, data.size(), dialect);
+  // Build ParseOptions based on auto_detect flag
+  simdcsv::ParseOptions options;
+  if (!auto_detect) {
+    options.dialect = dialect;
   }
+  // Note: We don't collect errors for CLI (fast path - throws on errors)
+
+  auto result = parser.parse(data.data(), data.size(), options);
+  idx = std::move(result.idx);
+
+  // Report auto-detected dialect if applicable
+  if (auto_detect && data.size() > 0 && result.detection.success()) {
+    cerr << "Auto-detected: " << result.dialect.to_string() << endl;
+  }
+
   return true;
 }
 
