@@ -436,9 +436,13 @@ public:
       int64_t exp_value = 0;
       while (ptr < end && *ptr >= '0' && *ptr <= '9') {
         exp_value = exp_value * 10 + (*ptr - '0');
-        if (exp_value > 400)
-          break; // Overflow protection
         ++ptr;
+        if (exp_value > 400) {
+          // Consume remaining exponent digits after overflow
+          while (ptr < end && *ptr >= '0' && *ptr <= '9')
+            ++ptr;
+          break;
+        }
       }
 
       if (exp_negative)
