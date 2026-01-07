@@ -70,7 +70,7 @@
 //
 // 13. PARSER INTEGRATION (8 tests)
 //     Tests parse_auto, parse with explicit dialect, parse_two_pass variants.
-//     Exercises: two_pass parser dialect integration
+//     Exercises: TwoPass parser dialect integration
 //
 // 14. DIALECT VALIDATION (4 tests)
 //     Tests valid/invalid dialect configurations.
@@ -438,8 +438,8 @@ TEST_F(DialectDetectionTest, ParseAutoWithCommaCSV) {
   std::string path = getTestDataPath("basic", "simple.csv");
   auto data = get_corpus(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   libvroom::DetectionResult detected;
 
@@ -457,8 +457,8 @@ TEST_F(DialectDetectionTest, ParseAutoWithSemicolonCSV) {
   std::string path = getTestDataPath("separators", "semicolon.csv");
   auto data = get_corpus(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   libvroom::DetectionResult detected;
 
@@ -483,8 +483,8 @@ TEST_F(DialectDetectionTest, ParseAutoWithSemicolonCSV) {
 
 TEST_F(DialectDetectionTest, DetectDialectStatic) {
   const std::string csv_data = "a;b;c\n1;2;3\n4;5;6\n7;8;9\n";
-  auto result = libvroom::two_pass::detect_dialect(
-      reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
+  auto result = libvroom::TwoPass::detect_dialect(reinterpret_cast<const uint8_t*>(csv_data.data()),
+                                                  csv_data.size());
 
   EXPECT_TRUE(result.success());
   EXPECT_EQ(result.dialect.delimiter, ';');
@@ -497,8 +497,8 @@ TEST_F(DialectDetectionTest, DetectDialectWithOptions) {
   libvroom::DetectionOptions opts;
   opts.delimiters = {'#'};
 
-  auto result = libvroom::two_pass::detect_dialect(
-      reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size(), opts);
+  auto result = libvroom::TwoPass::detect_dialect(reinterpret_cast<const uint8_t*>(csv_data.data()),
+                                                  csv_data.size(), opts);
 
   EXPECT_TRUE(result.success());
   EXPECT_EQ(result.dialect.delimiter, '#');
@@ -512,8 +512,8 @@ TEST_F(DialectDetectionTest, ParseWithTSVDialect) {
   std::string path = getTestDataPath("separators", "tab.csv");
   auto data = get_corpus(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
   libvroom::Dialect tsv = libvroom::Dialect::tsv();
 
   bool success = parser.parse(data.data(), idx, data.size(), tsv);
@@ -527,8 +527,8 @@ TEST_F(DialectDetectionTest, ParseWithSemicolonDialect) {
   std::string path = getTestDataPath("separators", "semicolon.csv");
   auto data = get_corpus(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
   libvroom::Dialect semicolon = libvroom::Dialect::semicolon();
 
   bool success = parser.parse(data.data(), idx, data.size(), semicolon);
@@ -542,8 +542,8 @@ TEST_F(DialectDetectionTest, ParseWithPipeDialect) {
   std::string path = getTestDataPath("separators", "pipe.csv");
   auto data = get_corpus(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
   libvroom::Dialect pipe = libvroom::Dialect::pipe();
 
   bool success = parser.parse(data.data(), idx, data.size(), pipe);
@@ -558,8 +558,8 @@ TEST_F(DialectDetectionTest, ParseWithErrorsDialect) {
   const std::string csv_data = "name;age;city\nAlice;30;Paris\nBob;25;London\n";
   auto buf = makeBuffer(csv_data);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(csv_data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(csv_data.size(), 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   libvroom::Dialect semicolon = libvroom::Dialect::semicolon();
 
@@ -574,8 +574,8 @@ TEST_F(DialectDetectionTest, ParseValidateDialect) {
   const std::string tsv_data = "name\tage\tcity\nAlice\t30\tParis\nBob\t25\tLondon\n";
   auto buf = makeBuffer(tsv_data);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(tsv_data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(tsv_data.size(), 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   libvroom::Dialect tsv = libvroom::Dialect::tsv();
 
@@ -594,8 +594,8 @@ TEST_F(DialectDetectionTest, ParseWithSingleQuote) {
   single_quote.delimiter = ',';
   single_quote.quote_char = '\'';
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(csv_data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(csv_data.size(), 1);
 
   bool success = parser.parse(buf.data(), idx, csv_data.size(), single_quote);
 
@@ -607,8 +607,8 @@ TEST_F(DialectDetectionTest, ParseTwoPassWithErrorsDialect) {
   const std::string csv_data = "name;age;city\nAlice;30;Paris\nBob;25;London\nCharlie;35;Berlin\n";
   auto buf = makeBuffer(csv_data);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(csv_data.size(), 2); // 2 threads
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(csv_data.size(), 2); // 2 threads
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   libvroom::Dialect semicolon = libvroom::Dialect::semicolon();
 
