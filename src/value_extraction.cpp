@@ -8,6 +8,49 @@
 
 namespace libvroom {
 
+// Helper: Skip over comment lines starting at the given position.
+// Returns the position after all consecutive comment lines, or the original
+// position if no comment lines are present.
+static size_t skip_comment_lines_from(const uint8_t* buf, size_t len, size_t pos,
+                                      char comment_char) {
+  if (comment_char == '\0' || pos >= len) {
+    return pos;
+  }
+
+  while (pos < len) {
+    // Skip any leading whitespace (spaces and tabs only)
+    size_t line_start = pos;
+    while (pos < len && (buf[pos] == ' ' || buf[pos] == '\t')) {
+      ++pos;
+    }
+
+    // Check if this line starts with the comment character
+    if (pos < len && buf[pos] == static_cast<uint8_t>(comment_char)) {
+      // This is a comment line - skip to end of line
+      while (pos < len && buf[pos] != '\n' && buf[pos] != '\r') {
+        ++pos;
+      }
+      // Skip the line ending (LF, CR, or CRLF)
+      if (pos < len) {
+        if (buf[pos] == '\r') {
+          ++pos;
+          if (pos < len && buf[pos] == '\n') {
+            ++pos;
+          }
+        } else if (buf[pos] == '\n') {
+          ++pos;
+        }
+      }
+      // Continue checking for more comment lines
+    } else {
+      // Not a comment line - revert to start of this line content
+      return line_start;
+    }
+  }
+
+  return pos;
+}
+
 ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx,
                                const Dialect& dialect, const ExtractionConfig& config)
     : buf_(buf), len_(len), idx_(idx), dialect_(dialect), config_(config) {
@@ -54,6 +97,18 @@ std::string_view ValueExtractor::get_string_view_internal(size_t row, size_t col
     end = len_; // Bounds check
   if (start > len_)
     start = len_; // Bounds check
+
+  // If this is the first column of a row (col == 0) and not the first field overall,
+  // check if the previous field ended with a newline. If so, skip any comment lines
+  // that may exist between the end of the previous row and the start of this row.
+  if (col == 0 && field_idx > 0 && dialect_.comment_char != '\0') {
+    size_t prev_end_pos = linear_indexes_[field_idx - 1];
+    if (prev_end_pos < len_ && (buf_[prev_end_pos] == '\n' || buf_[prev_end_pos] == '\r')) {
+      // Previous field ended at a row boundary - skip any comment lines
+      start = skip_comment_lines_from(buf_, len_, start, dialect_.comment_char);
+    }
+  }
+
   if (end > start && buf_[end - 1] == '\r')
     --end;
   if (end > start && buf_[start] == static_cast<uint8_t>(dialect_.quote_char))
@@ -77,6 +132,18 @@ std::string ValueExtractor::get_string(size_t row, size_t col) const {
     end = len_; // Bounds check
   if (start > len_)
     start = len_; // Bounds check
+
+  // If this is the first column of a row (col == 0) and not the first field overall,
+  // check if the previous field ended with a newline. If so, skip any comment lines
+  // that may exist between the end of the previous row and the start of this row.
+  if (col == 0 && field_idx > 0 && dialect_.comment_char != '\0') {
+    size_t prev_end_pos = linear_indexes_[field_idx - 1];
+    if (prev_end_pos < len_ && (buf_[prev_end_pos] == '\n' || buf_[prev_end_pos] == '\r')) {
+      // Previous field ended at a row boundary - skip any comment lines
+      start = skip_comment_lines_from(buf_, len_, start, dialect_.comment_char);
+    }
+  }
+
   if (end > start && buf_[end - 1] == '\r')
     --end;
   if (end < start)
@@ -142,6 +209,13 @@ std::vector<std::string> ValueExtractor::get_header() const {
       end = len_; // Bounds check
     if (start > len_)
       start = len_; // Bounds check
+
+    // For the first header column (col == 0), skip any comment lines at the
+    // beginning of the file
+    if (col == 0 && dialect_.comment_char != '\0') {
+      start = skip_comment_lines_from(buf_, len_, start, dialect_.comment_char);
+    }
+
     if (end > start && buf_[end - 1] == '\r')
       --end;
     if (end < start)
@@ -159,6 +233,18 @@ bool ValueExtractor::get_field_bounds(size_t row, size_t col, size_t& start, siz
   size_t field_idx = compute_field_index(row, col);
   start = (field_idx == 0) ? 0 : linear_indexes_[field_idx - 1] + 1;
   end = linear_indexes_[field_idx];
+
+  // If this is the first column of a row (col == 0) and not the first field overall,
+  // check if the previous field ended with a newline. If so, skip any comment lines
+  // that may exist between the end of the previous row and the start of this row.
+  if (col == 0 && field_idx > 0 && dialect_.comment_char != '\0') {
+    size_t prev_end_pos = linear_indexes_[field_idx - 1];
+    if (prev_end_pos < len_ && (buf_[prev_end_pos] == '\n' || buf_[prev_end_pos] == '\r')) {
+      // Previous field ended at a row boundary - skip any comment lines
+      start = skip_comment_lines_from(buf_, len_, start, dialect_.comment_char);
+    }
+  }
+
   assert(end >= start && "Invalid field bounds: end must be >= start");
   return true;
 }

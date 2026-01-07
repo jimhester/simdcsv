@@ -39,6 +39,7 @@ component_management:
   default_rules:
     statuses:
       - type: project
+        informational: true
       - type: patch
   individual_components:
     - component_id: library

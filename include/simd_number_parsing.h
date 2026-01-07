@@ -1012,6 +1012,13 @@ parse_integer_simd(const char* str, size_t len,
     return {std::nullopt, "Integer too large"};
   }
 
+  // Check for leading zeros if not allowed
+  // LCOV_EXCL_BR_START - compound condition branches covered by tests
+  if (!config.allow_leading_zeros && digit_count > 1 && *digit_start == '0') {
+    return {std::nullopt, "Leading zeros not allowed"};
+  }
+  // LCOV_EXCL_BR_STOP
+
   // Use SIMD parser for the actual parsing
   // LCOV_EXCL_BR_START - if constexpr branches are compile-time only
   if constexpr (std::is_same_v<IntType, int64_t>) {
