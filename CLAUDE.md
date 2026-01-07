@@ -17,20 +17,20 @@ This project is authored by Jim Hester, the original author of [vroom](https://g
 ## Build Commands
 
 ```bash
-# Configure and build (Release)
+# Configure and build (Release) - use -j for parallel compilation
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake --build build -j$(nproc)
 
 # Minimal release build (library and CLI only, no tests/benchmarks)
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF
-cmake --build build
+cmake --build build -j$(nproc)
 
 # Build shared library instead of static
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
-cmake --build build
+cmake --build build -j$(nproc)
 
 # Run all tests
-cd build && ctest --output-on-failure
+cd build && ctest --output-on-failure -j$(nproc)
 
 # Run specific test binary
 ./build/libvroom_test              # 42 well-formed CSV tests
@@ -42,8 +42,21 @@ cd build && ctest --output-on-failure
 
 # Build with code coverage
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
-cmake --build build
+cmake --build build -j$(nproc)
 ```
+
+## Build Acceleration
+
+**ccache** is automatically detected and used if installed. Install with:
+```bash
+# Ubuntu/Debian
+sudo apt install ccache
+
+# macOS
+brew install ccache
+```
+
+ccache dramatically speeds up rebuilds by caching compilation results. View stats with `ccache -s`.
 
 ## Language Server
 
