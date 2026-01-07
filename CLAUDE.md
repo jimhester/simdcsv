@@ -77,6 +77,13 @@ ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
 
 To manually format a file: `clang-format -i <file>`
 
+## Git Workflow
+
+- **No force pushing**: Avoid `git push --force` on branches
+- **Update branches via merge**: When a branch needs updates from main, use `git merge main` instead of rebasing
+- **Squash on final merge**: Use squash merge when merging PRs into main to keep history clean
+- **Check for merge conflicts**: When opening a branch, check for merge conflicts with main. If CI status checks aren't appearing on a PR, merge conflicts are often the cause
+
 ## Key Files
 
 | File | Purpose |
@@ -115,4 +122,25 @@ SIMD via Google Highway 1.3.0: x86-64 (SSE4.2, AVX2), ARM (NEON), scalar fallbac
 
 ## Issue Labels
 
-Use `gh issue create --label "label"` with: `bug`, `feature`, `documentation`, `performance 🚀`, `testing 🧪`, `cleanup 🧹`, `api 🔌`, `c-api 🔧`, `simd ⚡`, `arrow 🏹`, `security 🔒`, `critical ☠️`
+Use `gh issue create --label "label"` with the following labels:
+
+| Label | Description |
+|-------|-------------|
+| `bug` | an unexpected problem or unintended behavior |
+| `feature` | a feature request or enhancement |
+| `documentation` | improvements or additions to documentation |
+| `performance 🚀` | performance improvement |
+| `testing 🧪` | test coverage or infrastructure |
+| `cleanup 🧹` | code cleanup or refactoring |
+| `api 🔌` | public API changes or additions |
+| `c-api 🔧` | C API wrapper |
+| `cli ⌨️` | vroom command line tool |
+| `simd ⚡` | SIMD implementation or optimization |
+| `arrow 🏹` | Apache Arrow integration |
+| `security 🔒` | security vulnerability or hardening |
+| `critical ☠️` | must fix - security or correctness issue |
+| `up next 📌` | next items to address from code review |
+| `good first issue ❤️` | good issue for first-time contributors |
+| `help wanted ❤️` | we'd love your help! |
+| `duplicate` | this issue or pull request already exists |
+| `wontfix ❌` | this will not be worked on |
