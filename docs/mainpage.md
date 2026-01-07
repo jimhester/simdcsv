@@ -190,6 +190,85 @@ if (errors.has_errors()) {
 
 ---
 
+## Common Pitfalls
+
+Watch out for these common mistakes when using libvroom:
+
+### Memory Management
+
+**Always use `aligned_free()` for `aligned_malloc()`**
+
+Memory allocated with `aligned_malloc()` or `allocate_padded_buffer()` MUST be freed
+with `aligned_free()`. Using standard `free()` or `delete` causes undefined behavior
+on some platforms (especially Windows).
+
+```cpp
+// WRONG - undefined behavior on Windows
+void* buf = aligned_malloc(64, 1024);
+free(buf);  // DO NOT DO THIS
+
+// CORRECT - use aligned_free()
+void* buf = aligned_malloc(64, 1024);
+aligned_free(buf);
+
+// BETTER - use RAII wrappers that handle this automatically
+AlignedPtr buf = make_aligned_ptr(1024, 64);
+// Memory automatically freed when buf goes out of scope
+```
+
+**Check for allocation failures in production code**
+
+`aligned_malloc()` and `allocate_padded_buffer()` return `nullptr` on failure.
+Always check the return value before using the pointer.
+
+```cpp
+void* buffer = aligned_malloc(64, large_size);
+if (buffer == nullptr) {
+    // Handle allocation failure
+    throw std::bad_alloc();
+}
+```
+
+### SIMD Safety
+
+**Ensure 32+ bytes padding for SIMD operations**
+
+SIMD operations read data in fixed-size chunks (32-64 bytes). Without sufficient
+padding at the end of your buffer, reads past the data boundary can cause crashes.
+
+```cpp
+// WRONG - no padding, may crash with SIMD
+uint8_t* buf = new uint8_t[file_size];
+
+// CORRECT - use padded allocation
+uint8_t* buf = allocate_padded_buffer(file_size, 64);  // 64 bytes padding
+
+// BETTER - use load_file() which handles padding automatically
+auto buffer = libvroom::load_file("data.csv");  // Includes default 64-byte padding
+```
+
+### Move-Only Types
+
+**`FileBuffer` and `AlignedBuffer` are move-only**
+
+These RAII wrappers cannot be copied to prevent double-free bugs. Use move semantics
+or references when passing them around.
+
+```cpp
+// WRONG - compilation error
+libvroom::FileBuffer buf1 = libvroom::load_file("data.csv");
+libvroom::FileBuffer buf2 = buf1;  // ERROR: copy constructor deleted
+
+// CORRECT - use move semantics
+libvroom::FileBuffer buf2 = std::move(buf1);  // OK, buf1 is now empty
+
+// CORRECT - pass by reference
+void process(const libvroom::FileBuffer& buf);
+process(buf1);  // OK, no copy
+```
+
+---
+
 ## See Also
 
 - [Error Handling Guide](error_handling.md) - Detailed error handling documentation
