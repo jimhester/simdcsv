@@ -29,11 +29,11 @@
  * // Memory automatically freed when buffer goes out of scope
  * @endcode
  *
- * ### 3. Manual management with get_corpus() (Legacy)
+ * ### 3. Direct allocation with read_file() (Low-level)
  * @code
- * auto corpus = get_corpus("data.csv", 64);
- * // ... use corpus ...
- * aligned_free((void*)corpus.data());  // Must manually free!
+ * auto [buffer, size] = read_file("data.csv", 64);
+ * // ... use buffer.get() ...
+ * // Memory automatically freed when buffer goes out of scope
  * @endcode
  *
  * @note All memory allocated with aligned_malloc() must be freed with
@@ -47,8 +47,8 @@
 #ifndef MEM_UTIL_H
 #define MEM_UTIL_H
 
-#include <stdlib.h>
 #include <memory>
+#include <stdlib.h>
 
 /**
  * @brief Allocate memory with specified alignment.
@@ -76,8 +76,8 @@
  *
  * @see aligned_free() To deallocate memory from this function.
  */
-static inline void *aligned_malloc(size_t alignment, size_t size) {
-  void *p;
+static inline void* aligned_malloc(size_t alignment, size_t size) {
+  void* p;
 #ifdef _MSC_VER
   p = _aligned_malloc(size, alignment);
 #elif defined(__MINGW32__) || defined(__MINGW64__)
@@ -85,7 +85,9 @@ static inline void *aligned_malloc(size_t alignment, size_t size) {
 #else
   // somehow, if this is used before including "x86intrin.h", it creates an
   // implicit defined warning.
-  if (posix_memalign(&p, alignment, size) != 0) { return nullptr; }
+  if (posix_memalign(&p, alignment, size) != 0) {
+    return nullptr;
+  }
 #endif
   return p;
 }
@@ -116,14 +118,16 @@ static inline void *aligned_malloc(size_t alignment, size_t size) {
  *
  * @see aligned_malloc() To allocate memory that this function frees.
  */
-static inline void aligned_free(void *memblock) {
-    if(memblock == nullptr) { return; }
+static inline void aligned_free(void* memblock) {
+  if (memblock == nullptr) {
+    return;
+  }
 #ifdef _MSC_VER
-    _aligned_free(memblock);
+  _aligned_free(memblock);
 #elif defined(__MINGW32__) || defined(__MINGW64__)
-    __mingw_aligned_free(memblock);
+  __mingw_aligned_free(memblock);
 #else
-    free(memblock);
+  free(memblock);
 #endif
 }
 
@@ -149,16 +153,14 @@ static inline void aligned_free(void *memblock) {
  * @see make_aligned_ptr() For a factory function.
  */
 struct AlignedDeleter {
-    /**
-     * @brief Deletes the given uint8_t array using aligned_free().
-     * @param ptr Pointer to free. Safe to call with nullptr.
-     *
-     * @note This deleter only accepts uint8_t* to avoid ambiguity with nullptr.
-     *       Use static_cast if you need to delete other pointer types.
-     */
-    void operator()(uint8_t* ptr) const noexcept {
-        aligned_free(ptr);
-    }
+  /**
+   * @brief Deletes the given uint8_t array using aligned_free().
+   * @param ptr Pointer to free. Safe to call with nullptr.
+   *
+   * @note This deleter only accepts uint8_t* to avoid ambiguity with nullptr.
+   *       Use static_cast if you need to delete other pointer types.
+   */
+  void operator()(uint8_t* ptr) const noexcept { aligned_free(ptr); }
 };
 
 /**
@@ -224,13 +226,13 @@ using AlignedPtr = std::unique_ptr<uint8_t[], AlignedDeleter>;
  * @see AlignedPtr For the returned type.
  */
 inline AlignedPtr make_aligned_ptr(size_t length, size_t padding) {
-    // Check for integer overflow before allocation
-    if (length > SIZE_MAX - padding) {
-        return AlignedPtr(nullptr);
-    }
-    size_t total = length + padding;
-    uint8_t* ptr = static_cast<uint8_t*>(aligned_malloc(64, total));
-    return AlignedPtr(ptr);
+  // Check for integer overflow before allocation
+  if (length > SIZE_MAX - padding) {
+    return AlignedPtr(nullptr);
+  }
+  size_t total = length + padding;
+  uint8_t* ptr = static_cast<uint8_t*>(aligned_malloc(64, total));
+  return AlignedPtr(ptr);
 }
 
 #endif

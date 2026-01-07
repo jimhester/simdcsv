@@ -98,7 +98,7 @@ The `Parser::parse()` method replaces multiple legacy methods:
 | Function | Description |
 |----------|-------------|
 | @ref libvroom::load_file() | Load a file into a FileBuffer (recommended). |
-| @ref get_corpus() | Load a file into a SIMD-aligned buffer (legacy). |
+| @ref libvroom::load_file_to_ptr() | Load a file into an AlignedBuffer with RAII. |
 | @ref allocate_padded_buffer() | Allocate a padded buffer for SIMD operations. |
 
 ---

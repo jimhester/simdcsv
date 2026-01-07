@@ -14,8 +14,8 @@
 #ifndef LIBVROOM_DIALECT_H
 #define LIBVROOM_DIALECT_H
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -33,158 +33,151 @@ namespace libvroom {
  * - double_quote: whether quotes are escaped by doubling (RFC 4180 style)
  */
 struct Dialect {
-    char delimiter = ',';
-    char quote_char = '"';
-    char escape_char = '"';
-    bool double_quote = true;  ///< If true, "" escapes to " (RFC 4180)
+  char delimiter = ',';
+  char quote_char = '"';
+  char escape_char = '"';
+  bool double_quote = true; ///< If true, "" escapes to " (RFC 4180)
 
-    /// Line ending style detected (informational)
-    enum class LineEnding { LF, CRLF, CR, MIXED, UNKNOWN };
-    LineEnding line_ending = LineEnding::UNKNOWN;
+  /// Line ending style detected (informational)
+  enum class LineEnding { LF, CRLF, CR, MIXED, UNKNOWN };
+  LineEnding line_ending = LineEnding::UNKNOWN;
 
-    /// Factory for standard CSV (comma-separated, double-quoted)
-    static Dialect csv() {
-        return Dialect{',', '"', '"', true, LineEnding::UNKNOWN};
+  /// Factory for standard CSV (comma-separated, double-quoted)
+  static Dialect csv() { return Dialect{',', '"', '"', true, LineEnding::UNKNOWN}; }
+
+  /// Factory for TSV (tab-separated)
+  static Dialect tsv() { return Dialect{'\t', '"', '"', true, LineEnding::UNKNOWN}; }
+
+  /// Factory for semicolon-separated (European style)
+  static Dialect semicolon() { return Dialect{';', '"', '"', true, LineEnding::UNKNOWN}; }
+
+  /// Factory for pipe-separated
+  static Dialect pipe() { return Dialect{'|', '"', '"', true, LineEnding::UNKNOWN}; }
+
+  bool operator==(const Dialect& other) const {
+    return delimiter == other.delimiter && quote_char == other.quote_char &&
+           escape_char == other.escape_char && double_quote == other.double_quote;
+  }
+
+  bool operator!=(const Dialect& other) const { return !(*this == other); }
+
+  /// Validate the dialect configuration
+  /// @return true if valid, false otherwise
+  bool is_valid() const {
+    // Delimiter and quote must be different
+    if (delimiter == quote_char)
+      return false;
+    // Neither can be newline characters
+    if (delimiter == '\n' || delimiter == '\r')
+      return false;
+    if (quote_char == '\n' || quote_char == '\r')
+      return false;
+    // Must be printable or tab
+    if (delimiter != '\t' && (delimiter < 32 || delimiter > 126))
+      return false;
+    if (quote_char < 32 || quote_char > 126)
+      return false;
+    return true;
+  }
+
+  /// Validate and throw if invalid
+  /// @throws std::invalid_argument if dialect is invalid
+  void validate() const {
+    if (delimiter == quote_char) {
+      throw std::invalid_argument("Delimiter and quote character cannot be the same");
     }
-
-    /// Factory for TSV (tab-separated)
-    static Dialect tsv() {
-        return Dialect{'\t', '"', '"', true, LineEnding::UNKNOWN};
+    if (delimiter == '\n' || delimiter == '\r') {
+      throw std::invalid_argument("Delimiter cannot be a newline character");
     }
-
-    /// Factory for semicolon-separated (European style)
-    static Dialect semicolon() {
-        return Dialect{';', '"', '"', true, LineEnding::UNKNOWN};
+    if (quote_char == '\n' || quote_char == '\r') {
+      throw std::invalid_argument("Quote character cannot be a newline character");
     }
+  }
 
-    /// Factory for pipe-separated
-    static Dialect pipe() {
-        return Dialect{'|', '"', '"', true, LineEnding::UNKNOWN};
-    }
-
-    bool operator==(const Dialect& other) const {
-        return delimiter == other.delimiter &&
-               quote_char == other.quote_char &&
-               escape_char == other.escape_char &&
-               double_quote == other.double_quote;
-    }
-
-    bool operator!=(const Dialect& other) const {
-        return !(*this == other);
-    }
-
-    /// Validate the dialect configuration
-    /// @return true if valid, false otherwise
-    bool is_valid() const {
-        // Delimiter and quote must be different
-        if (delimiter == quote_char) return false;
-        // Neither can be newline characters
-        if (delimiter == '\n' || delimiter == '\r') return false;
-        if (quote_char == '\n' || quote_char == '\r') return false;
-        // Must be printable or tab
-        if (delimiter != '\t' && (delimiter < 32 || delimiter > 126)) return false;
-        if (quote_char < 32 || quote_char > 126) return false;
-        return true;
-    }
-
-    /// Validate and throw if invalid
-    /// @throws std::invalid_argument if dialect is invalid
-    void validate() const {
-        if (delimiter == quote_char) {
-            throw std::invalid_argument("Delimiter and quote character cannot be the same");
-        }
-        if (delimiter == '\n' || delimiter == '\r') {
-            throw std::invalid_argument("Delimiter cannot be a newline character");
-        }
-        if (quote_char == '\n' || quote_char == '\r') {
-            throw std::invalid_argument("Quote character cannot be a newline character");
-        }
-    }
-
-    /// Returns a human-readable description of the dialect
-    std::string to_string() const;
+  /// Returns a human-readable description of the dialect
+  std::string to_string() const;
 };
 
 /**
  * @brief Configuration options for dialect detection.
  */
 struct DetectionOptions {
-    size_t sample_size = 10240;   ///< Bytes to sample (default 10KB)
-    size_t min_rows = 2;          ///< Minimum rows needed for detection
-    size_t max_rows = 100;        ///< Maximum rows to analyze
+  size_t sample_size = 10240; ///< Bytes to sample (default 10KB)
+  size_t min_rows = 2;        ///< Minimum rows needed for detection
+  size_t max_rows = 100;      ///< Maximum rows to analyze
 
-    /// Candidate delimiter characters to test
-    std::vector<char> delimiters = {',', ';', '\t', '|', ':'};
+  /// Candidate delimiter characters to test
+  std::vector<char> delimiters = {',', ';', '\t', '|', ':'};
 
-    /// Candidate quote characters to test
-    std::vector<char> quote_chars = {'"', '\''};
+  /// Candidate quote characters to test
+  std::vector<char> quote_chars = {'"', '\''};
 
-    /// Candidate escape characters to test (in addition to double-quote style)
-    /// Empty means only test double-quote escaping; backslash is common alternative
-    std::vector<char> escape_chars = {'\\'};
+  /// Candidate escape characters to test (in addition to double-quote style)
+  /// Empty means only test double-quote escaping; backslash is common alternative
+  std::vector<char> escape_chars = {'\\'};
 
-    /// Minimum confidence threshold for successful detection
-    double min_confidence = 0.5;
+  /// Minimum confidence threshold for successful detection
+  double min_confidence = 0.5;
 };
 
 /**
  * @brief Candidate dialect with detection scores.
  */
 struct DialectCandidate {
-    Dialect dialect;
-    double pattern_score = 0.0;      ///< Row length consistency [0, 1]
-    double type_score = 0.0;         ///< Cell type inference score [0, 1]
-    double consistency_score = 0.0;  ///< Combined: pattern_score * type_score
-    size_t num_columns = 0;          ///< Detected column count
+  Dialect dialect;
+  double pattern_score = 0.0;     ///< Row length consistency [0, 1]
+  double type_score = 0.0;        ///< Cell type inference score [0, 1]
+  double consistency_score = 0.0; ///< Combined: pattern_score * type_score
+  size_t num_columns = 0;         ///< Detected column count
 
-    bool operator<(const DialectCandidate& other) const {
-        // Higher consistency score is better (use epsilon for floating-point)
-        constexpr double epsilon = 1e-9;
-        double score_diff = consistency_score - other.consistency_score;
-        if (score_diff > epsilon) {
-            return true;  // this has higher score
-        }
-        if (score_diff < -epsilon) {
-            return false;  // other has higher score
-        }
-        // Scores are effectively equal, apply tie-breakers
-
-        // Tie-break 1: prefer more columns
-        if (num_columns != other.num_columns) {
-            return num_columns > other.num_columns;
-        }
-        // Tie-break 2: prefer double-quote character (RFC 4180 standard)
-        if (dialect.quote_char != other.dialect.quote_char) {
-            return dialect.quote_char == '"';
-        }
-        // Tie-break 3: prefer RFC 4180 double-quote escaping style
-        if (dialect.double_quote != other.dialect.double_quote) {
-            return dialect.double_quote;
-        }
-        // Tie-break 4: prefer comma delimiter (most common)
-        if (dialect.delimiter != other.dialect.delimiter) {
-            return dialect.delimiter == ',';
-        }
-        return false;  // Equal
+  bool operator<(const DialectCandidate& other) const {
+    // Higher consistency score is better (use epsilon for floating-point)
+    constexpr double epsilon = 1e-9;
+    double score_diff = consistency_score - other.consistency_score;
+    if (score_diff > epsilon) {
+      return true; // this has higher score
     }
+    if (score_diff < -epsilon) {
+      return false; // other has higher score
+    }
+    // Scores are effectively equal, apply tie-breakers
+
+    // Tie-break 1: prefer more columns
+    if (num_columns != other.num_columns) {
+      return num_columns > other.num_columns;
+    }
+    // Tie-break 2: prefer double-quote character (RFC 4180 standard)
+    if (dialect.quote_char != other.dialect.quote_char) {
+      return dialect.quote_char == '"';
+    }
+    // Tie-break 3: prefer RFC 4180 double-quote escaping style
+    if (dialect.double_quote != other.dialect.double_quote) {
+      return dialect.double_quote;
+    }
+    // Tie-break 4: prefer comma delimiter (most common)
+    if (dialect.delimiter != other.dialect.delimiter) {
+      return dialect.delimiter == ',';
+    }
+    return false; // Equal
+  }
 };
 
 /**
  * @brief Result of dialect detection.
  */
 struct DetectionResult {
-    Dialect dialect;                  ///< Detected dialect
-    double confidence = 0.0;          ///< Overall confidence [0, 1]
-    bool has_header = false;          ///< Whether first row appears to be header
-    size_t detected_columns = 0;      ///< Number of columns detected
-    size_t rows_analyzed = 0;         ///< Number of rows analyzed
-    std::string warning;              ///< Any warnings during detection
+  Dialect dialect;             ///< Detected dialect
+  double confidence = 0.0;     ///< Overall confidence [0, 1]
+  bool has_header = false;     ///< Whether first row appears to be header
+  size_t detected_columns = 0; ///< Number of columns detected
+  size_t rows_analyzed = 0;    ///< Number of rows analyzed
+  std::string warning;         ///< Any warnings during detection
 
-    /// All tested candidates, sorted by score (best first)
-    std::vector<DialectCandidate> candidates;
+  /// All tested candidates, sorted by score (best first)
+  std::vector<DialectCandidate> candidates;
 
-    /// Returns true if detection was successful (confidence > threshold)
-    bool success() const { return confidence > 0.5; }
+  /// Returns true if detection was successful (confidence > threshold)
+  bool success() const { return confidence > 0.5; }
 };
 
 /**
@@ -199,102 +192,88 @@ struct DetectionResult {
  * @example
  * @code
  * #include "dialect.h"
- * #include "io_util.h"
+ * #include "libvroom.h"
  *
- * auto corpus = get_corpus("data.csv", 64);
+ * auto buffer = libvroom::load_file("data.csv");
  * libvroom::DialectDetector detector;
- * auto result = detector.detect(corpus.data(), corpus.size());
+ * auto result = detector.detect(buffer.data(), buffer.size());
  *
  * if (result.success()) {
  *     std::cout << "Detected: " << result.dialect.to_string() << std::endl;
  *     std::cout << "Columns: " << result.detected_columns << std::endl;
  * }
+ * // Memory automatically freed when buffer goes out of scope
  * @endcode
  */
 class DialectDetector {
 public:
-    /// Cell type categories for type inference
-    enum class CellType {
-        EMPTY,
-        INTEGER,
-        FLOAT,
-        DATE,
-        DATETIME,
-        TIME,
-        BOOLEAN,
-        STRING
-    };
+  /// Cell type categories for type inference
+  enum class CellType { EMPTY, INTEGER, FLOAT, DATE, DATETIME, TIME, BOOLEAN, STRING };
 
-    /**
-     * @brief Construct a detector with given options.
-     * @param options Detection configuration
-     */
-    explicit DialectDetector(const DetectionOptions& options = DetectionOptions());
+  /**
+   * @brief Construct a detector with given options.
+   * @param options Detection configuration
+   */
+  explicit DialectDetector(const DetectionOptions& options = DetectionOptions());
 
-    /**
-     * @brief Detect dialect from a memory buffer.
-     * @param buf Pointer to CSV data
-     * @param len Length of data in bytes
-     * @return DetectionResult with detected dialect and confidence
-     */
-    DetectionResult detect(const uint8_t* buf, size_t len) const;
+  /**
+   * @brief Detect dialect from a memory buffer.
+   * @param buf Pointer to CSV data
+   * @param len Length of data in bytes
+   * @return DetectionResult with detected dialect and confidence
+   */
+  DetectionResult detect(const uint8_t* buf, size_t len) const;
 
-    /**
-     * @brief Detect dialect from a file.
-     * @param filename Path to CSV file
-     * @return DetectionResult with detected dialect and confidence
-     */
-    DetectionResult detect_file(const std::string& filename) const;
+  /**
+   * @brief Detect dialect from a file.
+   * @param filename Path to CSV file
+   * @return DetectionResult with detected dialect and confidence
+   */
+  DetectionResult detect_file(const std::string& filename) const;
 
-    /**
-     * @brief Infer the type of a cell value.
-     * @param cell The cell content as a string view
-     * @return The inferred CellType
-     */
-    static CellType infer_cell_type(std::string_view cell);
+  /**
+   * @brief Infer the type of a cell value.
+   * @param cell The cell content as a string view
+   * @return The inferred CellType
+   */
+  static CellType infer_cell_type(std::string_view cell);
 
-    /**
-     * @brief Convert CellType to string for debugging.
-     */
-    static const char* cell_type_to_string(CellType type);
+  /**
+   * @brief Convert CellType to string for debugging.
+   */
+  static const char* cell_type_to_string(CellType type);
 
 private:
-    DetectionOptions options_;
+  DetectionOptions options_;
 
-    /// Generate all candidate dialects to test
-    std::vector<Dialect> generate_candidates() const;
+  /// Generate all candidate dialects to test
+  std::vector<Dialect> generate_candidates() const;
 
-    /// Score a single dialect candidate
-    DialectCandidate score_dialect(const Dialect& dialect,
-                                   const uint8_t* buf, size_t len) const;
+  /// Score a single dialect candidate
+  DialectCandidate score_dialect(const Dialect& dialect, const uint8_t* buf, size_t len) const;
 
-    /// Compute pattern score (row length consistency)
-    double compute_pattern_score(const Dialect& dialect,
-                                 const uint8_t* buf, size_t len,
-                                 std::vector<size_t>& row_field_counts) const;
+  /// Compute pattern score (row length consistency)
+  double compute_pattern_score(const Dialect& dialect, const uint8_t* buf, size_t len,
+                               std::vector<size_t>& row_field_counts) const;
 
-    /// Compute type score (ratio of typed cells)
-    double compute_type_score(const Dialect& dialect,
-                              const uint8_t* buf, size_t len) const;
+  /// Compute type score (ratio of typed cells)
+  double compute_type_score(const Dialect& dialect, const uint8_t* buf, size_t len) const;
 
-    /// Detect line ending style
-    static Dialect::LineEnding detect_line_ending(const uint8_t* buf, size_t len);
+  /// Detect line ending style
+  static Dialect::LineEnding detect_line_ending(const uint8_t* buf, size_t len);
 
-    /// Detect if first row is likely a header
-    bool detect_header(const Dialect& dialect,
-                       const uint8_t* buf, size_t len) const;
+  /// Detect if first row is likely a header
+  bool detect_header(const Dialect& dialect, const uint8_t* buf, size_t len) const;
 
-    /// Find row boundaries respecting quote state
-    std::vector<std::pair<size_t, size_t>> find_rows(
-        const Dialect& dialect,
-        const uint8_t* buf, size_t len) const;
+  /// Find row boundaries respecting quote state
+  std::vector<std::pair<size_t, size_t>> find_rows(const Dialect& dialect, const uint8_t* buf,
+                                                   size_t len) const;
 
-    /// Extract fields from a single row
-    std::vector<std::string_view> extract_fields(
-        const Dialect& dialect,
-        const uint8_t* row_start, size_t row_len) const;
+  /// Extract fields from a single row
+  std::vector<std::string_view> extract_fields(const Dialect& dialect, const uint8_t* row_start,
+                                               size_t row_len) const;
 };
 
-}  // namespace libvroom
+} // namespace libvroom
 
-#endif  // LIBVROOM_DIALECT_H
+#endif // LIBVROOM_DIALECT_H

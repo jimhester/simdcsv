@@ -1,14 +1,15 @@
-#include <benchmark/benchmark.h>
-#include "common_defs.h"
-#include "io_util.h"
-#include "mem_util.h"
 #include "libvroom.h"
-#include <fstream>
-#include <chrono>
-#include <thread>
-#include <random>
 
-extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
+#include "common_defs.h"
+#include "mem_util.h"
+
+#include <benchmark/benchmark.h>
+#include <chrono>
+#include <fstream>
+#include <random>
+#include <thread>
+
+extern std::map<std::string, libvroom::AlignedBuffer> test_data;
 
 // Performance metrics and efficiency benchmarks
 
@@ -21,10 +22,14 @@ static void BM_CachePerformance(benchmark::State& state) {
 
   // Fill with realistic CSV-like data pattern
   for (size_t i = 0; i < data_size; ++i) {
-    if (i % 100 == 0) data[i] = '\n';       // Newlines
-    else if (i % 10 == 0) data[i] = ',';    // Commas
-    else if (i % 50 == 0) data[i] = '"';    // Quotes
-    else data[i] = 'a' + (i % 26);          // Letters
+    if (i % 100 == 0)
+      data[i] = '\n'; // Newlines
+    else if (i % 10 == 0)
+      data[i] = ','; // Commas
+    else if (i % 50 == 0)
+      data[i] = '"'; // Quotes
+    else
+      data[i] = 'a' + (i % 26); // Letters
   }
 
   // Add padding
@@ -57,50 +62,52 @@ static void BM_CachePerformance(benchmark::State& state) {
 }
 
 BENCHMARK(BM_CachePerformance)
-  ->Arg(16 * 1024)      // L1 cache size
-  ->Arg(128 * 1024)     // L2 cache size
-  ->Arg(4 * 1024 * 1024)  // L3 cache size
-  ->Arg(32 * 1024 * 1024) // Main memory
-  ->Unit(benchmark::kMicrosecond);
+    ->Arg(16 * 1024)        // L1 cache size
+    ->Arg(128 * 1024)       // L2 cache size
+    ->Arg(4 * 1024 * 1024)  // L3 cache size
+    ->Arg(32 * 1024 * 1024) // Main memory
+    ->Unit(benchmark::kMicrosecond);
 
 // Instructions per byte benchmark
 static void BM_InstructionEfficiency(benchmark::State& state) {
   // Load test file
   std::string filename = "test/data/basic/many_rows.csv";
-  std::basic_string_view<uint8_t> data;
 
   if (test_data.find(filename) == test_data.end()) {
     try {
-      data = get_corpus(filename.c_str(), LIBVROOM_PADDING);
-      test_data[filename] = data;
+      auto buffer = libvroom::load_file_to_ptr(filename, LIBVROOM_PADDING);
+      if (!buffer) {
+        state.SkipWithError(("Failed to load " + filename).c_str());
+        return;
+      }
+      test_data.emplace(filename, std::move(buffer));
     } catch (const std::exception& e) {
       state.SkipWithError(("Failed to load " + filename + ": " + e.what()).c_str());
       return;
     }
-  } else {
-    data = test_data[filename];
   }
 
+  const auto& buffer = test_data.at(filename);
   libvroom::Parser parser(1);
 
   // Measure cycles before and after
   auto start_time = std::chrono::high_resolution_clock::now();
 
   for (auto _ : state) {
-    auto result = parser.parse(data.data(), data.size());
+    auto result = parser.parse(buffer.data(), buffer.size);
     benchmark::DoNotOptimize(result);
   }
 
   auto end_time = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
+  auto duration =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
 
-  state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
-  state.counters["NsPerByte"] = static_cast<double>(duration) / (state.iterations() * data.size());
-  state.counters["FileSize"] = static_cast<double>(data.size());
+  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+  state.counters["NsPerByte"] = static_cast<double>(duration) / (state.iterations() * buffer.size);
+  state.counters["FileSize"] = static_cast<double>(buffer.size);
 }
 
-BENCHMARK(BM_InstructionEfficiency)
-  ->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_InstructionEfficiency)->Unit(benchmark::kMillisecond);
 
 // Thread scaling efficiency benchmark
 static void BM_ThreadScalingEfficiency(benchmark::State& state) {
@@ -108,30 +115,32 @@ static void BM_ThreadScalingEfficiency(benchmark::State& state) {
 
   // Use a reasonably large file for thread scaling
   std::string filename = "test/data/basic/many_rows.csv";
-  std::basic_string_view<uint8_t> data;
 
   if (test_data.find(filename) == test_data.end()) {
     try {
-      data = get_corpus(filename.c_str(), LIBVROOM_PADDING);
-      test_data[filename] = data;
+      auto buffer = libvroom::load_file_to_ptr(filename, LIBVROOM_PADDING);
+      if (!buffer) {
+        state.SkipWithError(("Failed to load " + filename).c_str());
+        return;
+      }
+      test_data.emplace(filename, std::move(buffer));
     } catch (const std::exception& e) {
       state.SkipWithError(("Failed to load " + filename + ": " + e.what()).c_str());
       return;
     }
-  } else {
-    data = test_data[filename];
   }
 
+  const auto& buffer = test_data.at(filename);
   libvroom::Parser parser(n_threads);
 
   for (auto _ : state) {
-    auto result = parser.parse(data.data(), data.size());
+    auto result = parser.parse(buffer.data(), buffer.size);
     benchmark::DoNotOptimize(result);
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
+  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
   state.counters["Threads"] = static_cast<double>(n_threads);
-  state.counters["FileSize"] = static_cast<double>(data.size());
+  state.counters["FileSize"] = static_cast<double>(buffer.size);
 
   // Calculate efficiency metrics
   static double single_thread_throughput = 0.0;
@@ -143,8 +152,8 @@ static void BM_ThreadScalingEfficiency(benchmark::State& state) {
 }
 
 BENCHMARK(BM_ThreadScalingEfficiency)
-  ->DenseRange(1, 16, 1) // 1 to 16 threads
-  ->Unit(benchmark::kMillisecond);
+    ->DenseRange(1, 16, 1) // 1 to 16 threads
+    ->Unit(benchmark::kMillisecond);
 
 // Memory bandwidth utilization benchmark
 static void BM_MemoryBandwidth(benchmark::State& state) {
@@ -182,9 +191,9 @@ static void BM_MemoryBandwidth(benchmark::State& state) {
 }
 
 BENCHMARK(BM_MemoryBandwidth)
-  ->RangeMultiplier(4)
-  ->Range(1024 * 1024, 256 * 1024 * 1024) // 1MB to 256MB
-  ->Unit(benchmark::kMillisecond);
+    ->RangeMultiplier(4)
+    ->Range(1024 * 1024, 256 * 1024 * 1024) // 1MB to 256MB
+    ->Unit(benchmark::kMillisecond);
 
 // Branch prediction benchmark
 static void BM_BranchPrediction(benchmark::State& state) {
@@ -195,30 +204,36 @@ static void BM_BranchPrediction(benchmark::State& state) {
 
   // Different branch prediction patterns
   switch (pattern_type) {
-    case 0: // Predictable pattern
-      for (size_t i = 0; i < data_size; ++i) {
-        if (i % 100 == 0) data[i] = '\n';
-        else if (i % 10 == 0) data[i] = ',';
-        else data[i] = 'a';
-      }
-      break;
-    case 1: // Random pattern (bad for branch prediction)
-      {
-        std::mt19937 gen(12345); // Fixed seed for reproducibility
-        std::uniform_int_distribution<> dist(0, 255);
-        for (size_t i = 0; i < data_size; ++i) {
-          data[i] = static_cast<uint8_t>(dist(gen));
-        }
-      }
-      break;
-    case 2: // Quotes heavy (lots of quote state changes)
-      for (size_t i = 0; i < data_size; ++i) {
-        if (i % 5 == 0) data[i] = '"';
-        else if (i % 10 == 0) data[i] = ',';
-        else if (i % 50 == 0) data[i] = '\n';
-        else data[i] = 'a';
-      }
-      break;
+  case 0: // Predictable pattern
+    for (size_t i = 0; i < data_size; ++i) {
+      if (i % 100 == 0)
+        data[i] = '\n';
+      else if (i % 10 == 0)
+        data[i] = ',';
+      else
+        data[i] = 'a';
+    }
+    break;
+  case 1: // Random pattern (bad for branch prediction)
+  {
+    std::mt19937 gen(12345); // Fixed seed for reproducibility
+    std::uniform_int_distribution<> dist(0, 255);
+    for (size_t i = 0; i < data_size; ++i) {
+      data[i] = static_cast<uint8_t>(dist(gen));
+    }
+  } break;
+  case 2: // Quotes heavy (lots of quote state changes)
+    for (size_t i = 0; i < data_size; ++i) {
+      if (i % 5 == 0)
+        data[i] = '"';
+      else if (i % 10 == 0)
+        data[i] = ',';
+      else if (i % 50 == 0)
+        data[i] = '\n';
+      else
+        data[i] = 'a';
+    }
+    break;
   }
 
   // Add padding
@@ -240,8 +255,8 @@ static void BM_BranchPrediction(benchmark::State& state) {
 }
 
 BENCHMARK(BM_BranchPrediction)
-  ->DenseRange(0, 2, 1) // 0=predictable, 1=random, 2=quote-heavy
-  ->Unit(benchmark::kMillisecond);
+    ->DenseRange(0, 2, 1) // 0=predictable, 1=random, 2=quote-heavy
+    ->Unit(benchmark::kMillisecond);
 
 // SIMD utilization benchmark (measures effectiveness of vectorization)
 static void BM_SIMDUtilization(benchmark::State& state) {
@@ -249,14 +264,18 @@ static void BM_SIMDUtilization(benchmark::State& state) {
   size_t data_size = 1024 * 1024; // 1MB
 
   // Test different alignments to see SIMD effectiveness
-  auto base_data = static_cast<uint8_t*>(aligned_malloc(64, data_size + alignment + LIBVROOM_PADDING));
+  auto base_data =
+      static_cast<uint8_t*>(aligned_malloc(64, data_size + alignment + LIBVROOM_PADDING));
   auto data = base_data + alignment; // Offset by alignment
 
   // Fill with CSV-like pattern
   for (size_t i = 0; i < data_size; ++i) {
-    if (i % 100 == 0) data[i] = '\n';
-    else if (i % 10 == 0) data[i] = ',';
-    else data[i] = 'a' + (i % 26);
+    if (i % 100 == 0)
+      data[i] = '\n';
+    else if (i % 10 == 0)
+      data[i] = ',';
+    else
+      data[i] = 'a' + (i % 26);
   }
 
   // Add padding
@@ -279,9 +298,9 @@ static void BM_SIMDUtilization(benchmark::State& state) {
 }
 
 BENCHMARK(BM_SIMDUtilization)
-  ->Arg(0)   // 64-byte aligned (optimal for AVX-512)
-  ->Arg(1)   // 1-byte offset (misaligned)
-  ->Arg(8)   // 8-byte offset
-  ->Arg(16)  // 16-byte offset
-  ->Arg(32)  // 32-byte offset
-  ->Unit(benchmark::kMicrosecond);
+    ->Arg(0)  // 64-byte aligned (optimal for AVX-512)
+    ->Arg(1)  // 1-byte offset (misaligned)
+    ->Arg(8)  // 8-byte offset
+    ->Arg(16) // 16-byte offset
+    ->Arg(32) // 32-byte offset
+    ->Unit(benchmark::kMicrosecond);

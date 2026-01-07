@@ -15,8 +15,8 @@ on:
 #    correctly add padding, but ASAN may still flag reads as the padding bytes
 #    were copied from a smaller source allocation.
 #
-# 2. Memory leaks: Test code often doesn't free get_corpus() return buffers.
-#    Leak detection is disabled via ASAN_OPTIONS=detect_leaks=0.
+# 2. Memory leaks: Test code now uses RAII (load_file_to_ptr()) for automatic cleanup.
+#    Leak detection is disabled via ASAN_OPTIONS=detect_leaks=0 as a safety measure.
 #
 # See: https://github.com/jimhester/libvroom/issues/310
 
@@ -46,7 +46,7 @@ jobs:
 
     - name: Run tests with ASAN (leak detection disabled)
       env:
-        # Disable leak detection as many tests don't free get_corpus() buffers
+        # Disable leak detection as a safety measure even though tests now use RAII
         # This is a test issue, not library issue - library code passes ASAN checks
         ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:halt_on_error=1
       run: |
@@ -104,7 +104,7 @@ jobs:
 
     - name: Run tests with ASAN and UBSAN (leak detection disabled)
       env:
-        # Disable leak detection as many tests don't free get_corpus() buffers
+        # Disable leak detection as a safety measure even though tests now use RAII
         # This is a test issue, not library issue - library code passes ASAN checks
         ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:halt_on_error=1
         UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1

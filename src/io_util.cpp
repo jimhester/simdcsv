@@ -1,202 +1,199 @@
 #include "io_util.h"
-#include "mem_util.h"
+
 #include "encoding.h"
-#include <cstring>
-#include <cstdlib>
+#include "mem_util.h"
+
 #include <cstdio>
-#include <vector>
+#include <cstdlib>
+#include <cstring>
 #include <sys/stat.h>
+#include <vector>
 
-uint8_t * allocate_padded_buffer(size_t length, size_t padding) {
-    // Check for integer overflow before addition
-    if (length > SIZE_MAX - padding) {
-        return nullptr;
-    }
-    // we could do a simple malloc
-    //return (char *) malloc(length + padding);
-    // However, we might as well align to cache lines...
-    size_t totalpaddedlength = length + padding;
-    uint8_t * padded_buffer = (uint8_t *) aligned_malloc(64, totalpaddedlength);
-    return padded_buffer;
+uint8_t* allocate_padded_buffer(size_t length, size_t padding) {
+  // Check for integer overflow before addition
+  if (length > SIZE_MAX - padding) {
+    return nullptr;
+  }
+  // we could do a simple malloc
+  // return (char *) malloc(length + padding);
+  // However, we might as well align to cache lines...
+  size_t totalpaddedlength = length + padding;
+  uint8_t* padded_buffer = (uint8_t*)aligned_malloc(64, totalpaddedlength);
+  return padded_buffer;
 }
 
-std::basic_string_view<uint8_t> get_corpus_stdin(size_t padding) {
-    // Read stdin in chunks since we don't know the size upfront
-    const size_t chunk_size = 64 * 1024;  // 64KB chunks
-    std::vector<uint8_t> data;
-    data.reserve(chunk_size * 16);  // Reserve ~1MB upfront to reduce reallocations
+std::pair<AlignedPtr, size_t> read_stdin(size_t padding) {
+  // Read stdin in chunks since we don't know the size upfront
+  const size_t chunk_size = 64 * 1024; // 64KB chunks
+  std::vector<uint8_t> data;
+  data.reserve(chunk_size * 16); // Reserve ~1MB upfront to reduce reallocations
 
-    uint8_t buffer[chunk_size];
-    while (true) {
-        size_t bytes_read = std::fread(buffer, 1, chunk_size, stdin);
-        if (bytes_read > 0) {
-            data.insert(data.end(), buffer, buffer + bytes_read);
-        }
-        if (bytes_read < chunk_size) {
-            if (std::ferror(stdin)) {
-                throw std::runtime_error("could not read from stdin");
-            }
-            break;  // EOF reached
-        }
+  uint8_t buffer[chunk_size];
+  while (true) {
+    size_t bytes_read = std::fread(buffer, 1, chunk_size, stdin);
+    if (bytes_read > 0) {
+      data.insert(data.end(), buffer, buffer + bytes_read);
     }
-
-    if (data.empty()) {
-        throw std::runtime_error("no data read from stdin");
+    if (bytes_read < chunk_size) {
+      if (std::ferror(stdin)) {
+        throw std::runtime_error("could not read from stdin");
+      }
+      break; // EOF reached
     }
+  }
 
-    // Allocate properly aligned buffer with padding
-    uint8_t* buf = allocate_padded_buffer(data.size(), padding);
-    if (buf == nullptr) {
-        throw std::runtime_error("could not allocate memory");
-    }
+  if (data.empty()) {
+    throw std::runtime_error("no data read from stdin");
+  }
 
-    // Copy data to aligned buffer
-    std::memcpy(buf, data.data(), data.size());
+  // Allocate properly aligned buffer with padding
+  uint8_t* buf = allocate_padded_buffer(data.size(), padding);
+  if (buf == nullptr) {
+    throw std::runtime_error("could not allocate memory");
+  }
 
-    return std::basic_string_view<uint8_t>(buf, data.size());
+  // Copy data to aligned buffer
+  std::memcpy(buf, data.data(), data.size());
+
+  return {AlignedPtr(buf), data.size()};
 }
 
-std::basic_string_view<uint8_t> get_corpus(const std::string& filename, size_t padding) {
+std::pair<AlignedPtr, size_t> read_file(const std::string& filename, size_t padding) {
   // Check if the path is a regular file (not a directory or special file)
   struct stat path_stat;
   if (stat(filename.c_str(), &path_stat) != 0 || !S_ISREG(path_stat.st_mode)) {
     throw std::runtime_error("could not load corpus");
   }
 
-  std::FILE *fp = std::fopen(filename.c_str(), "rb");
+  std::FILE* fp = std::fopen(filename.c_str(), "rb");
   if (fp != nullptr) {
-    std::fseek(fp, 0, SEEK_END);
-    size_t len = std::ftell(fp);
-    uint8_t * buf = allocate_padded_buffer(len, padding);
-    if(buf == nullptr) {
-      std::fclose(fp);
-      throw  std::runtime_error("could not allocate memory");
-    }
-    std::rewind(fp);
-    size_t readb = std::fread(buf, 1, len, fp);
-    std::fclose(fp);
-    if(readb != len) {
-      aligned_free(buf);
-      throw  std::runtime_error("could not read the data");
-    }
-    return std::basic_string_view<uint8_t>(buf,len);
-  }
-  throw  std::runtime_error("could not load corpus");
-}
-
-// Helper to transcode data if needed and return result
-static LoadResult process_with_encoding(uint8_t* raw_buf, size_t raw_len, size_t padding) {
-    LoadResult result;
-
-    // Detect encoding
-    result.encoding = libvroom::detect_encoding(raw_buf, raw_len);
-
-    // If transcoding is needed, transcode and free original buffer
-    if (result.encoding.needs_transcoding) {
-        auto transcoded = libvroom::transcode_to_utf8(
-            raw_buf, raw_len,
-            result.encoding.encoding,
-            result.encoding.bom_length,
-            padding
-        );
-
-        // Free the original buffer
-        aligned_free(raw_buf);
-
-        if (!transcoded.success) {
-            throw std::runtime_error("Transcoding failed: " + transcoded.error);
-        }
-
-        result.data = std::basic_string_view<uint8_t>(transcoded.data, transcoded.length);
-    } else if (result.encoding.bom_length > 0) {
-        // UTF-8 with BOM - need to strip the BOM
-        auto stripped = libvroom::transcode_to_utf8(
-            raw_buf, raw_len,
-            result.encoding.encoding,
-            result.encoding.bom_length,
-            padding
-        );
-
-        // Free the original buffer
-        aligned_free(raw_buf);
-
-        if (!stripped.success) {
-            throw std::runtime_error("Failed to strip BOM: " + stripped.error);
-        }
-
-        result.data = std::basic_string_view<uint8_t>(stripped.data, stripped.length);
-    } else {
-        // Already UTF-8 without BOM - use as-is
-        result.data = std::basic_string_view<uint8_t>(raw_buf, raw_len);
-    }
-
-    return result;
-}
-
-LoadResult get_corpus_with_encoding(const std::string& filename, size_t padding) {
-    // Check if the path is a regular file (not a directory or special file)
-    struct stat path_stat;
-    if (stat(filename.c_str(), &path_stat) != 0 || !S_ISREG(path_stat.st_mode)) {
-        throw std::runtime_error("could not load corpus");
-    }
-
-    std::FILE *fp = std::fopen(filename.c_str(), "rb");
-    if (fp == nullptr) {
-        throw std::runtime_error("could not load corpus");
-    }
-
     std::fseek(fp, 0, SEEK_END);
     size_t len = std::ftell(fp);
     uint8_t* buf = allocate_padded_buffer(len, padding);
     if (buf == nullptr) {
-        std::fclose(fp);
-        throw std::runtime_error("could not allocate memory");
+      std::fclose(fp);
+      throw std::runtime_error("could not allocate memory");
     }
-
     std::rewind(fp);
     size_t readb = std::fread(buf, 1, len, fp);
     std::fclose(fp);
-
     if (readb != len) {
-        aligned_free(buf);
-        throw std::runtime_error("could not read the data");
+      aligned_free(buf);
+      throw std::runtime_error("could not read the data");
     }
-
-    return process_with_encoding(buf, len, padding);
+    return {AlignedPtr(buf), len};
+  }
+  throw std::runtime_error("could not load corpus");
 }
 
-LoadResult get_corpus_stdin_with_encoding(size_t padding) {
-    // Read stdin in chunks since we don't know the size upfront
-    const size_t chunk_size = 64 * 1024;  // 64KB chunks
-    std::vector<uint8_t> data;
-    data.reserve(chunk_size * 16);  // Reserve ~1MB upfront
+// Helper to transcode data if needed and return result
+static LoadResult process_with_encoding(AlignedPtr raw_buf, size_t raw_len, size_t padding) {
+  LoadResult result;
 
-    uint8_t buffer[chunk_size];
-    while (true) {
-        size_t bytes_read = std::fread(buffer, 1, chunk_size, stdin);
-        if (bytes_read > 0) {
-            data.insert(data.end(), buffer, buffer + bytes_read);
-        }
-        if (bytes_read < chunk_size) {
-            if (std::ferror(stdin)) {
-                throw std::runtime_error("could not read from stdin");
-            }
-            break;  // EOF reached
-        }
+  // Detect encoding
+  result.encoding = libvroom::detect_encoding(raw_buf.get(), raw_len);
+
+  // If transcoding is needed, transcode and free original buffer
+  if (result.encoding.needs_transcoding) {
+    auto transcoded = libvroom::transcode_to_utf8(raw_buf.get(), raw_len, result.encoding.encoding,
+                                                  result.encoding.bom_length, padding);
+
+    // Release old buffer (will be freed by AlignedPtr going out of scope)
+    raw_buf.reset();
+
+    if (!transcoded.success) {
+      throw std::runtime_error("Transcoding failed: " + transcoded.error);
     }
 
-    if (data.empty()) {
-        throw std::runtime_error("no data read from stdin");
+    result.buffer = AlignedPtr(transcoded.data);
+    result.size = transcoded.length;
+  } else if (result.encoding.bom_length > 0) {
+    // UTF-8 with BOM - need to strip the BOM
+    auto stripped = libvroom::transcode_to_utf8(raw_buf.get(), raw_len, result.encoding.encoding,
+                                                result.encoding.bom_length, padding);
+
+    // Release old buffer
+    raw_buf.reset();
+
+    if (!stripped.success) {
+      throw std::runtime_error("Failed to strip BOM: " + stripped.error);
     }
 
-    // Allocate properly aligned buffer
-    uint8_t* buf = allocate_padded_buffer(data.size(), padding);
-    if (buf == nullptr) {
-        throw std::runtime_error("could not allocate memory");
+    result.buffer = AlignedPtr(stripped.data);
+    result.size = stripped.length;
+  } else {
+    // Already UTF-8 without BOM - use as-is
+    result.buffer = std::move(raw_buf);
+    result.size = raw_len;
+  }
+
+  return result;
+}
+
+LoadResult read_file_with_encoding(const std::string& filename, size_t padding) {
+  // Check if the path is a regular file (not a directory or special file)
+  struct stat path_stat;
+  if (stat(filename.c_str(), &path_stat) != 0 || !S_ISREG(path_stat.st_mode)) {
+    throw std::runtime_error("could not load corpus");
+  }
+
+  std::FILE* fp = std::fopen(filename.c_str(), "rb");
+  if (fp == nullptr) {
+    throw std::runtime_error("could not load corpus");
+  }
+
+  std::fseek(fp, 0, SEEK_END);
+  size_t len = std::ftell(fp);
+  uint8_t* buf = allocate_padded_buffer(len, padding);
+  if (buf == nullptr) {
+    std::fclose(fp);
+    throw std::runtime_error("could not allocate memory");
+  }
+
+  std::rewind(fp);
+  size_t readb = std::fread(buf, 1, len, fp);
+  std::fclose(fp);
+
+  if (readb != len) {
+    aligned_free(buf);
+    throw std::runtime_error("could not read the data");
+  }
+
+  return process_with_encoding(AlignedPtr(buf), len, padding);
+}
+
+LoadResult read_stdin_with_encoding(size_t padding) {
+  // Read stdin in chunks since we don't know the size upfront
+  const size_t chunk_size = 64 * 1024; // 64KB chunks
+  std::vector<uint8_t> data;
+  data.reserve(chunk_size * 16); // Reserve ~1MB upfront
+
+  uint8_t buffer[chunk_size];
+  while (true) {
+    size_t bytes_read = std::fread(buffer, 1, chunk_size, stdin);
+    if (bytes_read > 0) {
+      data.insert(data.end(), buffer, buffer + bytes_read);
     }
+    if (bytes_read < chunk_size) {
+      if (std::ferror(stdin)) {
+        throw std::runtime_error("could not read from stdin");
+      }
+      break; // EOF reached
+    }
+  }
 
-    // Copy data to aligned buffer
-    std::memcpy(buf, data.data(), data.size());
+  if (data.empty()) {
+    throw std::runtime_error("no data read from stdin");
+  }
 
-    return process_with_encoding(buf, data.size(), padding);
+  // Allocate properly aligned buffer
+  uint8_t* buf = allocate_padded_buffer(data.size(), padding);
+  if (buf == nullptr) {
+    throw std::runtime_error("could not allocate memory");
+  }
+
+  // Copy data to aligned buffer
+  std::memcpy(buf, data.data(), data.size());
+
+  return process_with_encoding(AlignedPtr(buf), data.size(), padding);
 }
