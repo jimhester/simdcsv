@@ -475,4 +475,46 @@ void ColumnTypeInference::merge(const ColumnTypeInference& other) {
   }
 }
 
+bool ColumnTypeInference::is_column_type_confirmed(size_t column, size_t min_samples) const {
+  if (column >= stats_.size())
+    return false;
+
+  const auto& s = stats_[column];
+  size_t non_empty = s.total_count - s.empty_count;
+
+  // Need enough samples to be confident
+  if (non_empty < min_samples)
+    return false;
+
+  // Check if any type meets the confidence threshold
+  double threshold = options_.confidence_threshold;
+
+  // Check each type - using the same logic as dominant_type()
+  if (static_cast<double>(s.boolean_count) / non_empty >= threshold)
+    return true;
+  if (static_cast<double>(s.integer_count) / non_empty >= threshold)
+    return true;
+  if (static_cast<double>(s.float_count + s.integer_count) / non_empty >= threshold)
+    return true;
+  if (static_cast<double>(s.date_count) / non_empty >= threshold)
+    return true;
+
+  // STRING type is the fallback - it's "confirmed" if we have enough samples
+  // but no other type dominates. However, for early termination purposes,
+  // we should still return true since the type won't change with more data.
+  // The only way it could change is if we see a lot more of a specific type.
+  return true;
+}
+
+bool ColumnTypeInference::all_types_confirmed(size_t min_samples) const {
+  if (stats_.empty())
+    return false;
+
+  for (size_t i = 0; i < stats_.size(); ++i) {
+    if (!is_column_type_confirmed(i, min_samples))
+      return false;
+  }
+  return true;
+}
+
 } // namespace libvroom

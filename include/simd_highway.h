@@ -4,9 +4,10 @@
 // Portable SIMD implementation using Google Highway
 // Replaces x86-specific AVX2 intrinsics with cross-platform Highway API
 
+#include "common_defs.h"
+
 #include <cstdint>
 #include <cstring>
-#include "common_defs.h"
 
 // Include Highway for portable SIMD
 #undef HWY_TARGET_INCLUDE
@@ -38,7 +39,8 @@ really_inline uint64_t blsmsk_u64(uint64_t input_num) {
 }
 
 really_inline int trailing_zeroes(uint64_t input_num) {
-  if (input_num == 0) return 64;
+  if (input_num == 0)
+    return 64;
   return __builtin_ctzll(input_num);
 }
 
@@ -46,9 +48,24 @@ really_inline long long int count_ones(uint64_t input_num) {
   return __builtin_popcountll(input_num);
 }
 
-// Fill SIMD input from memory
+// Fill SIMD input from memory (caller must ensure at least 64 bytes are readable)
 really_inline simd_input fill_input(const uint8_t* ptr) {
   return simd_input::load(ptr);
+}
+
+// Fill SIMD input from memory with bounds checking for partial final blocks.
+// Only reads 'remaining' bytes from ptr, padding the rest with zeros.
+// This avoids out-of-bounds reads when processing the final block of a buffer.
+really_inline simd_input fill_input_safe(const uint8_t* ptr, size_t remaining) {
+  simd_input in;
+  if (remaining >= 64) {
+    std::memcpy(in.data, ptr, 64);
+  } else {
+    // Zero-initialize first, then copy only the valid bytes
+    std::memset(in.data, 0, 64);
+    std::memcpy(in.data, ptr, remaining);
+  }
+  return in;
 }
 
 // Compare mask against input using Highway SIMD
@@ -92,7 +109,7 @@ HWY_ATTR really_inline uint64_t find_quote_mask(uint64_t quote_bits,
   // - x86: PCLMULQDQ instruction
   // - ARM: PMULL instruction
   // - Other: Software fallback
-  const hn::FixedTag<uint64_t, 2> d;  // 128-bit vector of uint64_t
+  const hn::FixedTag<uint64_t, 2> d; // 128-bit vector of uint64_t
 
   // Load quote_bits into the lower 64 bits of a 128-bit vector
   // Multiplying by 0xFF...FF computes the prefix XOR (each bit becomes the XOR
@@ -121,7 +138,7 @@ HWY_ATTR really_inline uint64_t find_quote_mask2(uint64_t quote_bits,
   // - x86: PCLMULQDQ instruction
   // - ARM: PMULL instruction
   // - Other: Software fallback
-  const hn::FixedTag<uint64_t, 2> d;  // 128-bit vector of uint64_t
+  const hn::FixedTag<uint64_t, 2> d; // 128-bit vector of uint64_t
 
   // Load quote_bits into the lower 64 bits of a 128-bit vector
   // Multiplying by 0xFF...FF computes the prefix XOR
@@ -164,11 +181,9 @@ HWY_ATTR really_inline uint64_t find_quote_mask2(uint64_t quote_bits,
  *                           CRLF but completes the previous block's CRLF.
  * @return Bitmask with line ending positions
  */
-HWY_ATTR really_inline uint64_t compute_line_ending_mask(
-    const simd_input& in,
-    uint64_t mask,
-    bool& prev_ended_with_cr,
-    bool prev_block_ended_cr = false) {
+HWY_ATTR really_inline uint64_t compute_line_ending_mask(const simd_input& in, uint64_t mask,
+                                                         bool& prev_ended_with_cr,
+                                                         bool prev_block_ended_cr = false) {
 
   uint64_t lf_mask = cmp_mask_against_input(in, '\n') & mask;
   uint64_t cr_mask = cmp_mask_against_input(in, '\r') & mask;
@@ -203,9 +218,8 @@ HWY_ATTR really_inline uint64_t compute_line_ending_mask(
  *
  * For use in first-pass where we just need to find any line ending.
  */
-HWY_ATTR really_inline uint64_t compute_line_ending_mask_simple(
-    const simd_input& in,
-    uint64_t mask) {
+HWY_ATTR really_inline uint64_t compute_line_ending_mask_simple(const simd_input& in,
+                                                                uint64_t mask) {
   uint64_t lf_mask = cmp_mask_against_input(in, '\n') & mask;
   uint64_t cr_mask = cmp_mask_against_input(in, '\r') & mask;
 
@@ -237,9 +251,8 @@ HWY_ATTR really_inline uint64_t compute_line_ending_mask_simple(
  * @param prev_escape_carry Whether previous block ended with an unmatched escape
  * @return Bitmask where bit i is set if character at position i is escaped
  */
-HWY_ATTR really_inline uint64_t compute_escaped_mask(
-    uint64_t escape_mask,
-    uint64_t& prev_escape_carry) {
+HWY_ATTR really_inline uint64_t compute_escaped_mask(uint64_t escape_mask,
+                                                     uint64_t& prev_escape_carry) {
 
   if (escape_mask == 0 && prev_escape_carry == 0) {
     return 0;
@@ -273,7 +286,8 @@ HWY_ATTR really_inline uint64_t compute_escaped_mask(
 // Write indexes to output array
 really_inline int write(uint64_t* base_ptr, uint64_t& base, uint64_t idx, int stride,
                         uint64_t bits) {
-  if (bits == 0) return 0;
+  if (bits == 0)
+    return 0;
   int cnt = static_cast<int>(count_ones(bits));
 
   for (int i = 0; i < 8; i++) {
@@ -303,6 +317,6 @@ really_inline int write(uint64_t* base_ptr, uint64_t& base, uint64_t idx, int st
   return cnt;
 }
 
-}  // namespace libvroom
+} // namespace libvroom
 
-#endif  // SIMD_HIGHWAY_H
+#endif // SIMD_HIGHWAY_H

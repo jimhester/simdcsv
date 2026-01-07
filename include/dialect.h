@@ -116,6 +116,10 @@ struct DetectionOptions {
   /// Empty means only test double-quote escaping; backslash is common alternative
   std::vector<char> escape_chars = {'\\'};
 
+  /// Comment characters to recognize (lines starting with these are skipped)
+  /// Default includes '#' which is common in many data formats
+  std::vector<char> comment_chars = {'#'};
+
   /// Minimum confidence threshold for successful detection
   double min_confidence = 0.5;
 };
@@ -172,6 +176,12 @@ struct DetectionResult {
   size_t detected_columns = 0; ///< Number of columns detected
   size_t rows_analyzed = 0;    ///< Number of rows analyzed
   std::string warning;         ///< Any warnings during detection
+
+  /// Detected comment character ('\0' if none detected)
+  char comment_char = '\0';
+
+  /// Number of comment lines skipped during detection
+  size_t comment_lines_skipped = 0;
 
   /// All tested candidates, sorted by score (best first)
   std::vector<DialectCandidate> candidates;
@@ -265,6 +275,9 @@ private:
   /// Detect if first row is likely a header
   bool detect_header(const Dialect& dialect, const uint8_t* buf, size_t len) const;
 
+  /// Check if a row starts with a comment character
+  bool is_comment_line(const uint8_t* row_start, size_t row_len) const;
+
   /// Find row boundaries respecting quote state
   std::vector<std::pair<size_t, size_t>> find_rows(const Dialect& dialect, const uint8_t* buf,
                                                    size_t len) const;
@@ -272,6 +285,15 @@ private:
   /// Extract fields from a single row
   std::vector<std::string_view> extract_fields(const Dialect& dialect, const uint8_t* row_start,
                                                size_t row_len) const;
+
+  /// Skip leading comment lines and detect comment character
+  /// @param buf Pointer to CSV data
+  /// @param len Length of data in bytes
+  /// @param[out] comment_char Detected comment character ('\0' if none)
+  /// @param[out] lines_skipped Number of comment lines skipped
+  /// @return Offset to start of first non-comment line
+  size_t skip_comment_lines(const uint8_t* buf, size_t len, char& comment_char,
+                            size_t& lines_skipped) const;
 };
 
 } // namespace libvroom
