@@ -980,6 +980,8 @@ int cmdDialect(const char* filename, bool json_output) {
   libvroom::DialectDetector detector;
   auto result = detector.detect(load_result.data(), load_result.size);
 
+  // Check if detection failed (confidence too low)
+  // Even if the warning mentions ambiguity, we still fail if confidence is below threshold
   if (!result.success()) {
     cerr << "Error: Could not detect CSV dialect";
     if (!result.warning.empty()) {
@@ -988,6 +990,11 @@ int cmdDialect(const char* filename, bool json_output) {
     cerr << endl;
     return 1;
   }
+
+  // Check if detection is ambiguous (multiple candidates with similar scores)
+  // Detection succeeded (confidence > 0.5) but may be uncertain due to similar scores
+  bool is_ambiguous =
+      !result.warning.empty() && result.warning.find("ambiguous") != std::string::npos;
 
   const auto& d = result.dialect;
   const auto& enc_result = load_result.encoding;
@@ -1006,8 +1013,34 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "  \"encoding\": \"" << libvroom::encoding_to_string(enc_result.encoding) << "\",\n";
     cout << "  \"has_header\": " << (result.has_header ? "true" : "false") << ",\n";
     cout << "  \"columns\": " << result.detected_columns << ",\n";
-    cout << "  \"confidence\": " << result.confidence << "\n";
-    cout << "}\n";
+    cout << "  \"confidence\": " << result.confidence << ",\n";
+    cout << "  \"ambiguous\": " << (is_ambiguous ? "true" : "false");
+
+    // Include alternative candidates when ambiguous
+    if (is_ambiguous && result.candidates.size() > 1) {
+      cout << ",\n  \"alternatives\": [\n";
+      // Show top 3 alternatives (skip first since it's the main result)
+      size_t max_alternatives = std::min(size_t(4), result.candidates.size());
+      for (size_t i = 1; i < max_alternatives; ++i) {
+        const auto& alt = result.candidates[i];
+        cout << "    {\n";
+        cout << "      \"delimiter\": \"" << escapeJsonChar(alt.dialect.delimiter) << "\",\n";
+        cout << "      \"quote\": \"";
+        if (alt.dialect.quote_char != '\0') {
+          cout << escapeJsonChar(alt.dialect.quote_char);
+        }
+        cout << "\",\n";
+        cout << "      \"score\": " << alt.consistency_score << ",\n";
+        cout << "      \"columns\": " << alt.num_columns << "\n";
+        cout << "    }";
+        if (i + 1 < max_alternatives) {
+          cout << ",";
+        }
+        cout << "\n";
+      }
+      cout << "  ]";
+    }
+    cout << "\n}\n";
   } else {
     // Human-readable output with CLI flags
     cout << "Detected dialect:\n";
@@ -1020,6 +1053,24 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "  Has header:   " << (result.has_header ? "yes" : "no") << "\n";
     cout << "  Columns:      " << result.detected_columns << "\n";
     cout << "  Confidence:   " << static_cast<int>(result.confidence * 100) << "%\n";
+
+    // Show ambiguity warning and alternatives
+    if (is_ambiguous) {
+      cout << "\n";
+      cerr << "Warning: Detection is ambiguous. Multiple dialects have similar scores.\n";
+      if (result.candidates.size() > 1) {
+        cerr << "Alternative candidates:\n";
+        size_t max_alternatives = std::min(size_t(4), result.candidates.size());
+        for (size_t i = 1; i < max_alternatives; ++i) {
+          const auto& alt = result.candidates[i];
+          cerr << "  - delimiter=" << formatDelimiter(alt.dialect.delimiter)
+               << ", quote=" << formatQuoteChar(alt.dialect.quote_char)
+               << ", score=" << static_cast<int>(alt.consistency_score * 100) << "%"
+               << ", columns=" << alt.num_columns << "\n";
+        }
+      }
+    }
+
     cout << "\n";
 
     // Output CLI flags that can be reused
