@@ -922,12 +922,26 @@ TEST_F(CliTest, TailManyRows) {
   auto result = CliRunner::run("tail -n 5 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have header
-  EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos);
+  EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos)
+      << "Expected header not found. Output length: " << result.output.size()
+      << "\nActual output:\n"
+      << result.output;
   // Should have last 5 rows (IDs 16-20)
-  EXPECT_TRUE(result.output.find("16,") != std::string::npos);
-  EXPECT_TRUE(result.output.find("20,") != std::string::npos);
+  EXPECT_TRUE(result.output.find("16,") != std::string::npos)
+      << "Expected '16,' not found in tail output.\n"
+      << "Exit code: " << result.exit_code << "\n"
+      << "Output length: " << result.output.size() << " bytes\n"
+      << "Actual output:\n"
+      << result.output;
+  EXPECT_TRUE(result.output.find("20,") != std::string::npos)
+      << "Expected '20,' not found in tail output.\n"
+      << "Actual output:\n"
+      << result.output;
   // Should NOT have earlier rows (IDs 1-15)
-  EXPECT_TRUE(result.output.find("15,") == std::string::npos);
+  EXPECT_TRUE(result.output.find("15,") == std::string::npos)
+      << "Unexpected '15,' found in tail output (should only have last 5 rows).\n"
+      << "Actual output:\n"
+      << result.output;
 }
 
 TEST_F(CliTest, TailFromStdin) {
