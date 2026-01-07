@@ -432,7 +432,8 @@ TEST_F(CliTest, InvalidThreadCount) {
 }
 
 TEST_F(CliTest, InvalidThreadCountTooHigh) {
-  auto result = CliRunner::run("count -t 300 " + testDataPath("basic/simple.csv"));
+  // 1025 exceeds new MAX_THREADS of 1024
+  auto result = CliRunner::run("count -t 1025 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
   EXPECT_TRUE(result.output.find("Thread count") != std::string::npos);
 }
@@ -587,8 +588,8 @@ TEST_F(CliTest, MalformedUnclosedQuote) {
   // File has an unclosed quote in the middle - parser should handle gracefully
   auto result = CliRunner::run("count " + testDataPath("malformed/unclosed_quote.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  // Parser processes what it can - row count may vary based on quote interpretation
-  // but should return some reasonable value (not crash or hang)
+  // Parser processes what it can - row count may vary based on quote
+  // interpretation but should return some reasonable value (not crash or hang)
   EXPECT_FALSE(result.output.empty());
 }
 
@@ -640,9 +641,9 @@ TEST_F(CliTest, MalformedInconsistentColumns) {
 }
 
 TEST_F(CliTest, MalformedVariableColumns) {
-  // Regression test for GitHub issue #263: SIGABRT crash on variable column count
-  // File has ~30 rows with column counts varying from 20-26
-  // This previously caused an assertion failure with SIGABRT
+  // Regression test for GitHub issue #263: SIGABRT crash on variable column
+  // count File has ~30 rows with column counts varying from 20-26 This
+  // previously caused an assertion failure with SIGABRT
   auto result = CliRunner::run("head -n 5 " + testDataPath("malformed/variable_columns.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should handle variable column counts gracefully without crashing
@@ -794,8 +795,8 @@ TEST_F(CliTest, NoHeaderWithColumnNameSelect) {
 }
 
 TEST_F(CliTest, ExcessiveThreadsInvalid) {
-  // More than 255 threads is invalid (limited by uint8_t in index struct)
-  auto result = CliRunner::run("count -t 300 " + testDataPath("basic/simple.csv"));
+  // More than 1024 threads is invalid (limited by MAX_THREADS)
+  auto result = CliRunner::run("count -t 2000 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
 }
 
@@ -909,13 +910,15 @@ TEST_F(CliTest, TailNoHeader) {
   // So we get rows "4,5,6" and "7,8,9" (last 2 of 4 total rows)
   EXPECT_TRUE(result.output.find("4,5,6") != std::string::npos);
   EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
-  // Header "A,B,C" should NOT be in output since we're not treating it as header
+  // Header "A,B,C" should NOT be in output since we're not treating it as
+  // header
   EXPECT_TRUE(result.output.find("A,B,C") == std::string::npos);
 }
 
 TEST_F(CliTest, TailManyRows) {
   // Test with file that has 20 data rows
-  // Uses default multi-threaded parsing (PR #303 fixed SIMD delimiter masking on macOS)
+  // Uses default multi-threaded parsing (PR #303 fixed SIMD delimiter masking
+  // on macOS)
   auto result = CliRunner::run("tail -n 5 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have header
@@ -1005,7 +1008,8 @@ TEST_F(CliTest, SampleReproducibleWithSeed) {
 }
 
 TEST_F(CliTest, SampleDifferentSeeds) {
-  // Different seeds should likely produce different samples (not guaranteed but highly probable)
+  // Different seeds should likely produce different samples (not guaranteed but
+  // highly probable)
   auto result1 = CliRunner::run("sample -n 5 -s 1 " + testDataPath("basic/many_rows.csv"));
   auto result2 = CliRunner::run("sample -n 5 -s 999 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result1.exit_code, 0);
@@ -1035,7 +1039,8 @@ TEST_F(CliTest, SampleNoHeader) {
 
 TEST_F(CliTest, SampleManyRows) {
   // Sample from file with 20 data rows
-  // Uses default multi-threaded parsing (PR #303 fixed SIMD delimiter masking on macOS)
+  // Uses default multi-threaded parsing (PR #303 fixed SIMD delimiter masking
+  // on macOS)
   auto result = CliRunner::run("sample -n 5 -s 42 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have header
@@ -1235,8 +1240,8 @@ TEST_F(CliTest, TailCRLineEndingsFile) {
   auto result = CliRunner::run("tail -n 1 " + testDataPath("line_endings/cr.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Output should not be empty - CR line endings should be handled gracefully
-  // Note: CR line endings cause the entire file to appear as one line to the parser,
-  // so exact content verification is complex
+  // Note: CR line endings cause the entire file to appear as one line to the
+  // parser, so exact content verification is complex
 }
 
 TEST_F(CliTest, SampleCRLineEndingsFile) {
@@ -1553,8 +1558,14 @@ TEST_F(CliTest, CountSingleThread) {
 }
 
 TEST_F(CliTest, CountMaxThreads) {
-  // Test with maximum valid thread count
-  auto result = CliRunner::run("count -t 255 " + testDataPath("basic/simple.csv"));
+  // Test with maximum valid thread count (1024 after uint16_t change)
+  auto result = CliRunner::run("count -t 1024 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, CountManyThreads) {
+  // Test with thread count above old uint8_t limit (255)
+  auto result = CliRunner::run("count -t 500 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
 }
 
@@ -1854,14 +1865,14 @@ TEST_F(CliTest, PrettyUtf8ShortFieldsNotTruncated) {
 // ============================================================================
 
 TEST_F(CliTest, RegressionIssue264_ExtremelyWideCsv) {
-  // Regression test for GitHub issue #264: SIGSEGV crash on extremely wide CSV files
-  // The bug was in index buffer allocation for multi-threaded parsing.
+  // Regression test for GitHub issue #264: SIGSEGV crash on extremely wide CSV
+  // files The bug was in index buffer allocation for multi-threaded parsing.
   // Files with very high separator density (many columns) could overflow the
   // interleaved index buffer because the allocation didn't account for the
   // stride pattern used in multi-threaded mode.
   //
-  // The test file has 16384 columns and 74 rows (~868K separators in ~876KB file).
-  // This previously caused a segmentation fault.
+  // The test file has 16384 columns and 74 rows (~868K separators in ~876KB
+  // file). This previously caused a segmentation fault.
   auto result = CliRunner::run("head -n 5 " + testDataPath("edge_cases/extremely_wide.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should successfully parse and output the first rows
