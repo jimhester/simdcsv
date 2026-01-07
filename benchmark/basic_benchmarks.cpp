@@ -128,3 +128,37 @@ static void BM_IndexCreation(benchmark::State& state) {
 BENCHMARK(BM_IndexCreation)
     ->Ranges({{1024, 1024 * 1024 * 100}, {1, 16}}) // File sizes 1KB-100MB, threads 1-16
     ->Unit(benchmark::kMicrosecond);
+
+// Index creation with counted allocation benchmark
+// Shows memory savings from the optimized allocation strategy
+static void BM_IndexCreationCounted(benchmark::State& state) {
+  size_t file_size = static_cast<size_t>(state.range(0));
+  int n_threads = static_cast<int>(state.range(1));
+  // Simulate different separator densities (1%, 5%, 10% of file size)
+  double separator_ratio = 0.05; // 5% separator density is typical for CSV
+  uint64_t separator_count = static_cast<uint64_t>(file_size * separator_ratio);
+
+  libvroom::TwoPass tp;
+
+  for (auto _ : state) {
+    auto result = tp.init_counted(separator_count, n_threads);
+    benchmark::DoNotOptimize(result);
+  }
+
+  // Calculate memory savings
+  // Old allocation: (file_size + 8) * n_threads * sizeof(uint64_t)
+  // New allocation: (separator_count + 8) * n_threads * sizeof(uint64_t)
+  size_t old_alloc = (file_size + 8) * n_threads * sizeof(uint64_t);
+  size_t new_alloc = (separator_count + 8) * n_threads * sizeof(uint64_t);
+  double savings_ratio = static_cast<double>(old_alloc) / static_cast<double>(new_alloc);
+
+  state.counters["FileSize"] = static_cast<double>(file_size);
+  state.counters["Threads"] = static_cast<double>(n_threads);
+  state.counters["Separators"] = static_cast<double>(separator_count);
+  state.counters["MemorySavingsRatio"] = savings_ratio;
+  state.counters["OldAllocMB"] = static_cast<double>(old_alloc) / (1024.0 * 1024.0);
+  state.counters["NewAllocMB"] = static_cast<double>(new_alloc) / (1024.0 * 1024.0);
+}
+BENCHMARK(BM_IndexCreationCounted)
+    ->Ranges({{1024, 1024 * 1024 * 100}, {1, 16}}) // File sizes 1KB-100MB, threads 1-16
+    ->Unit(benchmark::kMicrosecond);

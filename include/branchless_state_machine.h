@@ -593,7 +593,7 @@ inline uint64_t second_pass_simd_branchless(const BranchlessStateMachine& sm, co
 
   // Handle remaining bytes (< 64)
   if (pos < len) {
-    simd_input in = fill_input(data + pos);
+    simd_input in = fill_input_safe(data + pos, len - pos);
     count += process_block_simd_branchless(sm, in, len - pos, prev_quote_state, prev_escape_carry,
                                            indexes + thread_id, start + pos, idx, n_threads);
   }
