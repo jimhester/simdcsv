@@ -297,7 +297,6 @@ std::string utf8_truncate(std::string_view str, size_t max_width) {
   size_t width = 0;
   size_t pos = 0;
   size_t last_valid_pos = 0;
-  size_t last_valid_width = 0;
 
   // Calculate total width and find truncation point
   while (pos < str.size()) {
@@ -315,8 +314,7 @@ std::string utf8_truncate(std::string_view str, size_t max_width) {
     }
 
     last_valid_pos = pos + len;
-    last_valid_width = width + cp_width;
-    width = last_valid_width;
+    width += cp_width;
     pos += len;
   }
 

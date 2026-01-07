@@ -76,7 +76,7 @@ std::string utf8_truncate(std::string_view str, size_t max_width);
  * Decodes one Unicode code point from the UTF-8 sequence.
  *
  * @param str The UTF-8 string
- * @param pos Starting byte position (updated to point past the decoded sequence)
+ * @param pos Starting byte position
  * @param[out] codepoint The decoded code point (set to 0xFFFD for invalid sequences)
  * @return The number of bytes consumed (1-4, or 1 for invalid sequences)
  */
