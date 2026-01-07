@@ -591,7 +591,8 @@ TwoPass::branchless_chunk_result TwoPass::second_pass_branchless_chunk_with_erro
     size_t thread_id, size_t total_len, ErrorMode mode) {
   branchless_chunk_result result;
   result.errors.set_mode(mode);
-  result.n_indexes = second_pass_branchless_with_errors(
+  // Use SIMD-optimized version for better performance
+  result.n_indexes = second_pass_simd_branchless_with_errors(
       sm, buf, start, end, out->indexes, thread_id, out->n_threads, &result.errors, total_len);
   return result;
 }
@@ -629,8 +630,9 @@ bool TwoPass::parse_branchless_with_errors(const uint8_t* buf, ParseIndex& out, 
 
   // For single-threaded, use the simpler path
   if (n_threads == 1) {
+    // Use SIMD-optimized version for better performance
     out.n_indexes[0] =
-        second_pass_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
+        second_pass_simd_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
     check_field_counts(buf, len, errors, delim, quote);
     return !errors.has_fatal_errors();
   }
@@ -640,8 +642,9 @@ bool TwoPass::parse_branchless_with_errors(const uint8_t* buf, ParseIndex& out, 
   // If chunk size is too small, fall back to single-threaded
   if (chunk_size < 64) {
     out.n_threads = 1;
+    // Use SIMD-optimized version for better performance
     out.n_indexes[0] =
-        second_pass_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
+        second_pass_simd_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
     check_field_counts(buf, len, errors, delim, quote);
     return !errors.has_fatal_errors();
   }
@@ -671,8 +674,9 @@ bool TwoPass::parse_branchless_with_errors(const uint8_t* buf, ParseIndex& out, 
   for (int i = 1; i < n_threads; ++i) {
     if (chunk_pos[i] == null_pos) {
       out.n_threads = 1;
+      // Use SIMD-optimized version for better performance
       out.n_indexes[0] =
-          second_pass_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
+          second_pass_simd_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
       check_field_counts(buf, len, errors, delim, quote);
       return !errors.has_fatal_errors();
     }

@@ -787,6 +787,7 @@ set(BENCHMARK_SOURCES
     benchmark/simd_benchmarks.cpp
     benchmark/energy_benchmarks.cpp
     benchmark/number_parsing_benchmarks.cpp
+    benchmark/error_collection_benchmark.cpp
 )
 
 # Add external parser benchmarks if any external parser is enabled
