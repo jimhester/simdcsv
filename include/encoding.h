@@ -32,40 +32,41 @@ namespace libvroom {
  * @brief Character encodings supported by the parser.
  */
 enum class Encoding {
-    UTF8,       ///< UTF-8 (default)
-    UTF8_BOM,   ///< UTF-8 with BOM (EF BB BF)
-    UTF16_LE,   ///< UTF-16 Little Endian
-    UTF16_BE,   ///< UTF-16 Big Endian
-    UTF32_LE,   ///< UTF-32 Little Endian
-    UTF32_BE,   ///< UTF-32 Big Endian
-    LATIN1,     ///< Latin-1 (ISO-8859-1)
-    UNKNOWN     ///< Unknown encoding
+  UTF8,         ///< UTF-8 (default)
+  UTF8_BOM,     ///< UTF-8 with BOM (EF BB BF)
+  UTF16_LE,     ///< UTF-16 Little Endian
+  UTF16_BE,     ///< UTF-16 Big Endian
+  UTF32_LE,     ///< UTF-32 Little Endian
+  UTF32_BE,     ///< UTF-32 Big Endian
+  LATIN1,       ///< Latin-1 (ISO-8859-1)
+  WINDOWS_1252, ///< Windows-1252 (Western European)
+  UNKNOWN       ///< Unknown encoding
 };
 
 /**
  * @brief Result of encoding detection.
  */
 struct EncodingResult {
-    Encoding encoding = Encoding::UTF8;  ///< Detected encoding
-    size_t bom_length = 0;               ///< Length of BOM in bytes (0 if no BOM)
-    double confidence = 1.0;             ///< Detection confidence [0.0, 1.0]
-    bool needs_transcoding = false;      ///< True if transcoding to UTF-8 is needed
+  Encoding encoding = Encoding::UTF8; ///< Detected encoding
+  size_t bom_length = 0;              ///< Length of BOM in bytes (0 if no BOM)
+  double confidence = 1.0;            ///< Detection confidence [0.0, 1.0]
+  bool needs_transcoding = false;     ///< True if transcoding to UTF-8 is needed
 
-    /// Returns true if detection was successful
-    bool success() const { return encoding != Encoding::UNKNOWN; }
+  /// Returns true if detection was successful
+  bool success() const { return encoding != Encoding::UNKNOWN; }
 };
 
 /**
  * @brief Result of transcoding operation.
  */
 struct TranscodeResult {
-    uint8_t* data = nullptr;     ///< Pointer to transcoded data (caller owns)
-    size_t length = 0;           ///< Length of transcoded data in bytes
-    bool success = false;        ///< True if transcoding succeeded
-    std::string error;           ///< Error message if failed
+  uint8_t* data = nullptr; ///< Pointer to transcoded data (caller owns)
+  size_t length = 0;       ///< Length of transcoded data in bytes
+  bool success = false;    ///< True if transcoding succeeded
+  std::string error;       ///< Error message if failed
 
-    /// Check if the result is valid
-    operator bool() const { return success && data != nullptr; }
+  /// Check if the result is valid
+  operator bool() const { return success && data != nullptr; }
 };
 
 /**
@@ -75,6 +76,23 @@ struct TranscodeResult {
  * @return C-string name of the encoding (e.g., "UTF-16LE", "UTF-8")
  */
 const char* encoding_to_string(Encoding enc);
+
+/**
+ * @brief Parse an encoding name string to Encoding enum.
+ *
+ * Accepts various common aliases for each encoding:
+ * - UTF-8: "utf-8", "utf8"
+ * - UTF-16LE: "utf-16le", "utf16le", "utf-16-le"
+ * - UTF-16BE: "utf-16be", "utf16be", "utf-16-be"
+ * - UTF-32LE: "utf-32le", "utf32le", "utf-32-le"
+ * - UTF-32BE: "utf-32be", "utf32be", "utf-32-be"
+ * - Latin-1: "latin1", "latin-1", "iso-8859-1", "iso88591"
+ * - Windows-1252: "windows-1252", "windows1252", "cp1252"
+ *
+ * @param name The encoding name (case-insensitive)
+ * @return The corresponding Encoding enum, or Encoding::UNKNOWN if not recognized
+ */
+Encoding parse_encoding_name(std::string_view name);
 
 /**
  * @brief Detect the encoding of a byte buffer.
@@ -135,9 +153,8 @@ EncodingResult detect_encoding(const uint8_t* buf, size_t len);
  * }
  * @endcode
  */
-TranscodeResult transcode_to_utf8(const uint8_t* buf, size_t len,
-                                   Encoding enc, size_t bom_length,
-                                   size_t padding);
+TranscodeResult transcode_to_utf8(const uint8_t* buf, size_t len, Encoding enc, size_t bom_length,
+                                  size_t padding);
 
 /**
  * @brief Calculate the UTF-8 length needed for a UTF-16 buffer.
@@ -159,6 +176,6 @@ size_t utf16_to_utf8_length(const uint8_t* buf, size_t len, bool is_big_endian);
  */
 size_t utf32_to_utf8_length(const uint8_t* buf, size_t len, bool is_big_endian);
 
-}  // namespace libvroom
+} // namespace libvroom
 
-#endif  // LIBVROOM_ENCODING_H
+#endif // LIBVROOM_ENCODING_H
