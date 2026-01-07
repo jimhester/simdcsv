@@ -83,6 +83,7 @@ To manually format a file: `clang-format -i <file>`
 - **Update branches via merge**: When a branch needs updates from main, use `git merge main` instead of rebasing
 - **Squash on final merge**: Use squash merge when merging PRs into main to keep history clean
 - **Check for merge conflicts**: When opening a branch, check for merge conflicts with main. If CI status checks aren't appearing on a PR, merge conflicts are often the cause
+- **Use auto-merge**: Enable auto-merge on PRs when there are no outstanding review comments. The PR will merge automatically once CI passes
 
 ```bash
 # Check for conflicts before creating PR
