@@ -321,8 +321,8 @@ TEST_F(CSVFileTest, NoFinalNewlineEndsWithoutNewline) {
 TEST_F(CSVFileTest, CRLineEndingsParseCorrectly) {
   std::string path = getTestDataPath("line_endings", "cr.csv");
   auto buffer = libvroom::load_file_to_ptr(path, 64);
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   parser.parse_with_errors(buffer.data(), idx, buffer.size, errors);
 
@@ -344,8 +344,8 @@ TEST_F(CSVFileTest, CRLineEndingsParseCorrectly) {
 TEST_F(CSVFileTest, CRLFLineEndingsParseCorrectly) {
   std::string path = getTestDataPath("line_endings", "crlf.csv");
   auto buffer = libvroom::load_file_to_ptr(path, 64);
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   parser.parse_with_errors(buffer.data(), idx, buffer.size, errors);
 
@@ -367,8 +367,8 @@ TEST_F(CSVFileTest, CRLFLineEndingsParseCorrectly) {
 TEST_F(CSVFileTest, LFLineEndingsParseCorrectly) {
   std::string path = getTestDataPath("line_endings", "lf.csv");
   auto buffer = libvroom::load_file_to_ptr(path, 64);
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   parser.parse_with_errors(buffer.data(), idx, buffer.size, errors);
 
@@ -394,8 +394,8 @@ TEST_F(CSVFileTest, AllLineEndingsProduceEquivalentResults) {
   for (const auto& file : files) {
     std::string path = getTestDataPath("line_endings", file);
     auto buffer = libvroom::load_file_to_ptr(path, 64);
-    libvroom::two_pass parser;
-    libvroom::index idx = parser.init(buffer.size, 1);
+    libvroom::TwoPass parser;
+    libvroom::ParseIndex idx = parser.init(buffer.size, 1);
     libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     parser.parse_with_errors(buffer.data(), idx, buffer.size, errors);
 

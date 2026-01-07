@@ -23,8 +23,8 @@ TEST_F(CSVParserTest, ParseSimpleCSV) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -38,8 +38,8 @@ TEST_F(CSVParserTest, ParseSimpleCSVColumnCount) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -54,8 +54,8 @@ TEST_F(CSVParserTest, ParseWideColumnsCSV) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -69,8 +69,8 @@ TEST_F(CSVParserTest, ParseSingleColumnCSV) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -84,8 +84,8 @@ TEST_F(CSVParserTest, ParseQuotedFieldsCSV) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -99,8 +99,8 @@ TEST_F(CSVParserTest, ParseEscapedQuotesCSV) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -114,8 +114,8 @@ TEST_F(CSVParserTest, ParseNewlinesInQuotesCSV) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -129,8 +129,8 @@ TEST_F(CSVParserTest, ParseFinancialDataCSV) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -145,8 +145,8 @@ TEST_F(CSVParserTest, ParseUnicodeCSV) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -160,8 +160,8 @@ TEST_F(CSVParserTest, ParseEmptyFieldsCSV) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -175,8 +175,8 @@ TEST_F(CSVParserTest, IndexStructureValid) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   parser.parse(buffer.data(), idx, buffer.size);
 
@@ -190,8 +190,8 @@ TEST_F(CSVParserTest, MultiThreadedParsing) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 2); // Use 2 threads
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2); // Use 2 threads
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -210,8 +210,8 @@ TEST_F(CSVParserTest, ParseMalformedUnclosedQuote) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect the error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
@@ -227,8 +227,8 @@ TEST_F(CSVParserTest, ParseMalformedUnclosedQuoteEOF) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect the error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
@@ -244,8 +244,8 @@ TEST_F(CSVParserTest, ParseMalformedQuoteInUnquotedField) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect the error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
@@ -260,8 +260,8 @@ TEST_F(CSVParserTest, ParseMalformedInconsistentColumns) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect the error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
@@ -276,8 +276,8 @@ TEST_F(CSVParserTest, ParseMalformedTripleQuote) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Triple quote sequence """bad""" is actually valid RFC 4180 CSV
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
@@ -293,8 +293,8 @@ TEST_F(CSVParserTest, ParseMalformedMixedLineEndings) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -307,8 +307,8 @@ TEST_F(CSVParserTest, ParseMalformedNullByte) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect the null byte error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
@@ -323,8 +323,8 @@ TEST_F(CSVParserTest, ParseMalformedMultipleErrors) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect errors
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
@@ -346,8 +346,8 @@ TEST_F(CSVParserTest, ParseEmptyQuotedFields) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -361,8 +361,8 @@ TEST_F(CSVParserTest, ParseSingleQuoteCharacter) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -376,8 +376,8 @@ TEST_F(CSVParserTest, ParseOnlyQuotes) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -390,8 +390,8 @@ TEST_F(CSVParserTest, ParseAlternatingQuotedUnquoted) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -405,8 +405,8 @@ TEST_F(CSVParserTest, ParseOnlyDelimiters) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -420,8 +420,8 @@ TEST_F(CSVParserTest, ParseConsecutiveQuotes) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -435,8 +435,8 @@ TEST_F(CSVParserTest, ParseQuoteCommaQuoteSequence) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -450,8 +450,8 @@ TEST_F(CSVParserTest, ParseDeeplyNestedQuotes) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -465,8 +465,8 @@ TEST_F(CSVParserTest, ParseTruncatedRow) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -483,8 +483,8 @@ TEST_F(CSVParserTest, ParseVeryLongField) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -512,8 +512,8 @@ TEST_F(CSVParserTest, ParseVeryWideCSV) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -534,8 +534,8 @@ TEST_F(CSVParserTest, ParseManyRowsWithQuotes) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -549,8 +549,8 @@ TEST_F(CSVParserTest, ParseAllQuotedFields) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -563,8 +563,8 @@ TEST_F(CSVParserTest, ParseQuotedFieldWithEmbeddedNewlines) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -576,8 +576,8 @@ TEST_F(CSVParserTest, ParseMultiThreadedMalformed) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 2); // Use 2 threads with malformed data
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2); // Use 2 threads with malformed data
 
   // Use parse_validate to detect the error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
@@ -599,8 +599,8 @@ TEST_F(CSVParserTest, ParseQuoteOtherPattern) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -614,8 +614,8 @@ TEST_F(CSVParserTest, ParseOtherQuotePattern) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -642,8 +642,8 @@ TEST_F(CSVParserTest, ParseVeryLargeMultiThreaded) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 4); // Use 4 threads
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 4); // Use 4 threads
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -657,8 +657,8 @@ TEST_F(CSVParserTest, ParseNoNewlineAtAll) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -672,8 +672,8 @@ TEST_F(CSVParserTest, ParseQuotedFieldNoNewline) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -691,8 +691,8 @@ TEST_F(CSVParserTest, ParseComplexQuoteSequences) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -714,8 +714,8 @@ TEST_F(CSVParserTest, ParseLargeFieldSpanningChunks) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1); // Single thread to avoid bug
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1); // Single thread to avoid bug
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -745,8 +745,8 @@ TEST_F(CSVParserTest, ParseMixedQuotePatternsMultiThread) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 4); // 4 threads
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 4); // 4 threads
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -762,8 +762,8 @@ TEST_F(CSVParserTest, ParseSemicolonSeparator) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -775,8 +775,8 @@ TEST_F(CSVParserTest, ParseTabSeparator) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -788,8 +788,8 @@ TEST_F(CSVParserTest, ParsePipeSeparator) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -805,8 +805,8 @@ TEST_F(CSVParserTest, ParseCRLFLineEndings) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -818,8 +818,8 @@ TEST_F(CSVParserTest, ParseCRLineEndings) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -831,8 +831,8 @@ TEST_F(CSVParserTest, ParseLFLineEndings) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -844,8 +844,8 @@ TEST_F(CSVParserTest, ParseNoFinalNewline) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -861,8 +861,8 @@ TEST_F(CSVParserTest, Parse8Threads) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 8);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 8);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -885,8 +885,8 @@ TEST_F(CSVParserTest, Parse16ThreadsLargeData) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 16);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 16);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -898,9 +898,9 @@ TEST_F(CSVParserTest, ParseQuotedFieldsMultiThreaded) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
+  libvroom::TwoPass parser;
   // Use 2 threads instead of 4 for small file to avoid segfault
-  libvroom::index idx = parser.init(buffer.size, 2);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -912,9 +912,9 @@ TEST_F(CSVParserTest, ParseEscapedQuotesMultiThreaded) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
+  libvroom::TwoPass parser;
   // Use 2 threads instead of 4 for small file to avoid segfault
-  libvroom::index idx = parser.init(buffer.size, 2);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -926,9 +926,9 @@ TEST_F(CSVParserTest, ParseNewlinesInQuotesMultiThreaded) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
+  libvroom::TwoPass parser;
   // Use 2 threads instead of 4 for small file to avoid segfault
-  libvroom::index idx = parser.init(buffer.size, 2);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -944,8 +944,8 @@ TEST_F(CSVParserTest, ParseEmptyFile) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -957,8 +957,8 @@ TEST_F(CSVParserTest, ParseSingleCell) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -970,8 +970,8 @@ TEST_F(CSVParserTest, ParseSingleRowHeaderOnly) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -983,8 +983,8 @@ TEST_F(CSVParserTest, ParseWhitespaceFields) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -1001,8 +1001,8 @@ TEST_F(CSVParserTest, ParseSingleNewline) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1015,8 +1015,8 @@ TEST_F(CSVParserTest, ParseMultipleNewlines) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1029,8 +1029,8 @@ TEST_F(CSVParserTest, ParseSingleComma) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1044,9 +1044,9 @@ TEST_F(CSVParserTest, ParseSmallDataMultiThreaded) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
+  libvroom::TwoPass parser;
   // Use 2 threads instead of 8 for very small data to avoid segfault
-  libvroom::index idx = parser.init(data.size(), 2);
+  libvroom::ParseIndex idx = parser.init(data.size(), 2);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1058,8 +1058,8 @@ TEST_F(CSVParserTest, ParseOddThreadCount) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 3); // Odd number
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 3); // Odd number
 
   bool success = parser.parse(buffer.data(), idx, buffer.size);
 
@@ -1076,8 +1076,8 @@ TEST_F(CSVParserTest, ParseVariedFieldLengths) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1093,8 +1093,8 @@ TEST_F(CSVParserTest, ParseAlternatingEmptyFields) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1107,8 +1107,8 @@ TEST_F(CSVParserTest, ParseQuoteAtEndOfLine) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1121,8 +1121,8 @@ TEST_F(CSVParserTest, ParseMixedCRLFAndLF) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1144,8 +1144,8 @@ TEST_F(CSVParserTest, ParseDataAligned64) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1159,8 +1159,8 @@ TEST_F(CSVParserTest, ParseDataUnaligned) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1178,8 +1178,8 @@ TEST_F(CSVParserTest, ParseData63Bytes) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1197,8 +1197,8 @@ TEST_F(CSVParserTest, ParseData65Bytes) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1216,8 +1216,8 @@ TEST_F(CSVParserTest, ParseData128Bytes) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1234,8 +1234,8 @@ TEST_F(CSVParserTest, ParseQuoteAtFieldStart) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1248,8 +1248,8 @@ TEST_F(CSVParserTest, ParseQuoteNotAtFieldStart) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1262,8 +1262,8 @@ TEST_F(CSVParserTest, ParseQuoteAfterComma) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1276,8 +1276,8 @@ TEST_F(CSVParserTest, ParseQuoteBeforeComma) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1290,8 +1290,8 @@ TEST_F(CSVParserTest, ParseQuoteBeforeNewline) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1304,8 +1304,8 @@ TEST_F(CSVParserTest, ParseConsecutiveSeparators) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1319,8 +1319,8 @@ TEST_F(CSVParserTest, ParseMultiByteSequence) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1337,8 +1337,8 @@ TEST_F(CSVParserTest, ParseRepeatingPattern) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1359,8 +1359,8 @@ TEST_F(CSVParserTest, ParseAlternatingPattern) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse(data.data(), idx, content.size());
 
@@ -1395,8 +1395,8 @@ TEST_F(CSVParserTest, MultiThreadedDelimiterMasking) {
   // Get baseline count with single-threaded parsing
   uint64_t baseline_count;
   {
-    libvroom::two_pass parser;
-    libvroom::index idx = parser.init(content.size(), 1);
+    libvroom::TwoPass parser;
+    libvroom::ParseIndex idx = parser.init(content.size(), 1);
     parser.parse(data.data(), idx, content.size());
     baseline_count = idx.n_indexes[0];
   }
@@ -1407,8 +1407,8 @@ TEST_F(CSVParserTest, MultiThreadedDelimiterMasking) {
   // Multi-threaded parsing should find the SAME count as single-threaded,
   // not extra garbage delimiters from the padding
   for (int n_threads = 2; n_threads <= 4; ++n_threads) {
-    libvroom::two_pass parser;
-    libvroom::index idx = parser.init(content.size(), n_threads);
+    libvroom::TwoPass parser;
+    libvroom::ParseIndex idx = parser.init(content.size(), n_threads);
 
     bool success = parser.parse(data.data(), idx, content.size());
     EXPECT_TRUE(success) << "Multi-threaded parsing should succeed with " << n_threads
@@ -1444,8 +1444,8 @@ TEST_F(CSVParserTest, MultiThreadedChunkBoundaryPartialBlock) {
 
   uint64_t baseline_count;
   {
-    libvroom::two_pass parser;
-    libvroom::index idx = parser.init(content.size(), 1);
+    libvroom::TwoPass parser;
+    libvroom::ParseIndex idx = parser.init(content.size(), 1);
     parser.parse(data.data(), idx, content.size());
     baseline_count = idx.n_indexes[0];
   }
@@ -1455,8 +1455,8 @@ TEST_F(CSVParserTest, MultiThreadedChunkBoundaryPartialBlock) {
 
   // Test multi-threaded: should not detect garbage commas in padding
   for (int n_threads = 2; n_threads <= 8; ++n_threads) {
-    libvroom::two_pass parser;
-    libvroom::index idx = parser.init(content.size(), n_threads);
+    libvroom::TwoPass parser;
+    libvroom::ParseIndex idx = parser.init(content.size(), n_threads);
 
     bool success = parser.parse(data.data(), idx, content.size());
     EXPECT_TRUE(success) << "Parser should succeed with " << n_threads << " threads";

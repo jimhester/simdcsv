@@ -298,8 +298,8 @@ TEST_F(BranchlessParsingTest, ParseSimpleCSV) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
@@ -311,8 +311,8 @@ TEST_F(BranchlessParsingTest, ParseQuotedFields) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
@@ -324,8 +324,8 @@ TEST_F(BranchlessParsingTest, ParseEscapedQuotes) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
@@ -337,8 +337,8 @@ TEST_F(BranchlessParsingTest, ParseNewlinesInQuotes) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
@@ -350,8 +350,8 @@ TEST_F(BranchlessParsingTest, ParseManyRows) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
@@ -363,8 +363,8 @@ TEST_F(BranchlessParsingTest, ParseWideColumns) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
@@ -376,8 +376,8 @@ TEST_F(BranchlessParsingTest, ParseEmptyFields) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
@@ -391,8 +391,8 @@ TEST_F(BranchlessParsingTest, ParseCustomDelimiter) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success =
       parser.parse_branchless(data.data(), idx, content.size(), libvroom::Dialect::semicolon());
@@ -407,8 +407,8 @@ TEST_F(BranchlessParsingTest, ParseCustomQuote) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   // Create dialect with single quote as quote character
   libvroom::Dialect dialect{',', '\'', '\'', true, libvroom::Dialect::LineEnding::UNKNOWN};
@@ -422,8 +422,8 @@ TEST_F(BranchlessParsingTest, MultiThreadedParsing) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 2);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2);
 
   bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
@@ -436,14 +436,14 @@ TEST_F(BranchlessParsingTest, ConsistencyWithStandardParser) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
+  libvroom::TwoPass parser;
 
   // Parse with standard parser
-  libvroom::index idx1 = parser.init(buffer.size, 1);
+  libvroom::ParseIndex idx1 = parser.init(buffer.size, 1);
   parser.parse(buffer.data(), idx1, buffer.size);
 
   // Parse with branchless parser
-  libvroom::index idx2 = parser.init(buffer.size, 1);
+  libvroom::ParseIndex idx2 = parser.init(buffer.size, 1);
   parser.parse_branchless(buffer.data(), idx2, buffer.size);
 
   // Compare results
@@ -462,14 +462,14 @@ TEST_F(BranchlessParsingTest, ConsistencyWithQuotedFields) {
 
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
+  libvroom::TwoPass parser;
 
   // Parse with standard parser
-  libvroom::index idx1 = parser.init(buffer.size, 1);
+  libvroom::ParseIndex idx1 = parser.init(buffer.size, 1);
   parser.parse(buffer.data(), idx1, buffer.size);
 
   // Parse with branchless parser
-  libvroom::index idx2 = parser.init(buffer.size, 1);
+  libvroom::ParseIndex idx2 = parser.init(buffer.size, 1);
   parser.parse_branchless(buffer.data(), idx2, buffer.size);
 
   // Compare results
@@ -498,8 +498,8 @@ TEST_F(BranchlessParsingTest, LargeDataMultithreaded) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 4);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 4);
 
   bool success = parser.parse_branchless(data.data(), idx, content.size());
 
@@ -522,8 +522,8 @@ TEST_F(BranchlessParsingTest, CustomDelimiterMultithreaded) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 4);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 4);
 
   bool success =
       parser.parse_branchless(data.data(), idx, content.size(), libvroom::Dialect::semicolon());
@@ -563,8 +563,8 @@ TEST_F(BranchlessParsingTest, ThreadSafetyStressTest) {
     // Test with maximum threads to increase contention
     int n_threads = 8;
 
-    libvroom::two_pass parser;
-    libvroom::index idx = parser.init(data.size(), n_threads);
+    libvroom::TwoPass parser;
+    libvroom::ParseIndex idx = parser.init(data.size(), n_threads);
 
     bool success = parser.parse_branchless(data.data(), idx, content.size());
     EXPECT_TRUE(success) << "Iteration " << iteration << ": parse should succeed";
@@ -612,8 +612,8 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsBasic) {
   std::string path = getTestDataPath("basic", "simple.csv");
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_branchless_with_errors(buffer.data(), idx, buffer.size, errors);
@@ -627,8 +627,8 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsUnclosedQuote) {
   std::string path = getTestDataPath("malformed", "unclosed_quote.csv");
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_branchless_with_errors(buffer.data(), idx, buffer.size, errors);
@@ -641,8 +641,8 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsQuoteInUnquoted) {
   std::string path = getTestDataPath("malformed", "quote_in_unquoted_field.csv");
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
   parser.parse_branchless_with_errors(buffer.data(), idx, buffer.size, errors);
@@ -663,8 +663,8 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsNullByte) {
   std::string path = getTestDataPath("malformed", "null_byte.csv");
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
   parser.parse_branchless_with_errors(buffer.data(), idx, buffer.size, errors);
@@ -695,8 +695,8 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsMultiThreaded) {
   data.resize(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 4);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 4);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_branchless_with_errors(data.data(), idx, content.size(), errors);
@@ -710,15 +710,15 @@ TEST_F(BranchlessErrorCollectionTest, ConsistencyBranchlessWithErrorsVsSwitch) {
   std::string path = getTestDataPath("basic", "simple.csv");
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
+  libvroom::TwoPass parser;
 
   // Parse with switch-based parser
-  libvroom::index idx1 = parser.init(buffer.size, 1);
+  libvroom::ParseIndex idx1 = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors1(libvroom::ErrorMode::PERMISSIVE);
   parser.parse_with_errors(buffer.data(), idx1, buffer.size, errors1);
 
   // Parse with branchless parser with errors
-  libvroom::index idx2 = parser.init(buffer.size, 1);
+  libvroom::ParseIndex idx2 = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors2(libvroom::ErrorMode::PERMISSIVE);
   parser.parse_branchless_with_errors(buffer.data(), idx2, buffer.size, errors2);
 
@@ -737,15 +737,15 @@ TEST_F(BranchlessErrorCollectionTest, ConsistencyBranchlessWithErrorsQuotedField
   std::string path = getTestDataPath("quoted", "quoted_fields.csv");
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
+  libvroom::TwoPass parser;
 
   // Parse with switch-based parser
-  libvroom::index idx1 = parser.init(buffer.size, 1);
+  libvroom::ParseIndex idx1 = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors1(libvroom::ErrorMode::PERMISSIVE);
   parser.parse_with_errors(buffer.data(), idx1, buffer.size, errors1);
 
   // Parse with branchless parser with errors
-  libvroom::index idx2 = parser.init(buffer.size, 1);
+  libvroom::ParseIndex idx2 = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors2(libvroom::ErrorMode::PERMISSIVE);
   parser.parse_branchless_with_errors(buffer.data(), idx2, buffer.size, errors2);
 
@@ -827,8 +827,8 @@ TEST_F(EscapeCharacterTest, BackslashEscapedQuote) {
   std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
 
@@ -846,8 +846,8 @@ TEST_F(EscapeCharacterTest, BackslashEscapedBackslash) {
   std::vector<uint8_t> data(content2.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content2.data(), content2.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse_branchless(data.data(), idx, content2.size(), backslashDialect());
 
@@ -863,8 +863,8 @@ TEST_F(EscapeCharacterTest, BackslashEscapedDelimiter) {
   std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
 
@@ -881,8 +881,8 @@ TEST_F(EscapeCharacterTest, BackslashEscapedNewline) {
   std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
 
@@ -896,8 +896,8 @@ TEST_F(EscapeCharacterTest, MixedEscapeSequences) {
   std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
 
@@ -910,8 +910,8 @@ TEST_F(EscapeCharacterTest, ConsecutiveEscapes) {
   std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
 
@@ -925,8 +925,8 @@ TEST_F(EscapeCharacterTest, BackslashAtEndOfQuotedField) {
   std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
 
@@ -938,8 +938,8 @@ TEST_F(EscapeCharacterTest, ParseBackslashEscapeTestFile) {
   std::string path = getTestDataPath("escape", "backslash_escape.csv");
   auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.size, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   bool success = parser.parse_branchless(buffer.data(), idx, buffer.size, backslashDialect());
 
@@ -1039,15 +1039,15 @@ TEST_F(EscapeCharacterTest, ConsistencyWithScalarParsing) {
   std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
+  libvroom::TwoPass parser;
   Dialect dialect = backslashDialect();
 
   // Parse with branchless (SIMD)
-  libvroom::index idx1 = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx1 = parser.init(data.size(), 1);
   parser.parse_branchless(data.data(), idx1, content.size(), dialect);
 
   // Parse with error collection (uses scalar path)
-  libvroom::index idx2 = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx2 = parser.init(data.size(), 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   parser.parse_branchless_with_errors(data.data(), idx2, content.size(), errors, dialect);
 
@@ -1073,8 +1073,8 @@ TEST_F(EscapeCharacterTest, MultiThreadedEscapeParsing) {
   std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 4);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 4);
 
   bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
 
@@ -1088,8 +1088,8 @@ TEST_F(EscapeCharacterTest, CrossBlockEscapeSequence) {
   std::vector<uint8_t> data(content.size() + LIBVROOM_PADDING);
   std::memcpy(data.data(), content.data(), content.size());
 
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(data.size(), 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
 
   bool success = parser.parse_branchless(data.data(), idx, content.size(), backslashDialect());
 

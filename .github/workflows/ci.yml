@@ -16,6 +16,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         build_type: [Release, Debug]
+        exclude:
+          # Skip Debug on macOS - Debug is mainly for coverage which runs on Linux
+          - os: macos-latest
+            build_type: Debug
 
     steps:
     - name: Checkout code
@@ -32,13 +36,21 @@ jobs:
       run: |
         brew install cmake
 
+    - name: Cache FetchContent dependencies
+      uses: actions/cache@v4
+      with:
+        path: build/_deps
+        key: deps-${{ runner.os }}-${{ matrix.build_type }}-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: |
+          deps-${{ runner.os }}-${{ matrix.build_type }}-
+
     - name: Configure CMake
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
     - name: Build
       run: |
-        cmake --build build --config ${{ matrix.build_type }}
+        cmake --build build --config ${{ matrix.build_type }} -j
 
     - name: Run well-formed CSV tests
       run: |
@@ -50,7 +62,7 @@ jobs:
 
     - name: Run all tests with CTest
       run: |
-        cd build && ctest --output-on-failure --build-config ${{ matrix.build_type }}
+        cd build && ctest --output-on-failure --build-config ${{ matrix.build_type }} -j
 
   coverage:
     name: Code Coverage
@@ -65,17 +77,25 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y cmake build-essential lcov
 
+    - name: Cache FetchContent dependencies
+      uses: actions/cache@v4
+      with:
+        path: build/_deps
+        key: deps-Linux-Debug-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: |
+          deps-Linux-Debug-
+
     - name: Configure CMake with coverage
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
 
     - name: Build with coverage
       run: |
-        cmake --build build
+        cmake --build build -j
 
     - name: Run tests
       run: |
-        cd build && ctest --output-on-failure
+        cd build && ctest --output-on-failure -j
 
     - name: Generate coverage info
       run: |
@@ -111,6 +131,8 @@ jobs:
   minimal-release-build:
     name: Minimal Release Build
     runs-on: ubuntu-latest
+    # Only run on main branch pushes - tests CMake config, not code changes
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
     - name: Checkout code
@@ -127,7 +149,7 @@ jobs:
 
     - name: Build
       run: |
-        cmake --build build --config Release
+        cmake --build build --config Release -j
 
     - name: Verify expected artifacts exist
       run: |
@@ -192,28 +214,17 @@ jobs:
         echo "✓ No benchmark executables found (as expected)"
 
   shared-library-build:
-    name: Shared Library Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    name: Shared Library Build
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install dependencies (Ubuntu)
-      if: runner.os == 'Linux'
+    - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake build-essential
-
-    - name: Install dependencies (macOS)
-      if: runner.os == 'macOS'
-      run: |
-        brew install cmake
 
     - name: Configure shared library build
       run: |
@@ -221,28 +232,14 @@ jobs:
 
     - name: Build
       run: |
-        cmake --build build --config Release
+        cmake --build build --config Release -j
 
-    - name: Verify shared library exists (Linux)
-      if: runner.os == 'Linux'
+    - name: Verify shared library exists
       run: |
         echo "Checking for shared library (.so)..."
         if ls build/libvroom.so* 1>/dev/null 2>&1; then
           echo "✓ Shared library found:"
           ls -la build/libvroom.so*
-        else
-          echo "✗ Shared library not found!"
-          ls -la build/
-          exit 1
-        fi
-
-    - name: Verify shared library exists (macOS)
-      if: runner.os == 'macOS'
-      run: |
-        echo "Checking for shared library (.dylib)..."
-        if ls build/libvroom.dylib* 1>/dev/null 2>&1; then
-          echo "✓ Shared library found:"
-          ls -la build/libvroom.dylib*
         else
           echo "✗ Shared library not found!"
           ls -la build/
@@ -260,16 +257,9 @@ jobs:
           exit 1
         fi
 
-    - name: Test vroom can execute (Linux)
-      if: runner.os == 'Linux'
+    - name: Test vroom can execute
       run: |
         echo "Testing vroom execution with LD_LIBRARY_PATH..."
         export LD_LIBRARY_PATH="${PWD}/build:${LD_LIBRARY_PATH}"
-        ./build/vroom --help
-
-    - name: Test vroom can execute (macOS)
-      if: runner.os == 'macOS'
-      run: |
-        echo "Testing vroom execution..."
         ./build/vroom --help
 
