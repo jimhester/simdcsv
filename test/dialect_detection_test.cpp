@@ -2011,3 +2011,190 @@ TEST_F(DialectDetectionTest, SingleRowStillFailsWithDefaultMinRows) {
   // Should fail because we only have 1 row, less than min_rows=2
   EXPECT_FALSE(result.success()) << "Single row should fail with default min_rows=2";
 }
+
+// ============================================================================
+// Comment Line Detection Tests
+// ============================================================================
+
+TEST_F(DialectDetectionTest, DetectHashCommentLines) {
+  // CSV with hash comment header (matches issue #294 example)
+  std::string path = getTestDataPath("comments", "hash_comments.csv");
+  auto result = detector.detect_file(path);
+
+  EXPECT_TRUE(result.success()) << "Detection should succeed for hash_comments.csv";
+  EXPECT_EQ(result.dialect.delimiter, ',') << "Should detect comma delimiter";
+  EXPECT_EQ(result.detected_columns, 2) << "hash_comments.csv has 2 columns";
+  EXPECT_EQ(result.comment_char, '#') << "Should detect hash comment character";
+  EXPECT_EQ(result.comment_lines_skipped, 2) << "Should skip 2 leading comment lines";
+}
+
+TEST_F(DialectDetectionTest, DetectMultiHeaderComments) {
+  // The example from issue #294
+  std::string path = getTestDataPath("comments", "multi_header_comments.csv");
+  auto result = detector.detect_file(path);
+
+  EXPECT_TRUE(result.success()) << "Detection should succeed for multi_header_comments.csv";
+  EXPECT_EQ(result.dialect.delimiter, ',') << "Should detect comma delimiter";
+  EXPECT_EQ(result.detected_columns, 4) << "multi_header_comments.csv has 4 columns";
+  EXPECT_EQ(result.comment_char, '#') << "Should detect hash comment character";
+  EXPECT_EQ(result.comment_lines_skipped, 4) << "Should skip 4 leading comment lines";
+  // The key success criteria is that detection succeeds with correct results.
+  // An ambiguity warning may still occur if multiple dialects score similarly,
+  // but that's a general scoring issue unrelated to comment handling.
+}
+
+TEST_F(DialectDetectionTest, CommentLinesWithSemicolon) {
+  // Test semicolon comment character
+  libvroom::DetectionOptions opts;
+  opts.comment_chars = {';'}; // Only semicolon as comment char
+
+  libvroom::DialectDetector custom_detector(opts);
+  std::string path = getTestDataPath("comments", "semicolon_comments.csv");
+  auto result = custom_detector.detect_file(path);
+
+  EXPECT_TRUE(result.success()) << "Detection should succeed for semicolon_comments.csv";
+  EXPECT_EQ(result.dialect.delimiter, ',') << "Should detect comma delimiter";
+  EXPECT_EQ(result.comment_char, ';') << "Should detect semicolon comment character";
+  EXPECT_EQ(result.comment_lines_skipped, 2) << "Should skip 2 leading comment lines";
+}
+
+TEST_F(DialectDetectionTest, NoCommentLines) {
+  // Standard CSV without comment lines
+  std::string path = getTestDataPath("basic", "simple.csv");
+  auto result = detector.detect_file(path);
+
+  EXPECT_TRUE(result.success()) << "Detection should succeed for simple.csv";
+  EXPECT_EQ(result.comment_char, '\0') << "No comment character should be detected";
+  EXPECT_EQ(result.comment_lines_skipped, 0) << "No comment lines to skip";
+}
+
+TEST_F(DialectDetectionTest, CommentLinesInMemoryBuffer) {
+  // Test comment detection with in-memory buffer
+  const std::string csv_data = "# Header comment 1\n"
+                               "# Header comment 2\n"
+                               "name,value,active\n"
+                               "Alice,100,true\n"
+                               "Bob,200,false\n";
+
+  auto result = detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
+
+  EXPECT_TRUE(result.success()) << "In-memory detection with comments should succeed";
+  EXPECT_EQ(result.dialect.delimiter, ',');
+  EXPECT_EQ(result.detected_columns, 3);
+  EXPECT_EQ(result.comment_char, '#');
+  EXPECT_EQ(result.comment_lines_skipped, 2);
+}
+
+TEST_F(DialectDetectionTest, CommentLineWithLeadingWhitespace) {
+  // Comment lines may have leading whitespace
+  const std::string csv_data = "  # Comment with leading spaces\n"
+                               "\t# Comment with leading tab\n"
+                               "a,b,c\n"
+                               "1,2,3\n"
+                               "4,5,6\n";
+
+  auto result = detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
+
+  EXPECT_TRUE(result.success());
+  EXPECT_EQ(result.comment_char, '#');
+  EXPECT_EQ(result.comment_lines_skipped, 2);
+}
+
+TEST_F(DialectDetectionTest, AllLinesAreComments) {
+  // Edge case: file contains only comment lines
+  const std::string csv_data = "# Only comments\n"
+                               "# No data here\n"
+                               "# Still nothing\n";
+
+  auto result = detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
+
+  EXPECT_FALSE(result.success()) << "File with only comments should fail detection";
+  EXPECT_EQ(result.comment_char, '#');
+  EXPECT_EQ(result.comment_lines_skipped, 3);
+  EXPECT_FALSE(result.warning.empty());
+}
+
+TEST_F(DialectDetectionTest, EmptyCommentCharsDisablesCommentDetection) {
+  // Test that empty comment_chars disables comment detection
+  libvroom::DetectionOptions opts;
+  opts.comment_chars = {}; // No comment characters
+
+  libvroom::DialectDetector custom_detector(opts);
+
+  const std::string csv_data = "# This is data not a comment\n"
+                               "a,b\n"
+                               "1,2\n";
+
+  auto result =
+      custom_detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
+
+  // Without comment detection, the first row is treated as data
+  // which will likely cause inconsistent column counts
+  EXPECT_EQ(result.comment_char, '\0');
+  EXPECT_EQ(result.comment_lines_skipped, 0);
+}
+
+TEST_F(DialectDetectionTest, QuotedHashIsNotComment) {
+  // Hash inside quoted field should not be treated as comment
+  std::string path = getTestDataPath("comments", "quoted_hash.csv");
+  auto result = detector.detect_file(path);
+
+  EXPECT_TRUE(result.success()) << "Detection should succeed for quoted_hash.csv";
+  EXPECT_EQ(result.dialect.delimiter, ',');
+  EXPECT_EQ(result.detected_columns, 2);
+  // First line is data (name,description), not a comment
+  EXPECT_EQ(result.comment_char, '\0') << "No leading comment lines";
+  EXPECT_EQ(result.comment_lines_skipped, 0);
+}
+
+TEST_F(DialectDetectionTest, MultipleCommentCharTypes) {
+  // Test detection with multiple comment character options
+  libvroom::DetectionOptions opts;
+  opts.comment_chars = {'#', ';', '%'}; // Multiple single-char comment prefixes
+
+  libvroom::DialectDetector custom_detector(opts);
+
+  const std::string csv_data = "; Semicolon comment\n"
+                               "a,b,c\n"
+                               "1,2,3\n"
+                               "4,5,6\n";
+
+  auto result =
+      custom_detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
+
+  EXPECT_TRUE(result.success());
+  EXPECT_EQ(result.comment_char, ';');
+  EXPECT_EQ(result.comment_lines_skipped, 1);
+}
+
+TEST_F(DialectDetectionTest, CommentLinesCRLF) {
+  // Test comment detection with CRLF line endings
+  const std::string csv_data = "# Comment 1\r\n"
+                               "# Comment 2\r\n"
+                               "a,b,c\r\n"
+                               "1,2,3\r\n"
+                               "4,5,6\r\n";
+
+  auto result = detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
+
+  EXPECT_TRUE(result.success());
+  EXPECT_EQ(result.comment_char, '#');
+  EXPECT_EQ(result.comment_lines_skipped, 2);
+  EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::CRLF);
+}
+
+TEST_F(DialectDetectionTest, CommentLinesCR) {
+  // Test comment detection with CR line endings (old Mac style)
+  const std::string csv_data = "# Comment 1\r"
+                               "# Comment 2\r"
+                               "a,b,c\r"
+                               "1,2,3\r"
+                               "4,5,6\r";
+
+  auto result = detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
+
+  EXPECT_TRUE(result.success());
+  EXPECT_EQ(result.comment_char, '#');
+  EXPECT_EQ(result.comment_lines_skipped, 2);
+  EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::CR);
+}
