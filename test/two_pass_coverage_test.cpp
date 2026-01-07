@@ -2307,6 +2307,94 @@ TEST_F(BranchlessMultiThreadedTest, LargeFileMultiThreaded) {
   EXPECT_TRUE(success);
 }
 
+// ============================================================================
+// EMPTY FILE HANDLING TESTS
+// Verifies that parse_with_errors and parse_validate handle empty input
+// gracefully (fixes issue #352)
+// ============================================================================
+
+class EmptyFileTest : public ::testing::Test {
+protected:
+  std::vector<uint8_t> makeBuffer(const std::string& content) {
+    std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
+    if (!content.empty()) {
+      std::memcpy(buf.data(), content.data(), content.size());
+    }
+    return buf;
+  }
+};
+
+// Test parse_with_errors with empty input (issue #352)
+TEST_F(EmptyFileTest, ParseWithErrorsEmptyInput) {
+  auto buf = makeBuffer("");
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(0, 1);
+  libvroom::ErrorCollector errors;
+
+  bool success = parser.parse_with_errors(buf.data(), idx, 0, errors);
+
+  EXPECT_TRUE(success);
+  EXPECT_FALSE(errors.has_errors());
+}
+
+// Test parse_validate with empty input (issue #352)
+TEST_F(EmptyFileTest, ParseValidateEmptyInput) {
+  auto buf = makeBuffer("");
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(0, 1);
+  libvroom::ErrorCollector errors;
+
+  bool success = parser.parse_validate(buf.data(), idx, 0, errors);
+
+  EXPECT_TRUE(success);
+  EXPECT_FALSE(errors.has_errors());
+}
+
+// Test parse_two_pass_with_errors with empty input (for comparison)
+TEST_F(EmptyFileTest, ParseTwoPassWithErrorsEmptyInput) {
+  auto buf = makeBuffer("");
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(0, 1);
+  libvroom::ErrorCollector errors;
+
+  bool success = parser.parse_two_pass_with_errors(buf.data(), idx, 0, errors);
+
+  EXPECT_TRUE(success);
+  EXPECT_FALSE(errors.has_errors());
+}
+
+// Test parse_branchless_with_errors with empty input
+TEST_F(EmptyFileTest, ParseBranchlessWithErrorsEmptyInput) {
+  auto buf = makeBuffer("");
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(0, 1);
+  libvroom::ErrorCollector errors;
+
+  bool success = parser.parse_branchless_with_errors(buf.data(), idx, 0, errors);
+
+  EXPECT_TRUE(success);
+  EXPECT_FALSE(errors.has_errors());
+}
+
+// Test parse_with_errors with empty input and explicit delimiter
+TEST_F(EmptyFileTest, ParseWithErrorsEmptyInputExplicitDialect) {
+  auto buf = makeBuffer("");
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(0, 1);
+  libvroom::ErrorCollector errors;
+  libvroom::Dialect dialect = libvroom::Dialect::tsv();
+
+  bool success = parser.parse_with_errors(buf.data(), idx, 0, errors, dialect);
+
+  EXPECT_TRUE(success);
+  EXPECT_FALSE(errors.has_errors());
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
