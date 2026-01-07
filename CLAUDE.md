@@ -67,6 +67,16 @@ cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 ln -sf build/compile_commands.json .
 ```
 
+## Code Formatting
+
+A `.clang-format` config is provided. Install the pre-commit hook to auto-format staged files:
+
+```bash
+ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+```
+
+To manually format a file: `clang-format -i <file>`
+
 ## Key Files
 
 | File | Purpose |

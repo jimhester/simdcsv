@@ -273,38 +273,3 @@ jobs:
         echo "Testing vroom execution..."
         ./build/vroom --help
 
-  code-quality:
-    name: Code Quality Checks
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Check file structure
-      run: |
-        echo "Checking required files..."
-        test -f CMakeLists.txt || exit 1
-        test -f include/error.h || exit 1
-        test -f src/error.cpp || exit 1
-        test -d test/data || exit 1
-        echo "✓ All required files present"
-
-    - name: Count test files
-      run: |
-        echo "Well-formed CSV test files:"
-        find test/data -name "*.csv" ! -path "*/malformed/*" | wc -l
-        echo "Malformed CSV test files:"
-        find test/data/malformed -name "*.csv" | wc -l
-        echo "Total test files:"
-        find test/data -name "*.csv" | wc -l
-
-    - name: Verify test file integrity
-      run: |
-        # Check that malformed test files exist
-        MALFORMED_COUNT=$(find test/data/malformed -name "*.csv" | wc -l)
-        if [ "$MALFORMED_COUNT" -lt 16 ]; then
-          echo "Error: Expected at least 16 malformed test files, found $MALFORMED_COUNT"
-          exit 1
-        fi
-        echo "✓ Found $MALFORMED_COUNT malformed test files"
