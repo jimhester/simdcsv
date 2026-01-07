@@ -1995,3 +1995,64 @@ TEST_F(CliTest, StrictModeQuoteInUnquotedField) {
   auto result = CliRunner::run("head -S " + testDataPath("malformed/quote_in_unquoted_field.csv"));
   EXPECT_EQ(result.exit_code, 1);
 }
+
+// =============================================================================
+// Ambiguous Dialect Detection Tests (GitHub issue #225)
+// Tests for best-guess output when multiple dialects have similar scores
+// =============================================================================
+
+TEST_F(CliTest, DialectAmbiguousSucceeds) {
+  // When multiple dialects have similar scores, the command should still succeed
+  // and output the best-guess dialect rather than failing with an error
+  auto result = CliRunner::run("dialect " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should still detect a dialect (best guess)
+  EXPECT_TRUE(result.output.find("Delimiter:") != std::string::npos);
+  // Should include a warning about ambiguity
+  EXPECT_TRUE(result.output.find("ambiguous") != std::string::npos ||
+              result.output.find("Warning") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectAmbiguousJsonFormat) {
+  // JSON output should include "ambiguous" field
+  auto result = CliRunner::run("dialect -j " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should have ambiguous field in JSON
+  EXPECT_TRUE(result.output.find("\"ambiguous\":") != std::string::npos);
+  // Should have confidence score
+  EXPECT_TRUE(result.output.find("\"confidence\":") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectAmbiguousShowsAlternatives) {
+  // When ambiguous, should show alternative candidates
+  auto result = CliRunner::run("dialect " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show alternative candidates in warning output (stderr is merged to stdout)
+  // The alternatives will show different delimiters that scored similarly
+  EXPECT_TRUE(result.output.find("Alternative") != std::string::npos ||
+              result.output.find("delimiter=") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectAmbiguousJsonShowsAlternatives) {
+  // JSON output should include alternatives array when ambiguous
+  auto result = CliRunner::run("dialect -j " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // When ambiguous, JSON should include alternatives array
+  EXPECT_TRUE(result.output.find("\"alternatives\":") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectJsonAmbiguousFieldPresent) {
+  // JSON output should always include "ambiguous" field
+  auto result = CliRunner::run("dialect -j " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should have ambiguous field (true or false)
+  EXPECT_TRUE(result.output.find("\"ambiguous\":") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectOutputsCliFlags) {
+  // Dialect output should include CLI flags for reuse
+  auto result = CliRunner::run("dialect " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("CLI flags:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("-d comma") != std::string::npos);
+}
