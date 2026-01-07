@@ -307,11 +307,10 @@ TEST_F(DoubleParsingTest, VeryLongMantissa) {
 }
 
 TEST_F(DoubleParsingTest, LargeExponent) {
-  // Exponent > 400 - parsing stops early, causing "unexpected characters" error
-  // because not all digits after 'e' are consumed
+  // Exponent > 400 - now parses successfully and returns infinity
   auto result = parse_double("1e500", 5, config_);
-  // This fails because the parser breaks when exp_value > 400 leaving unconsumed chars
-  EXPECT_FALSE(result.ok());
+  EXPECT_TRUE(result.ok());
+  EXPECT_TRUE(std::isinf(result.get()));
 }
 
 TEST_F(DoubleParsingTest, MaxExponentThatWorks) {
