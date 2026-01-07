@@ -36,6 +36,14 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y cmake build-essential
 
+    - name: Cache FetchContent dependencies
+      uses: actions/cache@v4
+      with:
+        path: build/_deps
+        key: deps-Linux-Debug-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: |
+          deps-Linux-Debug-
+
     - name: Configure with ASAN and UBSAN
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON -DENABLE_UBSAN=ON
@@ -51,7 +59,7 @@ jobs:
         ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:halt_on_error=1
         UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
       run: |
-        cd build && ctest --output-on-failure
+        cd build && ctest --output-on-failure -j
 
   tsan:
     name: ThreadSanitizer
@@ -66,6 +74,14 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y cmake build-essential
 
+    - name: Cache FetchContent dependencies
+      uses: actions/cache@v4
+      with:
+        path: build/_deps
+        key: deps-Linux-Debug-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: |
+          deps-Linux-Debug-
+
     - name: Configure with TSAN
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_TSAN=ON
@@ -78,10 +94,10 @@ jobs:
       env:
         TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
       run: |
-        cd build && ctest -R concurrency --output-on-failure
+        cd build && ctest -R concurrency --output-on-failure -j
 
     - name: Run all tests with TSAN
       env:
         TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
       run: |
-        cd build && ctest --output-on-failure
+        cd build && ctest --output-on-failure -j

@@ -36,6 +36,14 @@ jobs:
       run: |
         brew install cmake
 
+    - name: Cache FetchContent dependencies
+      uses: actions/cache@v4
+      with:
+        path: build/_deps
+        key: deps-${{ runner.os }}-${{ matrix.build_type }}-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: |
+          deps-${{ runner.os }}-${{ matrix.build_type }}-
+
     - name: Configure CMake
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
@@ -54,7 +62,7 @@ jobs:
 
     - name: Run all tests with CTest
       run: |
-        cd build && ctest --output-on-failure --build-config ${{ matrix.build_type }}
+        cd build && ctest --output-on-failure --build-config ${{ matrix.build_type }} -j
 
   coverage:
     name: Code Coverage
@@ -69,6 +77,14 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y cmake build-essential lcov
 
+    - name: Cache FetchContent dependencies
+      uses: actions/cache@v4
+      with:
+        path: build/_deps
+        key: deps-Linux-Debug-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: |
+          deps-Linux-Debug-
+
     - name: Configure CMake with coverage
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
@@ -79,7 +95,7 @@ jobs:
 
     - name: Run tests
       run: |
-        cd build && ctest --output-on-failure
+        cd build && ctest --output-on-failure -j
 
     - name: Generate coverage info
       run: |
