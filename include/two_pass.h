@@ -323,12 +323,13 @@ public:
     for (; idx < len; idx += 64) {
       __builtin_prefetch(buf + idx + 128);
 
-      simd_input in = fill_input(buf + idx);
+      size_t remaining = len - idx;
+      simd_input in = fill_input_safe(buf + idx, remaining);
       uint64_t mask = ~0ULL;
 
       /* TODO: look into removing branches if possible */
-      if (len - idx < 64) {
-        mask = blsmsk_u64(1ULL << (len - idx));
+      if (remaining < 64) {
+        mask = blsmsk_u64(1ULL << remaining);
       }
 
       uint64_t quotes = cmp_mask_against_input(in, static_cast<uint8_t>(quote_char)) & mask;
@@ -425,12 +426,13 @@ public:
 
     for (; idx < len; idx += 64) {
       __builtin_prefetch(buf + idx + 128);
-      simd_input in = fill_input(buf + idx);
+      size_t remaining = len - idx;
+      simd_input in = fill_input_safe(buf + idx, remaining);
 
       uint64_t mask = ~0ULL;
 
-      if (len - idx < 64) {
-        mask = blsmsk_u64(1ULL << (len - idx));
+      if (remaining < 64) {
+        mask = blsmsk_u64(1ULL << remaining);
       }
 
       uint64_t quotes = cmp_mask_against_input(in, static_cast<uint8_t>(quote_char)) & mask;
