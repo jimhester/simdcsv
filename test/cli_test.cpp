@@ -1890,3 +1890,108 @@ TEST_F(CliTest, RegressionIssue264_ExtremelyWideCsvCount) {
   // Should return a valid row count
   EXPECT_FALSE(result.output.empty());
 }
+
+// =============================================================================
+// Strict Mode Tests
+// Tests for --strict / -S flag functionality (GitHub issue #354)
+// =============================================================================
+
+TEST_F(CliTest, StrictModeShortFlag) {
+  // -S flag should work on well-formed CSV
+  auto result = CliRunner::run("head -S " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeLongFlag) {
+  // --strict flag should work on well-formed CSV
+  auto result = CliRunner::run("head --strict " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeUnclosedQuoteReturnsError) {
+  // Unclosed quote should cause exit code 1 in strict mode
+  auto result = CliRunner::run("head -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Error:") != std::string::npos ||
+              result.output.find("Strict mode") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeUnclosedQuoteLongFlag) {
+  // Unclosed quote should cause exit code 1 in strict mode (long flag)
+  auto result = CliRunner::run("head --strict " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Error:") != std::string::npos ||
+              result.output.find("Strict mode") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeUnclosedQuoteEof) {
+  // Unclosed quote at EOF should cause exit code 1 in strict mode
+  auto result = CliRunner::run("head -S " + testDataPath("malformed/unclosed_quote_eof.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, NonStrictModeUnclosedQuoteSucceeds) {
+  // Without strict mode, unclosed quote should still succeed (lenient parsing)
+  auto result = CliRunner::run("head " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, StrictModeTailCommand) {
+  // Strict mode should work with tail command
+  auto result = CliRunner::run("tail -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModeSampleCommand) {
+  // Strict mode should work with sample command
+  auto result = CliRunner::run("sample -n 5 -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModeSelectCommand) {
+  // Strict mode should work with select command
+  auto result = CliRunner::run("select -c 0 -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModeInfoCommand) {
+  // Strict mode should work with info command
+  auto result = CliRunner::run("info -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModePrettyCommand) {
+  // Strict mode should work with pretty command
+  auto result = CliRunner::run("pretty -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModeHelpDocumented) {
+  // Help text should document the strict flag
+  auto result = CliRunner::run("-h");
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("--strict") != std::string::npos);
+  EXPECT_TRUE(result.output.find("-S") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeWithValidFile) {
+  // Strict mode should succeed with completely valid CSV
+  auto result = CliRunner::run("head -S " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("1,2,3") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeInvalidQuoteEscape) {
+  // Invalid quote escape should fail in strict mode
+  auto result = CliRunner::run("head -S " + testDataPath("malformed/invalid_quote_escape.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModeQuoteInUnquotedField) {
+  // Quote appearing in unquoted field should fail in strict mode
+  auto result = CliRunner::run("head -S " + testDataPath("malformed/quote_in_unquoted_field.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
