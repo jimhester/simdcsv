@@ -502,3 +502,246 @@ TEST(ParseEncodingNameTest, ReturnsUnknownForInvalidNames) {
   EXPECT_EQ(parse_encoding_name("utf-7"), Encoding::UNKNOWN);
   EXPECT_EQ(parse_encoding_name("ascii"), Encoding::UNKNOWN);
 }
+
+// ============================================================================
+// Forced Encoding Tests
+// ============================================================================
+
+class ForcedEncodingTest : public ::testing::Test {
+protected:
+  static std::string test_data_dir() { return "test/data/encoding/"; }
+};
+
+TEST_F(ForcedEncodingTest, ForcedUtf8BomStripsActualBom) {
+  // Test that forcing UTF8_BOM encoding strips the BOM when present
+  try {
+    auto result = read_file_with_encoding(test_data_dir() + "utf8_bom.csv", 64, Encoding::UTF8_BOM);
+
+    // Should report UTF8_BOM encoding
+    EXPECT_EQ(result.encoding.encoding, Encoding::UTF8_BOM);
+
+    // BOM should be detected and stripped
+    EXPECT_EQ(result.encoding.bom_length, 3);
+
+    // Content should NOT start with BOM bytes
+    ASSERT_GT(result.size, 0);
+    EXPECT_NE(result.data()[0], 0xEF);
+
+    // Confidence should be 1.0 for forced encoding
+    EXPECT_DOUBLE_EQ(result.encoding.confidence, 1.0);
+  } catch (const std::exception& e) {
+    FAIL() << "Exception: " << e.what();
+  }
+}
+
+TEST_F(ForcedEncodingTest, ForcedUtf8BomNoBomPresent) {
+  // Test that forcing UTF8_BOM encoding works when no BOM is present
+  // Use latin1.csv which doesn't have a BOM
+  try {
+    auto result = read_file_with_encoding(test_data_dir() + "latin1.csv", 64, Encoding::UTF8_BOM);
+
+    // Should report UTF8_BOM encoding (as forced)
+    EXPECT_EQ(result.encoding.encoding, Encoding::UTF8_BOM);
+
+    // No BOM found
+    EXPECT_EQ(result.encoding.bom_length, 0);
+
+    // Content should be unchanged
+    ASSERT_GT(result.size, 0);
+
+    // Confidence should be 1.0 for forced encoding
+    EXPECT_DOUBLE_EQ(result.encoding.confidence, 1.0);
+  } catch (const std::exception& e) {
+    FAIL() << "Exception: " << e.what();
+  }
+}
+
+TEST_F(ForcedEncodingTest, ForcedUtf8NoTranscoding) {
+  // Test that forcing UTF-8 encoding doesn't transcode
+  try {
+    auto result = read_file_with_encoding(test_data_dir() + "utf8_bom.csv", 64, Encoding::UTF8);
+
+    // Should report UTF-8 encoding
+    EXPECT_EQ(result.encoding.encoding, Encoding::UTF8);
+
+    // No transcoding needed
+    EXPECT_FALSE(result.encoding.needs_transcoding);
+
+    // Content should be unchanged (including the BOM if present)
+    ASSERT_GT(result.size, 0);
+  } catch (const std::exception& e) {
+    FAIL() << "Exception: " << e.what();
+  }
+}
+
+TEST_F(ForcedEncodingTest, ForcedUtf16LeTranscoding) {
+  // Test that forcing UTF-16LE encoding transcodes the file
+  try {
+    auto result =
+        read_file_with_encoding(test_data_dir() + "utf16_le_bom.csv", 64, Encoding::UTF16_LE);
+
+    // Should report UTF-16LE encoding
+    EXPECT_EQ(result.encoding.encoding, Encoding::UTF16_LE);
+
+    // Transcoding should be performed
+    EXPECT_TRUE(result.encoding.needs_transcoding);
+
+    // Content should be valid UTF-8 after transcoding
+    std::string content(reinterpret_cast<const char*>(result.data()), result.size);
+    EXPECT_TRUE(content.find("name") != std::string::npos);
+  } catch (const std::exception& e) {
+    FAIL() << "Exception: " << e.what();
+  }
+}
+
+TEST_F(ForcedEncodingTest, ForcedLatin1Transcoding) {
+  // Test that forcing Latin-1 encoding transcodes the file
+  try {
+    auto result = read_file_with_encoding(test_data_dir() + "latin1.csv", 64, Encoding::LATIN1);
+
+    // Should report Latin-1 encoding
+    EXPECT_EQ(result.encoding.encoding, Encoding::LATIN1);
+
+    // Transcoding should be performed
+    EXPECT_TRUE(result.encoding.needs_transcoding);
+
+    // Content should be valid UTF-8 after transcoding
+    std::string content(reinterpret_cast<const char*>(result.data()), result.size);
+    // Latin-1 "José" should become UTF-8 "José" (é = 0xC3 0xA9)
+    EXPECT_NE(content.find("Jos\xC3\xA9"), std::string::npos);
+  } catch (const std::exception& e) {
+    FAIL() << "Exception: " << e.what();
+  }
+}
+
+// ============================================================================
+// Windows-1252 Transcoding Tests
+// ============================================================================
+
+TEST(Windows1252TranscodingTest, TranscodesSmartQuotes) {
+  // Windows-1252 smart quotes (0x93 = left double quote, 0x94 = right double quote)
+  // These map to U+201C and U+201D
+  uint8_t data[] = {0x93, 'h', 'e', 'l', 'l', 'o', 0x94};
+  auto result = transcode_to_utf8(data, sizeof(data), Encoding::WINDOWS_1252, 0, 32);
+
+  ASSERT_TRUE(result.success);
+  // U+201C in UTF-8: E2 80 9C
+  // U+201D in UTF-8: E2 80 9D
+  // Plus 5 ASCII chars = 5 bytes
+  // Total: 3 + 5 + 3 = 11 bytes
+  EXPECT_EQ(result.length, 11);
+
+  // Check left quote: E2 80 9C
+  EXPECT_EQ(result.data[0], 0xE2);
+  EXPECT_EQ(result.data[1], 0x80);
+  EXPECT_EQ(result.data[2], 0x9C);
+
+  // Check "hello"
+  EXPECT_EQ(result.data[3], 'h');
+  EXPECT_EQ(result.data[4], 'e');
+  EXPECT_EQ(result.data[5], 'l');
+  EXPECT_EQ(result.data[6], 'l');
+  EXPECT_EQ(result.data[7], 'o');
+
+  // Check right quote: E2 80 9D
+  EXPECT_EQ(result.data[8], 0xE2);
+  EXPECT_EQ(result.data[9], 0x80);
+  EXPECT_EQ(result.data[10], 0x9D);
+
+  aligned_free(result.data);
+}
+
+TEST(Windows1252TranscodingTest, TranscodesEuroSign) {
+  // Windows-1252 Euro sign (0x80) maps to U+20AC
+  uint8_t data[] = {0x80, '1', '0', '0'};
+  auto result = transcode_to_utf8(data, sizeof(data), Encoding::WINDOWS_1252, 0, 32);
+
+  ASSERT_TRUE(result.success);
+  // U+20AC in UTF-8: E2 82 AC (3 bytes) + 3 ASCII = 6 bytes
+  EXPECT_EQ(result.length, 6);
+
+  // Check Euro sign: E2 82 AC
+  EXPECT_EQ(result.data[0], 0xE2);
+  EXPECT_EQ(result.data[1], 0x82);
+  EXPECT_EQ(result.data[2], 0xAC);
+
+  // Check "100"
+  EXPECT_EQ(result.data[3], '1');
+  EXPECT_EQ(result.data[4], '0');
+  EXPECT_EQ(result.data[5], '0');
+
+  aligned_free(result.data);
+}
+
+TEST(Windows1252TranscodingTest, TranscodesEmDash) {
+  // Windows-1252 em-dash (0x97) maps to U+2014
+  uint8_t data[] = {'a', 0x97, 'b'};
+  auto result = transcode_to_utf8(data, sizeof(data), Encoding::WINDOWS_1252, 0, 32);
+
+  ASSERT_TRUE(result.success);
+  // 1 + 3 + 1 = 5 bytes
+  EXPECT_EQ(result.length, 5);
+
+  EXPECT_EQ(result.data[0], 'a');
+  // U+2014 in UTF-8: E2 80 94
+  EXPECT_EQ(result.data[1], 0xE2);
+  EXPECT_EQ(result.data[2], 0x80);
+  EXPECT_EQ(result.data[3], 0x94);
+  EXPECT_EQ(result.data[4], 'b');
+
+  aligned_free(result.data);
+}
+
+TEST(Windows1252TranscodingTest, TranscodesEllipsis) {
+  // Windows-1252 ellipsis (0x85) maps to U+2026
+  uint8_t data[] = {'a', 0x85};
+  auto result = transcode_to_utf8(data, sizeof(data), Encoding::WINDOWS_1252, 0, 32);
+
+  ASSERT_TRUE(result.success);
+  // 1 + 3 = 4 bytes
+  EXPECT_EQ(result.length, 4);
+
+  EXPECT_EQ(result.data[0], 'a');
+  // U+2026 in UTF-8: E2 80 A6
+  EXPECT_EQ(result.data[1], 0xE2);
+  EXPECT_EQ(result.data[2], 0x80);
+  EXPECT_EQ(result.data[3], 0xA6);
+
+  aligned_free(result.data);
+}
+
+TEST(Windows1252TranscodingTest, TranscodesHighBytes) {
+  // Windows-1252 high bytes (0xA0-0xFF) should map to U+00A0-U+00FF (same as Latin-1)
+  // Test with 0xE9 (é in Latin-1/Windows-1252)
+  uint8_t data[] = {'c', 'a', 'f', 0xE9};
+  auto result = transcode_to_utf8(data, sizeof(data), Encoding::WINDOWS_1252, 0, 32);
+
+  ASSERT_TRUE(result.success);
+  // 3 ASCII + 2 bytes for UTF-8 é = 5 bytes
+  EXPECT_EQ(result.length, 5);
+
+  // Check "caf"
+  EXPECT_EQ(result.data[0], 'c');
+  EXPECT_EQ(result.data[1], 'a');
+  EXPECT_EQ(result.data[2], 'f');
+  // é in UTF-8: C3 A9
+  EXPECT_EQ(result.data[3], 0xC3);
+  EXPECT_EQ(result.data[4], 0xA9);
+
+  aligned_free(result.data);
+}
+
+TEST(Windows1252TranscodingTest, PreservesAscii) {
+  // ASCII bytes should pass through unchanged
+  uint8_t data[] = {'H', 'e', 'l', 'l', 'o', ',', ' ', 'W', 'o', 'r', 'l', 'd', '!'};
+  auto result = transcode_to_utf8(data, sizeof(data), Encoding::WINDOWS_1252, 0, 32);
+
+  ASSERT_TRUE(result.success);
+  EXPECT_EQ(result.length, sizeof(data));
+
+  for (size_t i = 0; i < sizeof(data); ++i) {
+    EXPECT_EQ(result.data[i], data[i]) << "Mismatch at position " << i;
+  }
+
+  aligned_free(result.data);
+}

@@ -206,11 +206,48 @@ static LoadResult process_with_forced_encoding(AlignedPtr raw_buf, size_t raw_le
   // Set encoding result with user-specified encoding
   result.encoding.encoding = forced_encoding;
   result.encoding.confidence = 1.0; // User-specified, so full confidence
-  result.encoding.bom_length = 0;   // No BOM detection when forced
+
+  // UTF-8 BOM bytes: EF BB BF
+  static constexpr uint8_t UTF8_BOM[] = {0xEF, 0xBB, 0xBF};
+
+  // Handle UTF8_BOM encoding: check for and strip BOM if present
+  if (forced_encoding == libvroom::Encoding::UTF8_BOM) {
+    // Check if buffer actually has UTF-8 BOM
+    size_t bom_len = 0;
+    if (raw_len >= 3 && raw_buf.get()[0] == UTF8_BOM[0] && raw_buf.get()[1] == UTF8_BOM[1] &&
+        raw_buf.get()[2] == UTF8_BOM[2]) {
+      bom_len = 3;
+    }
+
+    result.encoding.bom_length = bom_len;
+    result.encoding.needs_transcoding = false;
+
+    if (bom_len > 0) {
+      // Strip the BOM using transcode_to_utf8 (which handles BOM stripping)
+      auto stripped =
+          libvroom::transcode_to_utf8(raw_buf.get(), raw_len, forced_encoding, bom_len, padding);
+
+      raw_buf.reset();
+
+      if (!stripped.success) {
+        throw std::runtime_error("Failed to strip BOM: " + stripped.error);
+      }
+
+      result.buffer = AlignedPtr(stripped.data);
+      result.size = stripped.length;
+    } else {
+      // No BOM found - use as-is
+      result.buffer = std::move(raw_buf);
+      result.size = raw_len;
+    }
+    return result;
+  }
+
+  // For other encodings
+  result.encoding.bom_length = 0;
 
   // Determine if transcoding is needed
-  bool needs_transcoding = (forced_encoding != libvroom::Encoding::UTF8 &&
-                            forced_encoding != libvroom::Encoding::UTF8_BOM);
+  bool needs_transcoding = (forced_encoding != libvroom::Encoding::UTF8);
   result.encoding.needs_transcoding = needs_transcoding;
 
   if (needs_transcoding) {
