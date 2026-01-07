@@ -346,6 +346,27 @@ public:
   void reset();
   void merge(const ColumnTypeInference& other);
 
+  /**
+   * Check if all columns have confirmed types based on the confidence threshold.
+   *
+   * A column's type is "confirmed" when:
+   * 1. It has at least min_samples non-empty values
+   * 2. A single type dominates with >= confidence_threshold ratio
+   *
+   * @param min_samples Minimum samples per column before type can be confirmed (default: 100)
+   * @return true if all columns have confirmed types, enabling early termination
+   */
+  bool all_types_confirmed(size_t min_samples = 100) const;
+
+  /**
+   * Check if a specific column has a confirmed type.
+   *
+   * @param column Column index to check
+   * @param min_samples Minimum samples required for confirmation
+   * @return true if this column's type is confirmed
+   */
+  bool is_column_type_confirmed(size_t column, size_t min_samples = 100) const;
+
 private:
   std::vector<ColumnTypeStats> stats_;
   TypeDetectionOptions options_;
