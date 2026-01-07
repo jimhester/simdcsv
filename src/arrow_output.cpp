@@ -489,18 +489,14 @@ ArrowConvertResult csv_to_arrow(const std::string& filename, const ArrowConvertO
                                 const Dialect& dialect) {
   ArrowConvertResult result;
   try {
-    auto corpus = get_corpus(filename, 64);
-    // Use RAII to ensure memory is freed even if an exception is thrown
-    // during parsing or conversion. The buffer will be automatically freed
-    // when buffer_guard goes out of scope (either normally or via exception).
-    AlignedBufferPtr buffer_guard(const_cast<uint8_t*>(corpus.data()));
+    auto [buffer, size] = read_file(filename, 64);
 
     two_pass parser;
-    index idx = parser.init(corpus.size(), 1);
-    parser.parse(corpus.data(), idx, corpus.size(), dialect);
+    index idx = parser.init(size, 1);
+    parser.parse(buffer.get(), idx, size, dialect);
     ArrowConverter converter(options);
-    result = converter.convert(corpus.data(), corpus.size(), idx, dialect);
-    // buffer_guard automatically frees memory when it goes out of scope
+    result = converter.convert(buffer.get(), size, idx, dialect);
+    // buffer automatically frees memory when it goes out of scope
   } catch (const std::exception& e) {
     result.error_message = e.what();
   }

@@ -93,7 +93,7 @@ Bob,25,NYC,USA
 
 void parse_with_errors(const uint8_t* buf, size_t len) {
     // Create parser and error collector
-    libvroom::two_pass parser;
+    libvroom::TwoPass parser;
     auto idx = parser.init(len, 1);
     libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
@@ -144,7 +144,7 @@ if (errors.at_error_limit()) {
 When parsing with multiple threads, each thread collects errors locally. After parsing, errors are merged and sorted by byte offset:
 
 ```cpp
-libvroom::two_pass parser;
+libvroom::TwoPass parser;
 auto idx = parser.init(len, 4);  // 4 threads
 libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 

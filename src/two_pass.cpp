@@ -455,8 +455,6 @@ uint64_t TwoPass::second_pass_chunk_throwing(const uint8_t* buf, size_t start, s
 // TwoPass orchestration methods
 //-----------------------------------------------------------------------------
 
-LIBVROOM_SUPPRESS_DEPRECATION_START
-
 bool TwoPass::parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
                               const Dialect& dialect) {
   char delim = dialect.delimiter;
@@ -588,8 +586,6 @@ bool TwoPass::parse(const uint8_t* buf, ParseIndex& out, size_t len, const Diale
   return parse_speculate(buf, out, len, dialect);
 }
 
-LIBVROOM_SUPPRESS_DEPRECATION_END
-
 TwoPass::branchless_chunk_result TwoPass::second_pass_branchless_chunk_with_errors(
     const BranchlessStateMachine& sm, const uint8_t* buf, size_t start, size_t end, ParseIndex* out,
     size_t thread_id, size_t total_len, ErrorMode mode) {
@@ -711,8 +707,6 @@ bool TwoPass::parse_branchless_with_errors(const uint8_t* buf, ParseIndex& out, 
   return !errors.has_fatal_errors();
 }
 
-LIBVROOM_SUPPRESS_DEPRECATION_START
-
 bool TwoPass::parse_branchless(const uint8_t* buf, ParseIndex& out, size_t len,
                                const Dialect& dialect) {
   BranchlessStateMachine sm(dialect.delimiter, dialect.quote_char, dialect.escape_char,
@@ -811,8 +805,6 @@ bool TwoPass::parse_auto(const uint8_t* buf, ParseIndex& out, size_t len, ErrorC
   return parse_two_pass_with_errors(buf, out, len, errors, dialect);
 }
 
-LIBVROOM_SUPPRESS_DEPRECATION_END
-
 DetectionResult TwoPass::detect_dialect(const uint8_t* buf, size_t len,
                                         const DetectionOptions& options) {
   DialectDetector detector(options);
@@ -830,8 +822,6 @@ TwoPass::chunk_result TwoPass::second_pass_chunk_with_errors(const uint8_t* buf,
                                        delimiter, quote_char);
   return result;
 }
-
-LIBVROOM_SUPPRESS_DEPRECATION_START
 
 bool TwoPass::parse_two_pass_with_errors(const uint8_t* buf, ParseIndex& out, size_t len,
                                          ErrorCollector& errors, const Dialect& dialect) {
@@ -982,8 +972,6 @@ bool TwoPass::parse_validate(const uint8_t* buf, ParseIndex& out, size_t len,
 
   return !errors.has_fatal_errors();
 }
-
-LIBVROOM_SUPPRESS_DEPRECATION_END
 
 //-----------------------------------------------------------------------------
 // TwoPass validation functions

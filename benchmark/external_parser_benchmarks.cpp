@@ -40,14 +40,10 @@
 //
 // =============================================================================
 
-// Benchmarks intentionally test deprecated two_pass methods for performance
-// comparison
-#include "two_pass.h"
-LIBVROOM_SUPPRESS_DEPRECATION_START
-
 #include "common_defs.h"
 #include "io_util.h"
 #include "mem_util.h"
+#include "two_pass.h"
 
 #include <benchmark/benchmark.h>
 #include <cstring>
@@ -195,7 +191,7 @@ private:
 #endif
 
 extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
-extern libvroom::two_pass* global_parser;
+extern libvroom::TwoPass* global_parser;
 
 // ============================================================================
 // Test Data Generation
@@ -305,10 +301,10 @@ static const std::string& get_or_generate_quoted_data(size_t size) {
 
 static size_t parse_libvroom(const uint8_t* data, size_t len) {
   if (!global_parser) {
-    global_parser = new libvroom::two_pass();
+    global_parser = new libvroom::TwoPass();
   }
 
-  libvroom::index result = global_parser->init(len, 1);
+  libvroom::ParseIndex result = global_parser->init(len, 1);
   global_parser->parse(data, result, len);
 
   // Return total field count as work indicator

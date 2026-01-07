@@ -54,7 +54,8 @@ TEST_F(SimplifiedAPITest, ParserWithErrors) {
   libvroom::FileBuffer buffer(data, len);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   libvroom::Parser parser;
-  auto result = parser.parse_with_errors(buffer.data(), buffer.size(), errors);
+  auto result = parser.parse(buffer.data(), buffer.size(),
+                             {.dialect = libvroom::Dialect::csv(), .errors = &errors});
   EXPECT_TRUE(result.success());
   EXPECT_TRUE(errors.has_errors());
 }
@@ -64,14 +65,15 @@ TEST_F(SimplifiedAPITest, ParserDialects) {
     auto [data, len] = make_buffer("a\tb\tc\n1\t2\t3\n");
     libvroom::FileBuffer buffer(data, len);
     libvroom::Parser parser;
-    auto result = parser.parse(buffer.data(), buffer.size(), libvroom::Dialect::tsv());
+    auto result = parser.parse(buffer.data(), buffer.size(), {.dialect = libvroom::Dialect::tsv()});
     EXPECT_TRUE(result.success());
   }
   {
     auto [data, len] = make_buffer("a;b;c\n1;2;3\n");
     libvroom::FileBuffer buffer(data, len);
     libvroom::Parser parser;
-    auto result = parser.parse(buffer.data(), buffer.size(), libvroom::Dialect::semicolon());
+    auto result =
+        parser.parse(buffer.data(), buffer.size(), {.dialect = libvroom::Dialect::semicolon()});
     EXPECT_TRUE(result.success());
   }
 }
@@ -89,7 +91,7 @@ TEST_F(SimplifiedAPITest, ParserAutoDetection) {
   libvroom::FileBuffer buffer(data, len);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   libvroom::Parser parser;
-  auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+  auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
   EXPECT_TRUE(result.success());
   EXPECT_EQ(result.dialect.delimiter, ';');
 }
@@ -110,7 +112,7 @@ TEST_F(SimplifiedAPITest, CustomDialect) {
   custom.delimiter = ':';
   custom.quote_char = '\'';
   libvroom::Parser parser;
-  auto result = parser.parse(buffer.data(), buffer.size(), custom);
+  auto result = parser.parse(buffer.data(), buffer.size(), {.dialect = custom});
   EXPECT_TRUE(result.success());
 }
 
@@ -270,7 +272,8 @@ TEST_F(UnifiedAPITest, LegacyParseWithDialect) {
   libvroom::FileBuffer buffer(data, len);
   libvroom::Parser parser;
 
-  auto result = parser.parse(buffer.data(), buffer.size(), libvroom::Dialect::semicolon());
+  auto result =
+      parser.parse(buffer.data(), buffer.size(), {.dialect = libvroom::Dialect::semicolon()});
   EXPECT_TRUE(result.success());
   EXPECT_EQ(result.dialect.delimiter, ';');
 }
@@ -282,7 +285,8 @@ TEST_F(UnifiedAPITest, LegacyParseWithErrors) {
   libvroom::Parser parser;
 
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  auto result = parser.parse_with_errors(buffer.data(), buffer.size(), errors);
+  auto result = parser.parse(buffer.data(), buffer.size(),
+                             {.dialect = libvroom::Dialect::csv(), .errors = &errors});
   EXPECT_TRUE(result.success());
   EXPECT_TRUE(errors.has_errors());
 }
@@ -294,7 +298,7 @@ TEST_F(UnifiedAPITest, LegacyParseAuto) {
   libvroom::Parser parser;
 
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+  auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
   EXPECT_TRUE(result.success());
   EXPECT_EQ(result.dialect.delimiter, ';');
 }
@@ -1143,7 +1147,7 @@ TEST_F(RowColumnIterationTest, TSVIteration) {
   libvroom::FileBuffer buffer(data, len);
   libvroom::Parser parser;
 
-  auto result = parser.parse(buffer.data(), buffer.size(), libvroom::Dialect::tsv());
+  auto result = parser.parse(buffer.data(), buffer.size(), {.dialect = libvroom::Dialect::tsv()});
   EXPECT_TRUE(result.success());
   EXPECT_EQ(result.num_rows(), 2);
 
@@ -1156,7 +1160,8 @@ TEST_F(RowColumnIterationTest, SemicolonIteration) {
   libvroom::FileBuffer buffer(data, len);
   libvroom::Parser parser;
 
-  auto result = parser.parse(buffer.data(), buffer.size(), libvroom::Dialect::semicolon());
+  auto result =
+      parser.parse(buffer.data(), buffer.size(), {.dialect = libvroom::Dialect::semicolon()});
   EXPECT_TRUE(result.success());
   EXPECT_EQ(result.num_rows(), 2);
 
@@ -1398,20 +1403,6 @@ TEST_F(AlignedBufferTest, EmptyMethod) {
   EXPECT_TRUE(zero_size.valid()); // Valid pointer but empty data
 }
 
-// Test: wrap_corpus utility function
-TEST_F(AlignedBufferTest, WrapCorpus) {
-  std::string content = "a,b,c\n1,2,3\n";
-  auto [data, len] = make_buffer(content);
-  std::basic_string_view<uint8_t> corpus(data, len);
-
-  auto [ptr, size] = libvroom::wrap_corpus(corpus);
-
-  EXPECT_NE(ptr.get(), nullptr);
-  EXPECT_EQ(size, content.size());
-  EXPECT_EQ(ptr[0], 'a');
-  // Memory freed when ptr goes out of scope
-}
-
 // Test: AlignedBuffer with Parser
 TEST_F(AlignedBufferTest, WithParser) {
   auto [data, len] = make_buffer("name,age\nAlice,30\nBob,25\n");
@@ -1547,9 +1538,7 @@ TEST_F(IndexMemoryTest, WithParsing) {
   libvroom::TwoPass parser;
   libvroom::ParseIndex idx = parser.init(buffer.size(), 1);
 
-  LIBVROOM_SUPPRESS_DEPRECATION_START
   bool success = parser.parse(buffer.data(), idx, buffer.size());
-  LIBVROOM_SUPPRESS_DEPRECATION_END
 
   EXPECT_TRUE(success);
   EXPECT_GT(idx.n_indexes[0], 0);
@@ -1564,9 +1553,7 @@ TEST_F(IndexMemoryTest, WithMultiThreadedParsing) {
   libvroom::TwoPass parser;
   libvroom::ParseIndex idx = parser.init(buffer.size(), 4);
 
-  LIBVROOM_SUPPRESS_DEPRECATION_START
   bool success = parser.parse(buffer.data(), idx, buffer.size());
-  LIBVROOM_SUPPRESS_DEPRECATION_END
 
   EXPECT_TRUE(success);
   // Memory automatically freed when idx and buffer go out of scope

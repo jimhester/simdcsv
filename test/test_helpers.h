@@ -7,33 +7,28 @@
 #ifndef LIBVROOM_TEST_HELPERS_H
 #define LIBVROOM_TEST_HELPERS_H
 
-#include "io_util.h"
-#include "mem_util.h"
+#include "libvroom.h"
 
 #include <string>
 
 /**
  * RAII wrapper for exception-safe memory management of corpus data.
  *
- * Automatically frees the memory allocated by get_corpus() when the
- * guard goes out of scope, preventing memory leaks even when tests
- * throw exceptions or use early returns.
+ * Uses libvroom::load_file_to_ptr() internally which manages memory via
+ * RAII (AlignedBuffer). Memory is automatically freed when the guard
+ * goes out of scope, preventing memory leaks even when tests throw
+ * exceptions or use early returns.
  *
  * Usage:
  *   CorpusGuard corpus("path/to/file.csv");
  *   parser.parse(corpus.data.data(), idx, corpus.data.size());
- *   // No need to call free_buffer - automatically freed on scope exit
+ *   // No need to manually free - automatically freed on scope exit
  */
 struct CorpusGuard {
-  std::basic_string_view<uint8_t> data;
+  libvroom::AlignedBuffer data;
 
-  explicit CorpusGuard(const std::string& path) : data(get_corpus(path, LIBVROOM_PADDING)) {}
-
-  ~CorpusGuard() {
-    if (data.data()) {
-      aligned_free(const_cast<uint8_t*>(data.data()));
-    }
-  }
+  explicit CorpusGuard(const std::string& path)
+      : data(libvroom::load_file_to_ptr(path, LIBVROOM_PADDING)) {}
 
   // Non-copyable, non-movable
   CorpusGuard(const CorpusGuard&) = delete;

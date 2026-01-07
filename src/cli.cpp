@@ -208,33 +208,40 @@ static bool isStdinInput(const char* filename) {
   return filename == nullptr || strcmp(filename, "-") == 0;
 }
 
-// Parse a file or stdin - returns true on success
-// Caller is responsible for freeing data with aligned_free()
+/// Result of loading and parsing a file
+struct ParseResult {
+  LoadResult load_result;   ///< The loaded data (RAII-managed)
+  libvroom::ParseIndex idx; ///< The parsed index
+  bool success{false};      ///< Whether parsing was successful
+};
+
+// Parse a file or stdin - returns ParseResult with RAII-managed data
 // If detected_encoding is provided, the detected encoding will be stored there
 // If strict_mode is true, exits with error on any parse warning or error
-bool parseFile(const char* filename, int n_threads, std::basic_string_view<uint8_t>& data,
-               libvroom::ParseIndex& idx,
-               const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
-               bool auto_detect = false, libvroom::EncodingResult* detected_encoding = nullptr,
-               bool strict_mode = false) {
+ParseResult parseFile(const char* filename, int n_threads,
+                      const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
+                      bool auto_detect = false,
+                      libvroom::EncodingResult* detected_encoding = nullptr,
+                      bool strict_mode = false) {
+  ParseResult result;
+
   try {
-    LoadResult load_result;
     if (isStdinInput(filename)) {
-      load_result = get_corpus_stdin_with_encoding(LIBVROOM_PADDING);
+      result.load_result = read_stdin_with_encoding(LIBVROOM_PADDING);
     } else {
-      load_result = get_corpus_with_encoding(filename, LIBVROOM_PADDING);
+      result.load_result = read_file_with_encoding(filename, LIBVROOM_PADDING);
     }
-    data = load_result.data;
 
     // Store detected encoding if caller wants it
     if (detected_encoding) {
-      *detected_encoding = load_result.encoding;
+      *detected_encoding = result.load_result.encoding;
     }
 
     // Report encoding if transcoding occurred
-    if (load_result.encoding.needs_transcoding) {
-      cerr << "Transcoded from " << libvroom::encoding_to_string(load_result.encoding.encoding)
-           << " to UTF-8" << endl;
+    if (result.load_result.encoding.needs_transcoding) {
+      cerr << "Transcoded from "
+           << libvroom::encoding_to_string(result.load_result.encoding.encoding) << " to UTF-8"
+           << endl;
     }
   } catch (const std::exception& e) {
     if (isStdinInput(filename)) {
@@ -242,7 +249,7 @@ bool parseFile(const char* filename, int n_threads, std::basic_string_view<uint8
     } else {
       cerr << "Error: Could not load file '" << filename << "': " << e.what() << endl;
     }
-    return false;
+    return result;
   }
 
   // Use the unified Parser API
@@ -260,24 +267,25 @@ bool parseFile(const char* filename, int n_threads, std::basic_string_view<uint8
     options.errors = &errors;
   }
 
-  auto result = parser.parse(data.data(), data.size(), options);
-  idx = std::move(result.idx);
+  auto parse_result = parser.parse(result.load_result.data(), result.load_result.size, options);
+  result.idx = std::move(parse_result.idx);
 
   // Report auto-detected dialect if applicable
-  if (auto_detect && data.size() > 0 && result.detection.success()) {
-    cerr << "Auto-detected: " << result.dialect.to_string() << endl;
+  if (auto_detect && result.load_result.size > 0 && parse_result.detection.success()) {
+    cerr << "Auto-detected: " << parse_result.dialect.to_string() << endl;
   }
 
   // In strict mode, check for any errors (including warnings)
-  if (strict_mode && result.has_errors()) {
+  if (strict_mode && parse_result.has_errors()) {
     cerr << "Error: Strict mode enabled and parse errors were found:" << endl;
-    for (const auto& err : result.errors()) {
+    for (const auto& err : parse_result.errors()) {
       cerr << "  " << err.to_string() << endl;
     }
-    return false;
+    return result;
   }
 
-  return true;
+  result.success = true;
+  return result;
 }
 
 // Helper function to parse delimiter string
@@ -491,13 +499,18 @@ size_t countRowsDirectParallel(const uint8_t* buf, size_t len, int n_threads) {
 int cmdCount(const char* filename, int n_threads, bool has_header,
              const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
              bool auto_detect = false) {
-  std::basic_string_view<uint8_t> data;
+  AlignedPtr buffer;
+  size_t len = 0;
 
   try {
     if (isStdinInput(filename)) {
-      data = get_corpus_stdin(LIBVROOM_PADDING);
+      auto [ptr, size] = read_stdin(LIBVROOM_PADDING);
+      buffer = std::move(ptr);
+      len = size;
     } else {
-      data = get_corpus(filename, LIBVROOM_PADDING);
+      auto [ptr, size] = read_file(filename, LIBVROOM_PADDING);
+      buffer = std::move(ptr);
+      len = size;
     }
   } catch (const std::exception& e) {
     if (isStdinInput(filename)) {
@@ -511,7 +524,7 @@ int cmdCount(const char* filename, int n_threads, bool has_header,
   // Use optimized direct row counting - much faster than building full index
   // Note: For non-standard dialects, this still uses standard quote char
   // TODO: Make countRowsDirectParallel dialect-aware
-  size_t rows = countRowsDirectParallel(data.data(), data.size(), n_threads);
+  size_t rows = countRowsDirectParallel(buffer.get(), len, n_threads);
 
   // Subtract header if present
   if (has_header && rows > 0) {
@@ -520,7 +533,7 @@ int cmdCount(const char* filename, int n_threads, bool has_header,
     cout << rows << endl;
   }
 
-  aligned_free((void*)data.data());
+  // buffer automatically freed when it goes out of scope
   return 0;
 }
 
@@ -551,13 +564,11 @@ static void outputRow(const std::vector<std::string>& row, const libvroom::Diale
 int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
             bool strict_mode = false) {
-  std::basic_string_view<uint8_t> data;
-  libvroom::ParseIndex idx;
-
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+  if (!result.success)
     return 1;
 
-  CsvIterator iter(data.data(), idx);
+  CsvIterator iter(result.load_result.data(), result.idx);
   // Get num_rows + 1 if we have header to show header plus num_rows data rows
   auto rows = iter.getRows(has_header ? num_rows + 1 : num_rows);
 
@@ -565,7 +576,7 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
     outputRow(row, dialect);
   }
 
-  aligned_free((void*)data.data());
+  // Memory automatically freed when result goes out of scope
   return 0;
 }
 
@@ -573,17 +584,14 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
 int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
             bool strict_mode = false) {
-  std::basic_string_view<uint8_t> data;
-  libvroom::ParseIndex idx;
-
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+  if (!result.success)
     return 1;
 
-  CsvIterator iter(data.data(), idx);
+  CsvIterator iter(result.load_result.data(), result.idx);
   auto all_rows = iter.getRows();
 
   if (all_rows.empty()) {
-    aligned_free((void*)data.data());
     return 0;
   }
 
@@ -608,7 +616,7 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
     outputRow(all_rows[i], dialect);
   }
 
-  aligned_free((void*)data.data());
+  // Memory automatically freed when result goes out of scope
   return 0;
 }
 
@@ -616,17 +624,14 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
 int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               unsigned int seed = 0, bool strict_mode = false) {
-  std::basic_string_view<uint8_t> data;
-  libvroom::ParseIndex idx;
-
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+  if (!result.success)
     return 1;
 
-  CsvIterator iter(data.data(), idx);
+  CsvIterator iter(result.load_result.data(), result.idx);
   auto all_rows = iter.getRows();
 
   if (all_rows.empty()) {
-    aligned_free((void*)data.data());
     return 0;
   }
 
@@ -640,7 +645,6 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
   size_t data_rows = all_rows.size() > header_offset ? all_rows.size() - header_offset : 0;
 
   if (data_rows == 0) {
-    aligned_free((void*)data.data());
     return 0;
   }
 
@@ -673,11 +677,11 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
   }
 
   // Output the sampled rows
-  for (size_t idx : sample_indices) {
-    outputRow(all_rows[idx], dialect);
+  for (size_t sample_idx : sample_indices) {
+    outputRow(all_rows[sample_idx], dialect);
   }
 
-  aligned_free((void*)data.data());
+  // Memory automatically freed when result goes out of scope
   return 0;
 }
 
@@ -685,17 +689,14 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
 int cmdSelect(const char* filename, int n_threads, const string& columns, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               bool strict_mode = false) {
-  std::basic_string_view<uint8_t> data;
-  libvroom::ParseIndex idx;
-
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+  if (!result.success)
     return 1;
 
-  CsvIterator iter(data.data(), idx);
+  CsvIterator iter(result.load_result.data(), result.idx);
   auto rows = iter.getRows();
 
   if (rows.empty()) {
-    aligned_free((void*)data.data());
     return 0;
   }
 
@@ -721,7 +722,6 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
       if (col_idx >= num_cols) {
         cerr << "Error: Column index " << col_idx << " is out of range (file has " << num_cols
              << " columns, indices 0-" << (num_cols - 1) << ")" << endl;
-        aligned_free((void*)data.data());
         return 1;
       }
       col_indices.push_back(col_idx);
@@ -732,12 +732,10 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
         col_indices.push_back(distance(header.begin(), it));
       } else {
         cerr << "Error: Column '" << spec << "' not found in header" << endl;
-        aligned_free((void*)data.data());
         return 1;
       }
     } else {
       cerr << "Error: Cannot use column names without header (-H flag used)" << endl;
-      aligned_free((void*)data.data());
       return 1;
     }
   }
@@ -772,7 +770,7 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
     cout << '\n';
   }
 
-  aligned_free((void*)data.data());
+  // Memory automatically freed when result goes out of scope
   return 0;
 }
 
@@ -780,17 +778,15 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
 int cmdInfo(const char* filename, int n_threads, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
             bool strict_mode = false) {
-  std::basic_string_view<uint8_t> data;
-  libvroom::ParseIndex idx;
-
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+  if (!result.success)
     return 1;
 
-  CsvIterator iter(data.data(), idx);
+  CsvIterator iter(result.load_result.data(), result.idx);
   auto rows = iter.getRows();
 
   cout << "Source: " << (isStdinInput(filename) ? "<stdin>" : filename) << '\n';
-  cout << "Size: " << data.size() << " bytes\n";
+  cout << "Size: " << result.load_result.size << " bytes\n";
   cout << "Dialect: " << dialect.to_string() << '\n';
 
   size_t num_rows = rows.size();
@@ -810,7 +806,7 @@ int cmdInfo(const char* filename, int n_threads, bool has_header,
     }
   }
 
-  aligned_free((void*)data.data());
+  // Memory automatically freed when result goes out of scope
   return 0;
 }
 
@@ -818,17 +814,14 @@ int cmdInfo(const char* filename, int n_threads, bool has_header,
 int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               bool strict_mode = false) {
-  std::basic_string_view<uint8_t> data;
-  libvroom::ParseIndex idx;
-
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+  if (!result.success)
     return 1;
 
-  CsvIterator iter(data.data(), idx);
+  CsvIterator iter(result.load_result.data(), result.idx);
   auto rows = iter.getRows(has_header ? num_rows + 1 : num_rows);
 
   if (rows.empty()) {
-    aligned_free((void*)data.data());
     return 0;
   }
 
@@ -887,7 +880,7 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
   }
   printSep();
 
-  aligned_free((void*)data.data());
+  // Memory automatically freed when result goes out of scope
   return 0;
 }
 
@@ -967,18 +960,14 @@ static std::string escapeJsonChar(char c) {
 
 // Command: dialect - detect and output CSV dialect in human-readable or JSON format
 int cmdDialect(const char* filename, bool json_output) {
-  std::basic_string_view<uint8_t> data;
-  libvroom::EncodingResult enc_result;
+  LoadResult load_result;
 
   try {
-    LoadResult load_result;
     if (isStdinInput(filename)) {
-      load_result = get_corpus_stdin_with_encoding(LIBVROOM_PADDING);
+      load_result = read_stdin_with_encoding(LIBVROOM_PADDING);
     } else {
-      load_result = get_corpus_with_encoding(filename, LIBVROOM_PADDING);
+      load_result = read_file_with_encoding(filename, LIBVROOM_PADDING);
     }
-    data = load_result.data;
-    enc_result = load_result.encoding;
   } catch (const std::exception& e) {
     if (isStdinInput(filename)) {
       cerr << "Error: Could not read from stdin: " << e.what() << endl;
@@ -989,7 +978,7 @@ int cmdDialect(const char* filename, bool json_output) {
   }
 
   libvroom::DialectDetector detector;
-  auto result = detector.detect(data.data(), data.size());
+  auto result = detector.detect(load_result.data(), load_result.size);
 
   if (!result.success()) {
     cerr << "Error: Could not detect CSV dialect";
@@ -997,11 +986,11 @@ int cmdDialect(const char* filename, bool json_output) {
       cerr << ": " << result.warning;
     }
     cerr << endl;
-    aligned_free((void*)data.data());
     return 1;
   }
 
   const auto& d = result.dialect;
+  const auto& enc_result = load_result.encoding;
 
   if (json_output) {
     // JSON output for programmatic use
@@ -1044,7 +1033,7 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "\n";
   }
 
-  aligned_free((void*)data.data());
+  // Memory automatically freed when load_result goes out of scope
   return 0;
 }
 

@@ -156,7 +156,7 @@ TEST_F(FileSizeLimitTest, AllowsWithUnlimitedSize) {
 // ============================================================================
 
 TEST(IndexAllocationTest, ThrowsOnOverflow) {
-  two_pass parser;
+  TwoPass parser;
 
   // Attempt to allocate with extreme size that would overflow
   // SIZE_MAX / 8 would overflow when multiplied by sizeof(uint64_t)
@@ -166,7 +166,7 @@ TEST(IndexAllocationTest, ThrowsOnOverflow) {
 }
 
 TEST(IndexAllocationTest, ReportsOverflowWithErrorCollector) {
-  two_pass parser;
+  TwoPass parser;
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   size_t huge_len = std::numeric_limits<size_t>::max() - 10;
@@ -179,7 +179,7 @@ TEST(IndexAllocationTest, ReportsOverflowWithErrorCollector) {
 }
 
 TEST(IndexAllocationTest, MultiThreadOverflow) {
-  two_pass parser;
+  TwoPass parser;
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   // A size that's fine for single thread but overflows with many threads
@@ -194,7 +194,7 @@ TEST(IndexAllocationTest, MultiThreadOverflow) {
 }
 
 TEST(IndexAllocationTest, AcceptsNormalSize) {
-  two_pass parser;
+  TwoPass parser;
 
   // Normal allocation should succeed
   auto idx = parser.init_safe(1000, 4, nullptr);
@@ -220,7 +220,7 @@ TEST(StreamingFieldSizeTest, RejectsOversizeField) {
   parser.parse_chunk(csv.data(), csv.size());
   parser.finish();
 
-  const auto& errors = parser.errors();
+  const auto& errors = parser.error_collector();
   EXPECT_TRUE(errors.has_errors());
 
   // Find the FIELD_TOO_LARGE error
@@ -246,7 +246,7 @@ TEST(StreamingFieldSizeTest, AcceptsFieldWithinLimit) {
   parser.parse_chunk(csv.data(), csv.size());
   parser.finish();
 
-  const auto& errors = parser.errors();
+  const auto& errors = parser.error_collector();
   // Should not have any FIELD_TOO_LARGE errors
   for (const auto& err : errors.errors()) {
     EXPECT_NE(err.code, ErrorCode::FIELD_TOO_LARGE);
@@ -267,7 +267,7 @@ TEST(StreamingFieldSizeTest, DisabledWithZeroLimit) {
   parser.parse_chunk(csv.data(), csv.size());
   parser.finish();
 
-  const auto& errors = parser.errors();
+  const auto& errors = parser.error_collector();
   for (const auto& err : errors.errors()) {
     EXPECT_NE(err.code, ErrorCode::FIELD_TOO_LARGE);
   }

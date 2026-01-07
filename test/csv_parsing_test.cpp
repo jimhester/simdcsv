@@ -21,196 +21,184 @@ protected:
 TEST_F(CSVParserTest, ParseSimpleCSV) {
   std::string path = getTestDataPath("basic", "simple.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should successfully parse simple.csv";
   // Note: Column detection not yet implemented in experimental parser
   // EXPECT_GT(idx.columns, 0) << "Should detect at least one column";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseSimpleCSVColumnCount) {
   std::string path = getTestDataPath("basic", "simple.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should successfully parse simple.csv";
   // Note: Column detection not yet implemented in experimental parser
   // simple.csv has 3 columns: A,B,C (will verify when column detection added)
   // EXPECT_EQ(idx.columns, 3) << "simple.csv should have 3 columns";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseWideColumnsCSV) {
   std::string path = getTestDataPath("basic", "wide_columns.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle wide CSV";
   // Note: Column detection not yet implemented in experimental parser
   // EXPECT_EQ(idx.columns, 20) << "wide_columns.csv should have 20 columns";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseSingleColumnCSV) {
   std::string path = getTestDataPath("basic", "single_column.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle single column CSV";
   // Note: Column detection not yet implemented in experimental parser
   // EXPECT_EQ(idx.columns, 1) << "single_column.csv should have 1 column";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseQuotedFieldsCSV) {
   std::string path = getTestDataPath("quoted", "quoted_fields.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle quoted fields";
   // Note: Column detection not yet implemented in experimental parser
   // EXPECT_EQ(idx.columns, 3) << "quoted_fields.csv should have 3 columns";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseEscapedQuotesCSV) {
   std::string path = getTestDataPath("quoted", "escaped_quotes.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle escaped quotes";
   // Note: Column detection not yet implemented in experimental parser
   // EXPECT_GT(idx.columns, 0) << "Should detect columns in escaped_quotes.csv";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseNewlinesInQuotesCSV) {
   std::string path = getTestDataPath("quoted", "newlines_in_quotes.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle newlines in quoted fields";
   // Note: Column detection not yet implemented in experimental parser
   // EXPECT_EQ(idx.columns, 3) << "newlines_in_quotes.csv should have 3 columns";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseFinancialDataCSV) {
   std::string path = getTestDataPath("real_world", "financial.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle financial data";
   // Note: Column detection not yet implemented in experimental parser
   // EXPECT_EQ(idx.columns, 6) << "financial.csv should have 6 columns
   // (Date,Open,High,Low,Close,Volume)";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseUnicodeCSV) {
   std::string path = getTestDataPath("real_world", "unicode.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle UTF-8 data";
   // Note: Column detection not yet implemented in experimental parser
   // EXPECT_GT(idx.columns, 0) << "Should detect columns in unicode.csv";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseEmptyFieldsCSV) {
   std::string path = getTestDataPath("edge_cases", "empty_fields.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle empty fields";
   // Note: Column detection not yet implemented in experimental parser
   // EXPECT_EQ(idx.columns, 3) << "empty_fields.csv should have 3 columns";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, IndexStructureValid) {
   std::string path = getTestDataPath("basic", "simple.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  parser.parse(data.data(), idx, data.size());
+  parser.parse(buffer.data(), idx, buffer.size);
 
   ASSERT_NE(idx.indexes, nullptr) << "Index array should be allocated";
   ASSERT_NE(idx.n_indexes, nullptr) << "n_indexes array should be allocated";
   EXPECT_EQ(idx.n_threads, 1) << "Should use 1 thread as requested";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, MultiThreadedParsing) {
   std::string path = getTestDataPath("basic", "many_rows.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 2); // Use 2 threads
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2); // Use 2 threads
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle multi-threaded parsing";
   EXPECT_EQ(idx.n_threads, 2) << "Should use 2 threads";
   // Note: Column detection not yet implemented in experimental parser
   // EXPECT_GT(idx.columns, 0) << "Should detect columns";
-  libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -220,139 +208,131 @@ TEST_F(CSVParserTest, MultiThreadedParsing) {
 TEST_F(CSVParserTest, ParseMalformedUnclosedQuote) {
   std::string path = getTestDataPath("malformed", "unclosed_quote.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect the error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
+  bool success = parser.parse_validate(buffer.data(), idx, buffer.size, errors);
 
   // Should detect the unclosed quote error
   EXPECT_FALSE(success) << "Parser should fail on unclosed quote";
   EXPECT_TRUE(errors.has_errors()) << "Should have detected errors";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedUnclosedQuoteEOF) {
   std::string path = getTestDataPath("malformed", "unclosed_quote_eof.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect the error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
+  bool success = parser.parse_validate(buffer.data(), idx, buffer.size, errors);
 
   // Should detect the unclosed quote at EOF
   EXPECT_FALSE(success) << "Parser should fail on unclosed quote at EOF";
   EXPECT_TRUE(errors.has_errors()) << "Should have detected errors";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedQuoteInUnquotedField) {
   std::string path = getTestDataPath("malformed", "quote_in_unquoted_field.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect the error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_validate(data.data(), idx, data.size(), errors);
+  parser.parse_validate(buffer.data(), idx, buffer.size, errors);
 
   // Should detect quote in unquoted field error
   EXPECT_TRUE(errors.has_errors()) << "Should have detected quote in unquoted field";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedInconsistentColumns) {
   std::string path = getTestDataPath("malformed", "inconsistent_columns.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect the error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_validate(data.data(), idx, data.size(), errors);
+  parser.parse_validate(buffer.data(), idx, buffer.size, errors);
 
   // Should detect inconsistent column count
   EXPECT_TRUE(errors.has_errors()) << "Should have detected inconsistent column count";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedTripleQuote) {
   std::string path = getTestDataPath("malformed", "triple_quote.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Triple quote sequence """bad""" is actually valid RFC 4180 CSV
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
+  bool success = parser.parse_validate(buffer.data(), idx, buffer.size, errors);
 
   // This is valid CSV, should parse successfully
   EXPECT_TRUE(success) << "Triple quote is valid RFC 4180 CSV";
   EXPECT_FALSE(errors.has_errors()) << "Should have no errors for valid CSV";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedMixedLineEndings) {
   std::string path = getTestDataPath("malformed", "mixed_line_endings.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   // Mixed line endings should be parseable, just potentially warned about
   EXPECT_TRUE(success) << "Parser should successfully parse mixed line endings";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedNullByte) {
   std::string path = getTestDataPath("malformed", "null_byte.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect the null byte error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_validate(data.data(), idx, data.size(), errors);
+  parser.parse_validate(buffer.data(), idx, buffer.size, errors);
 
   // Should detect null byte in data
   EXPECT_TRUE(errors.has_errors()) << "Should have detected null byte error";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseMalformedMultipleErrors) {
   std::string path = getTestDataPath("malformed", "multiple_errors.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
   // Use parse_validate to detect errors
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_validate(data.data(), idx, data.size(), errors);
+  parser.parse_validate(buffer.data(), idx, buffer.size, errors);
 
   // Should detect multiple errors
   EXPECT_TRUE(errors.has_errors()) << "Should have detected multiple errors";
   EXPECT_GE(errors.error_count(), 2) << "Should have at least 2 errors";
-  libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -594,19 +574,18 @@ TEST_F(CSVParserTest, ParseQuotedFieldWithEmbeddedNewlines) {
 TEST_F(CSVParserTest, ParseMultiThreadedMalformed) {
   std::string path = getTestDataPath("malformed", "unclosed_quote.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 2); // Use 2 threads with malformed data
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2); // Use 2 threads with malformed data
 
   // Use parse_validate to detect the error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  bool success = parser.parse_validate(data.data(), idx, data.size(), errors);
+  bool success = parser.parse_validate(buffer.data(), idx, buffer.size, errors);
 
   // Should detect unclosed quote error
   EXPECT_FALSE(success) << "Parser should fail on malformed CSV with multiple threads";
   EXPECT_TRUE(errors.has_errors()) << "Should detect errors in malformed CSV";
-  libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -781,43 +760,40 @@ TEST_F(CSVParserTest, ParseMixedQuotePatternsMultiThread) {
 TEST_F(CSVParserTest, ParseSemicolonSeparator) {
   std::string path = getTestDataPath("separators", "semicolon.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success || !success) << "Parser should handle semicolon separator";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseTabSeparator) {
   std::string path = getTestDataPath("separators", "tab.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success || !success) << "Parser should handle tab separator";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParsePipeSeparator) {
   std::string path = getTestDataPath("separators", "pipe.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success || !success) << "Parser should handle pipe separator";
-  libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -827,57 +803,53 @@ TEST_F(CSVParserTest, ParsePipeSeparator) {
 TEST_F(CSVParserTest, ParseCRLFLineEndings) {
   std::string path = getTestDataPath("line_endings", "crlf.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle CRLF line endings";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseCRLineEndings) {
   std::string path = getTestDataPath("line_endings", "cr.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success || !success) << "Parser should handle CR line endings";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseLFLineEndings) {
   std::string path = getTestDataPath("line_endings", "lf.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle LF line endings";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseNoFinalNewline) {
   std::string path = getTestDataPath("line_endings", "no_final_newline.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle file with no final newline";
-  libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -887,15 +859,14 @@ TEST_F(CSVParserTest, ParseNoFinalNewline) {
 TEST_F(CSVParserTest, Parse8Threads) {
   std::string path = getTestDataPath("basic", "many_rows.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 8);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 8);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle 8 threads";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, Parse16ThreadsLargeData) {
@@ -925,46 +896,43 @@ TEST_F(CSVParserTest, Parse16ThreadsLargeData) {
 TEST_F(CSVParserTest, ParseQuotedFieldsMultiThreaded) {
   std::string path = getTestDataPath("quoted", "quoted_fields.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
   // Use 2 threads instead of 4 for small file to avoid segfault
-  libvroom::ParseIndex idx = parser.init(data.size(), 2);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle quoted fields multi-threaded";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseEscapedQuotesMultiThreaded) {
   std::string path = getTestDataPath("quoted", "escaped_quotes.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
   // Use 2 threads instead of 4 for small file to avoid segfault
-  libvroom::ParseIndex idx = parser.init(data.size(), 2);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle escaped quotes multi-threaded";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseNewlinesInQuotesMultiThreaded) {
   std::string path = getTestDataPath("quoted", "newlines_in_quotes.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
   // Use 2 threads instead of 4 for small file to avoid segfault
-  libvroom::ParseIndex idx = parser.init(data.size(), 2);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle newlines in quotes multi-threaded";
-  libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -974,57 +942,53 @@ TEST_F(CSVParserTest, ParseNewlinesInQuotesMultiThreaded) {
 TEST_F(CSVParserTest, ParseEmptyFile) {
   std::string path = getTestDataPath("edge_cases", "empty_file.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success || !success) << "Parser should handle empty file";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseSingleCell) {
   std::string path = getTestDataPath("edge_cases", "single_cell.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle single cell";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseSingleRowHeaderOnly) {
   std::string path = getTestDataPath("edge_cases", "single_row_header_only.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle single row (header only)";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseWhitespaceFields) {
   std::string path = getTestDataPath("edge_cases", "whitespace_fields.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle whitespace fields";
-  libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -1092,15 +1056,14 @@ TEST_F(CSVParserTest, ParseSmallDataMultiThreaded) {
 TEST_F(CSVParserTest, ParseOddThreadCount) {
   std::string path = getTestDataPath("basic", "many_rows.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 3); // Odd number
+  libvroom::ParseIndex idx = parser.init(buffer.size, 3); // Odd number
 
-  bool success = parser.parse(data.data(), idx, data.size());
+  bool success = parser.parse(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Parser should handle odd thread count";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(CSVParserTest, ParseVariedFieldLengths) {

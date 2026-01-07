@@ -296,99 +296,92 @@ protected:
 TEST_F(BranchlessParsingTest, ParseSimpleCSV) {
   std::string path = getTestDataPath("basic", "simple.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse_branchless(data.data(), idx, data.size());
+  bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Branchless parser should successfully parse simple.csv";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseQuotedFields) {
   std::string path = getTestDataPath("quoted", "quoted_fields.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse_branchless(data.data(), idx, data.size());
+  bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Branchless parser should handle quoted fields";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseEscapedQuotes) {
   std::string path = getTestDataPath("quoted", "escaped_quotes.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse_branchless(data.data(), idx, data.size());
+  bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Branchless parser should handle escaped quotes";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseNewlinesInQuotes) {
   std::string path = getTestDataPath("quoted", "newlines_in_quotes.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse_branchless(data.data(), idx, data.size());
+  bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Branchless parser should handle newlines in quoted fields";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseManyRows) {
   std::string path = getTestDataPath("basic", "many_rows.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse_branchless(data.data(), idx, data.size());
+  bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Branchless parser should handle many rows";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseWideColumns) {
   std::string path = getTestDataPath("basic", "wide_columns.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse_branchless(data.data(), idx, data.size());
+  bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Branchless parser should handle wide CSV";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseEmptyFields) {
   std::string path = getTestDataPath("edge_cases", "empty_fields.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse_branchless(data.data(), idx, data.size());
+  bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Branchless parser should handle empty fields";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ParseCustomDelimiter) {
@@ -427,32 +420,31 @@ TEST_F(BranchlessParsingTest, ParseCustomQuote) {
 TEST_F(BranchlessParsingTest, MultiThreadedParsing) {
   std::string path = getTestDataPath("basic", "many_rows.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 2);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 2);
 
-  bool success = parser.parse_branchless(data.data(), idx, data.size());
+  bool success = parser.parse_branchless(buffer.data(), idx, buffer.size);
 
   EXPECT_TRUE(success) << "Branchless parser should handle multi-threaded parsing";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ConsistencyWithStandardParser) {
   // Verify branchless parser produces same results as standard parser
   std::string path = getTestDataPath("basic", "simple.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
 
   // Parse with standard parser
-  libvroom::ParseIndex idx1 = parser.init(data.size(), 1);
-  parser.parse(data.data(), idx1, data.size());
+  libvroom::ParseIndex idx1 = parser.init(buffer.size, 1);
+  parser.parse(buffer.data(), idx1, buffer.size);
 
   // Parse with branchless parser
-  libvroom::ParseIndex idx2 = parser.init(data.size(), 1);
-  parser.parse_branchless(data.data(), idx2, data.size());
+  libvroom::ParseIndex idx2 = parser.init(buffer.size, 1);
+  parser.parse_branchless(buffer.data(), idx2, buffer.size);
 
   // Compare results
   EXPECT_EQ(idx1.n_indexes[0], idx2.n_indexes[0])
@@ -462,24 +454,23 @@ TEST_F(BranchlessParsingTest, ConsistencyWithStandardParser) {
     EXPECT_EQ(idx1.indexes[i], idx2.indexes[i])
         << "Field separator positions should match at index " << i;
   }
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, ConsistencyWithQuotedFields) {
   // Verify branchless parser produces same results with quoted fields
   std::string path = getTestDataPath("quoted", "quoted_fields.csv");
 
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
 
   // Parse with standard parser
-  libvroom::ParseIndex idx1 = parser.init(data.size(), 1);
-  parser.parse(data.data(), idx1, data.size());
+  libvroom::ParseIndex idx1 = parser.init(buffer.size, 1);
+  parser.parse(buffer.data(), idx1, buffer.size);
 
   // Parse with branchless parser
-  libvroom::ParseIndex idx2 = parser.init(data.size(), 1);
-  parser.parse_branchless(data.data(), idx2, data.size());
+  libvroom::ParseIndex idx2 = parser.init(buffer.size, 1);
+  parser.parse_branchless(buffer.data(), idx2, buffer.size);
 
   // Compare results
   EXPECT_EQ(idx1.n_indexes[0], idx2.n_indexes[0])
@@ -489,7 +480,6 @@ TEST_F(BranchlessParsingTest, ConsistencyWithQuotedFields) {
     EXPECT_EQ(idx1.indexes[i], idx2.indexes[i])
         << "Field separator positions should match at index " << i;
   }
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessParsingTest, LargeDataMultithreaded) {
@@ -549,6 +539,63 @@ TEST_F(BranchlessParsingTest, CustomDelimiterMultithreaded) {
   EXPECT_GT(total_seps, 30000) << "Should find separators with semicolon delimiter";
 }
 
+// Test specifically designed to trigger the data race condition fixed in issue #343.
+// The race occurred when multiple threads wrote to the same index positions due to
+// incorrect offset calculation in the write() function. This test uses many threads
+// and repeated iterations to maximize the chance of detecting any race conditions
+// under ThreadSanitizer.
+TEST_F(BranchlessParsingTest, ThreadSafetyStressTest) {
+  // Generate CSV with many separators per block to stress the interleaved write pattern
+  std::vector<uint8_t> data;
+  std::string content;
+
+  // Create dense CSV: many short fields = many separators = high write contention
+  content = "A,B,C,D,E,F,G,H\n";
+  for (int i = 0; i < 50000; i++) {
+    content += "1,2,3,4,5,6,7,8\n";
+  }
+
+  data.resize(content.size() + LIBVROOM_PADDING);
+  std::memcpy(data.data(), content.data(), content.size());
+
+  // Run multiple iterations to increase chance of exposing race conditions
+  for (int iteration = 0; iteration < 5; iteration++) {
+    // Test with maximum threads to increase contention
+    int n_threads = 8;
+
+    libvroom::TwoPass parser;
+    libvroom::ParseIndex idx = parser.init(data.size(), n_threads);
+
+    bool success = parser.parse_branchless(data.data(), idx, content.size());
+    EXPECT_TRUE(success) << "Iteration " << iteration << ": parse should succeed";
+
+    // Verify separator counts
+    uint64_t total_seps = 0;
+    for (int t = 0; t < n_threads; t++) {
+      total_seps += idx.n_indexes[t];
+    }
+
+    // 8 separators per row (7 commas + 1 newline) * 50001 rows (header + data)
+    // Expected: 400008 separators. Allow small variation due to chunk boundary handling.
+    EXPECT_GE(total_seps, 400008ULL)
+        << "Iteration " << iteration << ": should find at least expected separator count";
+    EXPECT_LE(total_seps, 400020ULL)
+        << "Iteration " << iteration << ": should not find too many separators";
+
+    // Verify no duplicate or out-of-order indices within each thread's slice
+    // This catches races that cause threads to overwrite each other's positions
+    for (int t = 0; t < n_threads; t++) {
+      uint64_t prev = 0;
+      for (uint64_t i = 0; i < idx.n_indexes[t]; i++) {
+        uint64_t pos = idx.indexes[t + i * n_threads];
+        EXPECT_GT(pos, prev) << "Thread " << t << " index " << i
+                             << ": positions should be strictly increasing";
+        prev = pos;
+      }
+    }
+  }
+}
+
 // ============================================================================
 // BRANCHLESS ERROR COLLECTION TESTS
 // ============================================================================
@@ -563,44 +610,42 @@ protected:
 TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsBasic) {
   // Test that branchless parser with error collection works for valid CSV
   std::string path = getTestDataPath("basic", "simple.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
-  bool success = parser.parse_branchless_with_errors(data.data(), idx, data.size(), errors);
+  bool success = parser.parse_branchless_with_errors(buffer.data(), idx, buffer.size, errors);
 
   EXPECT_TRUE(success) << "Branchless with errors should parse valid CSV successfully";
   EXPECT_EQ(errors.error_count(), 0) << "No errors expected for valid CSV";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsUnclosedQuote) {
   // Test detection of unclosed quote
   std::string path = getTestDataPath("malformed", "unclosed_quote.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
-  bool success = parser.parse_branchless_with_errors(data.data(), idx, data.size(), errors);
+  bool success = parser.parse_branchless_with_errors(buffer.data(), idx, buffer.size, errors);
 
   EXPECT_TRUE(errors.has_errors()) << "Should detect unclosed quote error";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsQuoteInUnquoted) {
   // Test detection of quote in unquoted field
   std::string path = getTestDataPath("malformed", "quote_in_unquoted_field.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
-  parser.parse_branchless_with_errors(data.data(), idx, data.size(), errors);
+  parser.parse_branchless_with_errors(buffer.data(), idx, buffer.size, errors);
 
   EXPECT_TRUE(errors.has_errors()) << "Should detect quote in unquoted field";
   bool found_quote_error = false;
@@ -611,19 +656,18 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsQuoteInUnquoted) {
     }
   }
   EXPECT_TRUE(found_quote_error) << "Should have QUOTE_IN_UNQUOTED_FIELD error";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsNullByte) {
   // Test detection of null byte
   std::string path = getTestDataPath("malformed", "null_byte.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
-  parser.parse_branchless_with_errors(data.data(), idx, data.size(), errors);
+  parser.parse_branchless_with_errors(buffer.data(), idx, buffer.size, errors);
 
   bool found_null_error = false;
   for (const auto& err : errors.errors()) {
@@ -633,7 +677,6 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsNullByte) {
     }
   }
   EXPECT_TRUE(found_null_error) << "Should detect NULL_BYTE error";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsMultiThreaded) {
@@ -665,19 +708,19 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsMultiThreaded) {
 TEST_F(BranchlessErrorCollectionTest, ConsistencyBranchlessWithErrorsVsSwitch) {
   // Verify branchless with errors produces same field positions as switch-based
   std::string path = getTestDataPath("basic", "simple.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
 
   // Parse with switch-based parser
-  libvroom::ParseIndex idx1 = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx1 = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors1(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_with_errors(data.data(), idx1, data.size(), errors1);
+  parser.parse_with_errors(buffer.data(), idx1, buffer.size, errors1);
 
   // Parse with branchless parser with errors
-  libvroom::ParseIndex idx2 = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx2 = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors2(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_branchless_with_errors(data.data(), idx2, data.size(), errors2);
+  parser.parse_branchless_with_errors(buffer.data(), idx2, buffer.size, errors2);
 
   // Compare results
   EXPECT_EQ(idx1.n_indexes[0], idx2.n_indexes[0])
@@ -687,52 +730,49 @@ TEST_F(BranchlessErrorCollectionTest, ConsistencyBranchlessWithErrorsVsSwitch) {
     EXPECT_EQ(idx1.indexes[i], idx2.indexes[i])
         << "Field separator positions should match at index " << i;
   }
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, ConsistencyBranchlessWithErrorsQuotedFields) {
   // Verify consistency with quoted fields
   std::string path = getTestDataPath("quoted", "quoted_fields.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
 
   // Parse with switch-based parser
-  libvroom::ParseIndex idx1 = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx1 = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors1(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_with_errors(data.data(), idx1, data.size(), errors1);
+  parser.parse_with_errors(buffer.data(), idx1, buffer.size, errors1);
 
   // Parse with branchless parser with errors
-  libvroom::ParseIndex idx2 = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx2 = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors2(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_branchless_with_errors(data.data(), idx2, data.size(), errors2);
+  parser.parse_branchless_with_errors(buffer.data(), idx2, buffer.size, errors2);
 
   // Compare results
   EXPECT_EQ(idx1.n_indexes[0], idx2.n_indexes[0])
       << "Should find same number of separators for quoted fields";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, ParserAPIUsesUnified) {
   // Test that Parser::parse() with errors uses the branchless implementation
   std::string path = getTestDataPath("basic", "simple.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::Parser parser(1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
-  auto result = parser.parse(data.data(), data.size(), {.errors = &errors});
+  auto result = parser.parse(buffer.data(), buffer.size, {.errors = &errors});
 
   EXPECT_TRUE(result.success()) << "Parser should succeed with error collection";
   EXPECT_EQ(errors.error_count(), 0) << "No errors expected for valid CSV";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(BranchlessErrorCollectionTest, ParserAPIWithErrorsDetectsProblems) {
   // Test that Parser::parse() with BRANCHLESS algorithm and errors detects malformed CSV
   // Use explicit dialect because auto-detection may pick wrong quote char for malformed files
   std::string path = getTestDataPath("malformed", "quote_in_unquoted_field.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::Parser parser(1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
@@ -743,7 +783,7 @@ TEST_F(BranchlessErrorCollectionTest, ParserAPIWithErrorsDetectsProblems) {
   opts.errors = &errors;
   opts.algorithm = ParseAlgorithm::BRANCHLESS;
 
-  auto result = parser.parse(data.data(), data.size(), opts);
+  auto result = parser.parse(buffer.data(), buffer.size, opts);
 
   EXPECT_TRUE(errors.has_errors()) << "Parser should detect errors in malformed CSV";
 
@@ -756,7 +796,6 @@ TEST_F(BranchlessErrorCollectionTest, ParserAPIWithErrorsDetectsProblems) {
     }
   }
   EXPECT_TRUE(found_quote_error) << "Should find QUOTE_IN_UNQUOTED_FIELD error";
-  libvroom::free_buffer(data);
 }
 
 // ============================================================================
@@ -897,16 +936,14 @@ TEST_F(EscapeCharacterTest, BackslashAtEndOfQuotedField) {
 TEST_F(EscapeCharacterTest, ParseBackslashEscapeTestFile) {
   // Parse the test file with backslash escapes
   std::string path = getTestDataPath("escape", "backslash_escape.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
 
-  bool success = parser.parse_branchless(data.data(), idx, data.size(), backslashDialect());
+  bool success = parser.parse_branchless(buffer.data(), idx, buffer.size, backslashDialect());
 
   EXPECT_TRUE(success) << "Should parse backslash_escape.csv successfully";
-
-  libvroom::free_buffer(data);
 }
 
 TEST_F(EscapeCharacterTest, BranchlessStateMachineEscapeTransitions) {

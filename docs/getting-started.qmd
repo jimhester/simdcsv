@@ -265,7 +265,7 @@ int main() {
     libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
 
     // Parse with automatic dialect detection
-    auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
 
     if (result.success()) {
         std::cout << "Columns: " << result.num_columns() << "\n";

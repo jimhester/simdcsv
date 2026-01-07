@@ -1,40 +1,42 @@
-#include <benchmark/benchmark.h>
-#include "common_defs.h"
-#include "io_util.h"
-#include "mem_util.h"
 #include "libvroom.h"
+
+#include "common_defs.h"
+#include "mem_util.h"
+
+#include <benchmark/benchmark.h>
 #include <memory>
 
-extern std::map<std::string, std::basic_string_view<uint8_t>> test_data;
+extern std::map<std::string, libvroom::AlignedBuffer> test_data;
 
 // Basic parsing benchmark for different file sizes
 static void BM_ParseFile(benchmark::State& state, const std::string& filename) {
-  std::basic_string_view<uint8_t> data;
-
   // Try to load the file if not already loaded
   if (test_data.find(filename) == test_data.end()) {
     try {
-      data = get_corpus(filename.c_str(), LIBVROOM_PADDING);
-      test_data[filename] = data;
+      auto buffer = libvroom::load_file_to_ptr(filename, LIBVROOM_PADDING);
+      if (!buffer) {
+        state.SkipWithError(("Failed to load " + filename).c_str());
+        return;
+      }
+      test_data.emplace(filename, std::move(buffer));
     } catch (const std::exception& e) {
       state.SkipWithError(("Failed to load " + filename + ": " + e.what()).c_str());
       return;
     }
-  } else {
-    data = test_data[filename];
   }
 
+  const auto& buffer = test_data.at(filename);
   int n_threads = static_cast<int>(state.range(0));
   libvroom::Parser parser(n_threads);
 
   for (auto _ : state) {
-    auto result = parser.parse(data.data(), data.size());
+    auto result = parser.parse(buffer.data(), buffer.size);
     benchmark::DoNotOptimize(result);
   }
 
   // Performance metrics are calculated automatically by Google Benchmark
-  state.SetBytesProcessed(static_cast<int64_t>(data.size() * state.iterations()));
-  state.counters["FileSize"] = static_cast<double>(data.size());
+  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+  state.counters["FileSize"] = static_cast<double>(buffer.size);
   state.counters["Threads"] = static_cast<double>(n_threads);
 }
 
@@ -47,12 +49,18 @@ BENCHMARK(BM_ParseSimple_Threads)->RangeMultiplier(2)->Range(1, 16)->Unit(benchm
 static void BM_ParseManyRows_Threads(benchmark::State& state) {
   BM_ParseFile(state, "test/data/basic/many_rows.csv");
 }
-BENCHMARK(BM_ParseManyRows_Threads)->RangeMultiplier(2)->Range(1, 16)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_ParseManyRows_Threads)
+    ->RangeMultiplier(2)
+    ->Range(1, 16)
+    ->Unit(benchmark::kMillisecond);
 
 static void BM_ParseWideColumns_Threads(benchmark::State& state) {
   BM_ParseFile(state, "test/data/basic/wide_columns.csv");
 }
-BENCHMARK(BM_ParseWideColumns_Threads)->RangeMultiplier(2)->Range(1, 16)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_ParseWideColumns_Threads)
+    ->RangeMultiplier(2)
+    ->Range(1, 16)
+    ->Unit(benchmark::kMillisecond);
 
 // Benchmark different file types
 static void BM_ParseQuoted(benchmark::State& state) {
@@ -89,25 +97,25 @@ BENCHMARK(BM_ParsePipeSeparated)->Arg(1)->Arg(4)->Arg(8)->Unit(benchmark::kMilli
 // Memory allocation benchmark
 static void BM_MemoryAllocation(benchmark::State& state) {
   size_t file_size = static_cast<size_t>(state.range(0));
-  
+
   for (auto _ : state) {
     auto data = aligned_malloc(64, file_size + LIBVROOM_PADDING);
     benchmark::DoNotOptimize(data);
     aligned_free(data);
   }
-  
+
   state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
 }
 BENCHMARK(BM_MemoryAllocation)
-  ->Range(1024, 1024*1024*100) // 1KB to 100MB
-  ->Unit(benchmark::kMicrosecond);
+    ->Range(1024, 1024 * 1024 * 100) // 1KB to 100MB
+    ->Unit(benchmark::kMicrosecond);
 
 // Index creation benchmark
 static void BM_IndexCreation(benchmark::State& state) {
   size_t file_size = static_cast<size_t>(state.range(0));
   int n_threads = static_cast<int>(state.range(1));
 
-  libvroom::two_pass tp;
+  libvroom::TwoPass tp;
 
   for (auto _ : state) {
     auto result = tp.init(file_size, n_threads);
@@ -118,5 +126,5 @@ static void BM_IndexCreation(benchmark::State& state) {
   state.counters["Threads"] = static_cast<double>(n_threads);
 }
 BENCHMARK(BM_IndexCreation)
-  ->Ranges({{1024, 1024*1024*100}, {1, 16}}) // File sizes 1KB-100MB, threads 1-16
-  ->Unit(benchmark::kMicrosecond);
+    ->Ranges({{1024, 1024 * 1024 * 100}, {1, 16}}) // File sizes 1KB-100MB, threads 1-16
+    ->Unit(benchmark::kMicrosecond);

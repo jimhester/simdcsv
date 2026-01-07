@@ -8,10 +8,11 @@
  * padding to allow SIMD operations to safely read beyond the actual data
  * length without bounds checking.
  *
- * @note All allocated buffers must be freed using aligned_free() from mem_util.h,
- *       not standard free() or delete.
+ * All functions in this header return memory managed via RAII wrappers
+ * (AlignedPtr) that automatically free memory when they go out of scope.
  *
  * @see mem_util.h for aligned memory allocation and deallocation functions.
+ * @see libvroom.h for higher-level FileBuffer and AlignedBuffer wrappers.
  */
 
 #ifndef LIBVROOM_JSONIOUTIL_H
@@ -19,6 +20,8 @@
 
 #include "common_defs.h"
 #include "encoding.h"
+#include "mem_util.h"
+
 #include <cstdint>
 #include <exception>
 #include <fstream>
@@ -26,7 +29,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-
+#include <utility>
 
 /**
  * @brief Allocates a memory buffer with padding for safe SIMD operations.
@@ -72,8 +75,7 @@
  *
  * @see aligned_free() in mem_util.h for proper deallocation.
  */
-uint8_t * allocate_padded_buffer(size_t length, size_t padding);
-
+uint8_t* allocate_padded_buffer(size_t length, size_t padding);
 
 /**
  * @brief Reads all data from stdin into a SIMD-aligned, padded memory buffer.
@@ -91,15 +93,11 @@ uint8_t * allocate_padded_buffer(size_t length, size_t padding);
  *                for safe SIMD overreads. Use at least 32 bytes for SSE/NEON,
  *                or 64 bytes for AVX/AVX2 operations.
  *
- * @return A std::basic_string_view<uint8_t> containing the stdin data.
- *         The view's data() points to the allocated buffer, and size()
- *         returns the actual data size (not including padding).
+ * @return A pair of (AlignedPtr, size). The AlignedPtr manages the buffer
+ *         lifetime automatically. Size is the actual data size (not padding).
  *
  * @throws std::runtime_error If memory allocation fails ("could not allocate memory").
  * @throws std::runtime_error If reading from stdin fails ("could not read from stdin").
- *
- * @note The caller is responsible for freeing the underlying buffer using
- *       aligned_free((void*)result.data()). Do NOT use free() or delete.
  *
  * @note The padding bytes beyond the content are uninitialized and may
  *       contain arbitrary values. Do not interpret them as valid data.
@@ -107,19 +105,16 @@ uint8_t * allocate_padded_buffer(size_t length, size_t padding);
  * @example
  * @code
  * #include "io_util.h"
- * #include "mem_util.h"
  *
- * // Read piped CSV data: cat data.csv | ./scsv -
- * auto corpus = get_corpus_stdin(64);
- * // ... process corpus ...
- * aligned_free((void*)corpus.data());
+ * // Read piped CSV data: cat data.csv | ./my_program
+ * auto [buffer, size] = read_stdin(64);
+ * // ... process buffer.get() with size bytes ...
+ * // Memory automatically freed when buffer goes out of scope
  * @endcode
  *
- * @see get_corpus() for loading from a file path.
- * @see aligned_free() in mem_util.h for proper deallocation.
+ * @see read_file() for loading from a file path.
  */
-std::basic_string_view<uint8_t> get_corpus_stdin(size_t padding);
-
+std::pair<AlignedPtr, size_t> read_stdin(size_t padding);
 
 /**
  * @brief Loads an entire file into a SIMD-aligned, padded memory buffer.
@@ -134,43 +129,37 @@ std::basic_string_view<uint8_t> get_corpus_stdin(size_t padding);
  * 2. Determines the file size
  * 3. Allocates an aligned buffer of (file_size + padding) bytes
  * 4. Reads the entire file contents
- * 5. Returns a string_view pointing to the buffer
+ * 5. Returns an RAII-managed pointer and size
  *
  * @param filename The path to the file to load.
  * @param padding The number of extra bytes to allocate beyond the file size
  *                for safe SIMD overreads. Use at least 32 bytes for SSE/NEON,
  *                or 64 bytes for AVX/AVX2 operations.
  *
- * @return A std::basic_string_view<uint8_t> containing the file data.
- *         The view's data() points to the allocated buffer, and size()
- *         returns the actual file size (not including padding).
+ * @return A pair of (AlignedPtr, size). The AlignedPtr manages the buffer
+ *         lifetime automatically. Size is the actual file size (not padding).
  *
  * @throws std::runtime_error If the file cannot be opened ("could not load corpus").
  * @throws std::runtime_error If memory allocation fails ("could not allocate memory").
  * @throws std::runtime_error If the file cannot be fully read ("could not read the data").
  *
- * @note The caller is responsible for freeing the underlying buffer using
- *       aligned_free((void*)result.data()). Do NOT use free() or delete.
- *
  * @note The padding bytes beyond the file content are uninitialized and may
  *       contain arbitrary values. Do not interpret them as valid file data.
  *
- * @note The returned string_view is NOT null-terminated by default. If you
+ * @note The returned buffer is NOT null-terminated by default. If you
  *       need null-termination, ensure padding >= 1 and manually set the
  *       byte after the content to '\0'.
  *
  * @example
  * @code
  * #include "io_util.h"
- * #include "mem_util.h"
  * #include <iostream>
  *
  * // Load a CSV file with 64-byte padding for AVX2 SIMD operations
- * std::basic_string_view<uint8_t> corpus;
  * try {
- *     corpus = get_corpus("data.csv", 64);
+ *     auto [buffer, size] = read_file("data.csv", 64);
  *
- *     std::cout << "Loaded " << corpus.size() << " bytes\n";
+ *     std::cout << "Loaded " << size << " bytes\n";
  *
  *     // Process the CSV data with SIMD
  *     // The buffer has 64 extra bytes that can be safely read
@@ -178,64 +167,58 @@ std::basic_string_view<uint8_t> get_corpus_stdin(size_t padding);
  *
  *     // ... parse CSV using SIMD ...
  *
- *     // Always free the buffer when done
- *     aligned_free((void*)corpus.data());
+ *     // Memory automatically freed when buffer goes out of scope
  *
  * } catch (const std::runtime_error& e) {
  *     std::cerr << "Failed to load file: " << e.what() << "\n";
- *     // Note: If exception is thrown, no memory was allocated
- *     // (or it was already freed), so no cleanup needed
- * }
- * @endcode
- *
- * @example
- * @code
- * // Using RAII wrapper for automatic cleanup
- * #include "io_util.h"
- * #include "mem_util.h"
- * #include <memory>
- *
- * // Custom deleter for aligned memory
- * struct AlignedDeleter {
- *     void operator()(uint8_t* ptr) const {
- *         aligned_free(ptr);
- *     }
- * };
- *
- * void process_file(const std::string& filename) {
- *     auto corpus = get_corpus(filename, 64);
- *
- *     // Wrap in unique_ptr for automatic cleanup
- *     std::unique_ptr<uint8_t, AlignedDeleter> guard(
- *         const_cast<uint8_t*>(corpus.data())
- *     );
- *
- *     // Process corpus...
- *     // Memory automatically freed when guard goes out of scope
  * }
  * @endcode
  *
  * @see allocate_padded_buffer() for the underlying allocation mechanism.
- * @see aligned_free() in mem_util.h for proper deallocation.
+ * @see read_stdin() for reading from standard input.
  */
-std::basic_string_view<uint8_t>  get_corpus(const std::string& filename, size_t padding);
-
+std::pair<AlignedPtr, size_t> read_file(const std::string& filename, size_t padding);
 
 /**
  * @brief Result of loading a file with encoding detection.
  *
  * Contains both the (possibly transcoded) data and information about
  * the detected encoding. If the file was transcoded (e.g., from UTF-16),
- * the data will be in UTF-8 format.
+ * the data will be in UTF-8 format. Memory is managed via RAII.
  */
 struct LoadResult {
-    std::basic_string_view<uint8_t> data;  ///< The loaded/transcoded data
-    libvroom::EncodingResult encoding;       ///< Detected encoding information
+  AlignedPtr buffer;                 ///< RAII-managed buffer
+  size_t size{0};                    ///< Size of the data (not padding)
+  libvroom::EncodingResult encoding; ///< Detected encoding information
 
-    /// Returns true if loading was successful
-    operator bool() const { return data.data() != nullptr; }
+  /// Default constructor
+  LoadResult() = default;
+
+  /// Move constructor
+  LoadResult(LoadResult&&) = default;
+
+  /// Move assignment
+  LoadResult& operator=(LoadResult&&) = default;
+
+  // Non-copyable (RAII)
+  LoadResult(const LoadResult&) = delete;
+  LoadResult& operator=(const LoadResult&) = delete;
+
+  /// Returns true if loading was successful
+  explicit operator bool() const { return buffer != nullptr; }
+
+  /// @return Pointer to the buffer data
+  uint8_t* data() { return buffer.get(); }
+
+  /// @return Const pointer to the buffer data
+  const uint8_t* data() const { return buffer.get(); }
+
+  /// @return true if the buffer is valid
+  bool valid() const { return buffer != nullptr; }
+
+  /// @return true if the buffer is empty
+  bool empty() const { return size == 0; }
 };
-
 
 /**
  * @brief Loads a file with automatic encoding detection and transcoding.
@@ -253,27 +236,24 @@ struct LoadResult {
  *                for safe SIMD overreads.
  *
  * @return A LoadResult containing the data and encoding information.
+ *         Memory is automatically freed when LoadResult goes out of scope.
  *
  * @throws std::runtime_error If the file cannot be opened, read, or transcoded.
  *
- * @note The caller is responsible for freeing the underlying buffer using
- *       aligned_free((void*)result.data.data()). Do NOT use free() or delete.
- *
  * @example
  * @code
- * auto result = get_corpus_with_encoding("data.csv", 64);
+ * auto result = read_file_with_encoding("data.csv", 64);
  * std::cout << "Encoding: " << encoding_to_string(result.encoding.encoding) << "\n";
- * // ... parse result.data ...
- * aligned_free((void*)result.data.data());
+ * // ... parse result.data() with result.size bytes ...
+ * // Memory automatically freed when result goes out of scope
  * @endcode
  */
-LoadResult get_corpus_with_encoding(const std::string& filename, size_t padding);
-
+LoadResult read_file_with_encoding(const std::string& filename, size_t padding);
 
 /**
  * @brief Reads stdin with automatic encoding detection and transcoding.
  *
- * Similar to get_corpus_with_encoding(), but reads from stdin instead of
+ * Similar to read_file_with_encoding(), but reads from stdin instead of
  * a file. The data is fully buffered, then encoding is detected and
  * transcoding is performed if necessary.
  *
@@ -281,12 +261,10 @@ LoadResult get_corpus_with_encoding(const std::string& filename, size_t padding)
  *                for safe SIMD overreads.
  *
  * @return A LoadResult containing the data and encoding information.
+ *         Memory is automatically freed when LoadResult goes out of scope.
  *
  * @throws std::runtime_error If reading fails or transcoding fails.
- *
- * @note The caller is responsible for freeing the underlying buffer using
- *       aligned_free((void*)result.data.data()). Do NOT use free() or delete.
  */
-LoadResult get_corpus_stdin_with_encoding(size_t padding);
+LoadResult read_stdin_with_encoding(size_t padding);
 
 #endif
