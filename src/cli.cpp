@@ -32,8 +32,8 @@
 using namespace std;
 
 // Constants
-// Note: MAX_THREADS is limited to 255 due to uint8_t n_threads in index struct
-constexpr int MAX_THREADS = 255;
+// MAX_THREADS raised to 1024 with uint16_t n_threads in index struct
+constexpr int MAX_THREADS = 1024;
 constexpr int MIN_THREADS = 1;
 constexpr size_t MAX_COLUMN_WIDTH = 40;
 constexpr size_t DEFAULT_NUM_ROWS = 10;
@@ -171,18 +171,22 @@ void printUsage(const char* prog) {
   cerr << "\nOptions:\n";
   cerr << "  -n <num>      Number of rows (for head/tail/sample/pretty)\n";
   cerr << "  -s <seed>     Random seed for reproducible sampling (for sample)\n";
-  cerr << "  -c <cols>     Comma-separated column names or indices (for select)\n";
+  cerr << "  -c <cols>     Comma-separated column names or indices (for "
+          "select)\n";
   cerr << "  -H            No header row in input\n";
   cerr << "  -t <threads>  Number of threads (default: auto, max: " << MAX_THREADS << ")\n";
   cerr << "  -d <delim>    Field delimiter (disables auto-detection)\n";
-  cerr << "                Values: comma, tab, semicolon, pipe, or single character\n";
+  cerr << "                Values: comma, tab, semicolon, pipe, or single "
+          "character\n";
   cerr << "  -q <char>     Quote character (default: \")\n";
   cerr << "  -j            Output in JSON format (for dialect command)\n";
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
   cerr << "\nDialect Detection:\n";
-  cerr << "  By default, vroom auto-detects the CSV dialect (delimiter, quote character,\n";
-  cerr << "  escape style). Use -d to explicitly specify a delimiter and disable\n";
+  cerr << "  By default, vroom auto-detects the CSV dialect (delimiter, quote "
+          "character,\n";
+  cerr << "  escape style). Use -d to explicitly specify a delimiter and "
+          "disable\n";
   cerr << "  auto-detection.\n";
   cerr << "\nExamples:\n";
   cerr << "  " << prog << " count data.csv\n";
@@ -250,9 +254,18 @@ bool parseFile(const char* filename, int n_threads, std::basic_string_view<uint8
   if (!auto_detect) {
     options.dialect = dialect;
   }
-  // Note: We don't collect errors for CLI (fast path - throws on errors)
 
   auto result = parser.parse(data.data(), data.size(), options);
+
+  // Note: Parser::parse() never throws for parse errors.
+  // For CLI tools, we continue with partial results and show warnings.
+  // This matches Unix CLI conventions where tools like head/cat try to output
+  // what they can.
+  if (result.has_errors()) {
+    cerr << "Warning: Parse errors: " << result.error_summary() << endl;
+    // Continue with partial results - don't fail hard
+  }
+
   idx = std::move(result.idx);
 
   // Report auto-detected dialect if applicable
@@ -293,10 +306,11 @@ libvroom::Dialect parseDialect(const std::string& delimiter_str, char quote_char
 // SIMD row counter - processes 64 bytes at a time
 // Note on escaped quotes (CSV ""): The SIMD path uses XOR-prefix to compute
 // quote state, which toggles on every quote. For escaped quotes "", this means
-// toggling twice (net effect: state unchanged). This is correct for row counting
-// because: (1) "" are adjacent by definition, so no newline can appear between
-// them, and (2) the final quote state after "" matches the correct semantics.
-// The scalar fallback explicitly handles "" for consistency with the library.
+// toggling twice (net effect: state unchanged). This is correct for row
+// counting because: (1) "" are adjacent by definition, so no newline can appear
+// between them, and (2) the final quote state after "" matches the correct
+// semantics. The scalar fallback explicitly handles "" for consistency with the
+// library.
 size_t countRowsSimd(const uint8_t* buf, size_t len) {
   size_t row_count = 0;
   size_t idx = 0;
@@ -320,7 +334,8 @@ size_t countRowsSimd(const uint8_t* buf, size_t len) {
     row_count += libvroom::count_ones(valid_newlines);
   }
 
-  // Handle remaining bytes with scalar code (properly handles escaped quotes "")
+  // Handle remaining bytes with scalar code (properly handles escaped quotes
+  // "")
   bool in_quote = (prev_iter_inside_quote != 0);
   for (; idx < len; ++idx) {
     if (buf[idx] == '"') {
@@ -385,11 +400,13 @@ static QuoteState getQuoteState(const uint8_t* buf, size_t pos) {
   // Scan backwards looking for quote-other patterns that determine state
   while (i > end) {
     if (buf[i] == '"') {
-      // q-o case: quote followed by non-delimiter means we found end of quoted field
+      // q-o case: quote followed by non-delimiter means we found end of quoted
+      // field
       if (i + 1 < pos && isOther(buf[i + 1])) {
         return num_quotes % 2 == 0 ? INSIDE_QUOTE : OUTSIDE_QUOTE;
       }
-      // o-q case: non-delimiter before quote means we found start of quoted field
+      // o-q case: non-delimiter before quote means we found start of quoted
+      // field
       else if (i > end && isOther(buf[i - 1])) {
         return num_quotes % 2 == 0 ? OUTSIDE_QUOTE : INSIDE_QUOTE;
       }
@@ -730,7 +747,8 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
       if (!first)
         cout << dialect.delimiter;
       first = false;
-      // Column bounds already validated above, but handle rows with fewer columns
+      // Column bounds already validated above, but handle rows with fewer
+      // columns
       if (col < row.size()) {
         const string& field = row[col];
         bool needs_quote = field.find(dialect.delimiter) != string::npos ||
@@ -945,7 +963,8 @@ static std::string escapeJsonChar(char c) {
   }
 }
 
-// Command: dialect - detect and output CSV dialect in human-readable or JSON format
+// Command: dialect - detect and output CSV dialect in human-readable or JSON
+// format
 int cmdDialect(const char* filename, bool json_output) {
   std::basic_string_view<uint8_t> data;
   libvroom::EncodingResult enc_result;
