@@ -84,6 +84,17 @@ To manually format a file: `clang-format -i <file>`
 - **Squash on final merge**: Use squash merge when merging PRs into main to keep history clean
 - **Check for merge conflicts**: When opening a branch, check for merge conflicts with main. If CI status checks aren't appearing on a PR, merge conflicts are often the cause
 
+```bash
+# Check for conflicts before creating PR
+git fetch origin main
+git merge origin/main --no-commit --no-ff
+# If no conflicts, abort the test merge
+git merge --abort
+
+# Check PR mergeability after creation
+gh pr view <PR-NUMBER> --json mergeable,mergeStateStatus
+```
+
 ## Key Files
 
 | File | Purpose |
