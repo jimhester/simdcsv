@@ -106,3 +106,31 @@ SIMD via Google Highway 1.3.0: x86-64 (SSE4.2, AVX2), ARM (NEON), scalar fallbac
 ## Issue Labels
 
 Use `gh issue create --label "label"` with: `bug`, `feature`, `documentation`, `performance 🚀`, `testing 🧪`, `cleanup 🧹`, `api 🔌`, `c-api 🔧`, `simd ⚡`, `arrow 🏹`, `security 🔒`, `critical ☠️`
+
+## Git Workflow
+
+**Before creating a PR**, always check for merge conflicts:
+```bash
+# Fetch latest main and check for conflicts
+git fetch origin main
+git merge origin/main --no-commit --no-ff
+
+# If conflicts exist, resolve them before pushing
+# If no conflicts, abort the test merge
+git merge --abort
+```
+
+You can also check PR mergeability after creation with:
+```bash
+gh pr view <PR-NUMBER> --json mergeable,mergeStateStatus
+# mergeable: "CONFLICTING" means conflicts exist
+# mergeable: "MERGEABLE" means PR can be merged
+```
+
+If conflicts are found after PR creation, rebase onto main:
+```bash
+git fetch origin main
+git rebase origin/main
+# Resolve conflicts, then force push
+git push --force-with-lease
+```

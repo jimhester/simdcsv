@@ -549,6 +549,63 @@ TEST_F(BranchlessParsingTest, CustomDelimiterMultithreaded) {
     EXPECT_GT(total_seps, 30000) << "Should find separators with semicolon delimiter";
 }
 
+// Test specifically designed to trigger the data race condition fixed in issue #343.
+// The race occurred when multiple threads wrote to the same index positions due to
+// incorrect offset calculation in the write() function. This test uses many threads
+// and repeated iterations to maximize the chance of detecting any race conditions
+// under ThreadSanitizer.
+TEST_F(BranchlessParsingTest, ThreadSafetyStressTest) {
+    // Generate CSV with many separators per block to stress the interleaved write pattern
+    std::vector<uint8_t> data;
+    std::string content;
+
+    // Create dense CSV: many short fields = many separators = high write contention
+    content = "A,B,C,D,E,F,G,H\n";
+    for (int i = 0; i < 50000; i++) {
+        content += "1,2,3,4,5,6,7,8\n";
+    }
+
+    data.resize(content.size() + LIBVROOM_PADDING);
+    std::memcpy(data.data(), content.data(), content.size());
+
+    // Run multiple iterations to increase chance of exposing race conditions
+    for (int iteration = 0; iteration < 5; iteration++) {
+        // Test with maximum threads to increase contention
+        int n_threads = 8;
+
+        libvroom::two_pass parser;
+        libvroom::index idx = parser.init(data.size(), n_threads);
+
+        bool success = parser.parse_branchless(data.data(), idx, content.size());
+        EXPECT_TRUE(success) << "Iteration " << iteration << ": parse should succeed";
+
+        // Verify separator counts
+        uint64_t total_seps = 0;
+        for (int t = 0; t < n_threads; t++) {
+            total_seps += idx.n_indexes[t];
+        }
+
+        // 8 separators per row (7 commas + 1 newline) * 50001 rows (header + data)
+        // Expected: 400008 separators. Allow small variation due to chunk boundary handling.
+        EXPECT_GE(total_seps, 400008ULL)
+            << "Iteration " << iteration << ": should find at least expected separator count";
+        EXPECT_LE(total_seps, 400020ULL)
+            << "Iteration " << iteration << ": should not find too many separators";
+
+        // Verify no duplicate or out-of-order indices within each thread's slice
+        // This catches races that cause threads to overwrite each other's positions
+        for (int t = 0; t < n_threads; t++) {
+            uint64_t prev = 0;
+            for (uint64_t i = 0; i < idx.n_indexes[t]; i++) {
+                uint64_t pos = idx.indexes[t + i * n_threads];
+                EXPECT_GT(pos, prev) << "Thread " << t << " index " << i
+                    << ": positions should be strictly increasing";
+                prev = pos;
+            }
+        }
+    }
+}
+
 // ============================================================================
 // BRANCHLESS ERROR COLLECTION TESTS
 // ============================================================================
