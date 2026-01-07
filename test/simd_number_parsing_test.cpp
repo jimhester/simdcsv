@@ -1943,6 +1943,20 @@ TEST_F(SIMDValueExtractionTest, AllowLeadingZerosDefault) {
   result = parse_integer_simd<int64_t>("+007", 4, config_);
   EXPECT_TRUE(result.ok());
   EXPECT_EQ(result.get(), 7);
+
+  // Also test unsigned integers with default config (covers A=false branch for uint64_t)
+  auto uresult = parse_integer_simd<uint64_t>("007", 3, config_);
+  EXPECT_TRUE(uresult.ok());
+  EXPECT_EQ(uresult.get(), 7u);
+
+  // Test int32_t and uint32_t with default config too
+  auto i32result = parse_integer_simd<int32_t>("007", 3, config_);
+  EXPECT_TRUE(i32result.ok());
+  EXPECT_EQ(i32result.get(), 7);
+
+  auto u32result = parse_integer_simd<uint32_t>("007", 3, config_);
+  EXPECT_TRUE(u32result.ok());
+  EXPECT_EQ(u32result.get(), 7u);
 }
 
 TEST_F(SIMDValueExtractionTest, DisallowLeadingZeros) {
@@ -2023,6 +2037,15 @@ TEST_F(SIMDValueExtractionTest, DisallowLeadingZerosUnsigned) {
   result = parse_integer_simd<uint64_t>("0", 1, config);
   EXPECT_TRUE(result.ok());
   EXPECT_EQ(result.get(), 0u);
+
+  // Multi-digit numbers not starting with 0 should work (covers C=false branch for uint64_t)
+  result = parse_integer_simd<uint64_t>("123", 3, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 123u);
+
+  result = parse_integer_simd<uint64_t>("10", 2, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 10u);
 }
 
 TEST_F(SIMDValueExtractionTest, DisallowLeadingZerosWithWhitespace) {
@@ -2043,30 +2066,46 @@ TEST_F(SIMDValueExtractionTest, DisallowLeadingZerosInt32) {
   ExtractionConfig config;
   config.allow_leading_zeros = false;
 
-  // Test with int32_t type
+  // Test with int32_t type - covers A=true, B=true, C=true (error case)
   auto result = parse_integer_simd<int32_t>("007", 3, config);
   EXPECT_FALSE(result.ok());
 
+  // Covers A=true, B=true, C=false (multi-digit not starting with 0)
   result = parse_integer_simd<int32_t>("123", 3, config);
   EXPECT_TRUE(result.ok());
   EXPECT_EQ(result.get(), 123);
 
+  // Covers A=true, B=false (single digit)
   result = parse_integer_simd<int32_t>("0", 1, config);
   EXPECT_TRUE(result.ok());
   EXPECT_EQ(result.get(), 0);
+
+  result = parse_integer_simd<int32_t>("5", 1, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 5);
 }
 
 TEST_F(SIMDValueExtractionTest, DisallowLeadingZerosUint32) {
   ExtractionConfig config;
   config.allow_leading_zeros = false;
 
-  // Test with uint32_t type
+  // Test with uint32_t type - covers A=true, B=true, C=true (error case)
   auto result = parse_integer_simd<uint32_t>("007", 3, config);
   EXPECT_FALSE(result.ok());
 
+  // Covers A=true, B=true, C=false (multi-digit not starting with 0)
   result = parse_integer_simd<uint32_t>("123", 3, config);
   EXPECT_TRUE(result.ok());
   EXPECT_EQ(result.get(), 123u);
+
+  // Covers A=true, B=false (single digit)
+  result = parse_integer_simd<uint32_t>("0", 1, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 0u);
+
+  result = parse_integer_simd<uint32_t>("7", 1, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 7u);
 }
 
 TEST_F(SIMDValueExtractionTest, LeadingZerosEquivalentToScalar) {

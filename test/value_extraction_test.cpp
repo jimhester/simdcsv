@@ -555,6 +555,10 @@ TEST_F(ExtractionConfigTest, AllowLeadingZerosDefault) {
   EXPECT_EQ(parse_integer<int64_t>("0123", 4, config).get(), 123);
   EXPECT_EQ(parse_integer<int64_t>("-007", 4, config).get(), -7);
   EXPECT_EQ(parse_integer<int64_t>("+007", 4, config).get(), 7);
+
+  // Also test unsigned integers with default config (allow_leading_zeros = true)
+  EXPECT_EQ(parse_integer<uint64_t>("007", 3, config).get(), 7u);
+  EXPECT_EQ(parse_integer<uint64_t>("0123", 4, config).get(), 123u);
 }
 
 TEST_F(ExtractionConfigTest, DisallowLeadingZeros) {
@@ -611,6 +615,10 @@ TEST_F(ExtractionConfigTest, DisallowLeadingZerosUnsigned) {
   // Without leading zeros should work
   EXPECT_EQ(parse_integer<uint64_t>("7", 1, config).get(), 7u);
   EXPECT_EQ(parse_integer<uint64_t>("0", 1, config).get(), 0u);
+
+  // Multi-digit numbers not starting with 0 should work (covers C=false branch for uint64_t)
+  EXPECT_EQ(parse_integer<uint64_t>("123", 3, config).get(), 123u);
+  EXPECT_EQ(parse_integer<uint64_t>("10", 2, config).get(), 10u);
 }
 
 TEST_F(ExtractionConfigTest, DisallowLeadingZerosWithWhitespace) {
