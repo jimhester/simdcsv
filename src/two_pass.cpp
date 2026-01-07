@@ -1169,6 +1169,28 @@ void TwoPass::check_field_counts(const uint8_t* buf, size_t len, ErrorCollector&
         ++current_line;
         line_start = i + 1;
         at_line_start = true;
+      } else if (buf[i] == '\r') {
+        // Support CR-only line endings: CR is a line ending if not followed by LF
+        bool is_line_ending = (i + 1 >= len || buf[i + 1] != '\n');
+        if (is_line_ending) {
+          if (!header_done) {
+            expected_fields = current_fields;
+            header_done = true;
+          } else if (current_fields != expected_fields) {
+            std::ostringstream msg;
+            msg << "Expected " << expected_fields << " fields but found " << current_fields;
+            errors.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR,
+                             current_line, 1, line_start, msg.str(),
+                             get_context(buf, len, line_start, 40));
+            if (errors.should_stop())
+              return;
+          }
+          current_fields = 1;
+          ++current_line;
+          line_start = i + 1;
+          at_line_start = true;
+        }
+        // If CR is followed by LF, the LF will handle the line ending
       }
     }
   }

@@ -498,6 +498,18 @@ TEST_F(CommentLineTest, CheckFieldCountsSkipsComments) {
       << "Should not count fields in comment line, data rows have 3 fields each";
 }
 
+TEST_F(CommentLineTest, CheckFieldCountsSkipsCommentsCROnly) {
+  // Test CR-only line endings with comments
+  std::string csv = "# Comment\ra,b,c\r1,2,3\r";
+
+  auto buf = makeBuffer(csv);
+  libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+
+  libvroom::TwoPass::check_field_counts(buf.data(), csv.size(), errors, ',', '"', '#');
+
+  EXPECT_FALSE(errors.has_errors()) << "Should handle CR-only line endings with comments";
+}
+
 // ============================================================================
 // Dialect Detection with Comments
 // ============================================================================
