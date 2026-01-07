@@ -42,21 +42,31 @@ struct Dialect {
   enum class LineEnding { LF, CRLF, CR, MIXED, UNKNOWN };
   LineEnding line_ending = LineEnding::UNKNOWN;
 
+  /// Comment character for line skipping ('\0' means no comment skipping)
+  /// Lines starting with this character (after optional whitespace) are ignored during parsing
+  char comment_char = '\0';
+
   /// Factory for standard CSV (comma-separated, double-quoted)
-  static Dialect csv() { return Dialect{',', '"', '"', true, LineEnding::UNKNOWN}; }
+  static Dialect csv() { return Dialect{',', '"', '"', true, LineEnding::UNKNOWN, '\0'}; }
 
   /// Factory for TSV (tab-separated)
-  static Dialect tsv() { return Dialect{'\t', '"', '"', true, LineEnding::UNKNOWN}; }
+  static Dialect tsv() { return Dialect{'\t', '"', '"', true, LineEnding::UNKNOWN, '\0'}; }
 
   /// Factory for semicolon-separated (European style)
-  static Dialect semicolon() { return Dialect{';', '"', '"', true, LineEnding::UNKNOWN}; }
+  static Dialect semicolon() { return Dialect{';', '"', '"', true, LineEnding::UNKNOWN, '\0'}; }
 
   /// Factory for pipe-separated
-  static Dialect pipe() { return Dialect{'|', '"', '"', true, LineEnding::UNKNOWN}; }
+  static Dialect pipe() { return Dialect{'|', '"', '"', true, LineEnding::UNKNOWN, '\0'}; }
+
+  /// Factory for CSV with comment support (hash comments)
+  static Dialect csv_with_comments(char comment = '#') {
+    return Dialect{',', '"', '"', true, LineEnding::UNKNOWN, comment};
+  }
 
   bool operator==(const Dialect& other) const {
     return delimiter == other.delimiter && quote_char == other.quote_char &&
-           escape_char == other.escape_char && double_quote == other.double_quote;
+           escape_char == other.escape_char && double_quote == other.double_quote &&
+           comment_char == other.comment_char;
   }
 
   bool operator!=(const Dialect& other) const { return !(*this == other); }

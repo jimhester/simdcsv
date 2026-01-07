@@ -606,12 +606,36 @@ public:
                               size_t& column);
 
   /**
+   * @brief Check if position is at the start of a comment line.
+   *
+   * A comment line is a line that starts with the comment character,
+   * optionally preceded by whitespace (spaces or tabs).
+   *
+   * @param buf Buffer to check
+   * @param pos Position to check (must be at start of line)
+   * @param end End of buffer
+   * @param comment_char Comment character ('\0' means no comments)
+   * @return true if this is a comment line
+   */
+  static bool is_comment_line(const uint8_t* buf, size_t pos, size_t end, char comment_char);
+
+  /**
+   * @brief Skip to the end of the current line.
+   *
+   * @param buf Buffer to scan
+   * @param pos Current position
+   * @param end End of buffer
+   * @return Position after the line ending (or end if no newline found)
+   */
+  static size_t skip_to_line_end(const uint8_t* buf, size_t pos, size_t end);
+
+  /**
    * @brief Second pass with error collection and dialect support.
    */
   static uint64_t second_pass_chunk(const uint8_t* buf, size_t start, size_t end, ParseIndex* out,
                                     size_t thread_id, ErrorCollector* errors = nullptr,
                                     size_t total_len = 0, char delimiter = ',',
-                                    char quote_char = '"');
+                                    char quote_char = '"', char comment_char = '\0');
 
   /**
    * @brief Second pass that throws on error (backward compatible), with dialect
@@ -619,7 +643,8 @@ public:
    */
   static uint64_t second_pass_chunk_throwing(const uint8_t* buf, size_t start, size_t end,
                                              ParseIndex* out, size_t thread_id,
-                                             char delimiter = ',', char quote_char = '"');
+                                             char delimiter = ',', char quote_char = '"',
+                                             char comment_char = '\0');
 
   /**
    * @brief Parse using speculative multi-threading with dialect support.
@@ -698,7 +723,8 @@ public:
   static chunk_result second_pass_chunk_with_errors(const uint8_t* buf, size_t start, size_t end,
                                                     ParseIndex* out, size_t thread_id,
                                                     size_t total_len, ErrorMode mode,
-                                                    char delimiter = ',', char quote_char = '"');
+                                                    char delimiter = ',', char quote_char = '"',
+                                                    char comment_char = '\0');
 
   /**
    * @brief Parse a CSV buffer with error collection using multi-threading.
@@ -712,20 +738,23 @@ public:
   bool parse_with_errors(const uint8_t* buf, ParseIndex& out, size_t len, ErrorCollector& errors,
                          const Dialect& dialect = Dialect::csv());
 
-  // Check for empty header
-  static bool check_empty_header(const uint8_t* buf, size_t len, ErrorCollector& errors);
+  // Check for empty header (skips leading comment lines if comment_char is set)
+  static bool check_empty_header(const uint8_t* buf, size_t len, ErrorCollector& errors,
+                                 char comment_char = '\0');
 
   /**
    * @brief Check for duplicate column names in header with dialect support.
    */
   static void check_duplicate_columns(const uint8_t* buf, size_t len, ErrorCollector& errors,
-                                      char delimiter = ',', char quote_char = '"');
+                                      char delimiter = ',', char quote_char = '"',
+                                      char comment_char = '\0');
 
   /**
    * @brief Check for inconsistent field counts with dialect support.
    */
   static void check_field_counts(const uint8_t* buf, size_t len, ErrorCollector& errors,
-                                 char delimiter = ',', char quote_char = '"');
+                                 char delimiter = ',', char quote_char = '"',
+                                 char comment_char = '\0');
 
   // Check for mixed line endings
   static void check_line_endings(const uint8_t* buf, size_t len, ErrorCollector& errors);

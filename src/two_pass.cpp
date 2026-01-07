@@ -302,18 +302,67 @@ void TwoPass::get_line_column(const uint8_t* buf, size_t buf_len, size_t offset,
 }
 
 //-----------------------------------------------------------------------------
+// TwoPass comment line helper functions
+//-----------------------------------------------------------------------------
+
+bool TwoPass::is_comment_line(const uint8_t* buf, size_t pos, size_t end, char comment_char) {
+  if (comment_char == '\0' || pos >= end) {
+    return false;
+  }
+
+  // Skip leading whitespace (spaces and tabs only)
+  while (pos < end && (buf[pos] == ' ' || buf[pos] == '\t')) {
+    pos++;
+  }
+
+  // Check if first non-whitespace character is the comment character
+  return pos < end && buf[pos] == static_cast<uint8_t>(comment_char);
+}
+
+size_t TwoPass::skip_to_line_end(const uint8_t* buf, size_t pos, size_t end) {
+  // Skip to end of line
+  while (pos < end && buf[pos] != '\n' && buf[pos] != '\r') {
+    pos++;
+  }
+
+  // Skip line ending (LF, CR, or CRLF)
+  if (pos < end) {
+    if (buf[pos] == '\r') {
+      pos++;
+      if (pos < end && buf[pos] == '\n') {
+        pos++;
+      }
+    } else if (buf[pos] == '\n') {
+      pos++;
+    }
+  }
+
+  return pos;
+}
+
+//-----------------------------------------------------------------------------
 // TwoPass scalar second pass implementations
 //-----------------------------------------------------------------------------
 
 uint64_t TwoPass::second_pass_chunk(const uint8_t* buf, size_t start, size_t end, ParseIndex* out,
                                     size_t thread_id, ErrorCollector* errors, size_t total_len,
-                                    char delimiter, char quote_char) {
+                                    char delimiter, char quote_char, char comment_char) {
   uint64_t pos = start;
   size_t n_indexes = 0;
   size_t i = thread_id;
   csv_state s = RECORD_START;
+  bool at_line_start = true; // Track if we're at the start of a line
 
   while (pos < end) {
+    // Check for comment lines at the start of a record/line
+    if (at_line_start && comment_char != '\0' && is_comment_line(buf, pos, end, comment_char)) {
+      // Skip the entire comment line
+      pos = skip_to_line_end(buf, pos, end);
+      // Stay in RECORD_START state, still at line start
+      continue;
+    }
+    at_line_start = false;
+
     uint8_t value = buf[pos];
 
     // Use effective buffer length for bounds checking
@@ -357,17 +406,19 @@ uint64_t TwoPass::second_pass_chunk(const uint8_t* buf, size_t start, size_t end
       if (s != QUOTED_FIELD) {
         i = add_position(out, i, pos);
         ++n_indexes;
+        at_line_start = true; // Next position is start of new line
       }
       result = newline_state(s);
       s = result.state;
     } else if (value == '\r') {
       // Support CR-only line endings: CR is a line ending if not followed by LF
-      bool is_line_ending = (pos + 1 >= end || buf[pos + 1] != '\n');
-      if (is_line_ending && s != QUOTED_FIELD) {
+      bool is_line_ending_char = (pos + 1 >= end || buf[pos + 1] != '\n');
+      if (is_line_ending_char && s != QUOTED_FIELD) {
         i = add_position(out, i, pos);
         ++n_indexes;
         result = newline_state(s);
         s = result.state;
+        at_line_start = true; // Next position is start of new line
       }
       // If CR is followed by LF (CRLF), treat CR as regular character
       // The LF will be the line ending; CR will be stripped during value
@@ -409,13 +460,23 @@ uint64_t TwoPass::second_pass_chunk(const uint8_t* buf, size_t start, size_t end
 
 uint64_t TwoPass::second_pass_chunk_throwing(const uint8_t* buf, size_t start, size_t end,
                                              ParseIndex* out, size_t thread_id, char delimiter,
-                                             char quote_char) {
+                                             char quote_char, char comment_char) {
   uint64_t pos = start;
   size_t n_indexes = 0;
   size_t i = thread_id;
   csv_state s = RECORD_START;
+  bool at_line_start = true; // Track if we're at the start of a line
 
   while (pos < end) {
+    // Check for comment lines at the start of a record/line
+    if (at_line_start && comment_char != '\0' && is_comment_line(buf, pos, end, comment_char)) {
+      // Skip the entire comment line
+      pos = skip_to_line_end(buf, pos, end);
+      // Stay in RECORD_START state, still at line start
+      continue;
+    }
+    at_line_start = false;
+
     uint8_t value = buf[pos];
     StateResult result;
     if (value == static_cast<uint8_t>(quote_char)) {
@@ -437,15 +498,17 @@ uint64_t TwoPass::second_pass_chunk_throwing(const uint8_t* buf, size_t start, s
       if (s != QUOTED_FIELD) {
         i = add_position(out, i, pos);
         ++n_indexes;
+        at_line_start = true; // Next position is start of new line
       }
       s = newline_state(s).state;
     } else if (value == '\r') {
       // Support CR-only line endings: CR is a line ending if not followed by LF
-      bool is_line_ending = (pos + 1 >= end || buf[pos + 1] != '\n');
-      if (is_line_ending && s != QUOTED_FIELD) {
+      bool is_line_ending_char = (pos + 1 >= end || buf[pos + 1] != '\n');
+      if (is_line_ending_char && s != QUOTED_FIELD) {
         i = add_position(out, i, pos);
         ++n_indexes;
         s = newline_state(s).state;
+        at_line_start = true; // Next position is start of new line
       }
       // If CR is followed by LF (CRLF), treat CR as regular character
     } else {
@@ -831,11 +894,11 @@ TwoPass::chunk_result TwoPass::second_pass_chunk_with_errors(const uint8_t* buf,
                                                              size_t end, ParseIndex* out,
                                                              size_t thread_id, size_t total_len,
                                                              ErrorMode mode, char delimiter,
-                                                             char quote_char) {
+                                                             char quote_char, char comment_char) {
   chunk_result result;
   result.errors.set_mode(mode);
   result.n_indexes = second_pass_chunk(buf, start, end, out, thread_id, &result.errors, total_len,
-                                       delimiter, quote_char);
+                                       delimiter, quote_char, comment_char);
   return result;
 }
 
@@ -843,17 +906,18 @@ bool TwoPass::parse_two_pass_with_errors(const uint8_t* buf, ParseIndex& out, si
                                          ErrorCollector& errors, const Dialect& dialect) {
   char delim = dialect.delimiter;
   char quote = dialect.quote_char;
+  char comment = dialect.comment_char;
 
   // Handle empty input
   if (len == 0)
     return true;
 
   // Check structural issues first (single-threaded, fast)
-  check_empty_header(buf, len, errors);
+  check_empty_header(buf, len, errors, comment);
   if (errors.should_stop())
     return false;
 
-  check_duplicate_columns(buf, len, errors, delim, quote);
+  check_duplicate_columns(buf, len, errors, delim, quote, comment);
   if (errors.should_stop())
     return false;
 
@@ -869,8 +933,8 @@ bool TwoPass::parse_two_pass_with_errors(const uint8_t* buf, ParseIndex& out, si
 
   // For single-threaded, use the simpler path
   if (n_threads == 1) {
-    out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote);
-    check_field_counts(buf, len, errors, delim, quote);
+    out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote, comment);
+    check_field_counts(buf, len, errors, delim, quote, comment);
     return !errors.has_fatal_errors();
   }
 
@@ -900,8 +964,9 @@ bool TwoPass::parse_two_pass_with_errors(const uint8_t* buf, ParseIndex& out, si
   for (int i = 1; i < n_threads; ++i) {
     if (chunk_pos[i] == null_pos) {
       out.n_threads = 1;
-      out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote);
-      check_field_counts(buf, len, errors, delim, quote);
+      out.n_indexes[0] =
+          second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote, comment);
+      check_field_counts(buf, len, errors, delim, quote, comment);
       return !errors.has_fatal_errors();
     }
   }
@@ -909,10 +974,10 @@ bool TwoPass::parse_two_pass_with_errors(const uint8_t* buf, ParseIndex& out, si
   // Second pass: parse with thread-local error collectors
   ErrorMode mode = errors.mode();
   for (int i = 0; i < n_threads; ++i) {
-    second_pass_fut[i] =
-        std::async(std::launch::async, [buf, &out, &chunk_pos, i, len, mode, delim, quote]() {
+    second_pass_fut[i] = std::async(
+        std::launch::async, [buf, &out, &chunk_pos, i, len, mode, delim, quote, comment]() {
           return second_pass_chunk_with_errors(buf, chunk_pos[i], chunk_pos[i + 1], &out, i, len,
-                                               mode, delim, quote);
+                                               mode, delim, quote, comment);
         });
   }
 
@@ -930,7 +995,7 @@ bool TwoPass::parse_two_pass_with_errors(const uint8_t* buf, ParseIndex& out, si
   errors.merge_sorted(thread_errors);
 
   // Check field counts after parsing (single-threaded, scans file linearly)
-  check_field_counts(buf, len, errors, delim, quote);
+  check_field_counts(buf, len, errors, delim, quote, comment);
 
   return !errors.has_fatal_errors();
 }
@@ -939,17 +1004,18 @@ bool TwoPass::parse_with_errors(const uint8_t* buf, ParseIndex& out, size_t len,
                                 ErrorCollector& errors, const Dialect& dialect) {
   char delim = dialect.delimiter;
   char quote = dialect.quote_char;
+  char comment = dialect.comment_char;
 
   // Handle empty input
   if (len == 0)
     return true;
 
   // Check structural issues first
-  check_empty_header(buf, len, errors);
+  check_empty_header(buf, len, errors, comment);
   if (errors.should_stop())
     return false;
 
-  check_duplicate_columns(buf, len, errors, delim, quote);
+  check_duplicate_columns(buf, len, errors, delim, quote, comment);
   if (errors.should_stop())
     return false;
 
@@ -958,10 +1024,10 @@ bool TwoPass::parse_with_errors(const uint8_t* buf, ParseIndex& out, size_t len,
     return false;
 
   // Single-threaded parsing for accurate error position tracking
-  out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote);
+  out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote, comment);
 
   // Check field counts after parsing
-  check_field_counts(buf, len, errors, delim, quote);
+  check_field_counts(buf, len, errors, delim, quote, comment);
 
   return !errors.has_fatal_errors();
 }
@@ -970,17 +1036,18 @@ bool TwoPass::parse_validate(const uint8_t* buf, ParseIndex& out, size_t len,
                              ErrorCollector& errors, const Dialect& dialect) {
   char delim = dialect.delimiter;
   char quote = dialect.quote_char;
+  char comment = dialect.comment_char;
 
   // Handle empty input
   if (len == 0)
     return true;
 
   // Check structural issues first
-  check_empty_header(buf, len, errors);
+  check_empty_header(buf, len, errors, comment);
   if (errors.should_stop())
     return false;
 
-  check_duplicate_columns(buf, len, errors, delim, quote);
+  check_duplicate_columns(buf, len, errors, delim, quote, comment);
   if (errors.should_stop())
     return false;
 
@@ -989,10 +1056,10 @@ bool TwoPass::parse_validate(const uint8_t* buf, ParseIndex& out, size_t len,
     return false;
 
   // Parse with error collection
-  out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote);
+  out.n_indexes[0] = second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote, comment);
 
   // Check field counts after parsing
-  check_field_counts(buf, len, errors, delim, quote);
+  check_field_counts(buf, len, errors, delim, quote, comment);
 
   return !errors.has_fatal_errors();
 }
@@ -1001,10 +1068,19 @@ bool TwoPass::parse_validate(const uint8_t* buf, ParseIndex& out, size_t len,
 // TwoPass validation functions
 //-----------------------------------------------------------------------------
 
-bool TwoPass::check_empty_header(const uint8_t* buf, size_t len, ErrorCollector& errors) {
+bool TwoPass::check_empty_header(const uint8_t* buf, size_t len, ErrorCollector& errors,
+                                 char comment_char) {
   if (len == 0)
     return true;
-  if (buf[0] == '\n' || buf[0] == '\r') {
+
+  // Skip leading comment lines if comment_char is set
+  size_t pos = 0;
+  while (pos < len && is_comment_line(buf, pos, len, comment_char)) {
+    pos = skip_to_line_end(buf, pos, len);
+  }
+
+  // Check if we've consumed everything or hit an empty line
+  if (pos >= len || buf[pos] == '\n' || buf[pos] == '\r') {
     errors.add_error(ErrorCode::EMPTY_HEADER, ErrorSeverity::ERROR, 1, 1, 0, "Header row is empty",
                      "");
     return false;
@@ -1013,12 +1089,21 @@ bool TwoPass::check_empty_header(const uint8_t* buf, size_t len, ErrorCollector&
 }
 
 void TwoPass::check_duplicate_columns(const uint8_t* buf, size_t len, ErrorCollector& errors,
-                                      char delimiter, char quote_char) {
+                                      char delimiter, char quote_char, char comment_char) {
   if (len == 0)
     return;
 
-  // Find end of first line
-  size_t header_end = 0;
+  // Skip leading comment lines if comment_char is set
+  size_t header_start = 0;
+  while (header_start < len && is_comment_line(buf, header_start, len, comment_char)) {
+    header_start = skip_to_line_end(buf, header_start, len);
+  }
+
+  if (header_start >= len)
+    return;
+
+  // Find end of first (non-comment) line
+  size_t header_end = header_start;
   bool in_quote = false;
   while (header_end < len) {
     if (buf[header_end] == static_cast<uint8_t>(quote_char))
@@ -1032,7 +1117,7 @@ void TwoPass::check_duplicate_columns(const uint8_t* buf, size_t len, ErrorColle
   std::vector<std::string> fields;
   std::string current;
   in_quote = false;
-  for (size_t i = 0; i < header_end; ++i) {
+  for (size_t i = header_start; i < header_end; ++i) {
     if (buf[i] == static_cast<uint8_t>(quote_char)) {
       in_quote = !in_quote;
     } else if (!in_quote && buf[i] == static_cast<uint8_t>(delimiter)) {
@@ -1056,7 +1141,7 @@ void TwoPass::check_duplicate_columns(const uint8_t* buf, size_t len, ErrorColle
 }
 
 void TwoPass::check_field_counts(const uint8_t* buf, size_t len, ErrorCollector& errors,
-                                 char delimiter, char quote_char) {
+                                 char delimiter, char quote_char, char comment_char) {
   if (len == 0)
     return;
 
@@ -1066,8 +1151,19 @@ void TwoPass::check_field_counts(const uint8_t* buf, size_t len, ErrorCollector&
   size_t line_start = 0;
   bool in_quote = false;
   bool header_done = false;
+  bool at_line_start = true;
 
   for (size_t i = 0; i < len; ++i) {
+    // Skip comment lines
+    if (at_line_start && is_comment_line(buf, i, len, comment_char)) {
+      size_t line_end = skip_to_line_end(buf, i, len);
+      i = line_end - 1; // -1 because loop will increment
+      ++current_line;
+      line_start = line_end;
+      continue;
+    }
+    at_line_start = false;
+
     if (buf[i] == static_cast<uint8_t>(quote_char)) {
       in_quote = !in_quote;
     } else if (!in_quote) {
@@ -1088,6 +1184,29 @@ void TwoPass::check_field_counts(const uint8_t* buf, size_t len, ErrorCollector&
         current_fields = 1;
         ++current_line;
         line_start = i + 1;
+        at_line_start = true;
+      } else if (buf[i] == '\r') {
+        // Support CR-only line endings: CR is a line ending if not followed by LF
+        bool is_line_ending = (i + 1 >= len || buf[i + 1] != '\n');
+        if (is_line_ending) {
+          if (!header_done) {
+            expected_fields = current_fields;
+            header_done = true;
+          } else if (current_fields != expected_fields) {
+            std::ostringstream msg;
+            msg << "Expected " << expected_fields << " fields but found " << current_fields;
+            errors.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR,
+                             current_line, 1, line_start, msg.str(),
+                             get_context(buf, len, line_start, 40));
+            if (errors.should_stop())
+              return;
+          }
+          current_fields = 1;
+          ++current_line;
+          line_start = i + 1;
+          at_line_start = true;
+        }
+        // If CR is followed by LF, the LF will handle the line ending
       }
     }
   }
