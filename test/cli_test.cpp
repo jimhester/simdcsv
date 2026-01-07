@@ -1089,12 +1089,6 @@ TEST_F(CliTest, SampleManyRows) {
     data_rows++;
   if (result.output.find("20,2000,T") != std::string::npos)
     data_rows++;
-  // Debug output to help diagnose flaky test failures
-  if (data_rows != 5) {
-    std::cerr << "SampleManyRows DEBUG: exit_code=" << result.exit_code
-              << " output_size=" << result.output.size() << " data_rows=" << data_rows << "\n";
-    std::cerr << "SampleManyRows DEBUG: full output:\n[[[" << result.output << "]]]\n";
-  }
   EXPECT_EQ(data_rows, 5); // We requested 5 rows
 }
 
