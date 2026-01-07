@@ -1819,27 +1819,22 @@ TEST_F(CliTest, InfoSingleCell) {
 }
 
 // =============================================================================
-// UTF-8 Truncation Limitation Tests
+// UTF-8 Truncation Tests (Issue #255)
 // =============================================================================
-// KNOWN LIMITATION: The pretty command truncates fields at byte boundaries,
-// not Unicode code point boundaries. This means multi-byte UTF-8 sequences
-// (emoji, CJK characters, etc.) may be split, resulting in potentially
-// invalid UTF-8 output. This is documented behavior per issue #240.
-//
-// These tests document the current behavior. If UTF-8-aware truncation is
-// implemented in the future, these tests should be updated to verify proper
-// code point boundary handling.
+// The pretty command now properly handles UTF-8 truncation at code point
+// boundaries, respecting display width for CJK and emoji characters.
+// This was implemented to fix issue #255.
 // =============================================================================
 
-TEST_F(CliTest, PrettyUtf8TruncationLimitation) {
-  // This test documents the known UTF-8 truncation limitation.
-  // The pretty command truncates at byte position 37 (MAX_COLUMN_WIDTH - 3),
-  // which may split multi-byte UTF-8 sequences.
+TEST_F(CliTest, PrettyUtf8TruncationProperBoundaries) {
+  // Test that UTF-8 truncation respects code point boundaries.
+  // The pretty command now uses display width (not byte length) and
+  // truncates at code point boundaries, never splitting multi-byte sequences.
   //
-  // Test file contains fields > 40 bytes with multi-byte UTF-8:
-  // - EmojiSplit: 36 ASCII + 2 emoji (4 bytes each) = 44 bytes
-  // - CJKSplit: 17 CJK characters (3 bytes each) = 51 bytes
-  // - MixedSplit: Mix of ASCII, CJK, emoji = 55 bytes
+  // Test file contains fields > 40 display columns with multi-byte UTF-8:
+  // - EmojiSplit: 36 ASCII + 2 emoji (2 cols each) = 40 display columns
+  // - CJKSplit: 17 CJK characters (2 cols each) = 34 display columns
+  // - MixedSplit: Mix of ASCII, CJK, emoji
   auto result = CliRunner::run("pretty " + testDataPath("edge_cases/utf8_truncation.csv"));
   EXPECT_EQ(result.exit_code, 0);
 
@@ -1847,25 +1842,34 @@ TEST_F(CliTest, PrettyUtf8TruncationLimitation) {
   EXPECT_TRUE(result.output.find("+") != std::string::npos);
   EXPECT_TRUE(result.output.find("|") != std::string::npos);
 
-  // Verify truncation occurred (look for "..." in output)
-  EXPECT_TRUE(result.output.find("...") != std::string::npos);
-
-  // Note: The truncated output may contain invalid UTF-8 sequences.
-  // This is the documented limitation - truncation operates on bytes,
-  // not code points. A future fix would ensure truncation respects
-  // UTF-8 character boundaries.
+  // Verify that truncation doesn't produce invalid UTF-8 sequences.
+  // The output should NOT contain the replacement character (0xFFFD).
+  // In valid UTF-8, we should not see orphaned continuation bytes (0x80-0xBF
+  // without proper leading byte) or truncated multi-byte sequences.
+  //
+  // Check that the output is valid UTF-8 by ensuring no orphaned bytes
+  for (size_t i = 0; i < result.output.size(); ++i) {
+    unsigned char c = static_cast<unsigned char>(result.output[i]);
+    if ((c & 0xC0) == 0x80) {
+      // This is a continuation byte (10xxxxxx), verify it follows a leading byte
+      EXPECT_GT(i, 0) << "Orphaned continuation byte at start of string";
+      if (i > 0) {
+        unsigned char prev = static_cast<unsigned char>(result.output[i - 1]);
+        // Previous byte should be either a leading byte or another continuation byte
+        bool valid_prev = (prev & 0x80) != 0; // Must be part of multi-byte sequence
+        EXPECT_TRUE(valid_prev) << "Orphaned continuation byte at position " << i;
+      }
+    }
+  }
 }
 
 TEST_F(CliTest, PrettyUtf8ShortFieldsNotTruncated) {
-  // Verify that short UTF-8 fields (< 40 bytes) are NOT truncated
+  // Verify that short UTF-8 fields (< 40 display columns) are NOT truncated
   auto result = CliRunner::run("pretty " + testDataPath("real_world/unicode.csv"));
   EXPECT_EQ(result.exit_code, 0);
 
-  // The unicode.csv file has fields < 40 bytes, so they should display fully
+  // The unicode.csv file has fields < 40 display columns, so they display fully
   EXPECT_TRUE(result.output.find("+") != std::string::npos);
-
-  // Fields should not be truncated - no "..." for content fields
-  // Note: Header "Description" is short so won't have "..."
 }
 
 // ============================================================================

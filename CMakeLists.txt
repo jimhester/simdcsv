@@ -233,6 +233,7 @@ set(VROOM_SOURCES
     src/two_pass.cpp
     src/branchless_state_machine.cpp
     src/simd_number_parsing.cpp
+    src/utf8.cpp
 )
 
 # Add type detection source if enabled
@@ -688,6 +689,24 @@ add_dependencies(encoding_test copy_test_data)
 
 # Register encoding tests with CTest
 gtest_discover_tests(encoding_test)
+
+# UTF-8 utilities test executable
+add_executable(utf8_test
+    test/utf8_test.cpp
+)
+
+target_link_libraries(utf8_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(utf8_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Register UTF-8 tests with CTest
+gtest_discover_tests(utf8_test)
 
 # Bounds validation test executable (tests assertions from PR #123)
 add_executable(bounds_validation_test
