@@ -637,20 +637,23 @@ inline uint64_t second_pass_simd_branchless(
     assert(end >= start && "Invalid range: end must be >= start");
     size_t len = end - start;
     size_t pos = 0;
-    uint64_t idx = thread_id;
+    uint64_t idx = 0;  // Start at 0; thread offset handled by base pointer
     uint64_t prev_quote_state = 0ULL;
     uint64_t prev_escape_carry = 0ULL;  // For escape char mode
     uint64_t count = 0;
     const uint8_t* data = buf + start;
 
     // Process 64-byte blocks
+    // Pass indexes + thread_id so each thread writes to its own interleaved slots:
+    // thread 0 -> indexes[0], indexes[n_threads], indexes[2*n_threads], ...
+    // thread 1 -> indexes[1], indexes[n_threads+1], indexes[2*n_threads+1], ...
     for (; pos + 64 <= len; pos += 64) {
         __builtin_prefetch(data + pos + 128);
 
         simd_input in = fill_input(data + pos);
         count += process_block_simd_branchless(
             sm, in, 64, prev_quote_state, prev_escape_carry,
-            indexes, start + pos, idx, n_threads
+            indexes + thread_id, start + pos, idx, n_threads
         );
     }
 
@@ -659,7 +662,7 @@ inline uint64_t second_pass_simd_branchless(
         simd_input in = fill_input(data + pos);
         count += process_block_simd_branchless(
             sm, in, len - pos, prev_quote_state, prev_escape_carry,
-            indexes, start + pos, idx, n_threads
+            indexes + thread_id, start + pos, idx, n_threads
         );
     }
 
