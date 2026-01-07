@@ -924,6 +924,10 @@ bool TwoPass::parse_with_errors(const uint8_t* buf, ParseIndex& out, size_t len,
   char delim = dialect.delimiter;
   char quote = dialect.quote_char;
 
+  // Handle empty input
+  if (len == 0)
+    return true;
+
   // Check structural issues first
   check_empty_header(buf, len, errors);
   if (errors.should_stop())
@@ -950,6 +954,10 @@ bool TwoPass::parse_validate(const uint8_t* buf, ParseIndex& out, size_t len,
                              ErrorCollector& errors, const Dialect& dialect) {
   char delim = dialect.delimiter;
   char quote = dialect.quote_char;
+
+  // Handle empty input
+  if (len == 0)
+    return true;
 
   // Check structural issues first
   check_empty_header(buf, len, errors);

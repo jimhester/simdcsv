@@ -922,12 +922,26 @@ TEST_F(CliTest, TailManyRows) {
   auto result = CliRunner::run("tail -n 5 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have header
-  EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos);
+  EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos)
+      << "Expected header not found. Output length: " << result.output.size()
+      << "\nActual output:\n"
+      << result.output;
   // Should have last 5 rows (IDs 16-20)
-  EXPECT_TRUE(result.output.find("16,") != std::string::npos);
-  EXPECT_TRUE(result.output.find("20,") != std::string::npos);
+  EXPECT_TRUE(result.output.find("16,") != std::string::npos)
+      << "Expected '16,' not found in tail output.\n"
+      << "Exit code: " << result.exit_code << "\n"
+      << "Output length: " << result.output.size() << " bytes\n"
+      << "Actual output:\n"
+      << result.output;
+  EXPECT_TRUE(result.output.find("20,") != std::string::npos)
+      << "Expected '20,' not found in tail output.\n"
+      << "Actual output:\n"
+      << result.output;
   // Should NOT have earlier rows (IDs 1-15)
-  EXPECT_TRUE(result.output.find("15,") == std::string::npos);
+  EXPECT_TRUE(result.output.find("15,") == std::string::npos)
+      << "Unexpected '15,' found in tail output (should only have last 5 rows).\n"
+      << "Actual output:\n"
+      << result.output;
 }
 
 TEST_F(CliTest, TailFromStdin) {
@@ -2158,4 +2172,65 @@ TEST_F(CliTest, StatsHelpDocumented) {
   auto result = CliRunner::run("-h");
   EXPECT_EQ(result.exit_code, 0);
   EXPECT_TRUE(result.output.find("stats") != std::string::npos);
+}
+
+// =============================================================================
+// Ambiguous Dialect Detection Tests (GitHub issue #225)
+// Tests for best-guess output when multiple dialects have similar scores
+// =============================================================================
+
+TEST_F(CliTest, DialectAmbiguousSucceeds) {
+  // When multiple dialects have similar scores, the command should still succeed
+  // and output the best-guess dialect rather than failing with an error
+  auto result = CliRunner::run("dialect " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should still detect a dialect (best guess)
+  EXPECT_TRUE(result.output.find("Delimiter:") != std::string::npos);
+  // Should include a warning about ambiguity
+  EXPECT_TRUE(result.output.find("ambiguous") != std::string::npos ||
+              result.output.find("Warning") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectAmbiguousJsonFormat) {
+  // JSON output should include "ambiguous" field
+  auto result = CliRunner::run("dialect -j " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should have ambiguous field in JSON
+  EXPECT_TRUE(result.output.find("\"ambiguous\":") != std::string::npos);
+  // Should have confidence score
+  EXPECT_TRUE(result.output.find("\"confidence\":") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectAmbiguousShowsAlternatives) {
+  // When ambiguous, should show alternative candidates
+  auto result = CliRunner::run("dialect " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show alternative candidates in warning output (stderr is merged to stdout)
+  // The alternatives will show different delimiters that scored similarly
+  EXPECT_TRUE(result.output.find("Alternative") != std::string::npos ||
+              result.output.find("delimiter=") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectAmbiguousJsonShowsAlternatives) {
+  // JSON output should include alternatives array when ambiguous
+  auto result = CliRunner::run("dialect -j " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // When ambiguous, JSON should include alternatives array
+  EXPECT_TRUE(result.output.find("\"alternatives\":") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectJsonAmbiguousFieldPresent) {
+  // JSON output should always include "ambiguous" field
+  auto result = CliRunner::run("dialect -j " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should have ambiguous field (true or false)
+  EXPECT_TRUE(result.output.find("\"ambiguous\":") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectOutputsCliFlags) {
+  // Dialect output should include CLI flags for reuse
+  auto result = CliRunner::run("dialect " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("CLI flags:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("-d comma") != std::string::npos);
 }
