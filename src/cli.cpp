@@ -49,7 +49,7 @@ constexpr size_t MIN_PARALLEL_SIZE = 1024 * 1024;  // Minimum size for parallel 
  */
 class CsvIterator {
 public:
-  CsvIterator(const uint8_t* buf, const libvroom::index& idx) : buf_(buf), idx_(idx) {
+  CsvIterator(const uint8_t* buf, const libvroom::ParseIndex& idx) : buf_(buf), idx_(idx) {
     // Merge indexes from all threads into sorted order
     mergeIndexes();
   }
@@ -145,7 +145,7 @@ private:
   }
 
   const uint8_t* buf_;
-  const libvroom::index& idx_;
+  const libvroom::ParseIndex& idx_;
   std::vector<uint64_t> merged_indexes_;
 };
 
@@ -213,7 +213,8 @@ static bool isStdinInput(const char* filename) {
 // If detected_encoding is provided, the detected encoding will be stored there
 // If strict_mode is true, exits with error on any parse warning or error
 bool parseFile(const char* filename, int n_threads, std::basic_string_view<uint8_t>& data,
-               libvroom::index& idx, const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
+               libvroom::ParseIndex& idx,
+               const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
                bool auto_detect = false, libvroom::EncodingResult* detected_encoding = nullptr,
                bool strict_mode = false) {
   try {
@@ -551,7 +552,7 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
             bool strict_mode = false) {
   std::basic_string_view<uint8_t> data;
-  libvroom::index idx;
+  libvroom::ParseIndex idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
     return 1;
@@ -573,7 +574,7 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
             bool strict_mode = false) {
   std::basic_string_view<uint8_t> data;
-  libvroom::index idx;
+  libvroom::ParseIndex idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
     return 1;
@@ -616,7 +617,7 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               unsigned int seed = 0, bool strict_mode = false) {
   std::basic_string_view<uint8_t> data;
-  libvroom::index idx;
+  libvroom::ParseIndex idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
     return 1;
@@ -685,7 +686,7 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               bool strict_mode = false) {
   std::basic_string_view<uint8_t> data;
-  libvroom::index idx;
+  libvroom::ParseIndex idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
     return 1;
@@ -780,7 +781,7 @@ int cmdInfo(const char* filename, int n_threads, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
             bool strict_mode = false) {
   std::basic_string_view<uint8_t> data;
-  libvroom::index idx;
+  libvroom::ParseIndex idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
     return 1;
@@ -818,7 +819,7 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               bool strict_mode = false) {
   std::basic_string_view<uint8_t> data;
-  libvroom::index idx;
+  libvroom::ParseIndex idx;
 
   if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect, nullptr, strict_mode))
     return 1;

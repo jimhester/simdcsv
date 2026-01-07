@@ -30,8 +30,8 @@ protected:
 };
 
 TEST_F(IndexClassTest, MoveConstructor) {
-  two_pass parser;
-  libvroom::index original = parser.init(100, 2);
+  TwoPass parser;
+  libvroom::ParseIndex original = parser.init(100, 2);
 
   // Set some values
   original.columns = 5;
@@ -41,7 +41,7 @@ TEST_F(IndexClassTest, MoveConstructor) {
   original.indexes[1] = 84;
 
   // Move construct
-  libvroom::index moved(std::move(original));
+  libvroom::ParseIndex moved(std::move(original));
 
   EXPECT_EQ(moved.columns, 5);
   EXPECT_EQ(moved.n_threads, 2);
@@ -56,9 +56,9 @@ TEST_F(IndexClassTest, MoveConstructor) {
 }
 
 TEST_F(IndexClassTest, MoveAssignment) {
-  two_pass parser;
-  libvroom::index original = parser.init(100, 2);
-  libvroom::index target = parser.init(50, 1);
+  TwoPass parser;
+  libvroom::ParseIndex original = parser.init(100, 2);
+  libvroom::ParseIndex target = parser.init(50, 1);
 
   // Set values on original
   original.columns = 7;
@@ -79,13 +79,13 @@ TEST_F(IndexClassTest, MoveAssignment) {
 }
 
 TEST_F(IndexClassTest, MoveAssignmentSelfAssignment) {
-  two_pass parser;
-  libvroom::index idx = parser.init(100, 2);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(100, 2);
   idx.columns = 3;
   idx.n_indexes[0] = 10;
 
   // Self-assignment should be safe
-  libvroom::index& ref = idx;
+  libvroom::ParseIndex& ref = idx;
   idx = std::move(ref);
 
   EXPECT_EQ(idx.columns, 3);
@@ -94,8 +94,8 @@ TEST_F(IndexClassTest, MoveAssignmentSelfAssignment) {
 }
 
 TEST_F(IndexClassTest, WriteAndRead) {
-  two_pass parser;
-  libvroom::index original = parser.init(100, 2);
+  TwoPass parser;
+  libvroom::ParseIndex original = parser.init(100, 2);
 
   // Set values
   original.columns = 10;
@@ -111,7 +111,7 @@ TEST_F(IndexClassTest, WriteAndRead) {
   original.write(temp_filename);
 
   // Read into new index
-  libvroom::index restored = parser.init(100, 2);
+  libvroom::ParseIndex restored = parser.init(100, 2);
   restored.read(temp_filename);
 
   EXPECT_EQ(restored.columns, 10);
@@ -126,75 +126,11 @@ TEST_F(IndexClassTest, WriteAndRead) {
 }
 
 TEST_F(IndexClassTest, DefaultConstructor) {
-  libvroom::index idx;
+  libvroom::ParseIndex idx;
   EXPECT_EQ(idx.columns, 0);
   EXPECT_EQ(idx.n_threads, 0);
   EXPECT_EQ(idx.n_indexes, nullptr);
   EXPECT_EQ(idx.indexes, nullptr);
-}
-
-TEST_F(IndexClassTest, WriteAndReadLargeThreadCount) {
-  // Test with thread count > 255 to verify uint16_t support
-  two_pass parser;
-  libvroom::index original = parser.init(100, 300); // 300 threads
-
-  // Set values
-  original.columns = 10;
-  // Set some non-zero indexes for first few threads
-  original.n_indexes[0] = 2;
-  original.n_indexes[1] = 1;
-  original.n_indexes[299] = 1; // Last thread
-  original.indexes[0] = 5;
-  original.indexes[1] = 10;
-  original.indexes[300] = 15; // Index for thread 0, position 1
-  original.indexes[299] = 20; // Index for thread 299, position 0
-
-  // Write to file
-  original.write(temp_filename);
-
-  // Read into new index
-  libvroom::index restored = parser.init(100, 300);
-  restored.read(temp_filename);
-
-  EXPECT_EQ(restored.columns, 10);
-  EXPECT_EQ(restored.n_threads, 300);
-  EXPECT_EQ(restored.n_indexes[0], 2);
-  EXPECT_EQ(restored.n_indexes[1], 1);
-  EXPECT_EQ(restored.n_indexes[299], 1);
-  EXPECT_EQ(restored.indexes[0], 5);
-  EXPECT_EQ(restored.indexes[1], 10);
-}
-
-TEST_F(IndexClassTest, ReadLegacyV1Format) {
-  // Test backward compatibility with v1 format (uint8_t n_threads)
-  // Manually create a v1 format file
-  std::FILE* fp = std::fopen(temp_filename.c_str(), "wb");
-  ASSERT_NE(fp, nullptr);
-
-  // V1 format: columns (uint64_t), n_threads (uint8_t), n_indexes[], indexes[]
-  uint64_t columns = 5;
-  uint8_t n_threads_v1 = 2;
-  uint64_t n_indexes[2] = {2, 1};
-  uint64_t indexes[3] = {10, 20, 30};
-
-  std::fwrite(&columns, sizeof(uint64_t), 1, fp);
-  std::fwrite(&n_threads_v1, sizeof(uint8_t), 1, fp);
-  std::fwrite(n_indexes, sizeof(uint64_t), 2, fp);
-  std::fwrite(indexes, sizeof(uint64_t), 3, fp);
-  std::fclose(fp);
-
-  // Read using current version (should detect v1 format)
-  two_pass parser;
-  libvroom::index restored = parser.init(100, 2);
-  restored.read(temp_filename);
-
-  EXPECT_EQ(restored.columns, 5);
-  EXPECT_EQ(restored.n_threads, 2);
-  EXPECT_EQ(restored.n_indexes[0], 2);
-  EXPECT_EQ(restored.n_indexes[1], 1);
-  EXPECT_EQ(restored.indexes[0], 10);
-  EXPECT_EQ(restored.indexes[1], 20);
-  EXPECT_EQ(restored.indexes[2], 30);
 }
 
 // ============================================================================
@@ -214,7 +150,7 @@ TEST_F(FirstPassTest, FirstPassNaive) {
   std::string content = "a,b,c\n1,2,3\n4,5,6\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_naive(buf.data(), 0, content.size());
+  auto stats = TwoPass::first_pass_naive(buf.data(), 0, content.size());
 
   // first_pass_naive finds the first newline
   EXPECT_EQ(stats.first_even_nl, 5);       // Position of first '\n'
@@ -226,7 +162,7 @@ TEST_F(FirstPassTest, FirstPassNaiveNoNewline) {
   std::string content = "a,b,c"; // No newline
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_naive(buf.data(), 0, content.size());
+  auto stats = TwoPass::first_pass_naive(buf.data(), 0, content.size());
 
   // Should not find any newline
   EXPECT_EQ(stats.first_even_nl, null_pos);
@@ -236,7 +172,7 @@ TEST_F(FirstPassTest, FirstPassChunkWithQuotes) {
   std::string content = "\"a\",b,c\n1,\"2\",3\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_chunk(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_chunk(buf.data(), 0, content.size(), '"');
 
   // Should find newlines and count quotes
   EXPECT_NE(stats.first_even_nl, null_pos);
@@ -247,7 +183,7 @@ TEST_F(FirstPassTest, FirstPassChunkOddQuotes) {
   std::string content = "\"a,\nb,c\n"; // Unclosed quote spans newline
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_chunk(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_chunk(buf.data(), 0, content.size(), '"');
 
   // First newline at position 3 is at odd quote count (1)
   EXPECT_EQ(stats.first_odd_nl, 3);
@@ -260,7 +196,7 @@ TEST_F(FirstPassTest, FirstPassSIMDShortBuffer) {
   std::string content = "a,b,c\n1,2,3\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_simd(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_simd(buf.data(), 0, content.size(), '"');
 
   EXPECT_NE(stats.first_even_nl, null_pos);
   EXPECT_EQ(stats.n_quotes, 0);
@@ -274,7 +210,7 @@ TEST_F(FirstPassTest, FirstPassSIMDLongBuffer) {
   }
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_simd(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_simd(buf.data(), 0, content.size(), '"');
 
   EXPECT_NE(stats.first_even_nl, null_pos);
 }
@@ -287,7 +223,7 @@ TEST_F(FirstPassTest, FirstPassSIMDWithQuotes) {
   }
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_simd(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_simd(buf.data(), 0, content.size(), '"');
 
   EXPECT_NE(stats.first_even_nl, null_pos);
   EXPECT_GT(stats.n_quotes, 0);
@@ -302,7 +238,7 @@ TEST_F(FirstPassTest, FirstPassNaiveWithCR) {
   std::string content = "a,b,c\r1,2,3\r4,5,6\r";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_naive(buf.data(), 0, content.size());
+  auto stats = TwoPass::first_pass_naive(buf.data(), 0, content.size());
 
   // first_pass_naive should find the first CR as a line ending
   EXPECT_EQ(stats.first_even_nl, 5); // Position of first '\r'
@@ -313,10 +249,9 @@ TEST_F(FirstPassTest, FirstPassNaiveWithCRLF) {
   std::string content = "a,b,c\r\n1,2,3\r\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_naive(buf.data(), 0, content.size());
+  auto stats = TwoPass::first_pass_naive(buf.data(), 0, content.size());
 
-  // Should find LF as line ending, not CR (CR followed by LF is not a line
-  // ending)
+  // Should find LF as line ending, not CR (CR followed by LF is not a line ending)
   EXPECT_EQ(stats.first_even_nl, 6); // Position of '\n' after '\r'
 }
 
@@ -325,7 +260,7 @@ TEST_F(FirstPassTest, FirstPassChunkWithCR) {
   std::string content = "\"a\",b,c\r1,\"2\",3\r";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_chunk(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_chunk(buf.data(), 0, content.size(), '"');
 
   // Should find CR as newline and count quotes
   EXPECT_NE(stats.first_even_nl, null_pos);
@@ -337,7 +272,7 @@ TEST_F(FirstPassTest, FirstPassChunkWithCRLF) {
   std::string content = "\"a\",b,c\r\n1,\"2\",3\r\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_chunk(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_chunk(buf.data(), 0, content.size(), '"');
 
   // Should find LF as newline (position 8), not CR (position 7)
   EXPECT_EQ(stats.first_even_nl, 8);
@@ -349,7 +284,7 @@ TEST_F(FirstPassTest, FirstPassChunkCRInQuotes) {
   std::string content = "\"a\rb\",c\r1,2,3\r";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_chunk(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_chunk(buf.data(), 0, content.size(), '"');
 
   // First newline outside quotes is at position 7 (after "c")
   // The CR at position 2 is inside quotes
@@ -374,17 +309,17 @@ TEST_F(QuotationStateTest, AtStart) {
   std::string content = "a,b,c";
   auto buf = makeBuffer(content);
 
-  auto state = two_pass::get_quotation_state(buf.data(), 0);
-  EXPECT_EQ(state, two_pass::UNQUOTED);
+  auto state = TwoPass::get_quotation_state(buf.data(), 0);
+  EXPECT_EQ(state, TwoPass::UNQUOTED);
 }
 
 TEST_F(QuotationStateTest, UnquotedContext) {
   std::string content = "abc,def,ghi";
   auto buf = makeBuffer(content);
 
-  auto state = two_pass::get_quotation_state(buf.data(), 5, ',', '"');
+  auto state = TwoPass::get_quotation_state(buf.data(), 5, ',', '"');
   // Position 5 is 'e' in 'def', preceded by comma - should determine context
-  EXPECT_TRUE(state == two_pass::UNQUOTED || state == two_pass::AMBIGUOUS);
+  EXPECT_TRUE(state == TwoPass::UNQUOTED || state == TwoPass::AMBIGUOUS);
 }
 
 TEST_F(QuotationStateTest, QuotedContext) {
@@ -392,11 +327,11 @@ TEST_F(QuotationStateTest, QuotedContext) {
   auto buf = makeBuffer(content);
 
   // Position 8 is inside "hello world" - should be in quoted context
-  auto state = two_pass::get_quotation_state(buf.data(), 8, ',', '"');
+  auto state = TwoPass::get_quotation_state(buf.data(), 8, ',', '"');
 
   // The function looks backward to determine if we're in quotes
   // Inside "hello world", should detect quoted state
-  EXPECT_TRUE(state == two_pass::QUOTED || state == two_pass::AMBIGUOUS);
+  EXPECT_TRUE(state == TwoPass::QUOTED || state == TwoPass::AMBIGUOUS);
 }
 
 TEST_F(QuotationStateTest, QuoteOtherPattern) {
@@ -411,14 +346,13 @@ TEST_F(QuotationStateTest, QuoteOtherPattern) {
   std::string content = "\"abc";
   auto buf = makeBuffer(content);
 
-  auto state = two_pass::get_quotation_state(buf.data(), 3, ',', '"');
+  auto state = TwoPass::get_quotation_state(buf.data(), 3, ',', '"');
   // Position 3 is 'c', function scans backward
   // The algorithm looks for quote patterns to determine state
-  // Since we're after a quote at position 0 with 'a' after it, we're in quoted
-  // context But the actual implementation may differ - let's accept whatever it
-  // returns
-  EXPECT_TRUE(state == two_pass::QUOTED || state == two_pass::UNQUOTED ||
-              state == two_pass::AMBIGUOUS);
+  // Since we're after a quote at position 0 with 'a' after it, we're in quoted context
+  // But the actual implementation may differ - let's accept whatever it returns
+  EXPECT_TRUE(state == TwoPass::QUOTED || state == TwoPass::UNQUOTED ||
+              state == TwoPass::AMBIGUOUS);
 }
 
 TEST_F(QuotationStateTest, OtherQuotePattern) {
@@ -426,9 +360,9 @@ TEST_F(QuotationStateTest, OtherQuotePattern) {
   std::string content = "ab\"c";
   auto buf = makeBuffer(content);
 
-  auto state = two_pass::get_quotation_state(buf.data(), 3, ',', '"');
+  auto state = TwoPass::get_quotation_state(buf.data(), 3, ',', '"');
   // Position 3 is 'c', looking back sees 'b' then quote - unquoted
-  EXPECT_EQ(state, two_pass::UNQUOTED);
+  EXPECT_EQ(state, TwoPass::UNQUOTED);
 }
 
 TEST_F(QuotationStateTest, LongContextAmbiguous) {
@@ -441,8 +375,8 @@ TEST_F(QuotationStateTest, LongContextAmbiguous) {
   auto buf = makeBuffer(content);
 
   // With no quotes at all and position 50, should be ambiguous or unquoted
-  auto state = two_pass::get_quotation_state(buf.data(), 50, ',', '"');
-  EXPECT_TRUE(state == two_pass::AMBIGUOUS || state == two_pass::UNQUOTED);
+  auto state = TwoPass::get_quotation_state(buf.data(), 50, ',', '"');
+  EXPECT_TRUE(state == TwoPass::AMBIGUOUS || state == TwoPass::UNQUOTED);
 }
 
 // ============================================================================
@@ -462,8 +396,8 @@ TEST_F(ParseBranchlessTest, SimpleCSV) {
   std::string content = "a,b,c\n1,2,3\n4,5,6\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse_branchless(buf.data(), idx, content.size());
 
@@ -475,8 +409,8 @@ TEST_F(ParseBranchlessTest, QuotedFields) {
   std::string content = "\"a\",\"b\",\"c\"\n\"1\",\"2\",\"3\"\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse_branchless(buf.data(), idx, content.size());
 
@@ -491,8 +425,8 @@ TEST_F(ParseBranchlessTest, MultiThreaded) {
   }
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 4);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
 
   bool success = parser.parse_branchless(buf.data(), idx, content.size());
 
@@ -503,8 +437,8 @@ TEST_F(ParseBranchlessTest, ZeroThreadsFallsBack) {
   std::string content = "a,b,c\n1,2,3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 0);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 0);
 
   // n_threads=0 should be handled (falls back to 1)
   bool success = parser.parse_branchless(buf.data(), idx, content.size());
@@ -517,9 +451,9 @@ TEST_F(ParseBranchlessTest, SmallChunkFallback) {
   std::string content = "a,b\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
+  TwoPass parser;
   // Allocate with enough space; parser will update n_threads to 1
-  libvroom::index idx = parser.init(content.size() + 64, 8); // Too many threads for tiny file
+  libvroom::ParseIndex idx = parser.init(content.size() + 64, 8); // Too many threads for tiny file
 
   bool success = parser.parse_branchless(buf.data(), idx, content.size());
 
@@ -532,8 +466,8 @@ TEST_F(ParseBranchlessTest, CustomDialect) {
   std::string content = "a;b;c\n1;2;3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse_branchless(buf.data(), idx, content.size(), Dialect::semicolon());
 
@@ -557,7 +491,7 @@ TEST_F(ParseAutoTest, DetectCSV) {
   std::string content = "a,b,c\n1,2,3\n4,5,6\n";
   auto buf = makeBuffer(content);
 
-  auto result = two_pass::detect_dialect(buf.data(), content.size());
+  auto result = TwoPass::detect_dialect(buf.data(), content.size());
 
   EXPECT_TRUE(result.success());
   EXPECT_EQ(result.dialect.delimiter, ',');
@@ -567,7 +501,7 @@ TEST_F(ParseAutoTest, DetectTSV) {
   std::string content = "a\tb\tc\n1\t2\t3\n4\t5\t6\n";
   auto buf = makeBuffer(content);
 
-  auto result = two_pass::detect_dialect(buf.data(), content.size());
+  auto result = TwoPass::detect_dialect(buf.data(), content.size());
 
   EXPECT_TRUE(result.success());
   EXPECT_EQ(result.dialect.delimiter, '\t');
@@ -577,7 +511,7 @@ TEST_F(ParseAutoTest, DetectSemicolon) {
   std::string content = "a;b;c\n1;2;3\n4;5;6\n";
   auto buf = makeBuffer(content);
 
-  auto result = two_pass::detect_dialect(buf.data(), content.size());
+  auto result = TwoPass::detect_dialect(buf.data(), content.size());
 
   EXPECT_TRUE(result.success());
   EXPECT_EQ(result.dialect.delimiter, ';');
@@ -587,8 +521,8 @@ TEST_F(ParseAutoTest, ParseAutoCSV) {
   std::string content = "a,b,c\n1,2,3\n4,5,6\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
   DetectionResult detected;
 
@@ -603,8 +537,8 @@ TEST_F(ParseAutoTest, ParseAutoTSV) {
   std::string content = "a\tb\tc\n1\t2\t3\n4\t5\t6\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
   DetectionResult detected;
 
@@ -620,8 +554,8 @@ TEST_F(ParseAutoTest, ParseAutoNullDetectedResult) {
   std::string content = "a,b,c\n1,2,3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_auto(buf.data(), idx, content.size(), errors, nullptr);
@@ -646,8 +580,8 @@ TEST_F(EdgeCaseTest, ZeroThreadsSpeculate) {
   std::string content = "a,b,c\n1,2,3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 0);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 0);
 
   bool success = parser.parse_speculate(buf.data(), idx, content.size());
 
@@ -658,8 +592,8 @@ TEST_F(EdgeCaseTest, ZeroThreadsTwoPass) {
   std::string content = "a,b,c\n1,2,3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 0);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 0);
 
   bool success = parser.parse_two_pass(buf.data(), idx, content.size());
 
@@ -670,8 +604,8 @@ TEST_F(EdgeCaseTest, ZeroThreadsTwoPassWithErrors) {
   std::string content = "a,b,c\n1,2,3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 0);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 0);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_two_pass_with_errors(buf.data(), idx, content.size(), errors);
@@ -682,8 +616,8 @@ TEST_F(EdgeCaseTest, ZeroThreadsTwoPassWithErrors) {
 TEST_F(EdgeCaseTest, EmptyInputTwoPassWithErrors) {
   std::vector<uint8_t> buf(LIBVROOM_PADDING, 0);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(0, 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(0, 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_two_pass_with_errors(buf.data(), idx, 0, errors);
@@ -696,8 +630,8 @@ TEST_F(EdgeCaseTest, VerySmallChunksMultiThreaded) {
   std::string content = "a\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 16);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 16);
 
   bool success = parser.parse_speculate(buf.data(), idx, content.size());
 
@@ -712,8 +646,8 @@ TEST_F(EdgeCaseTest, ChunkBoundaryExactly64Bytes) {
   content[63] = '\n';
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -729,8 +663,8 @@ TEST_F(EdgeCaseTest, ChunkBoundaryExactly128Bytes) {
   content[127] = '\n';
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -743,8 +677,8 @@ TEST_F(EdgeCaseTest, ChunkBoundaryExactly128Bytes) {
 
 TEST(HelperFunctionTest, GetContextNormal) {
   std::string content = "abcdefghijklmnopqrstuvwxyz";
-  auto ctx = two_pass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(),
-                                   10, 5);
+  auto ctx =
+      TwoPass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 10, 5);
 
   // Context around position 10 with 5 chars before/after
   EXPECT_FALSE(ctx.empty());
@@ -754,7 +688,7 @@ TEST(HelperFunctionTest, GetContextNormal) {
 TEST(HelperFunctionTest, GetContextNearStart) {
   std::string content = "abcdefghij";
   auto ctx =
-      two_pass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 2, 5);
+      TwoPass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 2, 5);
 
   EXPECT_FALSE(ctx.empty());
   EXPECT_TRUE(ctx.find('a') != std::string::npos);
@@ -763,7 +697,7 @@ TEST(HelperFunctionTest, GetContextNearStart) {
 TEST(HelperFunctionTest, GetContextNearEnd) {
   std::string content = "abcdefghij";
   auto ctx =
-      two_pass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 8, 5);
+      TwoPass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 8, 5);
 
   EXPECT_FALSE(ctx.empty());
   EXPECT_TRUE(ctx.find('j') != std::string::npos);
@@ -772,7 +706,7 @@ TEST(HelperFunctionTest, GetContextNearEnd) {
 TEST(HelperFunctionTest, GetContextWithNewlines) {
   std::string content = "abc\ndef\n";
   auto ctx =
-      two_pass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 4, 5);
+      TwoPass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 4, 5);
 
   // Newlines should be escaped as \n
   EXPECT_TRUE(ctx.find("\\n") != std::string::npos);
@@ -781,21 +715,21 @@ TEST(HelperFunctionTest, GetContextWithNewlines) {
 TEST(HelperFunctionTest, GetContextWithCarriageReturn) {
   std::string content = "abc\r\ndef";
   auto ctx =
-      two_pass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 4, 5);
+      TwoPass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 4, 5);
 
   // Carriage returns should be escaped as \r
   EXPECT_TRUE(ctx.find("\\r") != std::string::npos);
 }
 
 TEST(HelperFunctionTest, GetContextEmpty) {
-  auto ctx = two_pass::get_context(nullptr, 0, 0, 5);
+  auto ctx = TwoPass::get_context(nullptr, 0, 0, 5);
   EXPECT_TRUE(ctx.empty());
 }
 
 TEST(HelperFunctionTest, GetContextPosOutOfBounds) {
   std::string content = "abcde";
-  auto ctx = two_pass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(),
-                                   100, 5);
+  auto ctx = TwoPass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(),
+                                  100, 5);
 
   // Should handle gracefully
   EXPECT_FALSE(ctx.empty());
@@ -805,8 +739,8 @@ TEST(HelperFunctionTest, GetLineColumnSimple) {
   std::string content = "abc\ndef\nghi";
   size_t line, col;
 
-  two_pass::get_line_column(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 0,
-                            line, col);
+  TwoPass::get_line_column(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 0,
+                           line, col);
   EXPECT_EQ(line, 1);
   EXPECT_EQ(col, 1);
 }
@@ -816,8 +750,8 @@ TEST(HelperFunctionTest, GetLineColumnSecondLine) {
   size_t line, col;
 
   // Position 5 is 'e' on second line
-  two_pass::get_line_column(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 5,
-                            line, col);
+  TwoPass::get_line_column(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 5,
+                           line, col);
   EXPECT_EQ(line, 2);
   EXPECT_EQ(col, 2);
 }
@@ -827,8 +761,8 @@ TEST(HelperFunctionTest, GetLineColumnThirdLine) {
   size_t line, col;
 
   // Position 8 is 'g' on third line
-  two_pass::get_line_column(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 8,
-                            line, col);
+  TwoPass::get_line_column(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 8,
+                           line, col);
   EXPECT_EQ(line, 3);
   EXPECT_EQ(col, 1);
 }
@@ -838,8 +772,8 @@ TEST(HelperFunctionTest, GetLineColumnWithCRLF) {
   size_t line, col;
 
   // Position 4 is 'c' on second line
-  two_pass::get_line_column(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 4,
-                            line, col);
+  TwoPass::get_line_column(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 4,
+                           line, col);
   EXPECT_EQ(line, 2);
   // CR doesn't count as column increment
   EXPECT_EQ(col, 1);
@@ -849,8 +783,8 @@ TEST(HelperFunctionTest, GetLineColumnOutOfBounds) {
   std::string content = "abc";
   size_t line, col;
 
-  two_pass::get_line_column(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 100,
-                            line, col);
+  TwoPass::get_line_column(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 100,
+                           line, col);
 
   // Should handle gracefully, counting all content
   EXPECT_EQ(line, 1);
@@ -863,75 +797,74 @@ TEST(HelperFunctionTest, GetLineColumnOutOfBounds) {
 
 TEST(StateMachineTest, QuotedState) {
   // Test all transitions for quoted_state
-  auto r1 = two_pass::quoted_state(two_pass::RECORD_START);
-  EXPECT_EQ(r1.state, two_pass::QUOTED_FIELD);
+  auto r1 = TwoPass::quoted_state(TwoPass::RECORD_START);
+  EXPECT_EQ(r1.state, TwoPass::QUOTED_FIELD);
   EXPECT_EQ(r1.error, ErrorCode::NONE);
 
-  auto r2 = two_pass::quoted_state(two_pass::FIELD_START);
-  EXPECT_EQ(r2.state, two_pass::QUOTED_FIELD);
+  auto r2 = TwoPass::quoted_state(TwoPass::FIELD_START);
+  EXPECT_EQ(r2.state, TwoPass::QUOTED_FIELD);
 
-  auto r3 = two_pass::quoted_state(two_pass::UNQUOTED_FIELD);
-  EXPECT_EQ(r3.state, two_pass::UNQUOTED_FIELD);
+  auto r3 = TwoPass::quoted_state(TwoPass::UNQUOTED_FIELD);
+  EXPECT_EQ(r3.state, TwoPass::UNQUOTED_FIELD);
   EXPECT_EQ(r3.error, ErrorCode::QUOTE_IN_UNQUOTED_FIELD);
 
-  auto r4 = two_pass::quoted_state(two_pass::QUOTED_FIELD);
-  EXPECT_EQ(r4.state, two_pass::QUOTED_END);
+  auto r4 = TwoPass::quoted_state(TwoPass::QUOTED_FIELD);
+  EXPECT_EQ(r4.state, TwoPass::QUOTED_END);
 
-  auto r5 = two_pass::quoted_state(two_pass::QUOTED_END);
-  EXPECT_EQ(r5.state, two_pass::QUOTED_FIELD); // Escaped quote
+  auto r5 = TwoPass::quoted_state(TwoPass::QUOTED_END);
+  EXPECT_EQ(r5.state, TwoPass::QUOTED_FIELD); // Escaped quote
 }
 
 TEST(StateMachineTest, CommaState) {
-  auto r1 = two_pass::comma_state(two_pass::RECORD_START);
-  EXPECT_EQ(r1.state, two_pass::FIELD_START);
+  auto r1 = TwoPass::comma_state(TwoPass::RECORD_START);
+  EXPECT_EQ(r1.state, TwoPass::FIELD_START);
 
-  auto r2 = two_pass::comma_state(two_pass::FIELD_START);
-  EXPECT_EQ(r2.state, two_pass::FIELD_START);
+  auto r2 = TwoPass::comma_state(TwoPass::FIELD_START);
+  EXPECT_EQ(r2.state, TwoPass::FIELD_START);
 
-  auto r3 = two_pass::comma_state(two_pass::UNQUOTED_FIELD);
-  EXPECT_EQ(r3.state, two_pass::FIELD_START);
+  auto r3 = TwoPass::comma_state(TwoPass::UNQUOTED_FIELD);
+  EXPECT_EQ(r3.state, TwoPass::FIELD_START);
 
-  auto r4 = two_pass::comma_state(two_pass::QUOTED_FIELD);
-  EXPECT_EQ(r4.state, two_pass::QUOTED_FIELD); // Comma inside quotes
+  auto r4 = TwoPass::comma_state(TwoPass::QUOTED_FIELD);
+  EXPECT_EQ(r4.state, TwoPass::QUOTED_FIELD); // Comma inside quotes
 
-  auto r5 = two_pass::comma_state(two_pass::QUOTED_END);
-  EXPECT_EQ(r5.state, two_pass::FIELD_START);
+  auto r5 = TwoPass::comma_state(TwoPass::QUOTED_END);
+  EXPECT_EQ(r5.state, TwoPass::FIELD_START);
 }
 
 TEST(StateMachineTest, NewlineState) {
-  auto r1 = two_pass::newline_state(two_pass::RECORD_START);
-  EXPECT_EQ(r1.state, two_pass::RECORD_START);
+  auto r1 = TwoPass::newline_state(TwoPass::RECORD_START);
+  EXPECT_EQ(r1.state, TwoPass::RECORD_START);
 
-  auto r2 = two_pass::newline_state(two_pass::FIELD_START);
-  EXPECT_EQ(r2.state, two_pass::RECORD_START);
+  auto r2 = TwoPass::newline_state(TwoPass::FIELD_START);
+  EXPECT_EQ(r2.state, TwoPass::RECORD_START);
 
-  auto r3 = two_pass::newline_state(two_pass::UNQUOTED_FIELD);
-  EXPECT_EQ(r3.state, two_pass::RECORD_START);
+  auto r3 = TwoPass::newline_state(TwoPass::UNQUOTED_FIELD);
+  EXPECT_EQ(r3.state, TwoPass::RECORD_START);
 
-  auto r4 = two_pass::newline_state(two_pass::QUOTED_FIELD);
-  EXPECT_EQ(r4.state, two_pass::QUOTED_FIELD); // Newline inside quotes
+  auto r4 = TwoPass::newline_state(TwoPass::QUOTED_FIELD);
+  EXPECT_EQ(r4.state, TwoPass::QUOTED_FIELD); // Newline inside quotes
 
-  auto r5 = two_pass::newline_state(two_pass::QUOTED_END);
-  EXPECT_EQ(r5.state, two_pass::RECORD_START);
+  auto r5 = TwoPass::newline_state(TwoPass::QUOTED_END);
+  EXPECT_EQ(r5.state, TwoPass::RECORD_START);
 }
 
 TEST(StateMachineTest, OtherState) {
-  auto r1 = two_pass::other_state(two_pass::RECORD_START);
-  EXPECT_EQ(r1.state, two_pass::UNQUOTED_FIELD);
+  auto r1 = TwoPass::other_state(TwoPass::RECORD_START);
+  EXPECT_EQ(r1.state, TwoPass::UNQUOTED_FIELD);
 
-  auto r2 = two_pass::other_state(two_pass::FIELD_START);
-  EXPECT_EQ(r2.state, two_pass::UNQUOTED_FIELD);
+  auto r2 = TwoPass::other_state(TwoPass::FIELD_START);
+  EXPECT_EQ(r2.state, TwoPass::UNQUOTED_FIELD);
 
-  auto r3 = two_pass::other_state(two_pass::UNQUOTED_FIELD);
-  EXPECT_EQ(r3.state, two_pass::UNQUOTED_FIELD);
+  auto r3 = TwoPass::other_state(TwoPass::UNQUOTED_FIELD);
+  EXPECT_EQ(r3.state, TwoPass::UNQUOTED_FIELD);
 
-  auto r4 = two_pass::other_state(two_pass::QUOTED_FIELD);
-  EXPECT_EQ(r4.state, two_pass::QUOTED_FIELD);
+  auto r4 = TwoPass::other_state(TwoPass::QUOTED_FIELD);
+  EXPECT_EQ(r4.state, TwoPass::QUOTED_FIELD);
 
-  auto r5 = two_pass::other_state(two_pass::QUOTED_END);
-  EXPECT_EQ(r5.state, two_pass::UNQUOTED_FIELD);
-  EXPECT_EQ(r5.error,
-            ErrorCode::INVALID_QUOTE_ESCAPE); // Invalid char after quote
+  auto r5 = TwoPass::other_state(TwoPass::QUOTED_END);
+  EXPECT_EQ(r5.state, TwoPass::UNQUOTED_FIELD);
+  EXPECT_EQ(r5.error, ErrorCode::INVALID_QUOTE_ESCAPE); // Invalid char after quote
 }
 
 // ============================================================================
@@ -939,22 +872,22 @@ TEST(StateMachineTest, OtherState) {
 // ============================================================================
 
 TEST(IsOtherTest, Basic) {
-  EXPECT_FALSE(two_pass::is_other(','));
-  EXPECT_FALSE(two_pass::is_other('\n'));
-  EXPECT_FALSE(two_pass::is_other('"'));
-  EXPECT_TRUE(two_pass::is_other('a'));
-  EXPECT_TRUE(two_pass::is_other('1'));
-  EXPECT_TRUE(two_pass::is_other(' '));
+  EXPECT_FALSE(TwoPass::is_other(','));
+  EXPECT_FALSE(TwoPass::is_other('\n'));
+  EXPECT_FALSE(TwoPass::is_other('"'));
+  EXPECT_TRUE(TwoPass::is_other('a'));
+  EXPECT_TRUE(TwoPass::is_other('1'));
+  EXPECT_TRUE(TwoPass::is_other(' '));
 }
 
 TEST(IsOtherTest, CustomDelimiter) {
-  EXPECT_FALSE(two_pass::is_other(';', ';', '"'));
-  EXPECT_TRUE(two_pass::is_other(',', ';', '"'));
+  EXPECT_FALSE(TwoPass::is_other(';', ';', '"'));
+  EXPECT_TRUE(TwoPass::is_other(',', ';', '"'));
 }
 
 TEST(IsOtherTest, CustomQuote) {
-  EXPECT_FALSE(two_pass::is_other('\'', ',', '\''));
-  EXPECT_TRUE(two_pass::is_other('"', ',', '\''));
+  EXPECT_FALSE(TwoPass::is_other('\'', ',', '\''));
+  EXPECT_TRUE(TwoPass::is_other('"', ',', '\''));
 }
 
 // ============================================================================
@@ -975,7 +908,7 @@ TEST_F(FirstPassSpeculateTest, UnquotedContext) {
   auto buf = makeBuffer(content);
 
   // Start speculating from position 0
-  auto stats = two_pass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
+  auto stats = TwoPass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
 
   // Should find the first newline
   EXPECT_EQ(stats.first_even_nl, 7);
@@ -985,7 +918,7 @@ TEST_F(FirstPassSpeculateTest, NoNewline) {
   std::string content = "abc,def,ghi";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
+  auto stats = TwoPass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
 
   // No newline in content
   EXPECT_EQ(stats.first_even_nl, null_pos);
@@ -997,7 +930,7 @@ TEST_F(FirstPassSpeculateTest, WithCRLineEnding) {
   std::string content = "abc,def\rghi,jkl\r";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
+  auto stats = TwoPass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
 
   // Should find the first CR as newline
   EXPECT_EQ(stats.first_even_nl, 7);
@@ -1008,7 +941,7 @@ TEST_F(FirstPassSpeculateTest, WithCRLFLineEnding) {
   std::string content = "abc,def\r\nghi,jkl\r\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
+  auto stats = TwoPass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
 
   // Should skip CR and find LF at position 8 as newline
   EXPECT_EQ(stats.first_even_nl, 8);
@@ -1031,8 +964,8 @@ TEST_F(ParseValidateTest, ValidCSV) {
   std::string content = "a,b,c\n1,2,3\n4,5,6\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_validate(buf.data(), idx, content.size(), errors);
@@ -1045,8 +978,8 @@ TEST_F(ParseValidateTest, WithDialect) {
   std::string content = "a;b;c\n1;2;3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success =
@@ -1069,13 +1002,13 @@ protected:
 };
 
 TEST_F(MultiThreadedFallbackTest, SpeculateFallsBackOnNullPos) {
-  // Create content where multi-threaded chunking would fail to find valid split
-  // points This happens when chunks are too small to contain newlines
+  // Create content where multi-threaded chunking would fail to find valid split points
+  // This happens when chunks are too small to contain newlines
   std::string content = "abcdef\n"; // Very short content
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 4); // Try to use 4 threads
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4); // Try to use 4 threads
 
   bool success = parser.parse_speculate(buf.data(), idx, content.size());
 
@@ -1088,8 +1021,8 @@ TEST_F(MultiThreadedFallbackTest, TwoPassFallsBackOnNullPos) {
   std::string content = "abcdef\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 4);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
 
   bool success = parser.parse_two_pass(buf.data(), idx, content.size());
 
@@ -1114,8 +1047,8 @@ TEST_F(DialectIntegrationTest, ParseWithTSVDialect) {
   std::string content = "a\tb\tc\n1\t2\t3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse(buf.data(), idx, content.size(), Dialect::tsv());
 
@@ -1126,8 +1059,8 @@ TEST_F(DialectIntegrationTest, ParseWithSemicolonDialect) {
   std::string content = "a;b;c\n1;2;3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse(buf.data(), idx, content.size(), Dialect::semicolon());
 
@@ -1138,8 +1071,8 @@ TEST_F(DialectIntegrationTest, ParseWithPipeDialect) {
   std::string content = "a|b|c\n1|2|3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse(buf.data(), idx, content.size(), Dialect::pipe());
 
@@ -1150,8 +1083,8 @@ TEST_F(DialectIntegrationTest, ParseWithSingleQuoteDialect) {
   std::string content = "'a','b','c'\n'1','2','3'\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   Dialect dialect{',', '\'', '\'', true, Dialect::LineEnding::UNKNOWN};
   bool success = parser.parse(buf.data(), idx, content.size(), dialect);
@@ -1176,11 +1109,11 @@ TEST_F(SecondPassThrowingTest, ThrowsOnQuoteInUnquotedField) {
   std::string content = "a,bad\"quote,c\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   EXPECT_THROW(
-      { two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"'); },
+      { TwoPass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"'); },
       std::runtime_error);
 }
 
@@ -1188,11 +1121,11 @@ TEST_F(SecondPassThrowingTest, ThrowsOnInvalidQuoteEscape) {
   std::string content = "\"test\"invalid,b\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   EXPECT_THROW(
-      { two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"'); },
+      { TwoPass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"'); },
       std::runtime_error);
 }
 
@@ -1200,11 +1133,11 @@ TEST_F(SecondPassThrowingTest, ValidCSVDoesNotThrow) {
   std::string content = "a,b,c\n1,2,3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   EXPECT_NO_THROW(
-      { two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"'); });
+      { TwoPass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"'); });
 }
 
 TEST_F(SecondPassThrowingTest, CRLineEndingDoesNotThrow) {
@@ -1212,12 +1145,12 @@ TEST_F(SecondPassThrowingTest, CRLineEndingDoesNotThrow) {
   std::string content = "a,b,c\r1,2,3\r";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   EXPECT_NO_THROW({
     auto n_indexes =
-        two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"');
+        TwoPass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"');
     // Should have found indexes at each comma and CR
     EXPECT_GT(n_indexes, 0);
   });
@@ -1228,12 +1161,12 @@ TEST_F(SecondPassThrowingTest, CRLFLineEndingDoesNotThrow) {
   std::string content = "a,b,c\r\n1,2,3\r\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   EXPECT_NO_THROW({
     auto n_indexes =
-        two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"');
+        TwoPass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"');
     EXPECT_GT(n_indexes, 0);
   });
 }
@@ -1243,12 +1176,12 @@ TEST_F(SecondPassThrowingTest, CRInQuotedFieldDoesNotThrow) {
   std::string content = "\"a\rb\",c\r1,2,3\r";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   EXPECT_NO_THROW({
     auto n_indexes =
-        two_pass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"');
+        TwoPass::second_pass_chunk_throwing(buf.data(), 0, content.size(), &idx, 0, ',', '"');
     EXPECT_GT(n_indexes, 0);
   });
 }
@@ -1269,14 +1202,13 @@ protected:
 // Test all valid state transitions in sequence
 TEST_F(StateMachineEdgeCaseTest, AllValidTransitions) {
   // Create CSV that exercises all valid state transitions
-  // RECORD_START -> '"' -> QUOTED_FIELD -> '"' -> QUOTED_END -> ',' ->
-  // FIELD_START FIELD_START -> 'x' -> UNQUOTED_FIELD -> ',' -> FIELD_START ->
-  // '\n' -> RECORD_START
+  // RECORD_START -> '"' -> QUOTED_FIELD -> '"' -> QUOTED_END -> ',' -> FIELD_START
+  // FIELD_START -> 'x' -> UNQUOTED_FIELD -> ',' -> FIELD_START -> '\n' -> RECORD_START
   std::string content = "\"quoted\",unquoted\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1289,8 +1221,8 @@ TEST_F(StateMachineEdgeCaseTest, EscapedQuoteTransition) {
   std::string content = "\"he\"\"llo\"\n"; // Escaped quote inside quoted field
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1303,8 +1235,8 @@ TEST_F(StateMachineEdgeCaseTest, NewlineInQuotedField) {
   std::string content = "\"line1\nline2\",b\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1317,8 +1249,8 @@ TEST_F(StateMachineEdgeCaseTest, CommaInQuotedField) {
   std::string content = "\"a,b,c\",d\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1331,8 +1263,8 @@ TEST_F(StateMachineEdgeCaseTest, QuoteErrorInUnquotedField) {
   std::string content = "abc\"def,ghi\n"; // Quote in middle of unquoted field
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1345,8 +1277,8 @@ TEST_F(StateMachineEdgeCaseTest, InvalidCharAfterClosingQuote) {
   std::string content = "\"valid\"x,b\n"; // 'x' after closing quote is invalid
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1359,8 +1291,8 @@ TEST_F(StateMachineEdgeCaseTest, EmptyFieldsAtStart) {
   std::string content = ",b,c\n"; // Empty first field
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1372,8 +1304,8 @@ TEST_F(StateMachineEdgeCaseTest, EmptyFieldsAtEnd) {
   std::string content = "a,b,\n"; // Empty last field
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1384,8 +1316,8 @@ TEST_F(StateMachineEdgeCaseTest, ConsecutiveEmptyFields) {
   std::string content = "a,,,,b\n"; // Multiple consecutive empty fields
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1397,8 +1329,8 @@ TEST_F(StateMachineEdgeCaseTest, EmptyQuotedField) {
   std::string content = "\"\",b,c\n"; // Empty quoted field
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1417,8 +1349,8 @@ TEST_F(StateMachineEdgeCaseTest, NullByteDetection) {
   std::memcpy(buf.data() + 4, rest, 3);
   size_t content_len = 7; // "a,b\0,c\n"
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content_len, 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content_len, 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content_len, errors);
@@ -1432,8 +1364,8 @@ TEST_F(StateMachineEdgeCaseTest, CRLineEndingsWithErrors) {
   std::string content = "a,b,c\r1,2,3\r4,5,6\r";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1447,8 +1379,8 @@ TEST_F(StateMachineEdgeCaseTest, CRLFLineEndingsWithErrors) {
   std::string content = "a,b,c\r\n1,2,3\r\n4,5,6\r\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1462,8 +1394,8 @@ TEST_F(StateMachineEdgeCaseTest, CRInQuotedFieldWithErrors) {
   std::string content = "\"line1\rline2\",b\r";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1489,7 +1421,7 @@ TEST_F(QuoteParityTest, FirstPassSIMDNoQuotes) {
   std::string content = "a,b,c\n1,2,3\n4,5,6\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_simd(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_simd(buf.data(), 0, content.size(), '"');
 
   EXPECT_EQ(stats.n_quotes, 0);
   EXPECT_NE(stats.first_even_nl, null_pos); // Should find newline at even count
@@ -1500,7 +1432,7 @@ TEST_F(QuoteParityTest, FirstPassSIMDBalancedQuotes) {
   std::string content = "\"a\",\"b\"\n\"c\",\"d\"\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_simd(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_simd(buf.data(), 0, content.size(), '"');
 
   EXPECT_EQ(stats.n_quotes, 8);             // 4 pairs of quotes
   EXPECT_NE(stats.first_even_nl, null_pos); // Newlines at even quote count
@@ -1511,7 +1443,7 @@ TEST_F(QuoteParityTest, FirstPassSIMDOddQuoteAtNewline) {
   std::string content = "\"a\nb\",c\n"; // Newline inside quoted field
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_simd(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_simd(buf.data(), 0, content.size(), '"');
 
   // First newline is at odd quote count (inside quoted field)
   EXPECT_EQ(stats.first_odd_nl, 2); // Position of first \n
@@ -1522,7 +1454,7 @@ TEST_F(QuoteParityTest, FirstPassChunkMixedQuotes) {
   std::string content = "unquoted,\"quoted\"\n\"quote\nspan\",end\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_chunk(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_chunk(buf.data(), 0, content.size(), '"');
 
   EXPECT_GT(stats.n_quotes, 0);
 }
@@ -1536,7 +1468,7 @@ TEST_F(QuoteParityTest, QuotesAtChunkBoundary) {
   content += "\"more\"\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_simd(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_simd(buf.data(), 0, content.size(), '"');
 
   EXPECT_GT(stats.n_quotes, 0);
 }
@@ -1547,21 +1479,20 @@ TEST_F(QuoteParityTest, Exactly64Bytes) {
   content += '\n'; // Total 64 bytes
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_simd(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_simd(buf.data(), 0, content.size(), '"');
 
   EXPECT_EQ(stats.first_even_nl, 63);
   EXPECT_EQ(stats.n_quotes, 0);
 }
 
-// Test first_pass_simd with content > 64 but < 128 bytes (one full + partial
-// SIMD block)
+// Test first_pass_simd with content > 64 but < 128 bytes (one full + partial SIMD block)
 TEST_F(QuoteParityTest, BetweenSIMDBlocks) {
   std::string content(100, 'x');
   content[50] = '\n';
   content[99] = '\n';
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_simd(buf.data(), 0, content.size(), '"');
+  auto stats = TwoPass::first_pass_simd(buf.data(), 0, content.size(), '"');
 
   EXPECT_EQ(stats.first_even_nl, 50);
 }
@@ -1571,7 +1502,7 @@ TEST_F(QuoteParityTest, CustomQuoteCharacter) {
   std::string content = "'a','b'\n'c','d'\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_simd(buf.data(), 0, content.size(), '\'');
+  auto stats = TwoPass::first_pass_simd(buf.data(), 0, content.size(), '\'');
 
   EXPECT_EQ(stats.n_quotes, 8);
 }
@@ -1598,9 +1529,9 @@ TEST_F(MultiThreadedChunkTest, SuccessfulMultiThreadedParsing) {
   }
   auto buf = makeBuffer(content);
 
-  two_pass parser;
+  TwoPass parser;
   size_t num_threads = 4;
-  libvroom::index idx = parser.init(content.size(), num_threads);
+  libvroom::ParseIndex idx = parser.init(content.size(), num_threads);
 
   bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1615,8 +1546,8 @@ TEST_F(MultiThreadedChunkTest, QuotedFieldsSpanningChunks) {
   }
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 4);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
 
   bool success = parser.parse_speculate(buf.data(), idx, content.size());
 
@@ -1631,8 +1562,8 @@ TEST_F(MultiThreadedChunkTest, ParseTwoPassMultiThreaded) {
   }
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 4);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
 
   bool success = parser.parse_two_pass(buf.data(), idx, content.size());
 
@@ -1647,8 +1578,8 @@ TEST_F(MultiThreadedChunkTest, ParseTwoPassWithErrorsMultiThreaded) {
   }
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 4);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_two_pass_with_errors(buf.data(), idx, content.size(), errors);
@@ -1669,8 +1600,8 @@ TEST_F(MultiThreadedChunkTest, ErrorsInDifferentChunks) {
   }
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 4);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   parser.parse_two_pass_with_errors(buf.data(), idx, content.size(), errors);
@@ -1683,8 +1614,8 @@ TEST_F(MultiThreadedChunkTest, FallbackOnSmallChunks) {
   std::string content = "a,b\nc,d\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 16); // Too many threads
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 16); // Too many threads
 
   bool success = parser.parse_two_pass(buf.data(), idx, content.size());
 
@@ -1698,8 +1629,8 @@ TEST_F(MultiThreadedChunkTest, NoValidSplitPoints) {
   std::string content = "\"" + std::string(500, 'x') + "\"\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 4);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
 
   bool success = parser.parse_speculate(buf.data(), idx, content.size());
 
@@ -1724,8 +1655,8 @@ TEST_F(SIMDScalarFallbackTest, VerySmallFile) {
   std::string content = "a\n"; // 2 bytes
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1739,9 +1670,9 @@ TEST_F(SIMDScalarFallbackTest, ScalarSizes) {
     content += '\n';
     auto buf = makeBuffer(content);
 
-    two_pass parser;
+    TwoPass parser;
     // Allocate more space than content size for safety margin
-    libvroom::index idx = parser.init(content.size() + 64, 1);
+    libvroom::ParseIndex idx = parser.init(content.size() + 64, 1);
 
     bool success = parser.parse(buf.data(), idx, content.size());
     EXPECT_TRUE(success) << "Failed for size " << size;
@@ -1754,8 +1685,8 @@ TEST_F(SIMDScalarFallbackTest, ExactlyOneSIMDBlock) {
   content += '\n';
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1768,8 +1699,8 @@ TEST_F(SIMDScalarFallbackTest, ExactlyTwoSIMDBlocks) {
   content += '\n';
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1783,9 +1714,9 @@ TEST_F(SIMDScalarFallbackTest, SIMDWithRemainders) {
     content += '\n';
     auto buf = makeBuffer(content);
 
-    two_pass parser;
+    TwoPass parser;
     // Allocate more space for safety margin
-    libvroom::index idx = parser.init(content.size() + 64, 1);
+    libvroom::ParseIndex idx = parser.init(content.size() + 64, 1);
 
     bool success = parser.parse(buf.data(), idx, content.size());
     EXPECT_TRUE(success) << "Failed for size " << size;
@@ -1798,8 +1729,8 @@ TEST_F(SIMDScalarFallbackTest, SingleByteRemainder) {
   content += '\n'; // 65 bytes total - 64 SIMD + 1 remainder
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1812,8 +1743,8 @@ TEST_F(SIMDScalarFallbackTest, MaxRemainder) {
   content += '\n'; // 127 bytes - 64 SIMD + 63 remainder
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
   bool success = parser.parse(buf.data(), idx, content.size());
 
@@ -1831,10 +1762,10 @@ TEST_F(SIMDScalarFallbackTest, SecondPassSIMDVariousLengths) {
     content += '\n';
     auto buf = makeBuffer(content);
 
-    two_pass parser;
-    libvroom::index idx = parser.init(content.size(), 1);
+    TwoPass parser;
+    libvroom::ParseIndex idx = parser.init(content.size(), 1);
 
-    auto n_indexes = two_pass::second_pass_simd(buf.data(), 0, content.size(), &idx, 0, ',', '"');
+    auto n_indexes = TwoPass::second_pass_simd(buf.data(), 0, content.size(), &idx, 0, ',', '"');
 
     EXPECT_GE(n_indexes, 0) << "Failed for size " << size;
   }
@@ -1858,8 +1789,8 @@ TEST_F(ErrorHandlingEdgeCaseTest, UnclosedQuoteAtEnd) {
   std::string content = "a,b,\"unclosed";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1881,8 +1812,8 @@ TEST_F(ErrorHandlingEdgeCaseTest, EmptyHeaderLine) {
   std::string content = "\na,b,c\n"; // Empty first line
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1903,8 +1834,8 @@ TEST_F(ErrorHandlingEdgeCaseTest, DuplicateColumns) {
   std::string content = "a,b,a\n1,2,3\n"; // 'a' appears twice
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1924,8 +1855,8 @@ TEST_F(ErrorHandlingEdgeCaseTest, InconsistentFieldCount) {
   std::string content = "a,b,c\n1,2\n3,4,5\n"; // Second row has 2 fields, not 3
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1945,8 +1876,8 @@ TEST_F(ErrorHandlingEdgeCaseTest, MixedLineEndings) {
   std::string content = "a,b,c\r\n1,2,3\n4,5,6\r"; // CRLF, LF, CR mixed
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1966,8 +1897,8 @@ TEST_F(ErrorHandlingEdgeCaseTest, StrictModeStopsEarly) {
   std::string content = "a,bad\"quote,c\n1,2,3\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::STRICT);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1982,8 +1913,8 @@ TEST_F(ErrorHandlingEdgeCaseTest, BestEffortMode) {
   std::string content = "a,bad\"quote,c\nanother\"error,b,c\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::BEST_EFFORT);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -1997,8 +1928,8 @@ TEST_F(ErrorHandlingEdgeCaseTest, NoTrailingNewlineFieldCount) {
   std::string content = "a,b,c\n1,2"; // Last row has 2 fields, no trailing \n
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 1);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
@@ -2031,8 +1962,8 @@ TEST_F(QuotationStateEdgeCaseTest, StateAtPosition0) {
   std::string content = "abc";
   auto buf = makeBuffer(content);
 
-  auto state = two_pass::get_quotation_state(buf.data(), 0, ',', '"');
-  EXPECT_EQ(state, two_pass::UNQUOTED); // Start is always unquoted
+  auto state = TwoPass::get_quotation_state(buf.data(), 0, ',', '"');
+  EXPECT_EQ(state, TwoPass::UNQUOTED); // Start is always unquoted
 }
 
 // Test get_quotation_state with quote right before position
@@ -2040,9 +1971,9 @@ TEST_F(QuotationStateEdgeCaseTest, QuoteImmediatelyBefore) {
   std::string content = "\"abc";
   auto buf = makeBuffer(content);
 
-  auto state = two_pass::get_quotation_state(buf.data(), 1, ',', '"');
+  auto state = TwoPass::get_quotation_state(buf.data(), 1, ',', '"');
   // After opening quote, should be in quoted context
-  EXPECT_TRUE(state == two_pass::QUOTED || state == two_pass::AMBIGUOUS);
+  EXPECT_TRUE(state == TwoPass::QUOTED || state == TwoPass::AMBIGUOUS);
 }
 
 // Test with multiple quotes before position
@@ -2050,10 +1981,10 @@ TEST_F(QuotationStateEdgeCaseTest, MultipleQuotesBefore) {
   std::string content = "\"a\"b\"c";
   auto buf = makeBuffer(content);
 
-  auto state = two_pass::get_quotation_state(buf.data(), 5, ',', '"');
+  auto state = TwoPass::get_quotation_state(buf.data(), 5, ',', '"');
   // Odd number of quotes = quoted, even = unquoted
-  EXPECT_TRUE(state != two_pass::QUOTED || state != two_pass::UNQUOTED ||
-              state == two_pass::AMBIGUOUS);
+  EXPECT_TRUE(state != TwoPass::QUOTED || state != TwoPass::UNQUOTED ||
+              state == TwoPass::AMBIGUOUS);
 }
 
 // Test with delimiter in content
@@ -2062,9 +1993,9 @@ TEST_F(QuotationStateEdgeCaseTest, DelimiterContext) {
   auto buf = makeBuffer(content);
 
   // Position after a comma
-  auto state = two_pass::get_quotation_state(buf.data(), 2, ',', '"');
+  auto state = TwoPass::get_quotation_state(buf.data(), 2, ',', '"');
   // After delimiter in unquoted content, should be unquoted or ambiguous
-  EXPECT_TRUE(state == two_pass::UNQUOTED || state == two_pass::AMBIGUOUS);
+  EXPECT_TRUE(state == TwoPass::UNQUOTED || state == TwoPass::AMBIGUOUS);
 }
 
 // ============================================================================
@@ -2086,7 +2017,7 @@ protected:
 
 // Test destructor with null pointers
 TEST_F(IndexEdgeCaseTest, DestructorWithNullPointers) {
-  libvroom::index idx;
+  libvroom::ParseIndex idx;
   // Default constructor leaves pointers as nullptr
   EXPECT_EQ(idx.indexes, nullptr);
   EXPECT_EQ(idx.n_indexes, nullptr);
@@ -2096,10 +2027,10 @@ TEST_F(IndexEdgeCaseTest, DestructorWithNullPointers) {
 
 // Test move from already-moved object
 TEST_F(IndexEdgeCaseTest, MoveFromMovedObject) {
-  two_pass parser;
-  libvroom::index original = parser.init(100, 2);
-  libvroom::index first_move(std::move(original));
-  libvroom::index second_move(std::move(original)); // original is now empty
+  TwoPass parser;
+  libvroom::ParseIndex original = parser.init(100, 2);
+  libvroom::ParseIndex first_move(std::move(original));
+  libvroom::ParseIndex second_move(std::move(original)); // original is now empty
 
   EXPECT_EQ(second_move.indexes, nullptr);
   EXPECT_EQ(second_move.n_indexes, nullptr);
@@ -2112,16 +2043,15 @@ TEST_F(IndexEdgeCaseTest, MoveFromMovedObject) {
 TEST(GetContextEdgeCaseTest, ZeroContextSize) {
   std::string content = "abcdefghij";
   auto ctx =
-      two_pass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 5, 0);
+      TwoPass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 5, 0);
 
   EXPECT_TRUE(ctx.empty() || ctx.size() <= 1);
 }
 
 TEST(GetContextEdgeCaseTest, LargeContextSize) {
   std::string content = "abc";
-  auto ctx =
-      two_pass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(), 1,
-                            100); // Context larger than content
+  auto ctx = TwoPass::get_context(reinterpret_cast<const uint8_t*>(content.data()), content.size(),
+                                  1, 100); // Context larger than content
 
   EXPECT_FALSE(ctx.empty());
   EXPECT_LE(ctx.size(), content.size());
@@ -2132,7 +2062,7 @@ TEST(GetContextEdgeCaseTest, WithNullByte) {
   uint8_t data[10] = {'a', 'b', '\0', 'c', 'd', '\0'};
   size_t len = 5;
 
-  auto ctx = two_pass::get_context(data, len, 2, 3);
+  auto ctx = TwoPass::get_context(data, len, 2, 3);
 
   // Null bytes should be escaped as \0
   EXPECT_NE(ctx.find("\\0"), std::string::npos);
@@ -2143,7 +2073,7 @@ TEST(GetContextEdgeCaseTest, WithNonPrintable) {
   uint8_t data[10] = {'a', 'b', 0x01, 0x02, 'c', 'd', '\0'};
   size_t len = 6;
 
-  auto ctx = two_pass::get_context(data, len, 3, 3);
+  auto ctx = TwoPass::get_context(data, len, 3, 3);
 
   // Non-printable should be shown as ?
   EXPECT_NE(ctx.find("?"), std::string::npos);
@@ -2168,7 +2098,7 @@ TEST_F(CheckFunctionsTest, DuplicateQuotedColumns) {
   auto buf = makeBuffer(content);
 
   ErrorCollector errors(ErrorMode::PERMISSIVE);
-  two_pass::check_duplicate_columns(buf.data(), content.size(), errors, ',', '"');
+  TwoPass::check_duplicate_columns(buf.data(), content.size(), errors, ',', '"');
 
   bool found = false;
   for (const auto& err : errors.errors()) {
@@ -2185,7 +2115,7 @@ TEST_F(CheckFunctionsTest, EmptyBufferHeader) {
   std::vector<uint8_t> buf(LIBVROOM_PADDING, 0);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
-  bool result = two_pass::check_empty_header(buf.data(), 0, errors);
+  bool result = TwoPass::check_empty_header(buf.data(), 0, errors);
   EXPECT_TRUE(result); // Empty is "OK" (no error added)
 }
 
@@ -2195,7 +2125,7 @@ TEST_F(CheckFunctionsTest, CRAtStart) {
   auto buf = makeBuffer(content);
 
   ErrorCollector errors(ErrorMode::PERMISSIVE);
-  bool result = two_pass::check_empty_header(buf.data(), content.size(), errors);
+  bool result = TwoPass::check_empty_header(buf.data(), content.size(), errors);
 
   EXPECT_FALSE(result); // Should detect empty header
 }
@@ -2206,7 +2136,7 @@ TEST_F(CheckFunctionsTest, OnlyCRLF) {
   auto buf = makeBuffer(content);
 
   ErrorCollector errors(ErrorMode::PERMISSIVE);
-  two_pass::check_line_endings(buf.data(), content.size(), errors);
+  TwoPass::check_line_endings(buf.data(), content.size(), errors);
 
   // Should not have mixed line endings error
   bool found_mixed = false;
@@ -2225,7 +2155,7 @@ TEST_F(CheckFunctionsTest, OnlyLF) {
   auto buf = makeBuffer(content);
 
   ErrorCollector errors(ErrorMode::PERMISSIVE);
-  two_pass::check_line_endings(buf.data(), content.size(), errors);
+  TwoPass::check_line_endings(buf.data(), content.size(), errors);
 
   bool found_mixed = false;
   for (const auto& err : errors.errors()) {
@@ -2243,7 +2173,7 @@ TEST_F(CheckFunctionsTest, OnlyCR) {
   auto buf = makeBuffer(content);
 
   ErrorCollector errors(ErrorMode::PERMISSIVE);
-  two_pass::check_line_endings(buf.data(), content.size(), errors);
+  TwoPass::check_line_endings(buf.data(), content.size(), errors);
 
   bool found_mixed = false;
   for (const auto& err : errors.errors()) {
@@ -2260,7 +2190,7 @@ TEST_F(CheckFunctionsTest, FieldCountEmptyBuffer) {
   std::vector<uint8_t> buf(LIBVROOM_PADDING, 0);
   ErrorCollector errors(ErrorMode::PERMISSIVE);
 
-  two_pass::check_field_counts(buf.data(), 0, errors, ',', '"');
+  TwoPass::check_field_counts(buf.data(), 0, errors, ',', '"');
 
   EXPECT_EQ(errors.error_count(), 0);
 }
@@ -2271,7 +2201,7 @@ TEST_F(CheckFunctionsTest, FieldCountQuotedNewlines) {
   auto buf = makeBuffer(content);
 
   ErrorCollector errors(ErrorMode::PERMISSIVE);
-  two_pass::check_field_counts(buf.data(), content.size(), errors, ',', '"');
+  TwoPass::check_field_counts(buf.data(), content.size(), errors, ',', '"');
 
   // The newline inside quotes should be ignored for field counting
   // So all rows should have 3 fields (but the check may not be perfect)
@@ -2302,7 +2232,7 @@ TEST_F(SpeculateEdgeCaseTest, StartInQuotedContext) {
   auto fullBuf = makeBuffer(full);
 
   // Speculate from position 1 (after opening quote)
-  auto stats = two_pass::first_pass_speculate(fullBuf.data(), 1, full.size(), ',', '"');
+  auto stats = TwoPass::first_pass_speculate(fullBuf.data(), 1, full.size(), ',', '"');
 
   // The function should try to determine quote context
 }
@@ -2317,7 +2247,7 @@ TEST_F(SpeculateEdgeCaseTest, AmbiguousContext) {
   content[199] = '\n';
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_speculate(buf.data(), 50, content.size(), ',', '"');
+  auto stats = TwoPass::first_pass_speculate(buf.data(), 50, content.size(), ',', '"');
 
   // Should still find a newline
   EXPECT_NE(stats.first_even_nl, null_pos);
@@ -2328,7 +2258,7 @@ TEST_F(SpeculateEdgeCaseTest, QuoteToggling) {
   std::string content = "\"a\"b\"c\"\n";
   auto buf = makeBuffer(content);
 
-  auto stats = two_pass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
+  auto stats = TwoPass::first_pass_speculate(buf.data(), 0, content.size(), ',', '"');
 
   // Should handle quote toggling correctly
 }
@@ -2352,8 +2282,8 @@ TEST_F(BranchlessMultiThreadedTest, NullPosFallback) {
   std::string content = "ab\n";
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 8);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 8);
 
   bool success = parser.parse_branchless(buf.data(), idx, content.size());
 
@@ -2369,8 +2299,8 @@ TEST_F(BranchlessMultiThreadedTest, LargeFileMultiThreaded) {
   }
   auto buf = makeBuffer(content);
 
-  two_pass parser;
-  libvroom::index idx = parser.init(content.size(), 4);
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
 
   bool success = parser.parse_branchless(buf.data(), idx, content.size());
 

@@ -231,6 +231,7 @@ set(VROOM_SOURCES
     src/value_extraction.cpp
     src/streaming.cpp
     src/two_pass.cpp
+    src/branchless_state_machine.cpp
     src/simd_number_parsing.cpp
 )
 

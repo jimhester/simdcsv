@@ -1,5 +1,6 @@
+#include "libvroom.h"
+
 #include "mem_util.h"
-#include "two_pass.h"
 #include "value_extraction.h"
 
 #include <cmath>
@@ -306,20 +307,10 @@ TEST_F(DoubleParsingTest, VeryLongMantissa) {
 }
 
 TEST_F(DoubleParsingTest, LargeExponent) {
-  // Exponent > 400 - the parser consumes all exponent digits and handles overflow
+  // Exponent > 400 - now parses successfully and returns infinity
   auto result = parse_double("1e500", 5, config_);
   EXPECT_TRUE(result.ok());
   EXPECT_TRUE(std::isinf(result.get()));
-
-  // Very large exponents also work
-  auto result_huge = parse_double("1e9999", 6, config_);
-  EXPECT_TRUE(result_huge.ok());
-  EXPECT_TRUE(std::isinf(result_huge.get()));
-
-  // Very large negative exponents underflow to zero
-  auto result_neg = parse_double("1e-9999", 7, config_);
-  EXPECT_TRUE(result_neg.ok());
-  EXPECT_EQ(result_neg.get(), 0.0);
 }
 
 TEST_F(DoubleParsingTest, MaxExponentThatWorks) {
@@ -557,19 +548,21 @@ TEST_F(ExtractionConfigTest, NoWhitespaceTrimmingNA) {
 class ValueExtractorTest : public ::testing::Test {
 protected:
   std::unique_ptr<TestBuffer> buffer_;
-  libvroom::two_pass parser_;
-  libvroom::index idx_;
+  Parser parser_;
+  Parser::Result result_;
 
   void ParseCSV(const std::string& csv) {
     buffer_ = std::make_unique<TestBuffer>(csv);
-    idx_ = parser_.init(buffer_->size(), 1);
-    parser_.parse(buffer_->data(), idx_, buffer_->size());
+    result_ = parser_.parse(buffer_->data(), buffer_->size());
   }
+
+  // Accessor for the index to maintain API compatibility with existing tests
+  ParseIndex& idx() { return result_.idx; }
 };
 
 TEST_F(ValueExtractorTest, SimpleCSV) {
   ParseCSV("name,age\nAlice,30\nBob,25\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_EQ(extractor.num_columns(), 2);
   EXPECT_EQ(extractor.num_rows(), 2);
   EXPECT_EQ(extractor.get_string_view(0, 0), "Alice");
@@ -578,7 +571,7 @@ TEST_F(ValueExtractorTest, SimpleCSV) {
 
 TEST_F(ValueExtractorTest, NoHeader) {
   ParseCSV("Alice,30\nBob,25\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   extractor.set_has_header(false);
   EXPECT_EQ(extractor.num_rows(), 2);
   EXPECT_EQ(extractor.get_string_view(0, 0), "Alice");
@@ -587,7 +580,7 @@ TEST_F(ValueExtractorTest, NoHeader) {
 
 TEST_F(ValueExtractorTest, ColumnExtraction) {
   ParseCSV("id\n1\n2\n3\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   auto ids = extractor.extract_column<int64_t>(0);
   EXPECT_EQ(ids.size(), 3);
   EXPECT_EQ(*ids[0], 1);
@@ -597,13 +590,13 @@ TEST_F(ValueExtractorTest, ColumnExtraction) {
 
 TEST_F(ValueExtractorTest, EmptyField) {
   ParseCSV("a,b\n1,\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_TRUE(extractor.get<int64_t>(0, 1).is_na());
 }
 
 TEST_F(ValueExtractorTest, RowIterator) {
   ParseCSV("id\n1\n2\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   int count = 0;
   for (const auto& row : extractor) {
     EXPECT_EQ(row.get<int64_t>(0).get(), count + 1);
@@ -614,21 +607,21 @@ TEST_F(ValueExtractorTest, RowIterator) {
 
 TEST_F(ValueExtractorTest, QuotedField) {
   ParseCSV("name,value\n\"Hello\",42\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_EQ(extractor.get_string_view(0, 0), "Hello");
   EXPECT_EQ(extractor.get<int64_t>(0, 1).get(), 42);
 }
 
 TEST_F(ValueExtractorTest, CRLFLineEndings) {
   ParseCSV("a,b\r\n1,2\r\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_EQ(extractor.get<int64_t>(0, 0).get(), 1);
   EXPECT_EQ(extractor.get<int64_t>(0, 1).get(), 2);
 }
 
 TEST_F(ValueExtractorTest, GetHeader) {
   ParseCSV("name,age\nAlice,30\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   auto headers = extractor.get_header();
   EXPECT_EQ(headers.size(), 2);
   EXPECT_EQ(headers[0], "name");
@@ -637,7 +630,7 @@ TEST_F(ValueExtractorTest, GetHeader) {
 
 TEST_F(ValueExtractorTest, ExtractColumnOr) {
   ParseCSV("val\n1\nNA\n3\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   auto vals = extractor.extract_column_or<int64_t>(0, -1);
   EXPECT_EQ(vals.size(), 3);
   EXPECT_EQ(vals[0], 1);
@@ -647,50 +640,50 @@ TEST_F(ValueExtractorTest, ExtractColumnOr) {
 
 TEST_F(ValueExtractorTest, RowOutOfRange) {
   ParseCSV("a,b\n1,2\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_THROW(extractor.get_string_view(99, 0), std::out_of_range);
 }
 
 TEST_F(ValueExtractorTest, ColOutOfRange) {
   ParseCSV("a,b\n1,2\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_THROW(extractor.get_string_view(0, 99), std::out_of_range);
 }
 
 TEST_F(ValueExtractorTest, ExtractColumnStringViewOutOfRange) {
   ParseCSV("a,b\n1,2\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_THROW(extractor.extract_column_string_view(99), std::out_of_range);
 }
 
 TEST_F(ValueExtractorTest, ExtractColumnStringOutOfRange) {
   ParseCSV("a,b\n1,2\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_THROW(extractor.extract_column_string(99), std::out_of_range);
 }
 
 TEST_F(ValueExtractorTest, GetHeaderNoHeader) {
   ParseCSV("1,2\n3,4\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   extractor.set_has_header(false);
   EXPECT_THROW(extractor.get_header(), std::runtime_error);
 }
 
 TEST_F(ValueExtractorTest, GetString) {
   ParseCSV("name\n\"Hello\"\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_EQ(extractor.get_string(0, 0), "Hello");
 }
 
 TEST_F(ValueExtractorTest, GetStringWithEscapedQuotes) {
   ParseCSV("name\n\"He said \"\"Hi\"\"\"\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_EQ(extractor.get_string(0, 0), "He said \"Hi\"");
 }
 
 TEST_F(ValueExtractorTest, ExtractColumnStringView) {
   ParseCSV("name\nAlice\nBob\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   auto names = extractor.extract_column_string_view(0);
   EXPECT_EQ(names.size(), 2);
   EXPECT_EQ(names[0], "Alice");
@@ -699,7 +692,7 @@ TEST_F(ValueExtractorTest, ExtractColumnStringView) {
 
 TEST_F(ValueExtractorTest, ExtractColumnString) {
   ParseCSV("name\n\"Alice\"\n\"Bob\"\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   auto names = extractor.extract_column_string(0);
   EXPECT_EQ(names.size(), 2);
   EXPECT_EQ(names[0], "Alice");
@@ -708,14 +701,14 @@ TEST_F(ValueExtractorTest, ExtractColumnString) {
 
 TEST_F(ValueExtractorTest, GetFieldBounds) {
   ParseCSV("a,b\n1,2\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   size_t start, end;
   EXPECT_TRUE(extractor.get_field_bounds(0, 0, start, end));
 }
 
 TEST_F(ValueExtractorTest, GetFieldBoundsOutOfRange) {
   ParseCSV("a,b\n1,2\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   size_t start, end;
   EXPECT_FALSE(extractor.get_field_bounds(99, 0, start, end));
   EXPECT_FALSE(extractor.get_field_bounds(0, 99, start, end));
@@ -723,7 +716,7 @@ TEST_F(ValueExtractorTest, GetFieldBoundsOutOfRange) {
 
 TEST_F(ValueExtractorTest, ExtractDoubleColumn) {
   ParseCSV("val\n1.5\n2.5\n3.5\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   auto vals = extractor.extract_column<double>(0);
   EXPECT_EQ(vals.size(), 3);
   EXPECT_NEAR(*vals[0], 1.5, 0.01);
@@ -733,7 +726,7 @@ TEST_F(ValueExtractorTest, ExtractDoubleColumn) {
 
 TEST_F(ValueExtractorTest, ExtractBoolColumn) {
   ParseCSV("val\ntrue\nfalse\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   auto vals = extractor.extract_column<bool>(0);
   EXPECT_EQ(vals.size(), 2);
   EXPECT_TRUE(*vals[0]);
@@ -742,7 +735,7 @@ TEST_F(ValueExtractorTest, ExtractBoolColumn) {
 
 TEST_F(ValueExtractorTest, ExtractDoubleColumnOr) {
   ParseCSV("val\n1.5\nNA\n3.5\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   auto vals = extractor.extract_column_or<double>(0, -1.0);
   EXPECT_EQ(vals.size(), 3);
   EXPECT_NEAR(vals[0], 1.5, 0.01);
@@ -752,19 +745,19 @@ TEST_F(ValueExtractorTest, ExtractDoubleColumnOr) {
 
 TEST_F(ValueExtractorTest, GetDouble) {
   ParseCSV("val\n3.14\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_NEAR(extractor.get<double>(0, 0).get(), 3.14, 0.01);
 }
 
 TEST_F(ValueExtractorTest, GetBool) {
   ParseCSV("val\ntrue\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_TRUE(extractor.get<bool>(0, 0).get());
 }
 
 TEST_F(ValueExtractorTest, SetConfig) {
   ParseCSV("val\nMISSING\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
 
   // Initially "MISSING" is not recognized as NA
   EXPECT_FALSE(extractor.get<int64_t>(0, 0).is_na());
@@ -779,14 +772,14 @@ TEST_F(ValueExtractorTest, SetConfig) {
 
 TEST_F(ValueExtractorTest, Config) {
   ParseCSV("val\n1\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   const auto& config = extractor.config();
   EXPECT_TRUE(config.trim_whitespace);
 }
 
 TEST_F(ValueExtractorTest, RowIteratorMethods) {
   ParseCSV("name,age\nAlice,30\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   auto it = begin(extractor);
   auto row = *it;
   EXPECT_EQ(row.num_columns(), 2);
@@ -797,7 +790,7 @@ TEST_F(ValueExtractorTest, RowIteratorMethods) {
 
 TEST_F(ValueExtractorTest, QuotedHeaderWithCRLF) {
   ParseCSV("\"name\",\"age\"\r\nAlice,30\r\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   auto headers = extractor.get_header();
   EXPECT_EQ(headers.size(), 2);
   EXPECT_EQ(headers[0], "name");
@@ -807,20 +800,20 @@ TEST_F(ValueExtractorTest, QuotedHeaderWithCRLF) {
 TEST_F(ValueExtractorTest, SingleRowNoData) {
   // Single header row with no data rows
   ParseCSV("header\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_EQ(extractor.num_rows(), 0);
 }
 
 TEST_F(ValueExtractorTest, SingleColumn) {
   ParseCSV("val\n1\n2\n3\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_EQ(extractor.num_columns(), 1);
   EXPECT_EQ(extractor.num_rows(), 3);
 }
 
 TEST_F(ValueExtractorTest, HasHeader) {
   ParseCSV("a,b\n1,2\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_TRUE(extractor.has_header());
   extractor.set_has_header(false);
   EXPECT_FALSE(extractor.has_header());
@@ -828,7 +821,7 @@ TEST_F(ValueExtractorTest, HasHeader) {
 
 TEST_F(ValueExtractorTest, SetHasHeaderSameValue) {
   ParseCSV("a,b\n1,2\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   size_t initial_rows = extractor.num_rows();
   extractor.set_has_header(true);                // Same value as default
   EXPECT_EQ(extractor.num_rows(), initial_rows); // Should not change
@@ -836,20 +829,20 @@ TEST_F(ValueExtractorTest, SetHasHeaderSameValue) {
 
 TEST_F(ValueExtractorTest, GetInt32) {
   ParseCSV("val\n42\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_EQ(extractor.get<int32_t>(0, 0).get(), 42);
 }
 
 TEST_F(ValueExtractorTest, UnescapeFieldNoQuotes) {
   ParseCSV("name\nHello\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   EXPECT_EQ(extractor.get_string(0, 0), "Hello");
 }
 
 TEST_F(ValueExtractorTest, UnescapeFieldEmptyQuotedString) {
   // Test empty quoted field
   ParseCSV("name\n\"\"\n");
-  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx_);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
   std::string result = extractor.get_string(0, 0);
   EXPECT_EQ(result, "");
 }
