@@ -1250,7 +1250,7 @@ public:
       if (!idx.n_indexes)
         return 0;
       size_t total = 0;
-      for (uint8_t t = 0; t < idx.n_threads; ++t) {
+      for (uint16_t t = 0; t < idx.n_threads; ++t) {
         total += idx.n_indexes[t];
       }
       return total;
