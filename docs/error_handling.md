@@ -23,9 +23,22 @@ libvroom provides comprehensive error detection and reporting for malformed CSV 
 1. **Detect common CSV errors** - Quote escaping, field count mismatches, invalid characters
 2. **Provide precise location information** - Line, column, and byte offset
 3. **Support three error modes** - Strict, permissive, and best-effort parsing
-4. **Enable both exception and non-exception workflows** - Choose based on your needs
+4. **Never throw for parse errors** - All errors accessible via `result.errors()`
 5. **Collect multiple errors** - See all problems in one pass (permissive mode)
 6. **Support multi-threaded parsing** - Thread-local error collection with merging
+
+### Key Design Principle
+
+**`Parser::parse()` never throws exceptions for parse errors.** All parse errors are
+returned via the `Result` object's internal `ErrorCollector`, accessible through
+`result.errors()`, `result.has_errors()`, and `result.error_summary()`.
+
+Exceptions are reserved exclusively for truly exceptional conditions such as:
+- System-level memory allocation failures
+- Internal programming errors (bugs in libvroom itself)
+
+This design ensures predictable, non-exceptional control flow for all parsing
+operations, making error handling simpler and more consistent.
 
 ## Error Modes
 
