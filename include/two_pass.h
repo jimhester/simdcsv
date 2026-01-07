@@ -46,7 +46,7 @@
  *
  * @see libvroom::Parser for the unified public API
  * @see libvroom::ParseOptions for configuration options
- * @see libvroom::index for the result structure containing field positions
+ * @see libvroom::ParseIndex for the result structure containing field positions
  */
 
 #include "branchless_state_machine.h"
@@ -63,30 +63,6 @@
 #include <unistd.h> // for getopt
 #include <unordered_set>
 #include <vector>
-
-// Deprecation macro for cross-compiler support
-#if defined(__GNUC__) || defined(__clang__)
-#define LIBVROOM_DEPRECATED(msg) __attribute__((deprecated(msg)))
-#elif defined(_MSC_VER)
-#define LIBVROOM_DEPRECATED(msg) __declspec(deprecated(msg))
-#else
-#define LIBVROOM_DEPRECATED(msg)
-#endif
-
-// Macro to suppress deprecation warnings for internal use
-// (Parser class needs to call deprecated methods)
-#ifdef __GNUC__
-#define LIBVROOM_SUPPRESS_DEPRECATION_START                                                        \
-  _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
-#define LIBVROOM_SUPPRESS_DEPRECATION_END _Pragma("GCC diagnostic pop")
-#elif defined(_MSC_VER)
-#define LIBVROOM_SUPPRESS_DEPRECATION_START                                                        \
-  __pragma(warning(push)) __pragma(warning(disable : 4996))
-#define LIBVROOM_SUPPRESS_DEPRECATION_END __pragma(warning(pop))
-#else
-#define LIBVROOM_SUPPRESS_DEPRECATION_START
-#define LIBVROOM_SUPPRESS_DEPRECATION_END
-#endif
 
 namespace libvroom {
 
@@ -238,15 +214,10 @@ private:
   friend class TwoPass;
 };
 
-/// @brief Backward-compatible alias for ParseIndex.
-/// @deprecated Use ParseIndex instead. This alias will be removed in a future
-/// version.
-using index [[deprecated("Use ParseIndex instead")]] = ParseIndex;
-
 /**
  * @brief High-performance CSV parser using a speculative two-pass algorithm.
  *
- * The two_pass class implements a multi-threaded CSV parsing algorithm that
+ * The TwoPass class implements a multi-threaded CSV parsing algorithm that
  * achieves high performance through SIMD operations and speculative parallel
  * processing. The algorithm is based on research by Chang et al. (SIGMOD 2019)
  * combined with SIMD techniques from Langdale & Lemire (simdjson).
@@ -275,8 +246,8 @@ using index [[deprecated("Use ParseIndex instead")]] = ParseIndex;
  * auto [buffer, length] = libvroom::load_file("data.csv");
  *
  * // Create parser and initialize index
- * libvroom::two_pass parser;
- * libvroom::index idx = parser.init(length, 4);  // 4 threads
+ * libvroom::TwoPass parser;
+ * libvroom::ParseIndex idx = parser.init(length, 4);  // 4 threads
  *
  * // Parse without error collection (throws on error)
  * parser.parse(buffer, idx, length);
@@ -616,34 +587,19 @@ public:
 
   /**
    * @brief Parse using speculative multi-threading with dialect support.
-   *
-   * @deprecated Use Parser::parse() with ParseOptions{.algorithm =
-   * ParseAlgorithm::SPECULATIVE} instead. This method will be made private in a
-   * future version.
    */
-  LIBVROOM_DEPRECATED("Use Parser::parse() with ParseAlgorithm::SPECULATIVE instead")
   bool parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
                        const Dialect& dialect = Dialect::csv());
 
   /**
    * @brief Parse using two-pass algorithm with dialect support.
-   *
-   * @deprecated Use Parser::parse() with ParseOptions{.algorithm =
-   * ParseAlgorithm::TWO_PASS} instead. This method will be made private in a
-   * future version.
    */
-  LIBVROOM_DEPRECATED("Use Parser::parse() with ParseAlgorithm::TWO_PASS instead")
   bool parse_two_pass(const uint8_t* buf, ParseIndex& out, size_t len,
                       const Dialect& dialect = Dialect::csv());
 
   /**
    * @brief Parse a CSV buffer and build the field index.
-   *
-   * @deprecated Use Parser::parse() from libvroom.h instead. The Parser class
-   *             provides a simpler, unified API with automatic index
-   * management.
    */
-  LIBVROOM_DEPRECATED("Use Parser::parse() from libvroom.h instead")
   bool parse(const uint8_t* buf, ParseIndex& out, size_t len,
              const Dialect& dialect = Dialect::csv());
 
@@ -674,21 +630,13 @@ public:
 
   /**
    * @brief Parse a CSV buffer using branchless state machine (optimized).
-   *
-   * @deprecated Use Parser::parse() with ParseOptions::branchless() instead.
    */
-  LIBVROOM_DEPRECATED("Use Parser::parse() with ParseOptions::branchless() instead")
   bool parse_branchless(const uint8_t* buf, ParseIndex& out, size_t len,
                         const Dialect& dialect = Dialect::csv());
 
   /**
    * @brief Parse a CSV buffer with automatic dialect detection.
-   *
-   * @deprecated Use Parser::parse() with default ParseOptions (auto-detects
-   * dialect).
    */
-  LIBVROOM_DEPRECATED("Use Parser::parse() with {.errors = &errors} instead "
-                      "(auto-detects dialect)")
   bool parse_auto(const uint8_t* buf, ParseIndex& out, size_t len, ErrorCollector& errors,
                   DetectionResult* detected = nullptr,
                   const DetectionOptions& detection_options = DetectionOptions());
@@ -718,21 +666,13 @@ public:
 
   /**
    * @brief Parse a CSV buffer with error collection using multi-threading.
-   *
-   * @deprecated Use Parser::parse() with {.dialect = ..., .errors = &errors}
-   * instead.
    */
-  LIBVROOM_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
   bool parse_two_pass_with_errors(const uint8_t* buf, ParseIndex& out, size_t len,
                                   ErrorCollector& errors, const Dialect& dialect = Dialect::csv());
 
   /**
    * @brief Parse a CSV buffer with detailed error collection (single-threaded).
-   *
-   * @deprecated Use Parser::parse() with {.dialect = ..., .errors = &errors}
-   * instead.
    */
-  LIBVROOM_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
   bool parse_with_errors(const uint8_t* buf, ParseIndex& out, size_t len, ErrorCollector& errors,
                          const Dialect& dialect = Dialect::csv());
 
@@ -756,11 +696,7 @@ public:
 
   /**
    * @brief Perform full CSV validation with comprehensive error checking.
-   *
-   * @deprecated Use Parser::parse() with {.dialect = ..., .errors = &errors}
-   * instead.
    */
-  LIBVROOM_DEPRECATED("Use Parser::parse() with {.dialect = ..., .errors = &errors} instead")
   bool parse_validate(const uint8_t* buf, ParseIndex& out, size_t len, ErrorCollector& errors,
                       const Dialect& dialect = Dialect::csv());
 
@@ -774,11 +710,6 @@ public:
    */
   ParseIndex init_safe(size_t len, size_t n_threads, ErrorCollector* errors = nullptr);
 };
-
-/// @brief Backward-compatible alias for TwoPass.
-/// @deprecated Use TwoPass instead. This alias will be removed in a future
-/// version.
-using two_pass [[deprecated("Use TwoPass instead")]] = TwoPass;
 
 } // namespace libvroom
 

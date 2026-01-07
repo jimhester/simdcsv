@@ -115,7 +115,7 @@ static void BM_IndexCreation(benchmark::State& state) {
   size_t file_size = static_cast<size_t>(state.range(0));
   int n_threads = static_cast<int>(state.range(1));
 
-  libvroom::two_pass tp;
+  libvroom::TwoPass tp;
 
   for (auto _ : state) {
     auto result = tp.init(file_size, n_threads);

@@ -33,7 +33,7 @@ struct libvroom_index {
   // Default constructor - index will be populated by Parser::parse()
   libvroom_index(size_t threads) : idx(), num_threads(threads) {}
 
-  // Note: No explicit destructor needed - libvroom::index has its own destructor
+  // Note: No explicit destructor needed - libvroom::ParseIndex has its own destructor
   // that handles cleanup of n_indexes and indexes arrays
 };
 
