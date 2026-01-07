@@ -31,8 +31,8 @@
 using namespace std;
 
 // Constants
-// Note: MAX_THREADS is limited to 255 due to uint8_t n_threads in index struct
-constexpr int MAX_THREADS = 255;
+// MAX_THREADS raised to 1024 with uint16_t n_threads in index struct
+constexpr int MAX_THREADS = 1024;
 constexpr int MIN_THREADS = 1;
 constexpr size_t MAX_COLUMN_WIDTH = 40;
 constexpr size_t DEFAULT_NUM_ROWS = 10;
