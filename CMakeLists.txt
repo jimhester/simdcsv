@@ -232,6 +232,7 @@ set(VROOM_SOURCES
     src/streaming.cpp
     src/two_pass.cpp
     src/branchless_state_machine.cpp
+    src/simd_number_parsing.cpp
 )
 
 # Add type detection source if enabled
