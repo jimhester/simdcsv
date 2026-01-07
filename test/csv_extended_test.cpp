@@ -10,29 +10,16 @@
  * - Fuzz-discovered edge cases
  */
 
-#include "libvroom.h"
-
 #include "error.h"
+#include "io_util.h"
+#include "mem_util.h"
+#include "test_helpers.h"
 #include "two_pass.h"
 
 #include <cstring>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
-
-// RAII wrapper for exception-safe memory management of corpus data
-struct CorpusGuard {
-  libvroom::AlignedBuffer buffer;
-  explicit CorpusGuard(const std::string& path)
-      : buffer(libvroom::load_file_to_ptr(path, LIBVROOM_PADDING)) {}
-  // Non-copyable
-  CorpusGuard(const CorpusGuard&) = delete;
-  CorpusGuard& operator=(const CorpusGuard&) = delete;
-
-  // Provide access to data and size for compatibility
-  const uint8_t* data() const { return buffer.data(); }
-  size_t size() const { return buffer.size; }
-};
 
 class CSVExtendedTest : public ::testing::Test {
 protected:
@@ -60,10 +47,10 @@ TEST_F(CSVExtendedTest, UTF8BOMDetection) {
   CorpusGuard corpus(path);
 
   // Check that file starts with BOM (EF BB BF)
-  ASSERT_GE(corpus.size(), 3) << "File should be at least 3 bytes";
-  EXPECT_EQ(corpus.data()[0], 0xEF) << "First byte should be 0xEF";
-  EXPECT_EQ(corpus.data()[1], 0xBB) << "Second byte should be 0xBB";
-  EXPECT_EQ(corpus.data()[2], 0xBF) << "Third byte should be 0xBF";
+  ASSERT_GE(corpus.data.size, 3) << "File should be at least 3 bytes";
+  EXPECT_EQ(corpus.data.data()[0], 0xEF) << "First byte should be 0xEF";
+  EXPECT_EQ(corpus.data.data()[1], 0xBB) << "Second byte should be 0xBB";
+  EXPECT_EQ(corpus.data.data()[2], 0xBF) << "Third byte should be 0xBF";
 }
 
 TEST_F(CSVExtendedTest, UTF8BOMParsing) {
@@ -71,10 +58,10 @@ TEST_F(CSVExtendedTest, UTF8BOMParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should handle BOM (may or may not skip it)
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle UTF-8 BOM file";
 }
 
@@ -89,8 +76,8 @@ TEST_F(CSVExtendedTest, Latin1Detection) {
 
   // Check for Latin-1 specific bytes (0xE9 = é in Latin-1)
   bool has_latin1_char = false;
-  for (size_t i = 0; i < corpus.size(); ++i) {
-    if (corpus.data()[i] == 0xE9) { // é in Latin-1
+  for (size_t i = 0; i < corpus.data.size; ++i) {
+    if (corpus.data.data()[i] == 0xE9) { // é in Latin-1
       has_latin1_char = true;
       break;
     }
@@ -103,10 +90,10 @@ TEST_F(CSVExtendedTest, Latin1Parsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should parse Latin-1 file (treating bytes as-is)
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle Latin-1 file";
 }
 
@@ -120,9 +107,9 @@ TEST_F(CSVExtendedTest, UTF16BOMDetection) {
   CorpusGuard corpus(path);
 
   // Check that file starts with UTF-16 LE BOM (FF FE)
-  ASSERT_GE(corpus.size(), 2) << "File should be at least 2 bytes";
-  EXPECT_EQ(corpus.data()[0], 0xFF) << "First byte should be 0xFF (UTF-16 LE BOM)";
-  EXPECT_EQ(corpus.data()[1], 0xFE) << "Second byte should be 0xFE (UTF-16 LE BOM)";
+  ASSERT_GE(corpus.data.size, 2) << "File should be at least 2 bytes";
+  EXPECT_EQ(corpus.data.data()[0], 0xFF) << "First byte should be 0xFF (UTF-16 LE BOM)";
+  EXPECT_EQ(corpus.data.data()[1], 0xFE) << "Second byte should be 0xFE (UTF-16 LE BOM)";
 }
 
 TEST_F(CSVExtendedTest, UTF16BOMParsing) {
@@ -134,11 +121,11 @@ TEST_F(CSVExtendedTest, UTF16BOMParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser will attempt to parse but results are undefined for UTF-16
   // We just ensure it doesn't crash but we can verify indexes were created
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   // Just verify parser doesn't crash - UTF-16 is not supported
   EXPECT_NE(idx.n_indexes, nullptr) << "Parser should still allocate indexes";
 }
@@ -157,11 +144,11 @@ TEST_F(CSVExtendedTest, BlankLeadingRowsParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // blank_leading_rows.csv has 5 blank lines before the header
   // This validates that leading blank lines don't corrupt parsing
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle blank leading rows";
 }
 
@@ -175,9 +162,9 @@ TEST_F(CSVExtendedTest, WhitespaceOnlyRowsParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle whitespace-only rows";
 }
 
@@ -191,11 +178,11 @@ TEST_F(CSVExtendedTest, TrimFieldsParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Fields with leading/trailing whitespace should parse correctly
   // Note: libvroom preserves whitespace; trimming is caller responsibility
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle fields with whitespace";
 }
 
@@ -209,9 +196,9 @@ TEST_F(CSVExtendedTest, BlankRowsMixedParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle blank rows mixed throughout";
 }
 
@@ -229,12 +216,12 @@ TEST_F(CSVExtendedTest, LongLineParsing) {
   CorpusGuard corpus(path);
 
   // File should be >10KB
-  EXPECT_GT(corpus.size(), 10000) << "long_line.csv should be >10KB";
+  EXPECT_GT(corpus.data.size, 10000) << "long_line.csv should be >10KB";
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle very long lines";
 }
 
@@ -248,12 +235,12 @@ TEST_F(CSVExtendedTest, LargeFieldParsing) {
   CorpusGuard corpus(path);
 
   // File should be >64KB (larger than typical SIMD buffer)
-  EXPECT_GT(corpus.size(), 64000) << "large_field.csv should be >64KB";
+  EXPECT_GT(corpus.data.size, 64000) << "large_field.csv should be >64KB";
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle very large fields";
 }
 
@@ -267,9 +254,9 @@ TEST_F(CSVExtendedTest, BufferBoundaryParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle quoted newlines at buffer boundaries";
 }
 
@@ -283,12 +270,12 @@ TEST_F(CSVExtendedTest, ParallelChunkBoundaryParsing) {
   CorpusGuard corpus(path);
 
   // File should be ~2MB
-  EXPECT_GT(corpus.size(), 1500000) << "parallel_chunk_boundary.csv should be >1.5MB";
+  EXPECT_GT(corpus.data.size, 1500000) << "parallel_chunk_boundary.csv should be >1.5MB";
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle parallel chunk boundary test file";
 }
 
@@ -298,9 +285,9 @@ TEST_F(CSVExtendedTest, ParallelChunkBoundaryMultiThreaded) {
 
   // Parse with multiple threads to stress test chunk boundaries
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 4); // 4 threads
+  libvroom::index idx = parser.init(corpus.data.size, 4); // 4 threads
 
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Multi-threaded parsing should handle chunk boundaries";
 }
 
@@ -309,9 +296,9 @@ TEST_F(CSVExtendedTest, ParallelChunkBoundary8Threads) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 8); // 8 threads
+  libvroom::index idx = parser.init(corpus.data.size, 8); // 8 threads
 
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "8-thread parsing should handle chunk boundaries";
 }
 
@@ -329,10 +316,10 @@ TEST_F(CSVExtendedTest, HashCommentsParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser currently doesn't skip comments, but should parse without crashing
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle files with comment-like lines";
 }
 
@@ -346,10 +333,10 @@ TEST_F(CSVExtendedTest, QuotedHashParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Hash inside quoted field should NOT be treated as comment
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle # inside quoted fields";
 }
 
@@ -363,11 +350,11 @@ TEST_F(CSVExtendedTest, SemicolonCommentsParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser currently doesn't skip comments, but should parse without crashing
   // Semicolon comments are common in some European CSV formats
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle files with semicolon comment lines";
 }
 
@@ -385,10 +372,10 @@ TEST_F(CSVExtendedTest, FewerColumnsParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should handle rows with fewer columns than header
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle rows with fewer columns";
 }
 
@@ -402,10 +389,10 @@ TEST_F(CSVExtendedTest, MoreColumnsParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should handle rows with more columns than header
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle rows with more columns";
 }
 
@@ -419,10 +406,10 @@ TEST_F(CSVExtendedTest, MixedColumnsParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should handle mixed column counts
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
   EXPECT_TRUE(success) << "Parser should handle mixed column counts";
 }
 
@@ -445,12 +432,12 @@ TEST_F(CSVExtendedTest, BadEscapeParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should handle backslash escapes without crashing
   // (non-RFC 4180 - backslashes are treated as literal characters)
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_validate(corpus.data(), idx, corpus.size(), errors);
+  parser.parse_validate(corpus.data.data(), idx, corpus.data.size, errors);
 
   // Just verify the parser completes without crashing
   EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing without crashing";
@@ -466,12 +453,12 @@ TEST_F(CSVExtendedTest, InvalidUTF8Parsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should not crash on invalid UTF-8 sequences (0xFE, 0xFF, truncated multibyte)
   // Note: UTF-8 validation is not yet implemented (INVALID_UTF8 is reserved)
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_validate(corpus.data(), idx, corpus.size(), errors);
+  parser.parse_validate(corpus.data.data(), idx, corpus.data.size, errors);
 
   // Just verify the parser completes without crashing
   EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing without crashing";
@@ -487,11 +474,11 @@ TEST_F(CSVExtendedTest, ScatteredNullsParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should handle embedded null bytes (0x00) by detecting errors
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_validate(corpus.data(), idx, corpus.size(), errors);
+  parser.parse_validate(corpus.data.data(), idx, corpus.data.size, errors);
 
   // Null bytes should be detected as errors
   EXPECT_TRUE(errors.has_errors()) << "Null bytes should be detected as errors";
@@ -507,10 +494,10 @@ TEST_F(CSVExtendedTest, DeepQuotesParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should handle many consecutive quotes without stack overflow
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
 
   // Deep quotes are valid RFC 4180 - they represent escaped quotes
   EXPECT_TRUE(success) << "Deep quotes (escaped) should parse successfully";
@@ -526,10 +513,10 @@ TEST_F(CSVExtendedTest, QuoteDelimiterAltParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should handle alternating quotes and delimiters
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
 
   // Alternating quotes and delimiters is valid CSV
   EXPECT_TRUE(success) << "Alternating quotes/delimiters should parse";
@@ -545,10 +532,10 @@ TEST_F(CSVExtendedTest, JustQuotesParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should handle file with only quotes
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
 
   // A file of just quotes may or may not be valid depending on count
   EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing";
@@ -564,11 +551,11 @@ TEST_F(CSVExtendedTest, QuoteEOFParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should handle unclosed quote at EOF by detecting the error
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  bool success = parser.parse_validate(corpus.data(), idx, corpus.size(), errors);
+  bool success = parser.parse_validate(corpus.data.data(), idx, corpus.data.size, errors);
 
   // Unclosed quote at EOF should be detected as an error
   EXPECT_FALSE(success) << "Unclosed quote at EOF should fail";
@@ -585,10 +572,10 @@ TEST_F(CSVExtendedTest, MixedCRParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should handle mixed CR and CRLF line endings
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
 
   // Mixed line endings should parse successfully
   EXPECT_TRUE(success) << "Mixed CR/CRLF should parse successfully";
@@ -604,11 +591,11 @@ TEST_F(CSVExtendedTest, AFLBinaryParsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // Parser should not crash on binary garbage (AFL-discovered test case)
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_validate(corpus.data(), idx, corpus.size(), errors);
+  parser.parse_validate(corpus.data.data(), idx, corpus.data.size, errors);
 
   // Binary garbage should be detected as errors
   EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing";
@@ -624,10 +611,10 @@ TEST_F(CSVExtendedTest, AFL10Parsing) {
   CorpusGuard corpus(path);
 
   libvroom::two_pass parser;
-  libvroom::index idx = parser.init(corpus.size(), 1);
+  libvroom::index idx = parser.init(corpus.data.size, 1);
 
   // AFL-discovered edge case test file
-  bool success = parser.parse(corpus.data(), idx, corpus.size());
+  bool success = parser.parse(corpus.data.data(), idx, corpus.data.size);
 
   // AFL edge case should be handled without crashing
   EXPECT_NE(idx.n_indexes, nullptr) << "Parser should complete indexing";

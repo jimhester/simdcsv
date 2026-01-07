@@ -490,8 +490,8 @@ TEST_F(AlgorithmSelectionTest, AlgorithmsProduceSameResults) {
 
 // Test: Algorithm selection with quoted fields
 TEST_F(AlgorithmSelectionTest, BranchlessWithQuotedFields) {
-  auto [data, len] =
-      make_buffer("name,description\n\"Alice\",\"Hello, World\"\n\"Bob\",\"Line1\\nLine2\"\n");
+  auto [data, len] = make_buffer("name,description\n\"Alice\",\"Hello, "
+                                 "World\"\n\"Bob\",\"Line1\\nLine2\"\n");
   libvroom::FileBuffer buffer(data, len);
   libvroom::Parser parser;
 
@@ -1690,7 +1690,8 @@ TEST_F(UnifiedErrorHandlingTest, BackwardCompatibilityWithExternalCollector) {
   EXPECT_EQ(external_errors.error_count(), result.error_count());
 }
 
-// Test: Internal error collector uses PERMISSIVE mode even with external collector
+// Test: Internal error collector uses PERMISSIVE mode even with external
+// collector
 TEST_F(UnifiedErrorHandlingTest, InternalCollectorAlwaysPermissive) {
   auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
   libvroom::FileBuffer buffer(data, len);
@@ -1804,4 +1805,228 @@ TEST_F(UnifiedErrorHandlingTest, ParseMalformedAndIterate) {
     }
   }
   EXPECT_TRUE(found_error);
+}
+
+// ============================================================================
+// Tests for Non-Throwing Error Handling (Issue #281)
+// ============================================================================
+
+class NonThrowingErrorTest : public ::testing::Test {
+protected:
+  static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
+    size_t len = content.size();
+    uint8_t* buf = allocate_padded_buffer(len, 64);
+    std::memcpy(buf, content.data(), len);
+    return {buf, len};
+  }
+};
+
+// Test: Parse errors are captured in result without throwing (no external
+// collector)
+TEST_F(NonThrowingErrorTest, ParseErrorsWithoutExternalCollector) {
+  // CSV with inconsistent field count - should NOT throw
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  // Should NOT throw - errors captured in result
+  libvroom::Parser::Result result;
+  EXPECT_NO_THROW({ result = parser.parse(buffer.data(), buffer.size()); });
+
+  // Parsing succeeds but with errors
+  EXPECT_TRUE(result.success());    // Parsing completed
+  EXPECT_TRUE(result.has_errors()); // But has errors
+  EXPECT_GT(result.error_count(), 0);
+
+  // Check that error is accessible via result.errors()
+  bool found_field_count_error = false;
+  for (const auto& err : result.errors()) {
+    if (err.code == libvroom::ErrorCode::INCONSISTENT_FIELD_COUNT) {
+      found_field_count_error = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found_field_count_error);
+}
+
+// Test: Malformed CSV with unclosed quote - should NOT throw
+TEST_F(NonThrowingErrorTest, QuoteErrorsWithoutExternalCollector) {
+  // CSV with unclosed quote - this is detected as a parse error
+  auto [data, len] = make_buffer("a,b,c\n1,\"unclosed quote,3\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  // Should NOT throw
+  libvroom::Parser::Result result;
+  EXPECT_NO_THROW({ result = parser.parse(buffer.data(), buffer.size()); });
+
+  // Parser should complete but we check it doesn't throw
+  // The unclosed quote may cause various errors or field count issues
+  // The key thing is that it doesn't throw an exception
+}
+
+// Test: Auto-detect dialect with errors - should NOT throw
+TEST_F(NonThrowingErrorTest, AutoDetectWithErrorsNoThrow) {
+  // Semicolon-separated with inconsistent field count
+  auto [data, len] = make_buffer("a;b;c\n1;2;3\n4;5\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  libvroom::Parser::Result result;
+  EXPECT_NO_THROW({ result = parser.parse(buffer.data(), buffer.size()); });
+
+  // Should auto-detect semicolon
+  EXPECT_EQ(result.dialect.delimiter, ';');
+
+  // Should have errors
+  EXPECT_TRUE(result.has_errors());
+}
+
+// Test: Well-formed CSV without external collector - no errors
+TEST_F(NonThrowingErrorTest, WellFormedWithoutExternalCollector) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  auto result = parser.parse(buffer.data(), buffer.size());
+
+  EXPECT_TRUE(result.success());
+  EXPECT_FALSE(result.has_errors());
+  EXPECT_EQ(result.error_count(), 0);
+}
+
+// Test: File size limit error is captured in result, not thrown
+TEST_F(NonThrowingErrorTest, FileSizeLimitErrorNotThrown) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  // Set a very small limit
+  libvroom::SizeLimits limits;
+  limits.max_file_size = 5; // Less than our data
+
+  libvroom::Parser::Result result;
+  EXPECT_NO_THROW({ result = parser.parse(buffer.data(), buffer.size(), {.limits = limits}); });
+
+  EXPECT_FALSE(result.success());
+  EXPECT_TRUE(result.has_errors());
+  EXPECT_TRUE(result.has_fatal_errors());
+
+  // Check for FILE_TOO_LARGE error
+  bool found_size_error = false;
+  for (const auto& err : result.errors()) {
+    if (err.code == libvroom::ErrorCode::FILE_TOO_LARGE) {
+      found_size_error = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found_size_error);
+}
+
+// Test: Explicit dialect with errors - should NOT throw
+TEST_F(NonThrowingErrorTest, ExplicitDialectWithErrorsNoThrow) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  libvroom::Parser::Result result;
+  EXPECT_NO_THROW({
+    result = parser.parse(buffer.data(), buffer.size(), {.dialect = libvroom::Dialect::csv()});
+  });
+
+  EXPECT_TRUE(result.has_errors());
+}
+
+// Test: Branchless algorithm with errors - should NOT throw
+TEST_F(NonThrowingErrorTest, BranchlessAlgorithmWithErrorsNoThrow) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  libvroom::Parser::Result result;
+  EXPECT_NO_THROW({
+    result = parser.parse(buffer.data(), buffer.size(), libvroom::ParseOptions::branchless());
+  });
+
+  EXPECT_TRUE(result.has_errors());
+}
+
+// Test: Errors accessible via result.error_summary()
+TEST_F(NonThrowingErrorTest, ErrorSummaryAccessible) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  auto result = parser.parse(buffer.data(), buffer.size());
+
+  // Error summary should be non-empty
+  std::string summary = result.error_summary();
+  EXPECT_FALSE(summary.empty());
+}
+
+// Test: Internal collector mode is PERMISSIVE
+TEST_F(NonThrowingErrorTest, InternalCollectorIsPermissive) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  auto result = parser.parse(buffer.data(), buffer.size());
+
+  // Internal collector should be PERMISSIVE to collect all errors
+  EXPECT_EQ(result.error_mode(), libvroom::ErrorMode::PERMISSIVE);
+}
+
+// Test: UTF-8 validation errors captured without throwing
+TEST_F(NonThrowingErrorTest, UTF8ValidationErrorsNotThrown) {
+  // Invalid UTF-8 byte
+  std::string content = "a,b,c\n1,\xFF,3\n";
+  auto [data, len] = make_buffer(content);
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  libvroom::SizeLimits limits;
+  limits.validate_utf8 = true;
+
+  libvroom::Parser::Result result;
+  EXPECT_NO_THROW({ result = parser.parse(buffer.data(), buffer.size(), {.limits = limits}); });
+
+  // Should have UTF-8 error
+  bool found_utf8_error = false;
+  for (const auto& err : result.errors()) {
+    if (err.code == libvroom::ErrorCode::INVALID_UTF8) {
+      found_utf8_error = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found_utf8_error);
+}
+
+// Test: Multi-threaded parsing with errors - should NOT throw
+TEST_F(NonThrowingErrorTest, MultiThreadedWithErrorsNoThrow) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n6,7,8,9\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser(4); // 4 threads
+
+  libvroom::Parser::Result result;
+  EXPECT_NO_THROW({ result = parser.parse(buffer.data(), buffer.size()); });
+
+  // Should have errors but not throw
+  EXPECT_TRUE(result.has_errors());
+}
+
+// Test: Errors still work with external collector AND internal result.errors()
+TEST_F(NonThrowingErrorTest, BothExternalAndInternalErrors) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  libvroom::ErrorCollector external_errors(libvroom::ErrorMode::PERMISSIVE);
+  auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &external_errors});
+
+  // Both should have errors
+  EXPECT_TRUE(external_errors.has_errors());
+  EXPECT_TRUE(result.has_errors());
+
+  // Same count
+  EXPECT_EQ(external_errors.error_count(), result.error_count());
 }

@@ -10,24 +10,23 @@
  * hardcoded in the test file - never use with user-provided input.
  */
 
-#include <gtest/gtest.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <gtest/gtest.h>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <sys/wait.h>
+#include <unistd.h>
 
 // Helper class to run CLI commands and capture output
 class CliRunner {
- public:
+public:
   struct Result {
     int exit_code;
-    std::string output;  // Combined stdout/stderr output
+    std::string output; // Combined stdout/stderr output
   };
 
   // Run vroom with given arguments
@@ -58,7 +57,7 @@ class CliRunner {
     if (WIFEXITED(status)) {
       result.exit_code = WEXITSTATUS(status);
     } else if (WIFSIGNALED(status)) {
-      result.exit_code = 128 + WTERMSIG(status);  // Common convention
+      result.exit_code = 128 + WTERMSIG(status); // Common convention
     } else {
       result.exit_code = -1;
     }
@@ -100,7 +99,7 @@ class CliRunner {
 };
 
 class CliTest : public ::testing::Test {
- protected:
+protected:
   static std::string testDataPath(const std::string& relative_path) {
     return "test/data/" + relative_path;
   }
@@ -293,7 +292,7 @@ TEST_F(CliTest, InfoBasicFile) {
   EXPECT_TRUE(result.output.find("Size:") != std::string::npos);
   EXPECT_TRUE(result.output.find("Rows:") != std::string::npos);
   EXPECT_TRUE(result.output.find("Columns:") != std::string::npos);
-  EXPECT_TRUE(result.output.find("3") != std::string::npos);  // columns
+  EXPECT_TRUE(result.output.find("3") != std::string::npos); // columns
 }
 
 TEST_F(CliTest, InfoShowsColumnNames) {
@@ -433,7 +432,8 @@ TEST_F(CliTest, InvalidThreadCount) {
 }
 
 TEST_F(CliTest, InvalidThreadCountTooHigh) {
-  auto result = CliRunner::run("count -t 300 " + testDataPath("basic/simple.csv"));
+  // 1025 exceeds new MAX_THREADS of 1024
+  auto result = CliRunner::run("count -t 1025 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
   EXPECT_TRUE(result.output.find("Thread count") != std::string::npos);
 }
@@ -560,8 +560,7 @@ TEST_F(CliTest, VersionAfterCommand) {
 // =============================================================================
 
 TEST_F(CliTest, HeadWithMultipleOptions) {
-  auto result =
-      CliRunner::run("head -n 2 -t 2 -d comma " + testDataPath("basic/simple.csv"));
+  auto result = CliRunner::run("head -n 2 -t 2 -d comma " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
   EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
 }
@@ -589,8 +588,8 @@ TEST_F(CliTest, MalformedUnclosedQuote) {
   // File has an unclosed quote in the middle - parser should handle gracefully
   auto result = CliRunner::run("count " + testDataPath("malformed/unclosed_quote.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  // Parser processes what it can - row count may vary based on quote interpretation
-  // but should return some reasonable value (not crash or hang)
+  // Parser processes what it can - row count may vary based on quote
+  // interpretation but should return some reasonable value (not crash or hang)
   EXPECT_FALSE(result.output.empty());
 }
 
@@ -642,9 +641,9 @@ TEST_F(CliTest, MalformedInconsistentColumns) {
 }
 
 TEST_F(CliTest, MalformedVariableColumns) {
-  // Regression test for GitHub issue #263: SIGABRT crash on variable column count
-  // File has ~30 rows with column counts varying from 20-26
-  // This previously caused an assertion failure with SIGABRT
+  // Regression test for GitHub issue #263: SIGABRT crash on variable column
+  // count File has ~30 rows with column counts varying from 20-26 This
+  // previously caused an assertion failure with SIGABRT
   auto result = CliRunner::run("head -n 5 " + testDataPath("malformed/variable_columns.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should handle variable column counts gracefully without crashing
@@ -653,7 +652,8 @@ TEST_F(CliTest, MalformedVariableColumns) {
 
 TEST_F(CliTest, MalformedVariableColumnsExplicitDelimiter) {
   // Test with explicit delimiter (disables auto-detection)
-  auto result = CliRunner::run("head -d comma -n 5 " + testDataPath("malformed/variable_columns.csv"));
+  auto result =
+      CliRunner::run("head -d comma -n 5 " + testDataPath("malformed/variable_columns.csv"));
   EXPECT_EQ(result.exit_code, 0);
   EXPECT_FALSE(result.output.empty());
 }
@@ -795,8 +795,8 @@ TEST_F(CliTest, NoHeaderWithColumnNameSelect) {
 }
 
 TEST_F(CliTest, ExcessiveThreadsInvalid) {
-  // More than 255 threads is invalid (limited by uint8_t in index struct)
-  auto result = CliRunner::run("count -t 300 " + testDataPath("basic/simple.csv"));
+  // More than 1024 threads is invalid (limited by MAX_THREADS)
+  auto result = CliRunner::run("count -t 2000 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
 }
 
@@ -910,13 +910,15 @@ TEST_F(CliTest, TailNoHeader) {
   // So we get rows "4,5,6" and "7,8,9" (last 2 of 4 total rows)
   EXPECT_TRUE(result.output.find("4,5,6") != std::string::npos);
   EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
-  // Header "A,B,C" should NOT be in output since we're not treating it as header
+  // Header "A,B,C" should NOT be in output since we're not treating it as
+  // header
   EXPECT_TRUE(result.output.find("A,B,C") == std::string::npos);
 }
 
 TEST_F(CliTest, TailManyRows) {
   // Test with file that has 20 data rows
-  // Uses default multi-threaded parsing (PR #303 fixed SIMD delimiter masking on macOS)
+  // Uses default multi-threaded parsing (PR #303 fixed SIMD delimiter masking
+  // on macOS)
   auto result = CliRunner::run("tail -n 5 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have header
@@ -961,10 +963,13 @@ TEST_F(CliTest, SampleWithNumRows) {
   // simple.csv has rows: 1,2,3 and 4,5,6 and 7,8,9
   // With seed 42, sample should select specific rows from the 3 available
   int data_rows = 0;
-  if (result.output.find("1,2,3") != std::string::npos) data_rows++;
-  if (result.output.find("4,5,6") != std::string::npos) data_rows++;
-  if (result.output.find("7,8,9") != std::string::npos) data_rows++;
-  EXPECT_EQ(data_rows, 2);  // We requested 2 rows
+  if (result.output.find("1,2,3") != std::string::npos)
+    data_rows++;
+  if (result.output.find("4,5,6") != std::string::npos)
+    data_rows++;
+  if (result.output.find("7,8,9") != std::string::npos)
+    data_rows++;
+  EXPECT_EQ(data_rows, 2); // We requested 2 rows
 }
 
 TEST_F(CliTest, SampleMoreRowsThanExist) {
@@ -1003,7 +1008,8 @@ TEST_F(CliTest, SampleReproducibleWithSeed) {
 }
 
 TEST_F(CliTest, SampleDifferentSeeds) {
-  // Different seeds should likely produce different samples (not guaranteed but highly probable)
+  // Different seeds should likely produce different samples (not guaranteed but
+  // highly probable)
   auto result1 = CliRunner::run("sample -n 5 -s 1 " + testDataPath("basic/many_rows.csv"));
   auto result2 = CliRunner::run("sample -n 5 -s 999 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result1.exit_code, 0);
@@ -1020,16 +1026,21 @@ TEST_F(CliTest, SampleNoHeader) {
   // With -H, all 4 rows (including "A,B,C") are treated as data
   // Verify we got exactly 2 data rows
   int data_rows = 0;
-  if (result.output.find("A,B,C") != std::string::npos) data_rows++;
-  if (result.output.find("1,2,3") != std::string::npos) data_rows++;
-  if (result.output.find("4,5,6") != std::string::npos) data_rows++;
-  if (result.output.find("7,8,9") != std::string::npos) data_rows++;
+  if (result.output.find("A,B,C") != std::string::npos)
+    data_rows++;
+  if (result.output.find("1,2,3") != std::string::npos)
+    data_rows++;
+  if (result.output.find("4,5,6") != std::string::npos)
+    data_rows++;
+  if (result.output.find("7,8,9") != std::string::npos)
+    data_rows++;
   EXPECT_EQ(data_rows, 2);
 }
 
 TEST_F(CliTest, SampleManyRows) {
   // Sample from file with 20 data rows
-  // Uses default multi-threaded parsing (PR #303 fixed SIMD delimiter masking on macOS)
+  // Uses default multi-threaded parsing (PR #303 fixed SIMD delimiter masking
+  // on macOS)
   auto result = CliRunner::run("sample -n 5 -s 42 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have header
@@ -1038,38 +1049,52 @@ TEST_F(CliTest, SampleManyRows) {
   // Each data row has format like "1,100,A" or "20,2000,T"
   // Use patterns that are unique to each row to avoid false matches
   int data_rows = 0;
-  if (result.output.find("1,100,A") != std::string::npos) data_rows++;
-  if (result.output.find("2,200,B") != std::string::npos) data_rows++;
-  if (result.output.find("3,300,C") != std::string::npos) data_rows++;
-  if (result.output.find("4,400,D") != std::string::npos) data_rows++;
-  if (result.output.find("5,500,E") != std::string::npos) data_rows++;
-  if (result.output.find("6,600,F") != std::string::npos) data_rows++;
-  if (result.output.find("7,700,G") != std::string::npos) data_rows++;
-  if (result.output.find("8,800,H") != std::string::npos) data_rows++;
-  if (result.output.find("9,900,I") != std::string::npos) data_rows++;
-  if (result.output.find("10,1000,J") != std::string::npos) data_rows++;
-  if (result.output.find("11,1100,K") != std::string::npos) data_rows++;
-  if (result.output.find("12,1200,L") != std::string::npos) data_rows++;
-  if (result.output.find("13,1300,M") != std::string::npos) data_rows++;
-  if (result.output.find("14,1400,N") != std::string::npos) data_rows++;
-  if (result.output.find("15,1500,O") != std::string::npos) data_rows++;
-  if (result.output.find("16,1600,P") != std::string::npos) data_rows++;
-  if (result.output.find("17,1700,Q") != std::string::npos) data_rows++;
-  if (result.output.find("18,1800,R") != std::string::npos) data_rows++;
-  if (result.output.find("19,1900,S") != std::string::npos) data_rows++;
-  if (result.output.find("20,2000,T") != std::string::npos) data_rows++;
-  // Debug output to help diagnose flaky test failures
-  if (data_rows != 5) {
-    std::cerr << "SampleManyRows DEBUG: exit_code=" << result.exit_code
-              << " output_size=" << result.output.size()
-              << " data_rows=" << data_rows << "\n";
-    std::cerr << "SampleManyRows DEBUG: full output:\n[[[" << result.output << "]]]\n";
-  }
-  EXPECT_EQ(data_rows, 5);  // We requested 5 rows
+  if (result.output.find("1,100,A") != std::string::npos)
+    data_rows++;
+  if (result.output.find("2,200,B") != std::string::npos)
+    data_rows++;
+  if (result.output.find("3,300,C") != std::string::npos)
+    data_rows++;
+  if (result.output.find("4,400,D") != std::string::npos)
+    data_rows++;
+  if (result.output.find("5,500,E") != std::string::npos)
+    data_rows++;
+  if (result.output.find("6,600,F") != std::string::npos)
+    data_rows++;
+  if (result.output.find("7,700,G") != std::string::npos)
+    data_rows++;
+  if (result.output.find("8,800,H") != std::string::npos)
+    data_rows++;
+  if (result.output.find("9,900,I") != std::string::npos)
+    data_rows++;
+  if (result.output.find("10,1000,J") != std::string::npos)
+    data_rows++;
+  if (result.output.find("11,1100,K") != std::string::npos)
+    data_rows++;
+  if (result.output.find("12,1200,L") != std::string::npos)
+    data_rows++;
+  if (result.output.find("13,1300,M") != std::string::npos)
+    data_rows++;
+  if (result.output.find("14,1400,N") != std::string::npos)
+    data_rows++;
+  if (result.output.find("15,1500,O") != std::string::npos)
+    data_rows++;
+  if (result.output.find("16,1600,P") != std::string::npos)
+    data_rows++;
+  if (result.output.find("17,1700,Q") != std::string::npos)
+    data_rows++;
+  if (result.output.find("18,1800,R") != std::string::npos)
+    data_rows++;
+  if (result.output.find("19,1900,S") != std::string::npos)
+    data_rows++;
+  if (result.output.find("20,2000,T") != std::string::npos)
+    data_rows++;
+  EXPECT_EQ(data_rows, 5); // We requested 5 rows
 }
 
 TEST_F(CliTest, SampleFromStdin) {
-  auto result = CliRunner::runWithFileStdin("sample -n 2 -s 42 -", testDataPath("basic/simple.csv"));
+  auto result =
+      CliRunner::runWithFileStdin("sample -n 2 -s 42 -", testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
   EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
 }
@@ -1209,8 +1234,8 @@ TEST_F(CliTest, TailCRLineEndingsFile) {
   auto result = CliRunner::run("tail -n 1 " + testDataPath("line_endings/cr.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Output should not be empty - CR line endings should be handled gracefully
-  // Note: CR line endings cause the entire file to appear as one line to the parser,
-  // so exact content verification is complex
+  // Note: CR line endings cause the entire file to appear as one line to the
+  // parser, so exact content verification is complex
 }
 
 TEST_F(CliTest, SampleCRLineEndingsFile) {
@@ -1244,7 +1269,8 @@ TEST_F(CliTest, TailMixedLineEndingsFile) {
 
 TEST_F(CliTest, SampleMixedLineEndingsFile) {
   // Test sample on file with mixed line endings
-  auto result = CliRunner::run("sample -n 2 -s 42 " + testDataPath("malformed/mixed_line_endings.csv"));
+  auto result =
+      CliRunner::run("sample -n 2 -s 42 " + testDataPath("malformed/mixed_line_endings.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should handle mixed line endings gracefully
 }
@@ -1526,8 +1552,14 @@ TEST_F(CliTest, CountSingleThread) {
 }
 
 TEST_F(CliTest, CountMaxThreads) {
-  // Test with maximum valid thread count
-  auto result = CliRunner::run("count -t 255 " + testDataPath("basic/simple.csv"));
+  // Test with maximum valid thread count (1024 after uint16_t change)
+  auto result = CliRunner::run("count -t 1024 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, CountManyThreads) {
+  // Test with thread count above old uint8_t limit (255)
+  auto result = CliRunner::run("count -t 500 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 0);
 }
 
@@ -1827,14 +1859,14 @@ TEST_F(CliTest, PrettyUtf8ShortFieldsNotTruncated) {
 // ============================================================================
 
 TEST_F(CliTest, RegressionIssue264_ExtremelyWideCsv) {
-  // Regression test for GitHub issue #264: SIGSEGV crash on extremely wide CSV files
-  // The bug was in index buffer allocation for multi-threaded parsing.
+  // Regression test for GitHub issue #264: SIGSEGV crash on extremely wide CSV
+  // files The bug was in index buffer allocation for multi-threaded parsing.
   // Files with very high separator density (many columns) could overflow the
   // interleaved index buffer because the allocation didn't account for the
   // stride pattern used in multi-threaded mode.
   //
-  // The test file has 16384 columns and 74 rows (~868K separators in ~876KB file).
-  // This previously caused a segmentation fault.
+  // The test file has 16384 columns and 74 rows (~868K separators in ~876KB
+  // file). This previously caused a segmentation fault.
   auto result = CliRunner::run("head -n 5 " + testDataPath("edge_cases/extremely_wide.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should successfully parse and output the first rows
@@ -1857,4 +1889,109 @@ TEST_F(CliTest, RegressionIssue264_ExtremelyWideCsvCount) {
   EXPECT_EQ(result.exit_code, 0);
   // Should return a valid row count
   EXPECT_FALSE(result.output.empty());
+}
+
+// =============================================================================
+// Strict Mode Tests
+// Tests for --strict / -S flag functionality (GitHub issue #354)
+// =============================================================================
+
+TEST_F(CliTest, StrictModeShortFlag) {
+  // -S flag should work on well-formed CSV
+  auto result = CliRunner::run("head -S " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeLongFlag) {
+  // --strict flag should work on well-formed CSV
+  auto result = CliRunner::run("head --strict " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeUnclosedQuoteReturnsError) {
+  // Unclosed quote should cause exit code 1 in strict mode
+  auto result = CliRunner::run("head -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Error:") != std::string::npos ||
+              result.output.find("Strict mode") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeUnclosedQuoteLongFlag) {
+  // Unclosed quote should cause exit code 1 in strict mode (long flag)
+  auto result = CliRunner::run("head --strict " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Error:") != std::string::npos ||
+              result.output.find("Strict mode") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeUnclosedQuoteEof) {
+  // Unclosed quote at EOF should cause exit code 1 in strict mode
+  auto result = CliRunner::run("head -S " + testDataPath("malformed/unclosed_quote_eof.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, NonStrictModeUnclosedQuoteSucceeds) {
+  // Without strict mode, unclosed quote should still succeed (lenient parsing)
+  auto result = CliRunner::run("head " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, StrictModeTailCommand) {
+  // Strict mode should work with tail command
+  auto result = CliRunner::run("tail -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModeSampleCommand) {
+  // Strict mode should work with sample command
+  auto result = CliRunner::run("sample -n 5 -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModeSelectCommand) {
+  // Strict mode should work with select command
+  auto result = CliRunner::run("select -c 0 -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModeInfoCommand) {
+  // Strict mode should work with info command
+  auto result = CliRunner::run("info -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModePrettyCommand) {
+  // Strict mode should work with pretty command
+  auto result = CliRunner::run("pretty -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModeHelpDocumented) {
+  // Help text should document the strict flag
+  auto result = CliRunner::run("-h");
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("--strict") != std::string::npos);
+  EXPECT_TRUE(result.output.find("-S") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeWithValidFile) {
+  // Strict mode should succeed with completely valid CSV
+  auto result = CliRunner::run("head -S " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("1,2,3") != std::string::npos);
+}
+
+TEST_F(CliTest, StrictModeInvalidQuoteEscape) {
+  // Invalid quote escape should fail in strict mode
+  auto result = CliRunner::run("head -S " + testDataPath("malformed/invalid_quote_escape.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StrictModeQuoteInUnquotedField) {
+  // Quote appearing in unquoted field should fail in strict mode
+  auto result = CliRunner::run("head -S " + testDataPath("malformed/quote_in_unquoted_field.csv"));
+  EXPECT_EQ(result.exit_code, 1);
 }

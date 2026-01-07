@@ -20,7 +20,8 @@
 namespace libvroom {
 
 // RAII wrapper for aligned memory to ensure proper cleanup on all code paths
-// This prevents memory leaks when exceptions are thrown during parsing or conversion
+// This prevents memory leaks when exceptions are thrown during parsing or
+// conversion
 struct AlignedDeleter {
   void operator()(uint8_t* ptr) const noexcept {
     if (ptr)
@@ -216,13 +217,13 @@ ArrowConverter::extract_field_ranges(const uint8_t* buf, size_t len, const Parse
   if (idx.n_threads == 0)
     return columns;
   size_t total_seps = 0;
-  for (uint8_t t = 0; t < idx.n_threads; ++t)
+  for (uint16_t t = 0; t < idx.n_threads; ++t)
     total_seps += idx.n_indexes[t];
   if (total_seps == 0)
     return columns;
   std::vector<uint64_t> all_positions;
   all_positions.reserve(total_seps);
-  for (uint8_t t = 0; t < idx.n_threads; ++t)
+  for (uint16_t t = 0; t < idx.n_threads; ++t)
     for (size_t i = 0; i < idx.n_indexes[t]; ++i) {
       uint64_t pos = idx.indexes[t + i * idx.n_threads];
       if (pos < len)
@@ -420,13 +421,15 @@ ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const
   }
 
   // Validate total cell count against security limit (with overflow protection)
-  // CSVs with individually acceptable dimensions can still exhaust memory through
-  // their multiplicative effect (e.g., 9999 columns × 1M rows = ~10B cells)
+  // CSVs with individually acceptable dimensions can still exhaust memory
+  // through their multiplicative effect (e.g., 9999 columns × 1M rows = ~10B
+  // cells)
   if (options_.max_total_cells > 0 && num_columns > 0) {
     // Use division-based check to prevent integer overflow in multiplication.
-    // If num_rows > max_total_cells / num_columns, then num_rows * num_columns > max_total_cells.
-    // This is guaranteed by integer division properties and avoids computing the potentially
-    // overflowing product. The num_columns > 0 check prevents division by zero.
+    // If num_rows > max_total_cells / num_columns, then num_rows * num_columns
+    // > max_total_cells. This is guaranteed by integer division properties and
+    // avoids computing the potentially overflowing product. The num_columns > 0
+    // check prevents division by zero.
     if (num_rows > options_.max_total_cells / num_columns) {
       result.error_message = "Total cell count (" + std::to_string(num_columns) + " columns × " +
                              std::to_string(num_rows) + " rows) exceeds maximum allowed " +
@@ -438,11 +441,11 @@ ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const
   // Extract column names from header
   std::vector<std::string> column_names;
   size_t total_seps = 0;
-  for (uint8_t t = 0; t < idx.n_threads; ++t)
+  for (uint16_t t = 0; t < idx.n_threads; ++t)
     total_seps += idx.n_indexes[t];
   if (total_seps > 0) {
     std::vector<uint64_t> all_positions;
-    for (uint8_t t = 0; t < idx.n_threads; ++t)
+    for (uint16_t t = 0; t < idx.n_threads; ++t)
       for (size_t i = 0; i < idx.n_indexes[t]; ++i) {
         uint64_t pos = idx.indexes[t + i * idx.n_threads];
         if (pos < len)
@@ -493,7 +496,7 @@ ArrowConvertResult csv_to_arrow(const std::string& filename, const ArrowConvertO
     parser.parse(buffer.get(), idx, size, dialect);
     ArrowConverter converter(options);
     result = converter.convert(buffer.get(), size, idx, dialect);
-    // Memory automatically freed when buffer goes out of scope
+    // buffer automatically frees memory when it goes out of scope
   } catch (const std::exception& e) {
     result.error_message = e.what();
   }

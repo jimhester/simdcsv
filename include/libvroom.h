@@ -1,6 +1,7 @@
 /**
  * @file libvroom.h
- * @brief libvroom - High-performance CSV parser using portable SIMD instructions.
+ * @brief libvroom - High-performance CSV parser using portable SIMD
+ * instructions.
  * @version 0.1.0
  *
  * This is the main public header for the libvroom library. Include this single
@@ -138,7 +139,8 @@ struct SizeLimits {
   bool validate_utf8 = false;
 
   /**
-   * @brief Factory for default limits (10GB file, 16MB field, no UTF-8 validation).
+   * @brief Factory for default limits (10GB file, 16MB field, no UTF-8
+   * validation).
    */
   static SizeLimits defaults() { return SizeLimits{}; }
 
@@ -206,30 +208,38 @@ inline bool would_overflow_add(size_t a, size_t b) {
  * dialect selection, error handling, and algorithm selection into a single
  * structure. This enables a single parse() method to handle all use cases.
  *
+ * **Key Design Principle**: Parser::parse() never throws for parse errors.
+ * All errors are collected in the Result object's internal ErrorCollector,
+ * accessible via result.errors(). Exceptions are reserved for truly exceptional
+ * conditions (e.g., system-level memory allocation failures).
+ *
  * Key behaviors:
  * - **Dialect**: If dialect is nullopt (default), the dialect is auto-detected
- *   from the data. Set an explicit dialect (e.g., Dialect::csv()) to skip detection.
- * - **Error collection**: If errors is nullptr (default), parsing uses the fast
- *   path and throws on errors. Provide an ErrorCollector for error-tolerant parsing.
- * - **Algorithm**: Choose parsing algorithm for performance tuning. Default (AUTO)
- *   uses speculative multi-threaded parsing.
- * - **Detection options**: Only used when dialect is nullopt and auto-detection runs.
+ *   from the data. Set an explicit dialect (e.g., Dialect::csv()) to skip
+ * detection.
+ * - **Error collection**: Errors are always collected in result.errors().
+ *   An external ErrorCollector can optionally be provided for backward
+ * compatibility.
+ * - **Algorithm**: Choose parsing algorithm for performance tuning. Default
+ * (AUTO) uses speculative multi-threaded parsing.
+ * - **Detection options**: Only used when dialect is nullopt and auto-detection
+ * runs.
  *
  * @example
  * @code
  * Parser parser;
  *
- * // Auto-detect dialect, throw on errors (fast path)
+ * // Simple usage - check result for errors
  * auto result = parser.parse(buf, len);
+ * if (!result.success() || result.has_errors()) {
+ *     std::cerr << result.error_summary() << std::endl;
+ * }
  *
- * // Auto-detect dialect, collect errors
- * ErrorCollector errors(ErrorMode::PERMISSIVE);
- * auto result = parser.parse(buf, len, {.errors = &errors});
- *
- * // Explicit CSV dialect, throw on errors
+ * // Explicit CSV dialect
  * auto result = parser.parse(buf, len, {.dialect = Dialect::csv()});
  *
- * // Explicit dialect with error collection
+ * // Explicit dialect (backward compatible with external collector)
+ * ErrorCollector errors(ErrorMode::PERMISSIVE);
  * auto result = parser.parse(buf, len, {
  *     .dialect = Dialect::tsv(),
  *     .errors = &errors
@@ -244,7 +254,7 @@ inline bool would_overflow_add(size_t a, size_t b) {
  *
  * @see Parser::parse() for the unified parsing method
  * @see Dialect for dialect configuration options
- * @see ErrorCollector for error handling configuration
+ * @see Result::errors() for accessing parse errors
  * @see ParseAlgorithm for algorithm selection
  */
 struct ParseOptions {
@@ -305,7 +315,8 @@ struct ParseOptions {
    * @brief Algorithm to use for parsing.
    *
    * Allows selecting different parsing implementations for performance tuning.
-   * Default is AUTO which currently uses the speculative multi-threaded algorithm.
+   * Default is AUTO which currently uses the speculative multi-threaded
+   * algorithm.
    *
    * Note: When errors is non-null, some algorithms may fall back to simpler
    * implementations to ensure accurate error position tracking.
@@ -494,7 +505,8 @@ public:
    * Release ownership of the buffer and return the raw pointer.
    * After calling this method, the FileBuffer no longer owns the memory
    * and the caller is responsible for freeing it using aligned_free().
-   * @return The raw pointer to the buffer data, or nullptr if the buffer was empty/invalid.
+   * @return The raw pointer to the buffer data, or nullptr if the buffer was
+   * empty/invalid.
    */
   uint8_t* release() {
     uint8_t* ptr = data_;
@@ -604,7 +616,8 @@ struct AlignedBuffer {
  *
  * @param filename Path to the file to load.
  * @param padding Extra bytes to allocate for SIMD overreads (default: 64).
- * @return AlignedBuffer containing the file data. Check with if(buffer) or valid().
+ * @return AlignedBuffer containing the file data. Check with if(buffer) or
+ * valid().
  * @throws std::runtime_error if file cannot be opened or read.
  *
  * @example
@@ -632,7 +645,8 @@ inline AlignedBuffer load_file_to_ptr(const std::string& filename, size_t paddin
  * Useful for piping data into CSV processing tools.
  *
  * @param padding Extra bytes to allocate for SIMD overreads (default: 64).
- * @return AlignedBuffer containing the stdin data. Check with if(buffer) or valid().
+ * @return AlignedBuffer containing the stdin data. Check with if(buffer) or
+ * valid().
  * @throws std::runtime_error if reading fails or allocation fails.
  *
  * @example
@@ -647,6 +661,7 @@ inline AlignedBuffer load_file_to_ptr(const std::string& filename, size_t paddin
  * @endcode
  *
  * @see load_file_to_ptr() For loading from files.
+ * @see read_stdin() For lower-level access.
  */
 inline AlignedBuffer load_stdin_to_ptr(size_t padding = 64) {
   auto [ptr, size] = read_stdin(padding);
@@ -669,7 +684,8 @@ inline AlignedBuffer load_stdin_to_ptr(size_t padding = 64) {
  * @param len Length of data in bytes
  * @param errors ErrorCollector to receive validation errors
  *
- * @note This is an internal function used by Parser when SizeLimits::validate_utf8 is true.
+ * @note This is an internal function used by Parser when
+ * SizeLimits::validate_utf8 is true.
  */
 inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollector& errors) {
   size_t line = 1;
@@ -850,11 +866,12 @@ public:
   /**
    * @brief A single row in a parsed CSV result.
    *
-   * Row provides access to individual fields within a row by column index or name.
-   * It supports type-safe value extraction with automatic type conversion.
+   * Row provides access to individual fields within a row by column index or
+   * name. It supports type-safe value extraction with automatic type
+   * conversion.
    *
-   * @note Row objects are lightweight views that do not own the underlying data.
-   *       They remain valid only as long as the parent Result object exists.
+   * @note Row objects are lightweight views that do not own the underlying
+   * data. They remain valid only as long as the parent Result object exists.
    */
   class Row {
   public:
@@ -865,7 +882,8 @@ public:
     /**
      * @brief Get a field value by column index with type conversion.
      *
-     * @tparam T The type to convert to (int32_t, int64_t, double, bool, std::string)
+     * @tparam T The type to convert to (int32_t, int64_t, double, bool,
+     * std::string)
      * @param col Column index (0-based)
      * @return ExtractResult<T> containing the value or error/NA status
      *
@@ -884,7 +902,8 @@ public:
     /**
      * @brief Get a field value by column name with type conversion.
      *
-     * @tparam T The type to convert to (int32_t, int64_t, double, bool, std::string)
+     * @tparam T The type to convert to (int32_t, int64_t, double, bool,
+     * std::string)
      * @param name Column name (must match header exactly)
      * @return ExtractResult<T> containing the value or error/NA status
      * @throws std::out_of_range if column name is not found
@@ -906,8 +925,9 @@ public:
     /**
      * @brief Get a string view of a field by column index.
      *
-     * This is the most efficient way to access string data as it avoids copying.
-     * The returned view is valid only as long as the parent Result exists.
+     * This is the most efficient way to access string data as it avoids
+     * copying. The returned view is valid only as long as the parent Result
+     * exists.
      *
      * @param col Column index (0-based)
      * @return std::string_view of the field contents (quotes stripped)
@@ -969,8 +989,8 @@ public:
   /**
    * @brief Iterator for iterating over rows in a parsed CSV result.
    *
-   * RowIterator is a forward iterator that yields Row objects for each data row.
-   * It skips the header row automatically when has_header is true.
+   * RowIterator is a forward iterator that yields Row objects for each data
+   * row. It skips the header row automatically when has_header is true.
    */
   class ResultRowIterator {
   public:
@@ -1008,7 +1028,8 @@ public:
   /**
    * @brief Iterable view over rows in a parsed CSV result.
    *
-   * RowView provides begin() and end() iterators for use in range-based for loops.
+   * RowView provides begin() and end() iterators for use in range-based for
+   * loops.
    */
   class RowView {
   public:
@@ -1037,10 +1058,12 @@ public:
    * @brief Result of a parsing operation.
    *
    * Contains the parsed index, dialect used (or detected), and success status.
-   * This structure is move-only since the underlying index contains raw pointers.
+   * This structure is move-only since the underlying index contains raw
+   * pointers.
    *
-   * Result provides a convenient API for iterating over rows and accessing columns,
-   * as well as integrated error handling through the built-in ErrorCollector.
+   * Result provides a convenient API for iterating over rows and accessing
+   * columns, as well as integrated error handling through the built-in
+   * ErrorCollector.
    *
    * @example Row iteration
    * @code
@@ -1150,7 +1173,7 @@ public:
       if (!idx.n_indexes)
         return 0;
       size_t total = 0;
-      for (uint8_t t = 0; t < idx.n_threads; ++t) {
+      for (uint16_t t = 0; t < idx.n_threads; ++t) {
         total += idx.n_indexes[t];
       }
       return total;
@@ -1269,7 +1292,8 @@ public:
     }
 
     /**
-     * @brief Extract a column by name with a default value for NA/missing entries.
+     * @brief Extract a column by name with a default value for NA/missing
+     * entries.
      *
      * @tparam T The type to convert values to.
      * @param name Column name.
@@ -1498,65 +1522,80 @@ public:
    * @brief Unified parse method with configurable options.
    *
    * This is the primary parsing method that handles all use cases through
-   * the ParseOptions structure. It unifies the previous parse(), parse_with_errors(),
-   * and parse_auto() methods into a single entry point.
+   * the ParseOptions structure. It unifies the previous parse(),
+   * parse_with_errors(), and parse_auto() methods into a single entry point.
+   *
+   * **Key Design Principle**: This method never throws exceptions for parse
+   * errors. Parse errors are always returned via the Result object's
+   * error_collector(). Exceptions are reserved for truly exceptional conditions
+   * (e.g., memory allocation failures at the system level).
    *
    * Behavior based on options:
    * - **dialect = nullopt** (default): Auto-detect dialect from data
    * - **dialect = Dialect::xxx()**: Use the specified dialect
-   * - **errors = nullptr** (default): Fast path, throws on errors
-   * - **errors = &collector**: Collect errors, continue parsing based on mode
+   * - **errors = nullptr** (default): Errors collected in result.errors()
+   * - **errors = &collector**: Errors go to both external and result.errors()
    *
-   * @param buf Pointer to the CSV data buffer. Must remain valid during parsing.
-   *            Should have at least 64 bytes of padding beyond len for SIMD safety.
+   * @param buf Pointer to the CSV data buffer. Must remain valid during
+   * parsing. Should have at least 64 bytes of padding beyond len for SIMD
+   * safety.
    * @param len Length of the CSV data in bytes (excluding any padding).
-   * @param options Configuration options for parsing (default: auto-detect, fast path).
+   * @param options Configuration options for parsing (default: auto-detect).
    *
-   * @return Result containing the parsed index, dialect used, and detection info.
+   * @return Result containing the parsed index, dialect used, detection info,
+   *         and any errors via result.errors().
    *
-   * @throws std::runtime_error On parsing errors when options.errors is nullptr.
+   * @note This method does NOT throw for parse errors. Check result.success()
+   *       and result.has_errors() to detect parsing issues.
    *
    * @example
    * @code
    * Parser parser;
    *
-   * // Auto-detect dialect, throw on errors (simplest usage)
+   * // Simple usage - errors accessible via result
    * auto result = parser.parse(buf, len);
+   * if (!result.success() || result.has_errors()) {
+   *     for (const auto& err : result.errors()) {
+   *         std::cerr << err.to_string() << std::endl;
+   *     }
+   * }
    *
-   * // Auto-detect with error collection
-   * ErrorCollector errors(ErrorMode::PERMISSIVE);
-   * auto result = parser.parse(buf, len, {.errors = &errors});
-   *
-   * // Explicit CSV dialect
+   * // Explicit dialect
    * auto result = parser.parse(buf, len, {.dialect = Dialect::csv()});
    *
-   * // Explicit TSV dialect with error collection
-   * auto result = parser.parse(buf, len, ParseOptions::with_dialect_and_errors(
-   *     Dialect::tsv(), errors));
+   * // With external error collector (backward compatibility)
+   * ErrorCollector errors(ErrorMode::PERMISSIVE);
+   * auto result = parser.parse(buf, len, {.errors = &errors});
    * @endcode
    *
    * @see ParseOptions for configuration details
+   * @see Result::errors() for accessing parse errors
    */
   Result parse(const uint8_t* buf, size_t len, const ParseOptions& options = ParseOptions{}) {
     Result result;
 
+    // Determine which error collector to use:
+    // - If external collector provided, use it and copy errors to internal
+    // collector
+    // - Otherwise, use the internal collector directly (never throw for parse
+    // errors)
+    ErrorCollector* collector =
+        options.errors != nullptr ? options.errors : &result.error_collector();
+
     // SECURITY: Validate file size limits before any allocation
     if (options.limits.max_file_size > 0 && len > options.limits.max_file_size) {
+      collector->add_error(ErrorCode::FILE_TOO_LARGE, ErrorSeverity::FATAL, 1, 1, 0,
+                           "File size " + std::to_string(len) + " bytes exceeds maximum " +
+                               std::to_string(options.limits.max_file_size) + " bytes");
       if (options.errors != nullptr) {
-        options.errors->add_error(ErrorCode::FILE_TOO_LARGE, ErrorSeverity::FATAL, 1, 1, 0,
-                                  "File size " + std::to_string(len) + " bytes exceeds maximum " +
-                                      std::to_string(options.limits.max_file_size) + " bytes");
         result.error_collector().merge_from(*options.errors);
-        result.successful = false;
-        return result;
-      } else {
-        throw std::runtime_error("File size " + std::to_string(len) + " bytes exceeds maximum " +
-                                 std::to_string(options.limits.max_file_size) + " bytes");
       }
+      result.successful = false;
+      return result;
     }
 
     // Initialize index with size limits (will validate overflow internally)
-    result.idx = parser_.init_safe(len, num_threads_, options.errors);
+    result.idx = parser_.init_safe(len, num_threads_, collector);
     if (result.idx.indexes == nullptr) {
       // Allocation failed or would overflow
       if (options.errors != nullptr) {
@@ -1567,10 +1606,12 @@ public:
     }
 
     // UTF-8 validation (optional, enabled via SizeLimits::validate_utf8)
-    if (options.limits.validate_utf8 && options.errors != nullptr) {
-      validate_utf8_internal(buf, len, *options.errors);
-      if (options.errors->should_stop()) {
-        result.error_collector().merge_from(*options.errors);
+    if (options.limits.validate_utf8) {
+      validate_utf8_internal(buf, len, *collector);
+      if (collector->should_stop()) {
+        if (options.errors != nullptr) {
+          result.error_collector().merge_from(*options.errors);
+        }
         result.successful = false;
         return result;
       }
@@ -1590,46 +1631,52 @@ public:
     // (Parser is the public API that wraps these deprecated methods)
     LIBVROOM_SUPPRESS_DEPRECATION_START
 
-    // Select parsing implementation based on algorithm and error collection
-    if (options.errors != nullptr) {
-      // Error collection mode - algorithm selection determines implementation
+    // Parse with error collection - never throw for parse errors
+    //
+    // Design principle: The error-collecting variants (_with_errors) do
+    // comprehensive validation (field counts, quote checking, etc.), while
+    // the fast-path variants only check for fatal quote errors. We prefer
+    // error-collecting variants for better error detection, and wrap
+    // fast-path variants in try-catch for backward compatibility.
+    try {
       if (!options.dialect.has_value()) {
-        // Auto-detect path with errors
-        result.successful = parser_.parse_auto(buf, result.idx, len, *options.errors,
-                                               &result.detection, options.detection_options);
+        // Auto-detect path - always uses error collection
+        result.successful = parser_.parse_auto(buf, result.idx, len, *collector, &result.detection,
+                                               options.detection_options);
         result.dialect = result.detection.dialect;
-      } else {
-        // Explicit dialect with errors - respect algorithm selection
-        if (options.algorithm == ParseAlgorithm::BRANCHLESS) {
-          // Use branchless implementation with error collection
-          result.successful = parser_.parse_branchless_with_errors(buf, result.idx, len,
-                                                                   *options.errors, result.dialect);
-        } else {
-          // Default to switch-based implementation (faster for error collection)
-          result.successful =
-              parser_.parse_with_errors(buf, result.idx, len, *options.errors, result.dialect);
-        }
-      }
-      // Copy errors from external collector to internal collector
-      result.error_collector().merge_from(*options.errors);
-    } else {
-      // Fast path (throws on error) - respects algorithm selection
-      switch (options.algorithm) {
-      case ParseAlgorithm::BRANCHLESS:
-        result.successful = parser_.parse_branchless(buf, result.idx, len, result.dialect);
-        break;
-      case ParseAlgorithm::TWO_PASS:
-        result.successful = parser_.parse_two_pass(buf, result.idx, len, result.dialect);
-        break;
-      case ParseAlgorithm::SPECULATIVE:
+      } else if (options.algorithm == ParseAlgorithm::BRANCHLESS) {
+        // Branchless with comprehensive error collection
+        result.successful =
+            parser_.parse_branchless_with_errors(buf, result.idx, len, *collector, result.dialect);
+      } else if (options.algorithm == ParseAlgorithm::TWO_PASS) {
+        // Two-pass with comprehensive error collection
+        result.successful =
+            parser_.parse_two_pass_with_errors(buf, result.idx, len, *collector, result.dialect);
+      } else if (options.algorithm == ParseAlgorithm::SPECULATIVE) {
+        // Speculative: fast path with try-catch (no _with_errors variant)
+        // Note: This path does NOT detect inconsistent field counts
         result.successful = parser_.parse_speculate(buf, result.idx, len, result.dialect);
-        break;
-      case ParseAlgorithm::AUTO:
-      default:
-        // AUTO currently uses speculative (same as parse())
-        result.successful = parser_.parse(buf, result.idx, len, result.dialect);
-        break;
+      } else {
+        // AUTO/default: Use error-collecting variant for comprehensive
+        // validation when errors are being collected, fast path otherwise
+        result.successful =
+            parser_.parse_with_errors(buf, result.idx, len, *collector, result.dialect);
       }
+    } catch (const ParseException& e) {
+      // Convert exception to error collector entries
+      for (const auto& err : e.errors()) {
+        collector->add_error(err);
+      }
+      result.successful = false;
+    } catch (const std::runtime_error& e) {
+      // Convert runtime_error to a generic parse error
+      collector->add_error(ErrorCode::INTERNAL_ERROR, ErrorSeverity::FATAL, 0, 0, 0, e.what());
+      result.successful = false;
+    }
+
+    // If external collector was used, copy errors to internal collector
+    if (options.errors != nullptr) {
+      result.error_collector().merge_from(*options.errors);
     }
 
     LIBVROOM_SUPPRESS_DEPRECATION_END
@@ -1660,7 +1707,8 @@ public:
   /**
    * @brief Parse with error collection (legacy method).
    *
-   * @deprecated Use parse(buf, len, {.dialect = dialect, .errors = &errors}) instead.
+   * @deprecated Use parse(buf, len, {.dialect = dialect, .errors = &errors})
+   * instead.
    *
    * This method is provided for backward compatibility. New code should use
    * the unified parse() method with ParseOptions.
