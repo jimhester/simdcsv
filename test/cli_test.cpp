@@ -2234,3 +2234,84 @@ TEST_F(CliTest, DialectOutputsCliFlags) {
   EXPECT_TRUE(result.output.find("CLI flags:") != std::string::npos);
   EXPECT_TRUE(result.output.find("-d comma") != std::string::npos);
 }
+
+// =============================================================================
+// Schema/Stats Sampling Tests (GitHub issue #378)
+// Tests for the -m option to limit rows examined
+// =============================================================================
+
+TEST_F(CliTest, SchemaSampleSizeOption) {
+  // Schema with -m option should work and limit rows examined
+  auto result = CliRunner::run("schema -m 5 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Schema:") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsSampleSizeOption) {
+  // Stats with -m option should work and limit rows examined
+  auto result = CliRunner::run("stats -m 5 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Statistics") != std::string::npos);
+  // Stats should report the sampled row count (5 rows)
+  EXPECT_TRUE(result.output.find("5 rows") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaSampleSizeJsonOutput) {
+  // Schema with -m and -j should produce valid JSON
+  auto result = CliRunner::run("schema -m 5 -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("{") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"columns\"") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsSampleSizeJsonOutput) {
+  // Stats with -m and -j should produce valid JSON with correct row count
+  auto result = CliRunner::run("stats -m 5 -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("\"rows\": 5") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaSampleSizeZeroProcessesAll) {
+  // Schema with -m 0 should process all rows (default behavior)
+  auto result = CliRunner::run("schema -m 0 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Schema:") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsSampleSizeZeroProcessesAll) {
+  // Stats with -m 0 should process all rows (default behavior)
+  auto result = CliRunner::run("stats -m 0 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // many_rows.csv has 20 data rows
+  EXPECT_TRUE(result.output.find("20 rows") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsSampleSizeLargerThanFile) {
+  // When sample size exceeds file rows, should process all rows
+  auto result = CliRunner::run("stats -m 1000 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // many_rows.csv has 20 data rows, should process all 20
+  EXPECT_TRUE(result.output.find("20 rows") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaSampleSizeHelpDocumented) {
+  // Help text should document the -m option
+  auto result = CliRunner::run("-h");
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("-m") != std::string::npos);
+  EXPECT_TRUE(result.output.find("sample") != std::string::npos ||
+              result.output.find("Sample") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaSampleSizeInvalidValue) {
+  // Invalid sample size should produce an error
+  auto result = CliRunner::run("schema -m abc " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Invalid sample size") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsSampleSizeNegativeValue) {
+  // Negative sample size should produce an error
+  auto result = CliRunner::run("stats -m -5 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}

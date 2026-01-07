@@ -185,6 +185,7 @@ void printUsage(const char* prog) {
   cerr << "                Values: utf-8, utf-16le, utf-16be, utf-32le, utf-32be,\n";
   cerr << "                        latin1, windows-1252\n";
   cerr << "  -j            Output in JSON format (for dialect/schema/stats)\n";
+  cerr << "  -m <size>     Sample size for schema/stats (0=all rows, default: 0)\n";
   cerr << "  -S, --strict  Strict mode: exit with code 1 on any parse error\n";
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
@@ -212,8 +213,10 @@ void printUsage(const char* prog) {
   cerr << "  " << prog << " dialect -j data.csv       # JSON output\n";
   cerr << "  " << prog << " schema data.csv\n";
   cerr << "  " << prog << " schema -j data.csv       # JSON output\n";
+  cerr << "  " << prog << " schema -m 1000 data.csv  # Sample 1000 rows\n";
   cerr << "  " << prog << " stats data.csv\n";
   cerr << "  " << prog << " stats -j data.csv        # JSON output\n";
+  cerr << "  " << prog << " stats -m 1000 data.csv   # Sample 1000 rows\n";
   cerr << "  cat data.csv | " << prog << " count\n";
   cerr << "  " << prog << " head - < data.csv\n";
 }
@@ -1155,7 +1158,7 @@ struct ColumnStats {
 // Command: schema - display inferred schema with column names, types, and nullable
 int cmdSchema(const char* filename, int n_threads, bool has_header,
               const libvroom::Dialect& dialect, bool auto_detect, bool json_output,
-              bool strict_mode) {
+              bool strict_mode, size_t sample_size = 0) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
   if (!result.success)
     return 1;
@@ -1188,12 +1191,28 @@ int cmdSchema(const char* filename, int n_threads, bool has_header,
   libvroom::ColumnTypeInference type_inference(num_cols);
 
   // Process data rows (skip header if present)
+  // With sampling and early termination optimization
   size_t start_row = has_header ? 1 : 0;
-  for (size_t r = start_row; r < rows.size(); ++r) {
+  size_t total_data_rows = rows.size() > start_row ? rows.size() - start_row : 0;
+  size_t max_rows_to_process =
+      (sample_size > 0) ? std::min(sample_size, total_data_rows) : total_data_rows;
+  size_t rows_processed = 0;
+  constexpr size_t EARLY_TERMINATION_CHECK_INTERVAL = 1000;
+  constexpr size_t EARLY_TERMINATION_MIN_SAMPLES = 100;
+
+  for (size_t r = start_row; r < rows.size() && rows_processed < max_rows_to_process; ++r) {
     const auto& row = rows[r];
     for (size_t c = 0; c < std::min(row.size(), num_cols); ++c) {
       const std::string& field = row[c];
       type_inference.add_field(c, reinterpret_cast<const uint8_t*>(field.data()), field.size());
+    }
+    ++rows_processed;
+
+    // Check for early termination every N rows (only if not sampling)
+    if (sample_size == 0 && rows_processed % EARLY_TERMINATION_CHECK_INTERVAL == 0) {
+      if (type_inference.all_types_confirmed(EARLY_TERMINATION_MIN_SAMPLES)) {
+        break;
+      }
     }
   }
 
@@ -1238,7 +1257,7 @@ int cmdSchema(const char* filename, int n_threads, bool has_header,
 
 // Command: stats - display statistical summary for each column
 int cmdStats(const char* filename, int n_threads, bool has_header, const libvroom::Dialect& dialect,
-             bool auto_detect, bool json_output, bool strict_mode) {
+             bool auto_detect, bool json_output, bool strict_mode, size_t sample_size = 0) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
   if (!result.success)
     return 1;
@@ -1277,10 +1296,14 @@ int cmdStats(const char* filename, int n_threads, bool has_header, const libvroo
   libvroom::ColumnTypeInference type_inference(num_cols);
 
   // Process data rows (skip header if present)
+  // With sampling optimization
   size_t start_row = has_header ? 1 : 0;
-  size_t data_row_count = rows.size() > start_row ? rows.size() - start_row : 0;
+  size_t total_data_rows = rows.size() > start_row ? rows.size() - start_row : 0;
+  size_t max_rows_to_process =
+      (sample_size > 0) ? std::min(sample_size, total_data_rows) : total_data_rows;
+  size_t rows_processed = 0;
 
-  for (size_t r = start_row; r < rows.size(); ++r) {
+  for (size_t r = start_row; r < rows.size() && rows_processed < max_rows_to_process; ++r) {
     const auto& row = rows[r];
     for (size_t c = 0; c < std::min(row.size(), num_cols); ++c) {
       const std::string& field = row[c];
@@ -1309,7 +1332,11 @@ int cmdStats(const char* filename, int n_threads, bool has_header, const libvroo
         }
       }
     }
+    ++rows_processed;
   }
+
+  // Calculate data_row_count based on what we actually processed
+  size_t data_row_count = rows_processed;
 
   // Get inferred types
   auto types = type_inference.infer_types();
@@ -1418,6 +1445,7 @@ int main(int argc, char* argv[]) {
   bool strict_mode = false;         // Strict mode: exit with code 1 on any parse error
   unsigned int random_seed = 0;     // Random seed for sample command (0 = use random_device)
   libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN; // User-specified encoding
+  size_t sample_size = 0; // Sample size for schema/stats (0 = all rows)
   string columns;
   string delimiter_str = "comma";
   string encoding_str; // User-specified encoding string
@@ -1437,7 +1465,7 @@ int main(int argc, char* argv[]) {
   }
 
   int c;
-  while ((c = getopt(argc, argv, "n:c:Ht:d:q:e:s:jShv")) != -1) {
+  while ((c = getopt(argc, argv, "n:c:Ht:d:q:e:s:m:jShv")) != -1) {
     switch (c) {
     case 'n': {
       char* endptr;
@@ -1502,6 +1530,16 @@ int main(int argc, char* argv[]) {
     case 'j':
       json_output = true;
       break;
+    case 'm': {
+      char* endptr;
+      long val = strtol(optarg, &endptr, 10);
+      if (*endptr != '\0' || val < 0) {
+        cerr << "Error: Invalid sample size '" << optarg << "'\n";
+        return 1;
+      }
+      sample_size = static_cast<size_t>(val);
+      break;
+    }
     case 'S':
       strict_mode = true;
       break;
@@ -1557,11 +1595,11 @@ int main(int argc, char* argv[]) {
     (void)delimiter_specified; // Suppress unused warning
     result = cmdDialect(filename, json_output);
   } else if (command == "schema") {
-    result =
-        cmdSchema(filename, n_threads, has_header, dialect, auto_detect, json_output, strict_mode);
+    result = cmdSchema(filename, n_threads, has_header, dialect, auto_detect, json_output,
+                       strict_mode, sample_size);
   } else if (command == "stats") {
-    result =
-        cmdStats(filename, n_threads, has_header, dialect, auto_detect, json_output, strict_mode);
+    result = cmdStats(filename, n_threads, has_header, dialect, auto_detect, json_output,
+                      strict_mode, sample_size);
   } else {
     cerr << "Error: Unknown command '" << command << "'\n";
     printUsage(argv[0]);
