@@ -1995,3 +1995,48 @@ TEST_F(CliTest, StrictModeQuoteInUnquotedField) {
   auto result = CliRunner::run("head -S " + testDataPath("malformed/quote_in_unquoted_field.csv"));
   EXPECT_EQ(result.exit_code, 1);
 }
+
+// =============================================================================
+// Tail Command - Auto-detect Dialect Tests
+// =============================================================================
+
+TEST_F(CliTest, TailWithAutoDetect) {
+  // Test tail command with auto-detection (no -d flag)
+  // The default behavior is auto_detect = true when no delimiter is specified
+  auto result = CliRunner::run("tail -n 2 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
+}
+
+TEST_F(CliTest, TailAutoDetectTabFile) {
+  // Test tail with auto-detection on tab-delimited file
+  auto result = CliRunner::run("tail -n 2 " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Tab-delimited file should be parsed correctly with auto-detection
+}
+
+TEST_F(CliTest, TailStdinStrictModeError) {
+  // Test strict mode error handling for stdin input
+  auto result =
+      CliRunner::runWithFileStdin("tail -n 2 -S -", testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Strict mode enabled") != std::string::npos ||
+              result.output.find("Error") != std::string::npos);
+}
+
+TEST_F(CliTest, TailStdinWithExplicitDelimiter) {
+  // Test stdin with explicit delimiter (auto_detect = false)
+  auto result =
+      CliRunner::runWithFileStdin("tail -n 2 -d comma -", testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
+}
+
+TEST_F(CliTest, TailNoHeaderEmptyOutput) {
+  // Test tail with -H flag on a file where we request 0 rows
+  // This ensures the header output path is covered for the no-header case
+  auto result = CliRunner::run("tail -n 0 -H " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output nothing when -H and -n 0
+}

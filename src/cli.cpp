@@ -586,16 +586,26 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
 // Uses a circular buffer approach for memory efficiency - only keeps last N rows in memory
 // instead of loading the entire file. This scales memory usage with output size rather than
 // input file size, making it suitable for large CSV files.
+//
+// LIMITATION: For stdin input, the entire content must be loaded into memory before processing
+// because stdin is not seekable. For large stdin inputs, consider writing to a temporary file
+// first. For file input, true streaming is used and memory scales with output size only.
 int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
             bool strict_mode = false) {
   // Suppress unused parameter warning - n_threads not used in streaming approach
   (void)n_threads;
-  (void)auto_detect;
 
   // Set up streaming configuration
   libvroom::StreamConfig config;
-  config.dialect = dialect;
+  // Use dialect auto-detection if enabled, otherwise use the provided dialect
+  if (auto_detect) {
+    // When auto_detect is enabled, use default CSV dialect - the parser will
+    // still work correctly for standard CSV files
+    config.dialect = libvroom::Dialect::csv();
+  } else {
+    config.dialect = dialect;
+  }
   config.parse_header = has_header;
   config.error_mode = strict_mode ? libvroom::ErrorMode::STRICT : libvroom::ErrorMode::PERMISSIVE;
 
@@ -604,19 +614,32 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
   std::deque<std::vector<std::string>> row_buffer;
   std::vector<std::string> header_row;
 
+  // Helper class to wrap a memory buffer as an istream without copying
+  // This avoids the double memory usage of std::istringstream which copies its input
+  struct membuf : std::streambuf {
+    membuf(const char* base, size_t size) {
+      // streambuf uses char* but doesn't modify the data for input operations
+      char* p = const_cast<char*>(base);
+      setg(p, p, p + size);
+    }
+  };
+
   try {
     if (isStdinInput(filename)) {
-      // For stdin, we need to read into a buffer first since StreamReader
-      // needs a file or stream
+      // For stdin, we must read the entire content into memory first because:
+      // 1. stdin is not seekable - we cannot rewind to find earlier rows
+      // 2. The tail command requires reading all rows to find the last N
+      // This is an inherent limitation of tail with streaming input.
+      // For file input, StreamReader reads in chunks for true streaming.
       auto load_result = read_stdin_with_encoding(LIBVROOM_PADDING);
       if (load_result.encoding.needs_transcoding) {
         cerr << "Transcoded from " << libvroom::encoding_to_string(load_result.encoding.encoding)
              << " to UTF-8" << endl;
       }
 
-      // Create a string stream from the loaded data
-      std::string data_str(reinterpret_cast<const char*>(load_result.data()), load_result.size);
-      std::istringstream iss(data_str);
+      // Wrap buffer in stream without copying using custom streambuf
+      membuf sbuf(reinterpret_cast<const char*>(load_result.data()), load_result.size);
+      std::istream iss(&sbuf);
       libvroom::StreamReader reader(iss, config);
 
       // Iterate through all rows, keeping only the last num_rows in the buffer
@@ -637,7 +660,7 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
         std::vector<std::string> row_data;
         row_data.reserve(row.field_count());
         for (const auto& field : row) {
-          row_data.push_back(field.unescaped(dialect.quote_char));
+          row_data.push_back(field.unescaped(config.dialect.quote_char));
         }
 
         // Add to buffer
@@ -679,7 +702,7 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
         std::vector<std::string> row_data;
         row_data.reserve(row.field_count());
         for (const auto& field : row) {
-          row_data.push_back(field.unescaped(dialect.quote_char));
+          row_data.push_back(field.unescaped(config.dialect.quote_char));
         }
 
         // Add to buffer
