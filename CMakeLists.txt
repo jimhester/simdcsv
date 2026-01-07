@@ -231,6 +231,7 @@ set(VROOM_SOURCES
     src/value_extraction.cpp
     src/streaming.cpp
     src/two_pass.cpp
+    src/simd_number_parsing.cpp
 )
 
 # Add type detection source if enabled
