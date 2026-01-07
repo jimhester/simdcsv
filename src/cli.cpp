@@ -266,14 +266,13 @@ bool parseFile(const char *filename, int n_threads,
 
   auto result = parser.parse(data.data(), data.size(), options);
 
-  // Check for parse errors (Parser::parse() never throws for parse errors)
-  if (!result.success() || result.has_fatal_errors()) {
-    if (result.has_errors()) {
-      cerr << "Error: Parse failed: " << result.error_summary() << endl;
-    } else {
-      cerr << "Error: Parse failed" << endl;
-    }
-    return false;
+  // Note: Parser::parse() never throws for parse errors.
+  // For CLI tools, we continue with partial results and show warnings.
+  // This matches Unix CLI conventions where tools like head/cat try to output
+  // what they can.
+  if (result.has_errors()) {
+    cerr << "Warning: Parse errors: " << result.error_summary() << endl;
+    // Continue with partial results - don't fail hard
   }
 
   idx = std::move(result.idx);
