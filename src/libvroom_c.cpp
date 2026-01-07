@@ -9,6 +9,7 @@
 
 #include "common_defs.h"
 #include "dialect.h"
+#include "encoding.h"
 #include "error.h"
 #include "io_util.h"
 #include "mem_util.h"
@@ -74,6 +75,12 @@ struct libvroom_detection_result {
       warning_str = r.warning;
     }
   }
+};
+
+struct libvroom_load_result {
+  LoadResult cpp_result;
+
+  libvroom_load_result(LoadResult&& r) : cpp_result(std::move(r)) {}
 };
 
 // Helper functions to convert between C and C++ types
@@ -597,4 +604,133 @@ size_t libvroom_recommended_threads(void) {
 
 size_t libvroom_simd_padding(void) {
   return LIBVROOM_PADDING;
+}
+
+// Encoding helper functions
+static libvroom_encoding_t to_c_encoding(libvroom::Encoding enc) {
+  switch (enc) {
+  case libvroom::Encoding::UTF8:
+    return LIBVROOM_ENCODING_UTF8;
+  case libvroom::Encoding::UTF8_BOM:
+    return LIBVROOM_ENCODING_UTF8_BOM;
+  case libvroom::Encoding::UTF16_LE:
+    return LIBVROOM_ENCODING_UTF16_LE;
+  case libvroom::Encoding::UTF16_BE:
+    return LIBVROOM_ENCODING_UTF16_BE;
+  case libvroom::Encoding::UTF32_LE:
+    return LIBVROOM_ENCODING_UTF32_LE;
+  case libvroom::Encoding::UTF32_BE:
+    return LIBVROOM_ENCODING_UTF32_BE;
+  case libvroom::Encoding::LATIN1:
+    return LIBVROOM_ENCODING_LATIN1;
+  case libvroom::Encoding::UNKNOWN:
+  default:
+    return LIBVROOM_ENCODING_UNKNOWN;
+  }
+}
+
+// Encoding Detection and Transcoding
+const char* libvroom_encoding_string(libvroom_encoding_t encoding) {
+  switch (encoding) {
+  case LIBVROOM_ENCODING_UTF8:
+    return "UTF-8";
+  case LIBVROOM_ENCODING_UTF8_BOM:
+    return "UTF-8 (BOM)";
+  case LIBVROOM_ENCODING_UTF16_LE:
+    return "UTF-16LE";
+  case LIBVROOM_ENCODING_UTF16_BE:
+    return "UTF-16BE";
+  case LIBVROOM_ENCODING_UTF32_LE:
+    return "UTF-32LE";
+  case LIBVROOM_ENCODING_UTF32_BE:
+    return "UTF-32BE";
+  case LIBVROOM_ENCODING_LATIN1:
+    return "Latin-1";
+  case LIBVROOM_ENCODING_UNKNOWN:
+  default:
+    return "Unknown";
+  }
+}
+
+libvroom_error_t libvroom_detect_encoding(const uint8_t* data, size_t length,
+                                          libvroom_encoding_result_t* result) {
+  if (!result)
+    return LIBVROOM_ERROR_NULL_POINTER;
+
+  // detect_encoding handles null data gracefully
+  auto cpp_result = libvroom::detect_encoding(data, length);
+
+  result->encoding = to_c_encoding(cpp_result.encoding);
+  result->bom_length = cpp_result.bom_length;
+  result->confidence = cpp_result.confidence;
+  result->needs_transcoding = cpp_result.needs_transcoding;
+
+  return LIBVROOM_OK;
+}
+
+libvroom_load_result_t* libvroom_load_file_with_encoding(const char* filename) {
+  if (!filename)
+    return nullptr;
+
+  try {
+    auto result = read_file_with_encoding(filename, LIBVROOM_PADDING);
+    if (!result.valid()) {
+      return nullptr;
+    }
+
+    return new (std::nothrow) libvroom_load_result(std::move(result));
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+const uint8_t* libvroom_load_result_data(const libvroom_load_result_t* result) {
+  if (!result)
+    return nullptr;
+  return result->cpp_result.data();
+}
+
+size_t libvroom_load_result_length(const libvroom_load_result_t* result) {
+  if (!result)
+    return 0;
+  return result->cpp_result.size;
+}
+
+libvroom_encoding_t libvroom_load_result_encoding(const libvroom_load_result_t* result) {
+  if (!result)
+    return LIBVROOM_ENCODING_UNKNOWN;
+  return to_c_encoding(result->cpp_result.encoding.encoding);
+}
+
+size_t libvroom_load_result_bom_length(const libvroom_load_result_t* result) {
+  if (!result)
+    return 0;
+  return result->cpp_result.encoding.bom_length;
+}
+
+double libvroom_load_result_confidence(const libvroom_load_result_t* result) {
+  if (!result)
+    return 0.0;
+  return result->cpp_result.encoding.confidence;
+}
+
+bool libvroom_load_result_was_transcoded(const libvroom_load_result_t* result) {
+  if (!result)
+    return false;
+  return result->cpp_result.encoding.needs_transcoding;
+}
+
+libvroom_buffer_t* libvroom_load_result_to_buffer(const libvroom_load_result_t* result) {
+  if (!result || !result->cpp_result.valid())
+    return nullptr;
+
+  try {
+    return new (std::nothrow) libvroom_buffer(result->cpp_result.data(), result->cpp_result.size);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+void libvroom_load_result_destroy(libvroom_load_result_t* result) {
+  delete result;
 }
