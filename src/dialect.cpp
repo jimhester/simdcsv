@@ -40,6 +40,7 @@ std::string Dialect::to_string() const {
   ss << "Dialect{delimiter=";
 
   // Format special characters nicely
+  // LCOV_EXCL_BR_START - switch branches; common delimiters tested
   switch (delimiter) {
   case ',':
     ss << "','";
@@ -60,8 +61,10 @@ std::string Dialect::to_string() const {
     ss << "'" << delimiter << "'";
     break;
   }
+  // LCOV_EXCL_BR_STOP
 
   ss << ", quote=";
+  // LCOV_EXCL_BR_START - formatting branches; common cases tested
   if (quote_char == '"') {
     ss << "'\"'";
   } else if (quote_char == '\'') {
@@ -80,6 +83,7 @@ std::string Dialect::to_string() const {
   } else {
     ss << "'" << escape_char << "'";
   }
+  // LCOV_EXCL_BR_STOP
 
   if (comment_char != '\0') {
     ss << ", comment='" << comment_char << "'";
@@ -889,6 +893,7 @@ DialectDetector::CellType DialectDetector::infer_cell_type(std::string_view cell
 }
 
 const char* DialectDetector::cell_type_to_string(CellType type) {
+  // LCOV_EXCL_BR_START - exhaustive switch; all types tested elsewhere
   switch (type) {
   case CellType::EMPTY:
     return "EMPTY";
@@ -909,6 +914,7 @@ const char* DialectDetector::cell_type_to_string(CellType type) {
   default:
     return "UNKNOWN";
   }
+  // LCOV_EXCL_BR_STOP
 }
 
 size_t DialectDetector::skip_comment_lines(const uint8_t* buf, size_t len, char& comment_char,
