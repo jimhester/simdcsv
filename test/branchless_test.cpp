@@ -905,6 +905,8 @@ TEST_F(EscapeCharacterTest, ParseBackslashEscapeTestFile) {
   bool success = parser.parse_branchless(data.data(), idx, data.size(), backslashDialect());
 
   EXPECT_TRUE(success) << "Should parse backslash_escape.csv successfully";
+
+  libvroom::free_buffer(data);
 }
 
 TEST_F(EscapeCharacterTest, BranchlessStateMachineEscapeTransitions) {

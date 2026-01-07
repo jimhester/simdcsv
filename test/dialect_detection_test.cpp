@@ -473,11 +473,12 @@ TEST_F(DialectDetectionTest, ParseAutoWithSemicolonCSV) {
   size_t total_fields = 0;
   for (int t = 0; t < idx.n_threads; ++t) {
     total_fields += idx.n_indexes[t];
-    libvroom::free_buffer(data);
   }
   // Should have found field separators with the semicolon delimiter
   EXPECT_GT(total_fields, 0) << "Should find field separators with detected dialect";
   EXPECT_EQ(detected.detected_columns, 3) << "Should detect 3 columns";
+
+  libvroom::free_buffer(data);
 }
 
 TEST_F(DialectDetectionTest, DetectDialectStatic) {

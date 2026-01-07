@@ -13,26 +13,13 @@
 #include "error.h"
 #include "io_util.h"
 #include "mem_util.h"
+#include "test_helpers.h"
 #include "two_pass.h"
 
 #include <cstring>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
-
-// RAII wrapper for exception-safe memory management of corpus data
-struct CorpusGuard {
-  std::basic_string_view<uint8_t> data;
-  explicit CorpusGuard(const std::string& path) : data(get_corpus(path, LIBVROOM_PADDING)) {}
-  ~CorpusGuard() {
-    if (data.data()) {
-      aligned_free(const_cast<uint8_t*>(data.data()));
-    }
-  }
-  // Non-copyable
-  CorpusGuard(const CorpusGuard&) = delete;
-  CorpusGuard& operator=(const CorpusGuard&) = delete;
-};
 
 class CSVExtendedTest : public ::testing::Test {
 protected:
