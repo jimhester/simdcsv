@@ -1385,14 +1385,27 @@ TEST_F(CAPIEncodingTest, LoadFileWithEncodingUtf8Bom) {
 
   EXPECT_EQ(libvroom_load_result_encoding(result), LIBVROOM_ENCODING_UTF8_BOM);
   EXPECT_EQ(libvroom_load_result_bom_length(result), 3u);
-  // UTF-8 with BOM doesn't really need transcoding (just BOM stripping)
-  // The needs_transcoding flag indicates the BOM was stripped
+  // was_transcoded returns true because the BOM was stripped from the data
+  EXPECT_TRUE(libvroom_load_result_was_transcoded(result));
 
   // Verify the BOM was stripped
   const uint8_t* data = libvroom_load_result_data(result);
   ASSERT_NE(data, nullptr);
   // First byte should NOT be the BOM start (0xEF)
   EXPECT_NE(data[0], 0xEF);
+
+  libvroom_load_result_destroy(result);
+}
+
+TEST_F(CAPIEncodingTest, LoadFileWithEncodingPlainUtf8) {
+  // Test a plain UTF-8 file without BOM - was_transcoded should be false
+  libvroom_load_result_t* result = libvroom_load_file_with_encoding("test/data/basic/simple.csv");
+  ASSERT_NE(result, nullptr);
+
+  EXPECT_EQ(libvroom_load_result_encoding(result), LIBVROOM_ENCODING_UTF8);
+  EXPECT_EQ(libvroom_load_result_bom_length(result), 0u);
+  // No BOM, no transcoding - data was not modified
+  EXPECT_FALSE(libvroom_load_result_was_transcoded(result));
 
   libvroom_load_result_destroy(result);
 }

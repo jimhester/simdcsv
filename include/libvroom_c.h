@@ -263,10 +263,14 @@ size_t libvroom_load_result_bom_length(const libvroom_load_result_t* result);
 double libvroom_load_result_confidence(const libvroom_load_result_t* result);
 
 /**
- * @brief Check if the file needed transcoding.
+ * @brief Check if the loaded data was modified from the original file.
+ *
+ * Returns true if any transformation was applied to the data, including:
+ * - Transcoding from UTF-16 or UTF-32 to UTF-8
+ * - Stripping a BOM (Byte Order Mark), including UTF-8 BOM
  *
  * @param result The load result handle.
- * @return true if the file was transcoded from UTF-16/UTF-32 to UTF-8.
+ * @return true if the data was transformed, false if unchanged.
  */
 bool libvroom_load_result_was_transcoded(const libvroom_load_result_t* result);
 

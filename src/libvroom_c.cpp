@@ -717,7 +717,11 @@ double libvroom_load_result_confidence(const libvroom_load_result_t* result) {
 bool libvroom_load_result_was_transcoded(const libvroom_load_result_t* result) {
   if (!result)
     return false;
-  return result->cpp_result.encoding.needs_transcoding;
+  // Data was transformed if either:
+  // 1. needs_transcoding is true (UTF-16/UTF-32 -> UTF-8)
+  // 2. BOM was present and stripped (includes UTF-8 BOM)
+  return result->cpp_result.encoding.needs_transcoding ||
+         result->cpp_result.encoding.bom_length > 0;
 }
 
 libvroom_buffer_t* libvroom_load_result_to_buffer(const libvroom_load_result_t* result) {
