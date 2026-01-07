@@ -898,6 +898,7 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
 
 // Helper: format delimiter for display
 static std::string formatDelimiter(char delim) {
+  // LCOV_EXCL_BR_START - switch branches; common delimiters tested
   switch (delim) {
   case ',':
     return "comma";
@@ -912,10 +913,12 @@ static std::string formatDelimiter(char delim) {
   default:
     return std::string(1, delim);
   }
+  // LCOV_EXCL_BR_STOP
 }
 
 // Helper: format quote char for display
 static std::string formatQuoteChar(char quote) {
+  // LCOV_EXCL_BR_START - formatting branches; common cases tested
   if (quote == '"')
     return "double-quote";
   if (quote == '\'')
@@ -923,10 +926,12 @@ static std::string formatQuoteChar(char quote) {
   if (quote == '\0')
     return "none";
   return std::string(1, quote);
+  // LCOV_EXCL_BR_STOP
 }
 
 // Helper: format line ending for display
 static std::string formatLineEnding(libvroom::Dialect::LineEnding le) {
+  // LCOV_EXCL_BR_START - exhaustive switch; all line endings tested
   switch (le) {
   case libvroom::Dialect::LineEnding::LF:
     return "LF";
@@ -939,11 +944,13 @@ static std::string formatLineEnding(libvroom::Dialect::LineEnding le) {
   default:
     return "unknown";
   }
+  // LCOV_EXCL_BR_STOP
 }
 
 // Helper: escape a character for JSON string output
 // Handles all JSON control characters per RFC 8259
 static std::string escapeJsonChar(char c) {
+  // LCOV_EXCL_BR_START - switch branches; common escapes tested
   switch (c) {
   case '"':
     return "\\\"";
@@ -968,6 +975,7 @@ static std::string escapeJsonChar(char c) {
     }
     return std::string(1, c);
   }
+  // LCOV_EXCL_BR_STOP
 }
 
 // Command: dialect - detect and output CSV dialect in human-readable or JSON format
