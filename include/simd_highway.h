@@ -216,6 +216,60 @@ HWY_ATTR really_inline uint64_t compute_line_ending_mask_simple(
   return lf_mask | standalone_cr;
 }
 
+/**
+ * @brief Compute mask of escaped characters for backslash escaping.
+ *
+ * For escape character mode (e.g., \" instead of ""), we need to identify
+ * which characters are escaped by a preceding escape character.
+ *
+ * The algorithm:
+ * 1. Find all escape character positions
+ * 2. For consecutive escapes (\\\\), alternating escapes cancel out
+ * 3. Characters immediately following an unescaped escape are escaped
+ *
+ * Examples:
+ * - "\\\"" (backslash-backslash-quote): positions 0,1 are escapes, position 1
+ *   is escaped (by pos 0), position 2 (quote) is NOT escaped
+ * - "\\\\\"" (4 backslashes + quote): positions 0,1,2,3 are escapes,
+ *   positions 1,3 are escaped, position 4 (quote) is NOT escaped
+ *
+ * @param escape_mask Bitmask of escape character positions
+ * @param prev_escape_carry Whether previous block ended with an unmatched escape
+ * @return Bitmask where bit i is set if character at position i is escaped
+ */
+HWY_ATTR really_inline uint64_t compute_escaped_mask(
+    uint64_t escape_mask,
+    uint64_t& prev_escape_carry) {
+
+  if (escape_mask == 0 && prev_escape_carry == 0) {
+    return 0;
+  }
+
+  // Simple algorithm: scan through positions, tracking whether we're in
+  // "escape pending" state. Each escape either:
+  // - Escapes the next character (if not currently escaped)
+  // - Gets escaped itself (if previous char was an unescaped escape)
+  uint64_t escaped = 0;
+  bool in_escape = prev_escape_carry != 0;
+
+  for (int i = 0; i < 64; ++i) {
+    uint64_t bit = 1ULL << i;
+    if (in_escape) {
+      // This position is escaped by previous escape
+      escaped |= bit;
+      in_escape = false;
+    } else if (escape_mask & bit) {
+      // This is a real escape (not escaped itself)
+      in_escape = true;
+    }
+  }
+
+  // Handle carry: if we ended in escape state, next block's first char is escaped
+  prev_escape_carry = in_escape ? 1 : 0;
+
+  return escaped;
+}
+
 // Write indexes to output array
 really_inline int write(uint64_t* base_ptr, uint64_t& base, uint64_t idx, int stride,
                         uint64_t bits) {

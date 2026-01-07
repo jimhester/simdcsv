@@ -25,7 +25,7 @@ struct libvroom_parser {
 };
 
 struct libvroom_index {
-    libvroom::index idx;
+    libvroom::ParseIndex idx;
     size_t num_threads;
 
     // Default constructor - index will be populated by Parser::parse()
@@ -38,9 +38,16 @@ struct libvroom_index {
 
 struct libvroom_buffer {
     std::vector<uint8_t> data;
+    size_t original_length;  // Length of the original data (without padding)
 
-    libvroom_buffer(const uint8_t* ptr, size_t len) : data(ptr, ptr + len) {}
-    libvroom_buffer() = default;
+    libvroom_buffer(const uint8_t* ptr, size_t len) : original_length(len) {
+        // Allocate space for data + SIMD padding to allow safe 64-byte reads
+        data.resize(len + LIBVROOM_PADDING);
+        std::memcpy(data.data(), ptr, len);
+        // Zero the padding bytes to avoid undefined behavior in SIMD comparisons
+        std::memset(data.data() + len, 0, LIBVROOM_PADDING);
+    }
+    libvroom_buffer() : original_length(0) {}
 };
 
 struct libvroom_dialect {
@@ -96,7 +103,6 @@ static libvroom_error_t to_c_error(libvroom::ErrorCode code) {
         case libvroom::ErrorCode::INCONSISTENT_FIELD_COUNT: return LIBVROOM_ERROR_INCONSISTENT_FIELDS;
         case libvroom::ErrorCode::FIELD_TOO_LARGE: return LIBVROOM_ERROR_FIELD_TOO_LARGE;
         case libvroom::ErrorCode::MIXED_LINE_ENDINGS: return LIBVROOM_ERROR_MIXED_LINE_ENDINGS;
-        case libvroom::ErrorCode::INVALID_LINE_ENDING: return LIBVROOM_ERROR_INVALID_LINE_ENDING;
         case libvroom::ErrorCode::INVALID_UTF8: return LIBVROOM_ERROR_INVALID_UTF8;
         case libvroom::ErrorCode::NULL_BYTE: return LIBVROOM_ERROR_NULL_BYTE;
         case libvroom::ErrorCode::EMPTY_HEADER: return LIBVROOM_ERROR_EMPTY_HEADER;
@@ -134,7 +140,6 @@ const char* libvroom_error_string(libvroom_error_t error) {
         case LIBVROOM_ERROR_INCONSISTENT_FIELDS: return "Inconsistent field count";
         case LIBVROOM_ERROR_FIELD_TOO_LARGE: return "Field too large";
         case LIBVROOM_ERROR_MIXED_LINE_ENDINGS: return "Mixed line endings";
-        case LIBVROOM_ERROR_INVALID_LINE_ENDING: return "Invalid line ending";
         case LIBVROOM_ERROR_INVALID_UTF8: return "Invalid UTF-8";
         case LIBVROOM_ERROR_NULL_BYTE: return "Null byte in data";
         case LIBVROOM_ERROR_EMPTY_HEADER: return "Empty header";
@@ -165,7 +170,9 @@ libvroom_buffer_t* libvroom_buffer_load_file(const char* filename) {
             return nullptr;
         }
 
-        // Copy from string_view into vector
+        // Store the original length (data size without padding)
+        buffer->original_length = corpus.size();
+        // Copy from string_view into vector (includes padding from get_corpus)
         buffer->data.assign(corpus.begin(), corpus.end());
         // Free the original aligned buffer
         aligned_free(const_cast<uint8_t*>(corpus.data()));
@@ -192,7 +199,7 @@ const uint8_t* libvroom_buffer_data(const libvroom_buffer_t* buffer) {
 
 size_t libvroom_buffer_length(const libvroom_buffer_t* buffer) {
     if (!buffer) return 0;
-    return buffer->data.size();
+    return buffer->original_length;  // Return original length, not padded size
 }
 
 void libvroom_buffer_destroy(libvroom_buffer_t* buffer) {
@@ -375,7 +382,8 @@ libvroom_error_t libvroom_parse(libvroom_parser_t* parser, const libvroom_buffer
         }
 
         // Parse using the unified Parser API
-        auto result = parser->parser.parse(buffer->data.data(), buffer->data.size(), options);
+        // Use original_length (not padded data.size()) for correct parsing
+        auto result = parser->parser.parse(buffer->data.data(), buffer->original_length, options);
 
         // Move the index from the result
         index->idx = std::move(result.idx);
@@ -405,7 +413,7 @@ libvroom_detection_result_t* libvroom_detect_dialect(const libvroom_buffer_t* bu
 
     try {
         libvroom::DialectDetector detector;
-        auto result = detector.detect(buffer->data.data(), buffer->data.size());
+        auto result = detector.detect(buffer->data.data(), buffer->original_length);
         return new (std::nothrow) libvroom_detection_result(result);
     } catch (...) {
         return nullptr;
@@ -475,7 +483,8 @@ libvroom_error_t libvroom_parse_auto(libvroom_parser_t* parser, const libvroom_b
         }
 
         // Parse using the unified Parser API with auto-detection
-        auto result = parser->parser.parse(buffer->data.data(), buffer->data.size(), options);
+        // Use original_length (not padded data.size()) for correct parsing
+        auto result = parser->parser.parse(buffer->data.data(), buffer->original_length, options);
 
         // Store detection result if requested
         if (detected) {

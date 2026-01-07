@@ -6,9 +6,11 @@
 #include <gtest/gtest.h>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 #include "debug.h"
 #include "debug_parser.h"
 #include "error.h"
+#include "common_defs.h"
 
 using namespace libvroom;
 
@@ -34,6 +36,15 @@ protected:
             result += buffer;
         }
         return result;
+    }
+
+    // Create a padded buffer from a string for SIMD-safe parsing
+    std::vector<uint8_t> makeBuffer(const char* str) {
+        size_t len = strlen(str);
+        std::vector<uint8_t> buf(len + LIBVROOM_PADDING);
+        std::memcpy(buf.data(), str, len);
+        std::memset(buf.data() + len, 0, LIBVROOM_PADDING);
+        return buf;
     }
 
     FILE* output_file_ = nullptr;
@@ -530,11 +541,11 @@ TEST_F(DebugTest, DebugParserParse) {
 
     debug_parser parser;
     const char* csv = "a,b,c\n1,2,3\n";
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(csv);
+    auto buf = makeBuffer(csv);
     size_t len = strlen(csv);
 
     libvroom::index idx = parser.init(len, 1);
-    bool result = parser.parse_debug(buf, idx, len, trace);
+    bool result = parser.parse_debug(buf.data(), idx, len, trace);
 
     EXPECT_TRUE(result);
 
@@ -736,11 +747,11 @@ TEST_F(DebugTest, GetSimdInfo) {
 TEST_F(DebugTest, DebugParserPassThrough) {
     debug_parser parser;
     const char* csv = "a,b,c\n1,2,3\n";
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(csv);
+    auto buf = makeBuffer(csv);
     size_t len = strlen(csv);
 
     libvroom::index idx = parser.init(len, 1);
-    bool result = parser.parse(buf, idx, len);
+    bool result = parser.parse(buf.data(), idx, len);
 
     EXPECT_TRUE(result);
 }
@@ -748,12 +759,12 @@ TEST_F(DebugTest, DebugParserPassThrough) {
 TEST_F(DebugTest, DebugParserParseWithErrors) {
     debug_parser parser;
     const char* csv = "a,b,c\n1,2,3\n";
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(csv);
+    auto buf = makeBuffer(csv);
     size_t len = strlen(csv);
 
     libvroom::index idx = parser.init(len, 1);
     libvroom::ErrorCollector errors;
-    bool result = parser.parse_with_errors(buf, idx, len, errors);
+    bool result = parser.parse_with_errors(buf.data(), idx, len, errors);
 
     EXPECT_TRUE(result);
     EXPECT_EQ(errors.error_count(), 0u);
@@ -769,12 +780,12 @@ TEST_F(DebugTest, DebugParserParseWithErrorsDebug) {
 
     debug_parser parser;
     const char* csv = "a,b,c\n1,2,3\n";
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(csv);
+    auto buf = makeBuffer(csv);
     size_t len = strlen(csv);
 
     libvroom::index idx = parser.init(len, 1);
     libvroom::ErrorCollector errors;
-    bool result = parser.parse_with_errors_debug(buf, idx, len, errors, trace);
+    bool result = parser.parse_with_errors_debug(buf.data(), idx, len, errors, trace);
 
     EXPECT_TRUE(result);
 
@@ -795,11 +806,11 @@ TEST_F(DebugTest, DebugParserParseDebugWithMasks) {
 
     debug_parser parser;
     const char* csv = "a,b,c\n1,2,3\n";
-    const uint8_t* buf = reinterpret_cast<const uint8_t*>(csv);
+    auto buf = makeBuffer(csv);
     size_t len = strlen(csv);
 
     libvroom::index idx = parser.init(len, 1);
-    bool result = parser.parse_debug(buf, idx, len, trace);
+    bool result = parser.parse_debug(buf.data(), idx, len, trace);
 
     EXPECT_TRUE(result);
 

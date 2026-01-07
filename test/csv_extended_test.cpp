@@ -29,6 +29,7 @@ struct CorpusGuard {
         : data(get_corpus(path, LIBVROOM_PADDING)) {}
     ~CorpusGuard() {
         if (data.data()) {
+            aligned_free(const_cast<uint8_t*>(data.data()));
         }
     }
     // Non-copyable

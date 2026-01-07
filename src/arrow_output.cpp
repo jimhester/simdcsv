@@ -160,7 +160,7 @@ std::string_view ArrowConverter::extract_field(const uint8_t* buf, size_t start,
 }
 
 std::vector<std::vector<ArrowConverter::FieldRange>> ArrowConverter::extract_field_ranges(
-    const uint8_t* buf, size_t len, const index& idx, const Dialect& dialect) {
+    const uint8_t* buf, size_t len, const ParseIndex& idx, const Dialect& dialect) {
     std::vector<std::vector<FieldRange>> columns;
     if (idx.n_threads == 0) return columns;
     size_t total_seps = 0;
@@ -196,7 +196,7 @@ std::vector<std::vector<ArrowConverter::FieldRange>> ArrowConverter::extract_fie
     return columns;
 }
 
-std::vector<ColumnType> ArrowConverter::infer_types(const uint8_t* buf, size_t len, const index& idx, const Dialect& dialect) {
+std::vector<ColumnType> ArrowConverter::infer_types(const uint8_t* buf, size_t len, const ParseIndex& idx, const Dialect& dialect) {
     auto field_ranges = extract_field_ranges(buf, len, idx, dialect);
     std::vector<ColumnType> types(field_ranges.size(), ColumnType::NULL_TYPE);
     for (size_t col = 0; col < field_ranges.size(); ++col) {
@@ -299,7 +299,7 @@ arrow::Result<std::shared_ptr<arrow::Array>> ArrowConverter::build_column(const 
     }
 }
 
-ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const index& idx, const Dialect& dialect) {
+ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const ParseIndex& idx, const Dialect& dialect) {
     ArrowConvertResult result;
     auto field_ranges = extract_field_ranges(buf, len, idx, dialect);
     if (field_ranges.empty()) { result.error_message = "No data"; return result; }

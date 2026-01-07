@@ -459,6 +459,131 @@ TEST_F(IOUtilTest, GetCorpus_FileWith65Bytes) {
 }
 
 // =============================================================================
+// AlignedDeleter AND AlignedPtr TESTS
+// =============================================================================
+
+TEST_F(IOUtilTest, AlignedDeleter_Basic) {
+    // Test that AlignedDeleter properly frees memory
+    uint8_t* raw = allocate_padded_buffer(1024, 64);
+    ASSERT_NE(raw, nullptr);
+
+    // Write some data to verify buffer is valid
+    raw[0] = 0xFF;
+    raw[1023] = 0xFE;
+
+    // Create unique_ptr with AlignedDeleter - should free on destruction
+    {
+        std::unique_ptr<uint8_t[], AlignedDeleter> ptr(raw);
+        EXPECT_EQ(ptr[0], 0xFF);
+        EXPECT_EQ(ptr[1023], 0xFE);
+    }
+    // Memory should be freed here - sanitizers will catch any leaks
+}
+
+TEST_F(IOUtilTest, AlignedDeleter_Nullptr) {
+    // AlignedDeleter should safely handle nullptr
+    AlignedDeleter deleter;
+    deleter(nullptr);  // Should not crash
+
+    // Also test via unique_ptr
+    std::unique_ptr<uint8_t[], AlignedDeleter> ptr(nullptr);
+    // Should not crash on destruction
+}
+
+TEST_F(IOUtilTest, AlignedPtr_BasicUsage) {
+    AlignedPtr ptr = make_aligned_ptr(1024, 64);
+
+    ASSERT_NE(ptr.get(), nullptr);
+
+    // Check alignment
+    uintptr_t addr = reinterpret_cast<uintptr_t>(ptr.get());
+    EXPECT_EQ(addr % 64, 0) << "Buffer should be 64-byte aligned";
+
+    // Write and read data
+    ptr[0] = 0xAA;
+    ptr[1023] = 0xBB;
+    EXPECT_EQ(ptr[0], 0xAA);
+    EXPECT_EQ(ptr[1023], 0xBB);
+
+    // Memory freed automatically when ptr goes out of scope
+}
+
+TEST_F(IOUtilTest, AlignedPtr_ZeroLength) {
+    AlignedPtr ptr = make_aligned_ptr(0, 64);
+
+    // Should succeed even with zero length (padding still allocated)
+    EXPECT_NE(ptr.get(), nullptr);
+}
+
+TEST_F(IOUtilTest, AlignedPtr_ZeroPadding) {
+    AlignedPtr ptr = make_aligned_ptr(1024, 0);
+
+    EXPECT_NE(ptr.get(), nullptr);
+}
+
+TEST_F(IOUtilTest, AlignedPtr_IntegerOverflow) {
+    // Try to trigger integer overflow
+    AlignedPtr ptr = make_aligned_ptr(SIZE_MAX - 10, 64);
+
+    // Should return empty ptr instead of undefined behavior
+    EXPECT_EQ(ptr.get(), nullptr);
+}
+
+TEST_F(IOUtilTest, AlignedPtr_Move) {
+    AlignedPtr ptr1 = make_aligned_ptr(1024, 64);
+    ASSERT_NE(ptr1.get(), nullptr);
+
+    uint8_t* raw = ptr1.get();
+    ptr1[0] = 0xCC;
+
+    // Move to new ptr
+    AlignedPtr ptr2 = std::move(ptr1);
+
+    EXPECT_EQ(ptr1.get(), nullptr);  // Original should be null
+    EXPECT_EQ(ptr2.get(), raw);       // New should own the pointer
+    EXPECT_EQ(ptr2[0], 0xCC);         // Data should be intact
+}
+
+TEST_F(IOUtilTest, AlignedPtr_Release) {
+    AlignedPtr ptr = make_aligned_ptr(1024, 64);
+    ASSERT_NE(ptr.get(), nullptr);
+
+    ptr[0] = 0xDD;
+
+    // Release ownership
+    uint8_t* raw = ptr.release();
+
+    EXPECT_EQ(ptr.get(), nullptr);  // Ptr should be null after release
+    EXPECT_EQ(raw[0], 0xDD);         // Data should be intact
+
+    // Must manually free since we released
+    aligned_free(raw);
+}
+
+TEST_F(IOUtilTest, AlignedPtr_LargeAllocation) {
+    // Allocate 10MB
+    AlignedPtr ptr = make_aligned_ptr(10 * 1024 * 1024, 64);
+
+    ASSERT_NE(ptr.get(), nullptr);
+
+    // Write to first and last bytes
+    ptr[0] = 0xEE;
+    ptr[10 * 1024 * 1024 - 1] = 0xFF;
+    EXPECT_EQ(ptr[0], 0xEE);
+    EXPECT_EQ(ptr[10 * 1024 * 1024 - 1], 0xFF);
+}
+
+TEST_F(IOUtilTest, AlignedPtr_MultipleAllocations) {
+    // Allocate multiple buffers - memory sanitizers will catch leaks
+    std::vector<AlignedPtr> buffers;
+    for (int i = 0; i < 100; ++i) {
+        buffers.push_back(make_aligned_ptr(1024, 64));
+        ASSERT_NE(buffers.back().get(), nullptr);
+    }
+    // All freed when vector goes out of scope
+}
+
+// =============================================================================
 // MEMORY MANAGEMENT TESTS
 // =============================================================================
 

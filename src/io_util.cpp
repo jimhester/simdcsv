@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
+#include <sys/stat.h>
 
 uint8_t * allocate_padded_buffer(size_t length, size_t padding) {
     // Check for integer overflow before addition
@@ -56,6 +57,12 @@ std::basic_string_view<uint8_t> get_corpus_stdin(size_t padding) {
 }
 
 std::basic_string_view<uint8_t> get_corpus(const std::string& filename, size_t padding) {
+  // Check if the path is a regular file (not a directory or special file)
+  struct stat path_stat;
+  if (stat(filename.c_str(), &path_stat) != 0 || !S_ISREG(path_stat.st_mode)) {
+    throw std::runtime_error("could not load corpus");
+  }
+
   std::FILE *fp = std::fopen(filename.c_str(), "rb");
   if (fp != nullptr) {
     std::fseek(fp, 0, SEEK_END);
@@ -127,6 +134,12 @@ static LoadResult process_with_encoding(uint8_t* raw_buf, size_t raw_len, size_t
 }
 
 LoadResult get_corpus_with_encoding(const std::string& filename, size_t padding) {
+    // Check if the path is a regular file (not a directory or special file)
+    struct stat path_stat;
+    if (stat(filename.c_str(), &path_stat) != 0 || !S_ISREG(path_stat.st_mode)) {
+        throw std::runtime_error("could not load corpus");
+    }
+
     std::FILE *fp = std::fopen(filename.c_str(), "rb");
     if (fp == nullptr) {
         throw std::runtime_error("could not load corpus");

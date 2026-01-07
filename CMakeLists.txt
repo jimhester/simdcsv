@@ -1,6 +1,18 @@
 cmake_minimum_required(VERSION 3.14)
 project(libvroom VERSION 0.1.0 LANGUAGES CXX C)
 
+# =============================================================================
+# Compiler cache (ccache) for faster rebuilds
+# =============================================================================
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    message(STATUS "Found ccache: ${CCACHE_PROGRAM}")
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+else()
+    message(STATUS "ccache not found - install with: sudo apt install ccache (or brew install ccache)")
+endif()
+
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,6 +29,7 @@ option(ENABLE_COVERAGE "Enable code coverage reporting" OFF)
 # Sanitizer options
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 
 # Compiler flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -38,7 +51,7 @@ if(ENABLE_COVERAGE)
 endif()
 
 # Sanitizer flags
-if(ENABLE_ASAN OR ENABLE_UBSAN)
+if(ENABLE_ASAN OR ENABLE_UBSAN OR ENABLE_TSAN)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         # Common sanitizer flags
         add_compile_options(-fno-omit-frame-pointer -g)
@@ -53,6 +66,12 @@ if(ENABLE_ASAN OR ENABLE_UBSAN)
             message(STATUS "UndefinedBehaviorSanitizer enabled")
             add_compile_options(-fsanitize=undefined)
             add_link_options(-fsanitize=undefined)
+        endif()
+
+        if(ENABLE_TSAN)
+            message(STATUS "ThreadSanitizer enabled")
+            add_compile_options(-fsanitize=thread)
+            add_link_options(-fsanitize=thread)
         endif()
     else()
         message(WARNING "Sanitizers not supported for compiler: ${CMAKE_CXX_COMPILER_ID}")
@@ -97,6 +116,15 @@ endif()
 
 # Apache Arrow output integration (optional)
 option(LIBVROOM_ENABLE_ARROW "Enable Apache Arrow output integration" OFF)
+
+# Type detection module (optional, but ON by default for backward compatibility)
+option(LIBVROOM_ENABLE_TYPE_DETECTION "Enable type detection module (libvroom_types.h)" ON)
+
+if(LIBVROOM_ENABLE_TYPE_DETECTION)
+    message(STATUS "Type detection module enabled")
+else()
+    message(STATUS "Type detection module disabled (libvroom_types.h excluded)")
+endif()
 
 # External benchmark parsers (only built if benchmarks enabled)
 if(BUILD_BENCHMARKS)
@@ -202,6 +230,7 @@ add_library(vroom
     src/libvroom_c.cpp
     src/value_extraction.cpp
     src/streaming.cpp
+    src/two_pass.cpp
 )
 
 target_include_directories(vroom PUBLIC
@@ -394,30 +423,32 @@ add_custom_command(TARGET dialect_detection_test POST_BUILD
 # Register dialect detection tests with CTest
 gtest_discover_tests(dialect_detection_test)
 
-# Type detection test executable
-add_executable(type_detection_test
-    test/type_detection_test.cpp
-)
+# Type detection test executable (only if type detection is enabled)
+if(LIBVROOM_ENABLE_TYPE_DETECTION)
+    add_executable(type_detection_test
+        test/type_detection_test.cpp
+    )
 
-target_link_libraries(type_detection_test PRIVATE
-    vroom
-    GTest::gtest_main
-    pthread
-)
+    target_link_libraries(type_detection_test PRIVATE
+        vroom
+        GTest::gtest_main
+        pthread
+    )
 
-target_include_directories(type_detection_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
+    target_include_directories(type_detection_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
 
-# Copy test data to build directory for type detection tests
-add_custom_command(TARGET type_detection_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+    # Copy test data to build directory for type detection tests
+    add_custom_command(TARGET type_detection_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+        ${CMAKE_CURRENT_BINARY_DIR}/test/data
+    )
 
-# Register type detection tests with CTest
-gtest_discover_tests(type_detection_test)
+    # Register type detection tests with CTest
+    gtest_discover_tests(type_detection_test)
+endif()
 
 # C API test executable
 add_executable(c_api_test
@@ -739,6 +770,11 @@ target_include_directories(bounds_validation_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# Pass type detection enable flag to bounds validation test
+if(LIBVROOM_ENABLE_TYPE_DETECTION)
+    target_compile_definitions(bounds_validation_test PRIVATE LIBVROOM_ENABLE_TYPE_DETECTION)
+endif()
+
 # Copy test data to build directory for bounds validation tests
 add_custom_command(TARGET bounds_validation_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -773,6 +809,31 @@ add_custom_command(TARGET integration_test POST_BUILD
 
 # Register integration tests with CTest
 gtest_discover_tests(integration_test)
+
+# Concurrency and thread safety test executable
+add_executable(concurrency_test
+    test/concurrency_test.cpp
+)
+
+target_link_libraries(concurrency_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(concurrency_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Copy test data to build directory for concurrency tests
+add_custom_command(TARGET concurrency_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+    ${CMAKE_CURRENT_BINARY_DIR}/test/data
+)
+
+# Register concurrency tests with CTest
+gtest_discover_tests(concurrency_test)
 
 # Arrow output test (only if Arrow is enabled)
 if(LIBVROOM_ENABLE_ARROW)
@@ -828,6 +889,14 @@ target_link_libraries(libvroom_benchmark PRIVATE
 target_include_directories(libvroom_benchmark PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+# Define benchmark mode to suppress debug output during benchmarking
+target_compile_definitions(libvroom_benchmark PRIVATE LIBVROOM_BENCHMARK_MODE)
+
+# Pass type detection enable flag to benchmarks
+if(LIBVROOM_ENABLE_TYPE_DETECTION)
+    target_compile_definitions(libvroom_benchmark PRIVATE LIBVROOM_ENABLE_TYPE_DETECTION)
+endif()
 
 # Conditionally link external CSV parsers
 if(HAVE_ZSV)

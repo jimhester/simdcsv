@@ -69,7 +69,6 @@ TEST_F(CAPITest, AllErrorStrings) {
     EXPECT_STREQ(libvroom_error_string(LIBVROOM_ERROR_INCONSISTENT_FIELDS), "Inconsistent field count");
     EXPECT_STREQ(libvroom_error_string(LIBVROOM_ERROR_FIELD_TOO_LARGE), "Field too large");
     EXPECT_STREQ(libvroom_error_string(LIBVROOM_ERROR_MIXED_LINE_ENDINGS), "Mixed line endings");
-    EXPECT_STREQ(libvroom_error_string(LIBVROOM_ERROR_INVALID_LINE_ENDING), "Invalid line ending");
     EXPECT_STREQ(libvroom_error_string(LIBVROOM_ERROR_INVALID_UTF8), "Invalid UTF-8");
     EXPECT_STREQ(libvroom_error_string(LIBVROOM_ERROR_NULL_BYTE), "Null byte in data");
     EXPECT_STREQ(libvroom_error_string(LIBVROOM_ERROR_EMPTY_HEADER), "Empty header");
@@ -269,8 +268,9 @@ TEST_F(CAPITest, IndexCreate) {
 TEST_F(CAPITest, IndexCreateInvalid) {
     // Note: buffer_length=0 is now valid since it's ignored (Parser allocates internally)
     // Only num_threads=0 should return nullptr
-    EXPECT_NE(libvroom_index_create(0, 1), nullptr);  // Valid: buffer_length ignored
-    libvroom_index_destroy(libvroom_index_create(0, 1));  // Clean up
+    libvroom_index_t* idx = libvroom_index_create(0, 1);
+    EXPECT_NE(idx, nullptr);  // Valid: buffer_length ignored
+    libvroom_index_destroy(idx);  // Clean up
     EXPECT_EQ(libvroom_index_create(1000, 0), nullptr);   // Invalid: num_threads=0
 }
 

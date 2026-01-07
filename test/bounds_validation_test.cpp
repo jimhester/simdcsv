@@ -21,9 +21,13 @@ LIBVROOM_SUPPRESS_DEPRECATION_START
 #include <vector>
 #include "value_extraction.h"
 #include "dialect.h"
-#include "type_detector.h"
 #include "branchless_state_machine.h"
 #include "mem_util.h"
+
+// Type detection is optional - only include if enabled
+#ifdef LIBVROOM_ENABLE_TYPE_DETECTION
+#include "libvroom_types.h"
+#endif
 
 using namespace libvroom;
 
@@ -314,8 +318,10 @@ TEST_F(DialectBoundsTest, DetectInconsistentRows) {
 }
 
 // =============================================================================
-// Type Detector Bounds Tests
+// Type Detector Bounds Tests (only if type detection is enabled)
 // =============================================================================
+
+#ifdef LIBVROOM_ENABLE_TYPE_DETECTION
 
 class TypeDetectorBoundsTest : public ::testing::Test {
 protected:
@@ -363,6 +369,8 @@ TEST_F(TypeDetectorBoundsTest, DetectFieldAllWhitespaceTypes) {
         reinterpret_cast<const uint8_t*>(ws), 4, options_);
     EXPECT_EQ(type, libvroom::FieldType::EMPTY);
 }
+
+#endif  // LIBVROOM_ENABLE_TYPE_DETECTION
 
 // =============================================================================
 // Integration Tests - Complete Parsing Workflow
@@ -524,6 +532,7 @@ TEST(AssertionVerificationTest, DialectDetectionValidData) {
 }
 
 // Test type detection with valid data doesn't trigger assertions
+#ifdef LIBVROOM_ENABLE_TYPE_DETECTION
 TEST(AssertionVerificationTest, TypeDetectionValidData) {
     libvroom::TypeDetectionOptions options;
 
@@ -540,6 +549,7 @@ TEST(AssertionVerificationTest, TypeDetectionValidData) {
         reinterpret_cast<const uint8_t*>("true"), 4, options);
     EXPECT_EQ(bool_type, libvroom::FieldType::BOOLEAN);
 }
+#endif  // LIBVROOM_ENABLE_TYPE_DETECTION
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);

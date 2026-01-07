@@ -44,11 +44,11 @@ class debug_parser {
 public:
     debug_parser() = default;
 
-    index init(size_t len, size_t n_threads) {
+    ParseIndex init(size_t len, size_t n_threads) {
         return parser_.init(len, n_threads);
     }
 
-    bool parse_debug(const uint8_t* buf, index& out, size_t len,
+    bool parse_debug(const uint8_t* buf, ParseIndex& out, size_t len,
                      DebugTrace& trace, const Dialect& dialect = Dialect::csv()) {
         trace.log("Starting parse: %zu bytes, %u threads", len, out.n_threads);
         trace.log_threading(out.n_threads, len / (out.n_threads > 0 ? out.n_threads : 1));
@@ -82,7 +82,7 @@ public:
         return result;
     }
 
-    bool parse_with_errors_debug(const uint8_t* buf, index& out, size_t len,
+    bool parse_with_errors_debug(const uint8_t* buf, ParseIndex& out, size_t len,
                                  ErrorCollector& errors, DebugTrace& trace,
                                  const Dialect& dialect = Dialect::csv()) {
         trace.log("Starting parse_with_errors: %zu bytes", len);
@@ -115,19 +115,19 @@ public:
         return result;
     }
 
-    bool parse(const uint8_t* buf, index& out, size_t len,
+    bool parse(const uint8_t* buf, ParseIndex& out, size_t len,
                const Dialect& dialect = Dialect::csv()) {
         return parser_.parse(buf, out, len, dialect);
     }
 
-    bool parse_with_errors(const uint8_t* buf, index& out, size_t len,
+    bool parse_with_errors(const uint8_t* buf, ParseIndex& out, size_t len,
                            ErrorCollector& errors,
                            const Dialect& dialect = Dialect::csv()) {
         return parser_.parse_with_errors(buf, out, len, errors, dialect);
     }
 
 private:
-    two_pass parser_;
+    TwoPass parser_;
 };
 
 }  // namespace libvroom

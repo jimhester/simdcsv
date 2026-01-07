@@ -23,9 +23,22 @@ libvroom provides comprehensive error detection and reporting for malformed CSV 
 1. **Detect common CSV errors** - Quote escaping, field count mismatches, invalid characters
 2. **Provide precise location information** - Line, column, and byte offset
 3. **Support three error modes** - Strict, permissive, and best-effort parsing
-4. **Enable both exception and non-exception workflows** - Choose based on your needs
+4. **Never throw for parse errors** - All errors accessible via `result.errors()`
 5. **Collect multiple errors** - See all problems in one pass (permissive mode)
 6. **Support multi-threaded parsing** - Thread-local error collection with merging
+
+### Key Design Principle
+
+**`Parser::parse()` never throws exceptions for parse errors.** All parse errors are
+returned via the `Result` object's internal `ErrorCollector`, accessible through
+`result.errors()`, `result.has_errors()`, and `result.error_summary()`.
+
+Exceptions are reserved exclusively for truly exceptional conditions such as:
+- System-level memory allocation failures
+- Internal programming errors (bugs in libvroom itself)
+
+This design ensures predictable, non-exceptional control flow for all parsing
+operations, making error handling simpler and more consistent.
 
 ## Error Modes
 
@@ -79,7 +92,7 @@ ErrorCollector errors(ErrorMode::BEST_EFFORT);
 
 ## Error Types
 
-libvroom defines 16 error types in `include/error.h` as the `ErrorCode` enum. Error types marked with **[RESERVED]** are defined for future compatibility but not yet implemented in the current parser.
+libvroom defines 15 error types in `include/error.h` as the `ErrorCode` enum.
 
 ### Quote-Related Errors
 
@@ -107,7 +120,7 @@ field"with"quotes
 | Error Code | Severity | Status | Description |
 |------------|----------|--------|-------------|
 | `INCONSISTENT_FIELD_COUNT` | ERROR | Implemented | Row has different field count than header |
-| `FIELD_TOO_LARGE` | ERROR | [RESERVED] | Field exceeds maximum size limit |
+| `FIELD_TOO_LARGE` | ERROR | Implemented | Field exceeds maximum size limit |
 
 **Example:**
 
@@ -123,13 +136,12 @@ A,B,C
 | Error Code | Severity | Status | Description |
 |------------|----------|--------|-------------|
 | `MIXED_LINE_ENDINGS` | WARNING | Implemented | File uses inconsistent line endings |
-| `INVALID_LINE_ENDING` | ERROR | [RESERVED] | Invalid line ending sequence |
 
 ### Character Encoding Errors
 
 | Error Code | Severity | Status | Description |
 |------------|----------|--------|-------------|
-| `INVALID_UTF8` | ERROR | [RESERVED] | Invalid UTF-8 byte sequence |
+| `INVALID_UTF8` | ERROR | Implemented | Invalid UTF-8 byte sequence |
 | `NULL_BYTE` | ERROR | Implemented | Unexpected null byte in data |
 
 ### Structure Errors
@@ -155,14 +167,14 @@ A,B,A,C
 
 | Error Code | Severity | Status | Description |
 |------------|----------|--------|-------------|
-| `AMBIGUOUS_SEPARATOR` | ERROR | [RESERVED] | Cannot reliably determine field separator |
+| `AMBIGUOUS_SEPARATOR` | ERROR | Implemented | Cannot reliably determine field separator |
 
 ### General Errors
 
 | Error Code | Severity | Status | Description |
 |------------|----------|--------|-------------|
-| `FILE_TOO_LARGE` | FATAL | [RESERVED] | File exceeds maximum size limit |
-| `IO_ERROR` | FATAL | [RESERVED] | File I/O error |
+| `FILE_TOO_LARGE` | FATAL | Implemented | File exceeds maximum size limit |
+| `IO_ERROR` | FATAL | Implemented | File I/O error |
 | `INTERNAL_ERROR` | FATAL | Implemented | Internal parser error (bug in libvroom) |
 
 ## Error Severity Levels
@@ -389,14 +401,13 @@ This section describes how libvroom attempts to recover from different error typ
 | Error | Recovery Strategy |
 |-------|-------------------|
 | `INCONSISTENT_FIELD_COUNT` | Parser records the error and continues to the next row. The affected row is parsed with whatever fields are present. Missing fields appear as empty; extra fields may be ignored. |
-| `FIELD_TOO_LARGE` | [RESERVED] Would truncate the field at the limit and continue. |
+| `FIELD_TOO_LARGE` | Parser records the error and skips the oversized field. Used in streaming API to prevent DoS attacks. |
 
 ### Line Ending Error Recovery
 
 | Error | Recovery Strategy |
 |-------|-------------------|
 | `MIXED_LINE_ENDINGS` | Parser normalizes all line endings during parsing. A warning is recorded but parsing continues normally. Data integrity is not affected. |
-| `INVALID_LINE_ENDING` | [RESERVED] Would treat as literal characters or skip. |
 
 ### Structure Error Recovery
 
@@ -410,7 +421,7 @@ This section describes how libvroom attempts to recover from different error typ
 | Error | Recovery Strategy |
 |-------|-------------------|
 | `NULL_BYTE` | Parser records the error at the null byte location. In recovery mode, the null byte is typically treated as end-of-field or skipped. |
-| `INVALID_UTF8` | [RESERVED] Would replace invalid sequences with replacement character (U+FFFD) or skip. |
+| `INVALID_UTF8` | Parser records the error at the invalid byte sequence location. Validation continues to find additional errors. Enable via `ValidationLimits::validate_utf8`. |
 
 ### Recovery Example
 
@@ -421,22 +432,21 @@ using namespace libvroom;
 
 // Parse a file with known issues
 FileBuffer buf = load_file("messy_data.csv");
-ErrorCollector errors(ErrorMode::PERMISSIVE);
 Parser parser;
 
-// Use unified parse() with error collection
-auto result = parser.parse(buf.data(), buf.size(), {.errors = &errors});
+// Parse - errors are automatically collected in result
+auto result = parser.parse(buf.data(), buf.size());
 
 // Parsing completed (unless FATAL error occurred)
 if (result.successful) {
     std::cout << "Parsed " << result.total_indexes() << " fields" << std::endl;
 }
 
-// Check what issues were found
-if (errors.has_errors()) {
-    std::cout << "Encountered " << errors.error_count() << " issues:" << std::endl;
+// Check what issues were found using unified result.errors() API
+if (result.has_errors()) {
+    std::cout << "Encountered " << result.error_count() << " issues:" << std::endl;
 
-    for (const auto& err : errors.errors()) {
+    for (const auto& err : result.errors()) {
         if (err.severity == ErrorSeverity::WARNING) {
             // Warnings - data is usable
             std::cout << "[WARN] " << err.message << std::endl;
@@ -534,18 +544,15 @@ using namespace libvroom;
 bool parse_production_csv(const std::string& filepath) {
     // Load file
     FileBuffer buffer = load_file(filepath);
-
-    // STRICT mode: stop on first error
-    ErrorCollector errors(ErrorMode::STRICT);
     Parser parser;
 
-    // Use unified parse() with error collection
-    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
+    // Parse and check for errors using unified result.errors() API
+    auto result = parser.parse(buffer.data(), buffer.size());
 
-    if (!result.successful || errors.has_errors()) {
+    if (!result.successful || result.has_errors()) {
         // Log the error and reject the file
         std::cerr << "CSV validation failed: " << filepath << std::endl;
-        for (const auto& err : errors.errors()) {
+        for (const auto& err : result.errors()) {
             std::cerr << err.to_string() << std::endl;
         }
         return false;
@@ -570,13 +577,10 @@ using namespace libvroom;
 
 void validate_csv_report(const std::string& filepath, const std::string& report_path) {
     FileBuffer buffer = load_file(filepath);
-
-    // PERMISSIVE mode: collect all errors
-    ErrorCollector errors(ErrorMode::PERMISSIVE);
     Parser parser;
 
-    // Use unified parse() - auto-detects dialect by default
-    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
+    // Parse - auto-detects dialect, errors collected in result
+    auto result = parser.parse(buffer.data(), buffer.size());
 
     // Write validation report
     std::ofstream report(report_path);
@@ -586,12 +590,12 @@ void validate_csv_report(const std::string& filepath, const std::string& report_
     report << "Detected dialect: " << result.dialect.to_string() << "\n";
     report << "Parse completed: " << (result.successful ? "Yes" : "No") << "\n\n";
 
-    if (errors.has_errors()) {
-        report << errors.summary() << "\n\n";
+    if (result.has_errors()) {
+        report << result.error_summary() << "\n\n";
 
         // Group errors by type
         report << "Errors by Line:\n";
-        for (const auto& err : errors.errors()) {
+        for (const auto& err : result.errors()) {
             report << "  Line " << err.line << ": "
                    << error_code_to_string(err.code) << " - "
                    << err.message << "\n";
@@ -614,22 +618,19 @@ using namespace libvroom;
 
 void import_messy_data(const std::string& filepath) {
     FileBuffer buffer = load_file(filepath);
-
-    // BEST_EFFORT mode: parse what we can
-    ErrorCollector errors(ErrorMode::BEST_EFFORT);
     Parser parser;
 
-    // Use unified parse() with error collection
-    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
+    // Parse - errors are automatically collected in result
+    auto result = parser.parse(buffer.data(), buffer.size());
 
     std::cout << "Import Results:\n";
     std::cout << "  Fields found: " << result.total_indexes() << "\n";
-    std::cout << "  Issues encountered: " << errors.error_count() << "\n";
+    std::cout << "  Issues encountered: " << result.error_count() << "\n";
 
-    if (errors.has_errors()) {
+    if (result.has_errors()) {
         // Log warnings for monitoring
         size_t warnings = 0, recoverable = 0;
-        for (const auto& err : errors.errors()) {
+        for (const auto& err : result.errors()) {
             if (err.severity == ErrorSeverity::WARNING) warnings++;
             else recoverable++;
         }
@@ -654,14 +655,13 @@ using namespace libvroom;
 
 void process_with_error_handling(const std::string& filepath) {
     FileBuffer buffer = load_file(filepath);
-    ErrorCollector errors(ErrorMode::PERMISSIVE);
     Parser parser;
 
-    // Use unified parse() with error collection
-    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
+    // Parse - errors are automatically collected in result
+    auto result = parser.parse(buffer.data(), buffer.size());
 
-    // Handle different error types
-    for (const auto& err : errors.errors()) {
+    // Handle different error types using result.errors()
+    for (const auto& err : result.errors()) {
         switch (err.code) {
             case ErrorCode::DUPLICATE_COLUMN_NAMES:
                 // Just log and continue - minor issue
@@ -708,20 +708,17 @@ void parallel_parse_with_errors(const uint8_t* data, size_t len) {
     // Create parser with multiple threads
     Parser parser(num_threads);
 
-    // Error collector - Parser handles thread-local collection internally
-    ErrorCollector errors(ErrorMode::PERMISSIVE);
-
-    // Use unified parse() - multi-threading is automatic based on num_threads
-    auto result = parser.parse(data, len, {.errors = &errors});
+    // Parse - errors are automatically collected in result
+    auto result = parser.parse(data, len);
 
     // Report results
     if (result.successful) {
         std::cout << "Parsed with " << num_threads << " threads\n";
     }
 
-    if (errors.has_errors()) {
+    if (result.has_errors()) {
         std::cout << "Errors found:\n";
-        std::cout << errors.summary() << std::endl;
+        std::cout << result.error_summary() << std::endl;
     }
 }
 ```
@@ -736,13 +733,12 @@ void parallel_parse_with_errors(const uint8_t* data, size_t len) {
 4. **Validate data sources** to catch errors early in the pipeline
 
 ```cpp
-ErrorCollector errors(ErrorMode::STRICT);
 Parser parser;
-auto result = parser.parse(data, len, {.errors = &errors});
+auto result = parser.parse(data, len);
 
-if (!result.successful || errors.has_errors()) {
+if (!result.successful || result.has_errors()) {
     // Log and reject
-    logger.error("CSV parsing failed: " + errors.summary());
+    logger.error("CSV parsing failed: " + result.error_summary());
     return Error::INVALID_CSV;
 }
 
@@ -758,16 +754,15 @@ process_data(result);
 4. **Categorize errors** by severity for prioritized fixing
 
 ```cpp
-ErrorCollector errors(ErrorMode::PERMISSIVE);
 Parser parser;
-auto result = parser.parse(data, len, {.errors = &errors});
+auto result = parser.parse(data, len);
 
-if (errors.has_errors()) {
+if (result.has_errors()) {
     // Generate detailed report
-    std::cout << "Validation found " << errors.error_count() << " issues:\n\n";
+    std::cout << "Validation found " << result.error_count() << " issues:\n\n";
 
     // Separate by severity
-    for (const auto& err : errors.errors()) {
+    for (const auto& err : result.errors()) {
         if (err.severity == ErrorSeverity::FATAL) {
             std::cout << "CRITICAL: ";
         }
@@ -784,27 +779,26 @@ if (errors.has_errors()) {
 4. **Document data quality** in metadata for downstream consumers
 
 ```cpp
-ErrorCollector errors(ErrorMode::BEST_EFFORT);
 Parser parser;
-auto result = parser.parse(messy_data, len, {.errors = &errors});
+auto result = parser.parse(messy_data, len);
 
 std::cout << "Imported " << result.total_indexes() << " fields";
-if (errors.has_errors()) {
-    std::cout << " with " << errors.error_count() << " issues";
+if (result.has_errors()) {
+    std::cout << " with " << result.error_count() << " issues";
 }
 std::cout << std::endl;
 
 // Track quality metrics
-data_quality_log.record(filepath, result.total_indexes(), errors.error_count());
+data_quality_log.record(filepath, result.total_indexes(), result.error_count());
 ```
 
 ### General Guidelines
 
 1. **Choose the right mode for your use case** - don't use STRICT when PERMISSIVE would give better user feedback
 2. **Always check for errors** even in BEST_EFFORT mode - errors provide valuable quality information
-3. **Use `summary()` for logging** - it provides a concise overview without dumping every error
+3. **Use `error_summary()` for logging** - it provides a concise overview without dumping every error
 4. **Consider `max_errors` limit** - set appropriately for your data size to prevent memory issues
-5. **Handle multi-threaded parsing correctly** - each thread needs its own collector, merge after parsing
+5. **Use result.errors()** - errors are automatically collected in the Result object, no external collector needed
 
 ## Test Files
 
