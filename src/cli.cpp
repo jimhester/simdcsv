@@ -177,6 +177,9 @@ void printUsage(const char* prog) {
   cerr << "  -d <delim>    Field delimiter (disables auto-detection)\n";
   cerr << "                Values: comma, tab, semicolon, pipe, or single character\n";
   cerr << "  -q <char>     Quote character (default: \")\n";
+  cerr << "  -e <enc>      Override encoding detection with specified encoding\n";
+  cerr << "                Values: utf-8, utf-16le, utf-16be, utf-32le, utf-32be,\n";
+  cerr << "                        latin1, windows-1252\n";
   cerr << "  -j            Output in JSON format (for dialect command)\n";
   cerr << "  -S, --strict  Strict mode: exit with code 1 on any parse error\n";
   cerr << "  -h            Show this help message\n";
@@ -185,6 +188,10 @@ void printUsage(const char* prog) {
   cerr << "  By default, vroom auto-detects the CSV dialect (delimiter, quote character,\n";
   cerr << "  escape style). Use -d to explicitly specify a delimiter and disable\n";
   cerr << "  auto-detection.\n";
+  cerr << "\nEncoding Support:\n";
+  cerr << "  By default, vroom auto-detects file encoding via BOM and byte patterns.\n";
+  cerr << "  Non-UTF-8 files are automatically transcoded to UTF-8 for parsing.\n";
+  cerr << "  Use -e to override automatic detection.\n";
   cerr << "\nExamples:\n";
   cerr << "  " << prog << " count data.csv\n";
   cerr << "  " << prog << " head -n 5 data.csv\n";
@@ -218,18 +225,30 @@ struct ParseResult {
 // Parse a file or stdin - returns ParseResult with RAII-managed data
 // If detected_encoding is provided, the detected encoding will be stored there
 // If strict_mode is true, exits with error on any parse warning or error
+// If forced_encoding is not UNKNOWN, it overrides auto-detection
 ParseResult parseFile(const char* filename, int n_threads,
                       const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
                       bool auto_detect = false,
                       libvroom::EncodingResult* detected_encoding = nullptr,
-                      bool strict_mode = false) {
+                      bool strict_mode = false,
+                      libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
   ParseResult result;
 
   try {
-    if (isStdinInput(filename)) {
-      result.load_result = read_stdin_with_encoding(LIBVROOM_PADDING);
+    if (forced_encoding != libvroom::Encoding::UNKNOWN) {
+      // Use forced encoding (user specified via -e flag)
+      if (isStdinInput(filename)) {
+        result.load_result = read_stdin_with_encoding(LIBVROOM_PADDING, forced_encoding);
+      } else {
+        result.load_result = read_file_with_encoding(filename, LIBVROOM_PADDING, forced_encoding);
+      }
     } else {
-      result.load_result = read_file_with_encoding(filename, LIBVROOM_PADDING);
+      // Auto-detect encoding
+      if (isStdinInput(filename)) {
+        result.load_result = read_stdin_with_encoding(LIBVROOM_PADDING);
+      } else {
+        result.load_result = read_file_with_encoding(filename, LIBVROOM_PADDING);
+      }
     }
 
     // Store detected encoding if caller wants it
@@ -563,8 +582,10 @@ static void outputRow(const std::vector<std::string>& row, const libvroom::Diale
 // Command: head
 int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-            bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+            bool strict_mode = false,
+            libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, forced_encoding);
   if (!result.success)
     return 1;
 
@@ -583,8 +604,10 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
 // Command: tail
 int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-            bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+            bool strict_mode = false,
+            libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, forced_encoding);
   if (!result.success)
     return 1;
 
@@ -623,8 +646,10 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
 // Command: sample
 int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-              unsigned int seed = 0, bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+              unsigned int seed = 0, bool strict_mode = false,
+              libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, forced_encoding);
   if (!result.success)
     return 1;
 
@@ -688,8 +713,10 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
 // Command: select
 int cmdSelect(const char* filename, int n_threads, const string& columns, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-              bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+              bool strict_mode = false,
+              libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, forced_encoding);
   if (!result.success)
     return 1;
 
@@ -777,8 +804,10 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
 // Command: info
 int cmdInfo(const char* filename, int n_threads, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-            bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+            bool strict_mode = false,
+            libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, forced_encoding);
   if (!result.success)
     return 1;
 
@@ -813,8 +842,10 @@ int cmdInfo(const char* filename, int n_threads, bool has_header,
 // Command: pretty
 int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-              bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+              bool strict_mode = false,
+              libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, forced_encoding);
   if (!result.success)
     return 1;
 
@@ -1077,8 +1108,10 @@ int main(int argc, char* argv[]) {
   bool json_output = false;         // JSON output for dialect command
   bool strict_mode = false;         // Strict mode: exit with code 1 on any parse error
   unsigned int random_seed = 0;     // Random seed for sample command (0 = use random_device)
+  libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN; // User-specified encoding
   string columns;
   string delimiter_str = "comma";
+  string encoding_str; // User-specified encoding string
   char quote_char = '"';
 
   // Pre-scan for --strict long option (since we're not using getopt_long)
@@ -1095,7 +1128,7 @@ int main(int argc, char* argv[]) {
   }
 
   int c;
-  while ((c = getopt(argc, argv, "n:c:Ht:d:q:s:jShv")) != -1) {
+  while ((c = getopt(argc, argv, "n:c:Ht:d:q:e:s:jShv")) != -1) {
     switch (c) {
     case 'n': {
       char* endptr;
@@ -1134,6 +1167,16 @@ int main(int argc, char* argv[]) {
         quote_char = optarg[0];
       } else {
         cerr << "Error: Quote character must be a single character\n";
+        return 1;
+      }
+      break;
+    case 'e':
+      encoding_str = optarg;
+      forced_encoding = libvroom::parse_encoding_name(encoding_str);
+      if (forced_encoding == libvroom::Encoding::UNKNOWN) {
+        cerr << "Error: Unknown encoding '" << encoding_str << "'\n";
+        cerr << "Supported encodings: utf-8, utf-16le, utf-16be, utf-32le, utf-32be, "
+             << "latin1, windows-1252\n";
         return 1;
       }
       break;
@@ -1176,28 +1219,32 @@ int main(int argc, char* argv[]) {
   int result = 0;
   if (command == "count") {
     // Note: count uses optimized row counting that doesn't do full parse validation,
-    // so strict_mode is not applicable (would need to use full parser for error detection)
+    // so strict_mode and forced_encoding are not applicable
     result = cmdCount(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "head") {
-    result = cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode);
+    result = cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
+                     forced_encoding);
   } else if (command == "tail") {
-    result = cmdTail(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode);
+    result = cmdTail(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
+                     forced_encoding);
   } else if (command == "sample") {
     result = cmdSample(filename, n_threads, num_rows, has_header, dialect, auto_detect, random_seed,
-                       strict_mode);
+                       strict_mode, forced_encoding);
   } else if (command == "select") {
     if (columns.empty()) {
       cerr << "Error: -c option required for select command\n";
       return 1;
     }
-    result = cmdSelect(filename, n_threads, columns, has_header, dialect, auto_detect, strict_mode);
+    result = cmdSelect(filename, n_threads, columns, has_header, dialect, auto_detect, strict_mode,
+                       forced_encoding);
   } else if (command == "info") {
-    result = cmdInfo(filename, n_threads, has_header, dialect, auto_detect, strict_mode);
+    result = cmdInfo(filename, n_threads, has_header, dialect, auto_detect, strict_mode,
+                     forced_encoding);
   } else if (command == "pretty") {
-    result =
-        cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode);
+    result = cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
+                       forced_encoding);
   } else if (command == "dialect") {
-    // Note: dialect command ignores -d and --strict flags since it's for detection
+    // Note: dialect command ignores -d, --strict, and -e flags since it's for detection
     (void)delimiter_specified; // Suppress unused warning
     result = cmdDialect(filename, json_output);
   } else {

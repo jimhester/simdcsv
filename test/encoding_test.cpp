@@ -414,14 +414,18 @@ TEST_F(FileLoadingTest, LoadsUtf8BomFile) {
   }
 }
 
-TEST_F(FileLoadingTest, LoadsPlainUtf8File) {
+TEST_F(FileLoadingTest, LoadsLatin1File) {
   try {
     auto result = read_file_with_encoding(test_data_dir() + "latin1.csv", 64);
-    // Latin-1 and UTF-8 are similar for ASCII subset
-    EXPECT_FALSE(result.encoding.needs_transcoding);
+    // Latin-1 with non-ASCII bytes needs transcoding to UTF-8
+    EXPECT_EQ(result.encoding.encoding, Encoding::LATIN1);
+    EXPECT_TRUE(result.encoding.needs_transcoding);
 
     std::string content(reinterpret_cast<const char*>(result.data()), result.size);
     EXPECT_FALSE(content.empty());
+    // After transcoding, the content should be valid UTF-8
+    // Latin-1 "José" should become UTF-8 "José" (é = 0xC3 0xA9)
+    EXPECT_NE(content.find("Jos\xC3\xA9"), std::string::npos);
     // RAII handles cleanup automatically
   } catch (const std::exception& e) {
     FAIL() << "Exception: " << e.what();
@@ -440,5 +444,61 @@ TEST(EncodingToStringTest, ReturnsCorrectStrings) {
   EXPECT_STREQ(encoding_to_string(Encoding::UTF32_LE), "UTF-32LE");
   EXPECT_STREQ(encoding_to_string(Encoding::UTF32_BE), "UTF-32BE");
   EXPECT_STREQ(encoding_to_string(Encoding::LATIN1), "Latin-1");
+  EXPECT_STREQ(encoding_to_string(Encoding::WINDOWS_1252), "Windows-1252");
   EXPECT_STREQ(encoding_to_string(Encoding::UNKNOWN), "Unknown");
+}
+
+// ============================================================================
+// parse_encoding_name Tests
+// ============================================================================
+
+TEST(ParseEncodingNameTest, ParsesUtf8Variants) {
+  EXPECT_EQ(parse_encoding_name("utf-8"), Encoding::UTF8);
+  EXPECT_EQ(parse_encoding_name("utf8"), Encoding::UTF8);
+  EXPECT_EQ(parse_encoding_name("UTF-8"), Encoding::UTF8);
+  EXPECT_EQ(parse_encoding_name("UTF8"), Encoding::UTF8);
+}
+
+TEST(ParseEncodingNameTest, ParsesUtf16Variants) {
+  EXPECT_EQ(parse_encoding_name("utf-16le"), Encoding::UTF16_LE);
+  EXPECT_EQ(parse_encoding_name("utf16le"), Encoding::UTF16_LE);
+  EXPECT_EQ(parse_encoding_name("utf-16-le"), Encoding::UTF16_LE);
+  EXPECT_EQ(parse_encoding_name("UTF-16LE"), Encoding::UTF16_LE);
+
+  EXPECT_EQ(parse_encoding_name("utf-16be"), Encoding::UTF16_BE);
+  EXPECT_EQ(parse_encoding_name("utf16be"), Encoding::UTF16_BE);
+  EXPECT_EQ(parse_encoding_name("utf-16-be"), Encoding::UTF16_BE);
+  EXPECT_EQ(parse_encoding_name("UTF-16BE"), Encoding::UTF16_BE);
+}
+
+TEST(ParseEncodingNameTest, ParsesUtf32Variants) {
+  EXPECT_EQ(parse_encoding_name("utf-32le"), Encoding::UTF32_LE);
+  EXPECT_EQ(parse_encoding_name("utf32le"), Encoding::UTF32_LE);
+  EXPECT_EQ(parse_encoding_name("utf-32-le"), Encoding::UTF32_LE);
+
+  EXPECT_EQ(parse_encoding_name("utf-32be"), Encoding::UTF32_BE);
+  EXPECT_EQ(parse_encoding_name("utf32be"), Encoding::UTF32_BE);
+  EXPECT_EQ(parse_encoding_name("utf-32-be"), Encoding::UTF32_BE);
+}
+
+TEST(ParseEncodingNameTest, ParsesLatin1Variants) {
+  EXPECT_EQ(parse_encoding_name("latin1"), Encoding::LATIN1);
+  EXPECT_EQ(parse_encoding_name("latin-1"), Encoding::LATIN1);
+  EXPECT_EQ(parse_encoding_name("iso-8859-1"), Encoding::LATIN1);
+  EXPECT_EQ(parse_encoding_name("iso88591"), Encoding::LATIN1);
+  EXPECT_EQ(parse_encoding_name("LATIN1"), Encoding::LATIN1);
+}
+
+TEST(ParseEncodingNameTest, ParsesWindows1252Variants) {
+  EXPECT_EQ(parse_encoding_name("windows-1252"), Encoding::WINDOWS_1252);
+  EXPECT_EQ(parse_encoding_name("windows1252"), Encoding::WINDOWS_1252);
+  EXPECT_EQ(parse_encoding_name("cp1252"), Encoding::WINDOWS_1252);
+  EXPECT_EQ(parse_encoding_name("CP1252"), Encoding::WINDOWS_1252);
+}
+
+TEST(ParseEncodingNameTest, ReturnsUnknownForInvalidNames) {
+  EXPECT_EQ(parse_encoding_name("invalid"), Encoding::UNKNOWN);
+  EXPECT_EQ(parse_encoding_name(""), Encoding::UNKNOWN);
+  EXPECT_EQ(parse_encoding_name("utf-7"), Encoding::UNKNOWN);
+  EXPECT_EQ(parse_encoding_name("ascii"), Encoding::UNKNOWN);
 }
