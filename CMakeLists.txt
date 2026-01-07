@@ -754,6 +754,26 @@ add_dependencies(concurrency_test copy_test_data)
 # Register concurrency tests with CTest
 gtest_discover_tests(concurrency_test)
 
+# Comment line skipping test executable
+add_executable(comment_line_test
+    test/comment_line_test.cpp
+)
+
+target_link_libraries(comment_line_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(comment_line_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(comment_line_test copy_test_data)
+
+# Register comment line tests with CTest
+gtest_discover_tests(comment_line_test)
+
 # Arrow output test (only if Arrow is enabled)
 if(LIBVROOM_ENABLE_ARROW)
     add_executable(arrow_output_test test/arrow_output_test.cpp)
