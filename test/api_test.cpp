@@ -1398,20 +1398,6 @@ TEST_F(AlignedBufferTest, EmptyMethod) {
   EXPECT_TRUE(zero_size.valid()); // Valid pointer but empty data
 }
 
-// Test: wrap_corpus utility function
-TEST_F(AlignedBufferTest, WrapCorpus) {
-  std::string content = "a,b,c\n1,2,3\n";
-  auto [data, len] = make_buffer(content);
-  std::basic_string_view<uint8_t> corpus(data, len);
-
-  auto [ptr, size] = libvroom::wrap_corpus(corpus);
-
-  EXPECT_NE(ptr.get(), nullptr);
-  EXPECT_EQ(size, content.size());
-  EXPECT_EQ(ptr[0], 'a');
-  // Memory freed when ptr goes out of scope
-}
-
 // Test: AlignedBuffer with Parser
 TEST_F(AlignedBufferTest, WithParser) {
   auto [data, len] = make_buffer("name,age\nAlice,30\nBob,25\n");

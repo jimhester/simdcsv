@@ -1,7 +1,8 @@
+#include "libvroom.h"
+
 #include "dialect.h"
 #include "error.h"
 #include "io_util.h"
-#include "mem_util.h"
 #include "two_pass.h"
 #include "value_extraction.h"
 
@@ -319,15 +320,13 @@ TEST_F(CSVFileTest, NoFinalNewlineEndsWithoutNewline) {
 // Test that CR-only line endings parse correctly to 3 columns and 3 rows
 TEST_F(CSVFileTest, CRLineEndingsParseCorrectly) {
   std::string path = getTestDataPath("line_endings", "cr.csv");
-  auto corpus = get_corpus(path.c_str(), 64);
+  auto buffer = libvroom::load_file_to_ptr(path, 64);
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(corpus.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(),
-                           errors);
+  parser.parse_with_errors(buffer.data(), idx, buffer.size, errors);
 
-  libvroom::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()), corpus.size(), idx,
-                              libvroom::Dialect::csv());
+  libvroom::ValueExtractor ve(buffer.data(), buffer.size, idx, libvroom::Dialect::csv());
   ve.set_has_header(true);
 
   EXPECT_EQ(ve.num_columns(), 3) << "CR-only file should have 3 columns";
@@ -339,22 +338,18 @@ TEST_F(CSVFileTest, CRLineEndingsParseCorrectly) {
   EXPECT_EQ(headers[0], "A");
   EXPECT_EQ(headers[1], "B");
   EXPECT_EQ(headers[2], "C");
-
-  aligned_free((void*)corpus.data());
 }
 
 // Test that CRLF line endings parse correctly to 3 columns and 3 rows
 TEST_F(CSVFileTest, CRLFLineEndingsParseCorrectly) {
   std::string path = getTestDataPath("line_endings", "crlf.csv");
-  auto corpus = get_corpus(path.c_str(), 64);
+  auto buffer = libvroom::load_file_to_ptr(path, 64);
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(corpus.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(),
-                           errors);
+  parser.parse_with_errors(buffer.data(), idx, buffer.size, errors);
 
-  libvroom::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()), corpus.size(), idx,
-                              libvroom::Dialect::csv());
+  libvroom::ValueExtractor ve(buffer.data(), buffer.size, idx, libvroom::Dialect::csv());
   ve.set_has_header(true);
 
   EXPECT_EQ(ve.num_columns(), 3) << "CRLF file should have 3 columns";
@@ -366,22 +361,18 @@ TEST_F(CSVFileTest, CRLFLineEndingsParseCorrectly) {
   EXPECT_EQ(headers[0], "A");
   EXPECT_EQ(headers[1], "B");
   EXPECT_EQ(headers[2], "C"); // Should be "C", not "C\r"
-
-  aligned_free((void*)corpus.data());
 }
 
 // Test that LF line endings parse correctly to 3 columns and 3 rows
 TEST_F(CSVFileTest, LFLineEndingsParseCorrectly) {
   std::string path = getTestDataPath("line_endings", "lf.csv");
-  auto corpus = get_corpus(path.c_str(), 64);
+  auto buffer = libvroom::load_file_to_ptr(path, 64);
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(corpus.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(),
-                           errors);
+  parser.parse_with_errors(buffer.data(), idx, buffer.size, errors);
 
-  libvroom::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()), corpus.size(), idx,
-                              libvroom::Dialect::csv());
+  libvroom::ValueExtractor ve(buffer.data(), buffer.size, idx, libvroom::Dialect::csv());
   ve.set_has_header(true);
 
   EXPECT_EQ(ve.num_columns(), 3) << "LF file should have 3 columns";
@@ -393,8 +384,6 @@ TEST_F(CSVFileTest, LFLineEndingsParseCorrectly) {
   EXPECT_EQ(headers[0], "A");
   EXPECT_EQ(headers[1], "B");
   EXPECT_EQ(headers[2], "C");
-
-  aligned_free((void*)corpus.data());
 }
 
 // Test that all line ending types produce equivalent results
@@ -404,15 +393,13 @@ TEST_F(CSVFileTest, AllLineEndingsProduceEquivalentResults) {
 
   for (const auto& file : files) {
     std::string path = getTestDataPath("line_endings", file);
-    auto corpus = get_corpus(path.c_str(), 64);
+    auto buffer = libvroom::load_file_to_ptr(path, 64);
     libvroom::TwoPass parser;
-    libvroom::ParseIndex idx = parser.init(corpus.size(), 1);
+    libvroom::ParseIndex idx = parser.init(buffer.size, 1);
     libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-    parser.parse_with_errors(reinterpret_cast<const uint8_t*>(corpus.data()), idx, corpus.size(),
-                             errors);
+    parser.parse_with_errors(buffer.data(), idx, buffer.size, errors);
 
-    libvroom::ValueExtractor ve(reinterpret_cast<const uint8_t*>(corpus.data()), corpus.size(), idx,
-                                libvroom::Dialect::csv());
+    libvroom::ValueExtractor ve(buffer.data(), buffer.size, idx, libvroom::Dialect::csv());
     ve.set_has_header(true);
 
     std::vector<std::vector<std::string>> data;
@@ -427,8 +414,6 @@ TEST_F(CSVFileTest, AllLineEndingsProduceEquivalentResults) {
       data.push_back(row_data);
     }
     all_data.push_back(data);
-
-    aligned_free((void*)corpus.data());
   }
 
   // All files should produce the same data

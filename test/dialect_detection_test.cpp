@@ -70,7 +70,7 @@
 //
 // 13. PARSER INTEGRATION (8 tests)
 //     Tests parse_auto, parse with explicit dialect, parse_two_pass variants.
-//     Exercises: TwoPass parser dialect integration
+//     Exercises: two_pass parser dialect integration
 //
 // 14. DIALECT VALIDATION (4 tests)
 //     Tests valid/invalid dialect configurations.
@@ -436,33 +436,32 @@ TEST_F(DialectDetectionTest, RealWorldContacts) {
 
 TEST_F(DialectDetectionTest, ParseAutoWithCommaCSV) {
   std::string path = getTestDataPath("basic", "simple.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   libvroom::DetectionResult detected;
 
-  bool success = parser.parse_auto(data.data(), idx, data.size(), errors, &detected);
+  bool success = parser.parse_auto(buffer.data(), idx, buffer.size, errors, &detected);
 
   EXPECT_TRUE(success) << "parse_auto should succeed for simple.csv";
   EXPECT_TRUE(detected.success()) << "Detection should succeed";
   EXPECT_EQ(detected.dialect.delimiter, ',');
   EXPECT_EQ(detected.detected_columns, 3);
   EXPECT_EQ(errors.error_count(), 0) << "Should have no errors for valid CSV";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(DialectDetectionTest, ParseAutoWithSemicolonCSV) {
   std::string path = getTestDataPath("separators", "semicolon.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
   libvroom::DetectionResult detected;
 
-  bool success = parser.parse_auto(data.data(), idx, data.size(), errors, &detected);
+  bool success = parser.parse_auto(buffer.data(), idx, buffer.size, errors, &detected);
 
   EXPECT_TRUE(success) << "parse_auto should succeed";
   EXPECT_TRUE(detected.success()) << "Detection should succeed";
@@ -477,8 +476,6 @@ TEST_F(DialectDetectionTest, ParseAutoWithSemicolonCSV) {
   // Should have found field separators with the semicolon delimiter
   EXPECT_GT(total_fields, 0) << "Should find field separators with detected dialect";
   EXPECT_EQ(detected.detected_columns, 3) << "Should detect 3 columns";
-
-  libvroom::free_buffer(data);
 }
 
 TEST_F(DialectDetectionTest, DetectDialectStatic) {
@@ -510,47 +507,44 @@ TEST_F(DialectDetectionTest, DetectDialectWithOptions) {
 
 TEST_F(DialectDetectionTest, ParseWithTSVDialect) {
   std::string path = getTestDataPath("separators", "tab.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::Dialect tsv = libvroom::Dialect::tsv();
 
-  bool success = parser.parse(data.data(), idx, data.size(), tsv);
+  bool success = parser.parse(buffer.data(), idx, buffer.size, tsv);
 
   EXPECT_TRUE(success) << "Should parse TSV successfully";
   EXPECT_GT(idx.n_indexes[0], 0) << "Should find tab separators";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(DialectDetectionTest, ParseWithSemicolonDialect) {
   std::string path = getTestDataPath("separators", "semicolon.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::Dialect semicolon = libvroom::Dialect::semicolon();
 
-  bool success = parser.parse(data.data(), idx, data.size(), semicolon);
+  bool success = parser.parse(buffer.data(), idx, buffer.size, semicolon);
 
   EXPECT_TRUE(success) << "Should parse semicolon-separated successfully";
   EXPECT_GT(idx.n_indexes[0], 0) << "Should find semicolon separators";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(DialectDetectionTest, ParseWithPipeDialect) {
   std::string path = getTestDataPath("separators", "pipe.csv");
-  auto data = get_corpus(path, LIBVROOM_PADDING);
+  auto buffer = libvroom::load_file_to_ptr(path, LIBVROOM_PADDING);
 
   libvroom::TwoPass parser;
-  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ParseIndex idx = parser.init(buffer.size, 1);
   libvroom::Dialect pipe = libvroom::Dialect::pipe();
 
-  bool success = parser.parse(data.data(), idx, data.size(), pipe);
+  bool success = parser.parse(buffer.data(), idx, buffer.size, pipe);
 
   EXPECT_TRUE(success) << "Should parse pipe-separated successfully";
   EXPECT_GT(idx.n_indexes[0], 0) << "Should find pipe separators";
-  libvroom::free_buffer(data);
 }
 
 TEST_F(DialectDetectionTest, ParseWithErrorsDialect) {

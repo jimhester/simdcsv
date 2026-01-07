@@ -543,32 +543,8 @@ private:
  * @note Memory ownership is transferred to FileBuffer - do not manually free.
  */
 inline FileBuffer load_file(const std::string& filename, size_t padding = 64) {
-  auto corpus = get_corpus(filename, padding);
-  // Note: get_corpus() allocates memory via allocate_padded_buffer() which
-  // must be freed with aligned_free(). FileBuffer takes ownership and will
-  // call aligned_free() in its destructor.
-  return FileBuffer(const_cast<uint8_t*>(corpus.data()), corpus.size());
-}
-
-/**
- * @brief Free a buffer returned by get_corpus().
- *
- * This is a convenience wrapper around aligned_free() for buffers returned
- * by the legacy get_corpus() function. For new code, prefer using FileBuffer
- * with load_file() which provides automatic memory management.
- *
- * @param corpus Reference to the string_view to free. After calling,
- *               the string_view's data pointer will be invalidated.
- *
- * @deprecated Prefer using FileBuffer with load_file() for automatic cleanup.
- *
- * @see load_file() For automatic memory management.
- * @see FileBuffer For RAII buffer management.
- */
-inline void free_buffer(std::basic_string_view<uint8_t>& corpus) {
-  if (corpus.data()) {
-    aligned_free(const_cast<uint8_t*>(corpus.data()));
-  }
+  auto [buffer, size] = read_file(filename, padding);
+  return FileBuffer(buffer.release(), size);
 }
 
 /**
@@ -658,9 +634,8 @@ struct AlignedBuffer {
  * @see load_stdin_to_ptr() For reading from stdin.
  */
 inline AlignedBuffer load_file_to_ptr(const std::string& filename, size_t padding = 64) {
-  auto corpus = get_corpus(filename, padding);
-  AlignedPtr ptr(const_cast<uint8_t*>(corpus.data()));
-  return AlignedBuffer(std::move(ptr), corpus.size());
+  auto [ptr, size] = read_file(filename, padding);
+  return AlignedBuffer(std::move(ptr), size);
 }
 
 /**
@@ -686,36 +661,11 @@ inline AlignedBuffer load_file_to_ptr(const std::string& filename, size_t paddin
  * @endcode
  *
  * @see load_file_to_ptr() For loading from files.
- * @see get_corpus_stdin() For manual memory management.
+ * @see read_stdin() For lower-level access.
  */
 inline AlignedBuffer load_stdin_to_ptr(size_t padding = 64) {
-  auto corpus = get_corpus_stdin(padding);
-  AlignedPtr ptr(const_cast<uint8_t*>(corpus.data()));
-  return AlignedBuffer(std::move(ptr), corpus.size());
-}
-
-/**
- * @brief Loads a file using the legacy get_corpus() API, wrapped with RAII.
- *
- * This function wraps the raw pointer from get_corpus() in an AlignedPtr
- * for automatic memory management. It's useful when you need to work with
- * existing code that uses get_corpus() but want RAII semantics.
- *
- * @param filename Path to the file to load.
- * @param padding Extra bytes to allocate for SIMD overreads.
- * @return A pair of (AlignedPtr, size). The AlignedPtr is empty on failure.
- * @throws std::runtime_error if file cannot be opened or read.
- *
- * @deprecated Prefer load_file_to_ptr() for new code.
- *
- * @example
- * @code
- * auto [ptr, size] = libvroom::wrap_corpus(get_corpus("data.csv", 64));
- * // Memory automatically freed when ptr goes out of scope
- * @endcode
- */
-inline std::pair<AlignedPtr, size_t> wrap_corpus(std::basic_string_view<uint8_t> corpus) {
-  return {AlignedPtr(const_cast<uint8_t*>(corpus.data())), corpus.size()};
+  auto [ptr, size] = read_stdin(padding);
+  return AlignedBuffer(std::move(ptr), size);
 }
 
 /**
