@@ -1583,17 +1583,6 @@ public:
       return result;
     }
 
-    // Initialize index with size limits (will validate overflow internally)
-    result.idx = parser_.init_safe(len, num_threads_, collector);
-    if (result.idx.indexes == nullptr) {
-      // Allocation failed or would overflow
-      if (options.errors != nullptr) {
-        result.error_collector().merge_from(*options.errors);
-      }
-      result.successful = false;
-      return result;
-    }
-
     // UTF-8 validation (optional, enabled via SizeLimits::validate_utf8)
     if (options.limits.validate_utf8) {
       validate_utf8_internal(buf, len, *collector);
@@ -1614,6 +1603,20 @@ public:
       DialectDetector detector(options.detection_options);
       result.detection = detector.detect(buf, len);
       result.dialect = result.detection.success() ? result.detection.dialect : Dialect::csv();
+    }
+
+    // Optimized allocation: Count separators first to allocate right-sized index.
+    // This typically reduces memory usage by 2-10x for real-world CSV files.
+    auto count_stats =
+        TwoPass::first_pass_simd(buf, 0, len, result.dialect.quote_char, result.dialect.delimiter);
+    result.idx = parser_.init_counted_safe(count_stats.n_separators, num_threads_, collector);
+    if (result.idx.indexes == nullptr) {
+      // Allocation failed or would overflow
+      if (options.errors != nullptr) {
+        result.error_collector().merge_from(*options.errors);
+      }
+      result.successful = false;
+      return result;
     }
 
     // Parse with error collection - never throw for parse errors

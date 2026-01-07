@@ -116,11 +116,12 @@ void ParseIndex::read(const std::string& filename) {
 //-----------------------------------------------------------------------------
 
 TwoPass::Stats TwoPass::first_pass_chunk(const uint8_t* buf, size_t start, size_t end,
-                                         char quote_char) {
+                                         char quote_char, char delimiter) {
   Stats out;
   uint64_t i = start;
   bool needs_even = out.first_even_nl == null_pos;
   bool needs_odd = out.first_odd_nl == null_pos;
+  bool inside_quote = false; // Track quote state for separator counting
   while (i < end) {
     // Support LF, CRLF, and CR-only line endings
     // Check for line ending: \n, or \r not followed by \n
@@ -136,6 +137,11 @@ TwoPass::Stats TwoPass::first_pass_chunk(const uint8_t* buf, size_t start, size_
     }
 
     if (is_line_ending) {
+      // Count separator if not inside quote
+      if (!inside_quote) {
+        ++out.n_separators;
+      }
+
       bool is_even = (out.n_quotes % 2) == 0;
       if (needs_even && is_even) {
         out.first_even_nl = i;
@@ -146,6 +152,12 @@ TwoPass::Stats TwoPass::first_pass_chunk(const uint8_t* buf, size_t start, size_
       }
     } else if (buf[i] == static_cast<uint8_t>(quote_char)) {
       ++out.n_quotes;
+      inside_quote = !inside_quote;
+    } else if (buf[i] == static_cast<uint8_t>(delimiter)) {
+      // Count delimiter if not inside quote
+      if (!inside_quote) {
+        ++out.n_separators;
+      }
     }
     ++i;
   }
@@ -591,7 +603,8 @@ TwoPass::branchless_chunk_result TwoPass::second_pass_branchless_chunk_with_erro
     size_t thread_id, size_t total_len, ErrorMode mode) {
   branchless_chunk_result result;
   result.errors.set_mode(mode);
-  result.n_indexes = second_pass_branchless_with_errors(
+  // Use SIMD-optimized version for better performance
+  result.n_indexes = second_pass_simd_branchless_with_errors(
       sm, buf, start, end, out->indexes, thread_id, out->n_threads, &result.errors, total_len);
   return result;
 }
@@ -629,8 +642,9 @@ bool TwoPass::parse_branchless_with_errors(const uint8_t* buf, ParseIndex& out, 
 
   // For single-threaded, use the simpler path
   if (n_threads == 1) {
+    // Use SIMD-optimized version for better performance
     out.n_indexes[0] =
-        second_pass_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
+        second_pass_simd_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
     check_field_counts(buf, len, errors, delim, quote);
     return !errors.has_fatal_errors();
   }
@@ -640,8 +654,9 @@ bool TwoPass::parse_branchless_with_errors(const uint8_t* buf, ParseIndex& out, 
   // If chunk size is too small, fall back to single-threaded
   if (chunk_size < 64) {
     out.n_threads = 1;
+    // Use SIMD-optimized version for better performance
     out.n_indexes[0] =
-        second_pass_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
+        second_pass_simd_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
     check_field_counts(buf, len, errors, delim, quote);
     return !errors.has_fatal_errors();
   }
@@ -671,8 +686,9 @@ bool TwoPass::parse_branchless_with_errors(const uint8_t* buf, ParseIndex& out, 
   for (int i = 1; i < n_threads; ++i) {
     if (chunk_pos[i] == null_pos) {
       out.n_threads = 1;
+      // Use SIMD-optimized version for better performance
       out.n_indexes[0] =
-          second_pass_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
+          second_pass_simd_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
       check_field_counts(buf, len, errors, delim, quote);
       return !errors.has_fatal_errors();
     }
@@ -924,6 +940,10 @@ bool TwoPass::parse_with_errors(const uint8_t* buf, ParseIndex& out, size_t len,
   char delim = dialect.delimiter;
   char quote = dialect.quote_char;
 
+  // Handle empty input
+  if (len == 0)
+    return true;
+
   // Check structural issues first
   check_empty_header(buf, len, errors);
   if (errors.should_stop())
@@ -950,6 +970,10 @@ bool TwoPass::parse_validate(const uint8_t* buf, ParseIndex& out, size_t len,
                              ErrorCollector& errors, const Dialect& dialect) {
   char delim = dialect.delimiter;
   char quote = dialect.quote_char;
+
+  // Handle empty input
+  if (len == 0)
+    return true;
 
   // Check structural issues first
   check_empty_header(buf, len, errors);
@@ -1178,6 +1202,111 @@ ParseIndex TwoPass::init_safe(size_t len, size_t n_threads, ErrorCollector* erro
   if (overflow) {
     std::string msg = "Index allocation would overflow: len=" + std::to_string(len) +
                       ", n_threads=" + std::to_string(n_threads);
+    if (errors != nullptr) {
+      errors->add_error(ErrorCode::INDEX_ALLOCATION_OVERFLOW, ErrorSeverity::FATAL, 1, 1, 0, msg);
+      // Return empty index to signal failure
+      return out;
+    } else {
+      throw std::runtime_error(msg);
+    }
+  }
+
+  // Safe to allocate - use RAII to ensure proper cleanup
+  out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.n_indexes = out.n_indexes_ptr_.get();
+
+  out.indexes_ptr_ = std::make_unique<uint64_t[]>(allocation_size);
+  out.indexes = out.indexes_ptr_.get();
+
+  return out;
+}
+
+ParseIndex TwoPass::init_counted(uint64_t total_separators, size_t n_threads) {
+  ParseIndex out;
+  // Ensure at least 1 thread for valid memory allocation
+  if (n_threads == 0)
+    n_threads = 1;
+  out.n_threads = n_threads;
+
+  // Allocate n_indexes array with RAII ownership
+  out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.n_indexes = out.n_indexes_ptr_.get();
+
+  // Allocate space for separator positions.
+  // Add padding for speculative writes in the write() function (writes up to 8 extra).
+  //
+  // For multi-threaded interleaved storage, thread i writes to positions:
+  //   indexes[i], indexes[i + n_threads], indexes[i + 2*n_threads], ...
+  // So the maximum index written by any thread is:
+  //   (max_separators_for_any_thread - 1) * n_threads + (n_threads - 1)
+  // = max_separators_for_any_thread * n_threads - 1
+  //
+  // Since we don't know exact per-thread distribution until after chunking,
+  // we conservatively assume all separators could end up in one thread's chunk.
+  // However, this is still much better than allocating based on file size.
+  size_t allocation_size;
+  if (n_threads == 1) {
+    // Single-threaded: simple allocation with padding
+    allocation_size = total_separators + 8;
+  } else {
+    // Multi-threaded: worst case is all separators in one chunk
+    // Allocation: (total_separators + 8) * n_threads
+    // This handles the interleaved storage requirement
+    allocation_size = (total_separators + 8) * n_threads;
+  }
+
+  // Allocate indexes array with RAII ownership
+  out.indexes_ptr_ = std::make_unique<uint64_t[]>(allocation_size);
+  out.indexes = out.indexes_ptr_.get();
+
+  return out;
+}
+
+ParseIndex TwoPass::init_counted_safe(uint64_t total_separators, size_t n_threads,
+                                      ErrorCollector* errors) {
+  ParseIndex out;
+  // Ensure at least 1 thread for valid memory allocation
+  if (n_threads == 0)
+    n_threads = 1;
+  out.n_threads = n_threads;
+
+  // Calculate allocation size with overflow checking
+  // See init_counted for explanation of the allocation strategy
+  size_t allocation_size;
+  bool overflow = false;
+
+  if (n_threads == 1) {
+    // Single-threaded: allocation_size = total_separators + 8
+    if (total_separators > std::numeric_limits<size_t>::max() - 8) {
+      overflow = true;
+    } else {
+      allocation_size = static_cast<size_t>(total_separators) + 8;
+    }
+  } else {
+    // Multi-threaded: (total_separators + 8) * n_threads
+    // Worst case: all separators in one chunk need interleaved storage
+    size_t sep_plus_8;
+    if (total_separators > std::numeric_limits<size_t>::max() - 8) {
+      overflow = true;
+    } else {
+      sep_plus_8 = static_cast<size_t>(total_separators) + 8;
+      if (sep_plus_8 > std::numeric_limits<size_t>::max() / n_threads) {
+        overflow = true;
+      } else {
+        allocation_size = sep_plus_8 * n_threads;
+      }
+    }
+  }
+
+  // Check final allocation: allocation_size * sizeof(uint64_t)
+  if (!overflow && allocation_size > std::numeric_limits<size_t>::max() / sizeof(uint64_t)) {
+    overflow = true;
+  }
+
+  if (overflow) {
+    std::string msg =
+        "Index allocation would overflow: total_separators=" + std::to_string(total_separators) +
+        ", n_threads=" + std::to_string(n_threads);
     if (errors != nullptr) {
       errors->add_error(ErrorCode::INDEX_ALLOCATION_OVERFLOW, ErrorSeverity::FATAL, 1, 1, 0, msg);
       // Return empty index to signal failure
