@@ -980,8 +980,9 @@ int cmdDialect(const char* filename, bool json_output) {
   libvroom::DialectDetector detector;
   auto result = detector.detect(load_result.data(), load_result.size);
 
-  // Check if detection truly failed (no valid dialect found at all)
-  if (!result.success() && result.warning.find("ambiguous") == std::string::npos) {
+  // Check if detection failed (confidence too low)
+  // Even if the warning mentions ambiguity, we still fail if confidence is below threshold
+  if (!result.success()) {
     cerr << "Error: Could not detect CSV dialect";
     if (!result.warning.empty()) {
       cerr << ": " << result.warning;
@@ -991,7 +992,7 @@ int cmdDialect(const char* filename, bool json_output) {
   }
 
   // Check if detection is ambiguous (multiple candidates with similar scores)
-  // In this case, we still output the best-guess dialect with a warning
+  // Detection succeeded (confidence > 0.5) but may be uncertain due to similar scores
   bool is_ambiguous =
       !result.warning.empty() && result.warning.find("ambiguous") != std::string::npos;
 
