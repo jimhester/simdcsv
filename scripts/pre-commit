@@ -19,7 +19,7 @@ fi
 
 # Format each file and re-stage if changed
 REFORMATTED=()
-for file in $STAGED_FILES; do
+while IFS= read -r file; do
     if [ -f "$file" ]; then
         # Get the original content
         ORIGINAL=$(cat "$file")
@@ -33,7 +33,7 @@ for file in $STAGED_FILES; do
             git add "$file"
         fi
     fi
-done
+done <<< "$STAGED_FILES"
 
 # Report what was reformatted
 if [ ${#REFORMATTED[@]} -gt 0 ]; then
