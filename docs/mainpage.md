@@ -64,14 +64,14 @@ auto result = parser.parse(buf, len, ParseOptions::branchless());
 
 | Class | Description |
 |-------|-------------|
-| @ref libvroom::index | Result structure containing parsed field positions. |
+| @ref libvroom::ParseIndex | Result structure containing parsed field positions. |
 | @ref libvroom::ErrorCollector | Collects and manages parse errors. |
 
 ### Internal Classes (Deprecated for Direct Use)
 
 | Class | Description |
 |-------|-------------|
-| @ref libvroom::two_pass | Low-level parser implementation. Use `Parser` instead. |
+| @ref libvroom::TwoPass | Low-level parser implementation. Use `Parser` instead. |
 
 ### Dialect Detection
 
@@ -109,16 +109,16 @@ libvroom supports multiple CSV dialects beyond standard comma-separated:
 
 ```cpp
 // Standard CSV (comma, double-quote)
-auto result = parser.parse(data, len, libvroom::Dialect::csv());
+auto result = parser.parse(data, len, {.dialect = libvroom::Dialect::csv()});
 
 // Tab-separated values
-auto result = parser.parse(data, len, libvroom::Dialect::tsv());
+auto result = parser.parse(data, len, {.dialect = libvroom::Dialect::tsv()});
 
 // Semicolon-separated (European style)
-auto result = parser.parse(data, len, libvroom::Dialect::semicolon());
+auto result = parser.parse(data, len, {.dialect = libvroom::Dialect::semicolon()});
 
 // Pipe-separated
-auto result = parser.parse(data, len, libvroom::Dialect::pipe());
+auto result = parser.parse(data, len, {.dialect = libvroom::Dialect::pipe()});
 
 // Custom dialect
 libvroom::Dialect custom;

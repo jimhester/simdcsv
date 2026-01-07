@@ -274,12 +274,7 @@ struct ParseOptions {
   std::optional<Dialect> dialect = std::nullopt;
 
   /**
-   * @brief Error collector for error-tolerant parsing.
-   *
-   * @deprecated Use result.errors() instead. The Result class now has an
-   * internal ErrorCollector that is automatically populated during parsing.
-   * This field is maintained for backward compatibility but will be removed
-   * in a future version.
+   * @brief Optional external error collector for error-tolerant parsing.
    *
    * If nullptr (default), errors are collected in Result's internal collector.
    * If a pointer is provided, errors go to both the external collector and
@@ -287,14 +282,8 @@ struct ParseOptions {
    *
    * @note The ErrorCollector must remain valid for the duration of parsing.
    *
-   * Migration example:
+   * For most use cases, the Result's internal error collector is sufficient:
    * @code
-   * // Old pattern (deprecated):
-   * ErrorCollector errors(ErrorMode::PERMISSIVE);
-   * auto result = parser.parse(buf, len, {.errors = &errors});
-   * if (errors.has_errors()) { ... }
-   *
-   * // New pattern (preferred):
    * auto result = parser.parse(buf, len);
    * if (result.has_errors()) {
    *     for (const auto& err : result.errors()) { ... }
@@ -846,12 +835,12 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
  * libvroom::Parser parser(4);
  * libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
  *
- * auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+ * auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
  *
  * std::cout << "Detected dialect: " << result.dialect.to_string() << "\n";
  *
- * if (errors.has_errors()) {
- *     for (const auto& err : errors.errors()) {
+ * if (result.has_errors()) {
+ *     for (const auto& err : result.errors()) {
  *         std::cerr << err.to_string() << "\n";
  *     }
  * }
@@ -1627,10 +1616,6 @@ public:
       result.dialect = result.detection.success() ? result.detection.dialect : Dialect::csv();
     }
 
-    // Suppress deprecation warnings for internal calls to TwoPass methods
-    // (Parser is the public API that wraps these deprecated methods)
-    LIBVROOM_SUPPRESS_DEPRECATION_START
-
     // Parse with error collection - never throw for parse errors
     //
     // Design principle: The error-collecting variants (_with_errors) do
@@ -1679,55 +1664,10 @@ public:
       result.error_collector().merge_from(*options.errors);
     }
 
-    LIBVROOM_SUPPRESS_DEPRECATION_END
-
     // Store buffer reference to enable row/column iteration
     result.set_buffer(buf, len);
 
     return result;
-  }
-
-  // =========================================================================
-  // Legacy methods - Provided for backward compatibility.
-  // These delegate to the unified parse() method above.
-  // =========================================================================
-
-  /**
-   * @brief Parse with explicit dialect (legacy method).
-   *
-   * @deprecated Use parse(buf, len, {.dialect = dialect}) instead.
-   *
-   * This method is provided for backward compatibility. New code should use
-   * the unified parse() method with ParseOptions.
-   */
-  Result parse(const uint8_t* buf, size_t len, const Dialect& dialect) {
-    return parse(buf, len, ParseOptions::with_dialect(dialect));
-  }
-
-  /**
-   * @brief Parse with error collection (legacy method).
-   *
-   * @deprecated Use parse(buf, len, {.dialect = dialect, .errors = &errors})
-   * instead.
-   *
-   * This method is provided for backward compatibility. New code should use
-   * the unified parse() method with ParseOptions.
-   */
-  Result parse_with_errors(const uint8_t* buf, size_t len, ErrorCollector& errors,
-                           const Dialect& dialect = Dialect::csv()) {
-    return parse(buf, len, ParseOptions::with_dialect_and_errors(dialect, errors));
-  }
-
-  /**
-   * @brief Parse with auto-detection and error collection (legacy method).
-   *
-   * @deprecated Use parse(buf, len, {.errors = &errors}) instead.
-   *
-   * This method is provided for backward compatibility. New code should use
-   * the unified parse() method with ParseOptions.
-   */
-  Result parse_auto(const uint8_t* buf, size_t len, ErrorCollector& errors) {
-    return parse(buf, len, ParseOptions::with_errors(errors));
   }
 
   /**

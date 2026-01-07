@@ -49,7 +49,7 @@ constexpr size_t MIN_PARALLEL_SIZE = 1024 * 1024;  // Minimum size for parallel 
  */
 class CsvIterator {
 public:
-  CsvIterator(const uint8_t* buf, const libvroom::index& idx) : buf_(buf), idx_(idx) {
+  CsvIterator(const uint8_t* buf, const libvroom::ParseIndex& idx) : buf_(buf), idx_(idx) {
     // Merge indexes from all threads into sorted order
     mergeIndexes();
   }
@@ -145,7 +145,7 @@ private:
   }
 
   const uint8_t* buf_;
-  const libvroom::index& idx_;
+  const libvroom::ParseIndex& idx_;
   std::vector<uint64_t> merged_indexes_;
 };
 
@@ -210,9 +210,9 @@ static bool isStdinInput(const char* filename) {
 
 /// Result of loading and parsing a file
 struct ParseResult {
-  LoadResult load_result; ///< The loaded data (RAII-managed)
-  libvroom::index idx;    ///< The parsed index
-  bool success{false};    ///< Whether parsing was successful
+  LoadResult load_result;   ///< The loaded data (RAII-managed)
+  libvroom::ParseIndex idx; ///< The parsed index
+  bool success{false};      ///< Whether parsing was successful
 };
 
 // Parse a file or stdin - returns ParseResult with RAII-managed data

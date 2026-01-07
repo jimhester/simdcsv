@@ -38,7 +38,7 @@ vroom info data.csv               # Get file info (rows, columns, dialect)
 libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
 libvroom::Parser parser;
 libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-auto result = parser.parse_auto(buffer.data(), buffer.size(), errors);
+auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
 // result.num_columns(), result.dialect.delimiter, etc.
 ```
 
