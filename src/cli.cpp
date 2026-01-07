@@ -8,7 +8,14 @@
  * limitation only; the underlying data is not modified.
  */
 
-#include <unistd.h>
+#include "libvroom.h"
+
+#include "common_defs.h"
+#include "encoding.h"
+#include "io_util.h"
+#include "mem_util.h"
+#include "simd_highway.h"
+
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -19,37 +26,30 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
-
-#include "common_defs.h"
-#include "encoding.h"
-#include "io_util.h"
-#include "mem_util.h"
-#include "simd_highway.h"
-#include "libvroom.h"
 
 using namespace std;
 
 // Constants
-// Note: MAX_THREADS is limited to 255 due to uint8_t n_threads in index struct
-constexpr int MAX_THREADS = 255;
+// MAX_THREADS raised to 1024 with uint16_t n_threads in index struct
+constexpr int MAX_THREADS = 1024;
 constexpr int MIN_THREADS = 1;
 constexpr size_t MAX_COLUMN_WIDTH = 40;
 constexpr size_t DEFAULT_NUM_ROWS = 10;
 constexpr const char* VERSION = "0.1.0";
 
 // Performance tuning constants
-constexpr size_t QUOTE_LOOKBACK_LIMIT = 64 * 1024;  // 64KB lookback for quote state
-constexpr size_t MAX_BOUNDARY_SEARCH = 8192;        // Max search for row boundary
-constexpr size_t MIN_PARALLEL_SIZE = 1024 * 1024;   // Minimum size for parallel processing
+constexpr size_t QUOTE_LOOKBACK_LIMIT = 64 * 1024; // 64KB lookback for quote state
+constexpr size_t MAX_BOUNDARY_SEARCH = 8192;       // Max search for row boundary
+constexpr size_t MIN_PARALLEL_SIZE = 1024 * 1024;  // Minimum size for parallel processing
 
 /**
  * CSV Iterator - Helper class to iterate over parsed CSV data
  */
 class CsvIterator {
- public:
-  CsvIterator(const uint8_t* buf, const libvroom::index& idx)
-      : buf_(buf), idx_(idx) {
+public:
+  CsvIterator(const uint8_t* buf, const libvroom::index& idx) : buf_(buf), idx_(idx) {
     // Merge indexes from all threads into sorted order
     mergeIndexes();
   }
@@ -58,13 +58,15 @@ class CsvIterator {
 
   // Get the content of field at position i (0-indexed)
   std::string getField(size_t i) const {
-    if (i >= merged_indexes_.size()) return "";
+    if (i >= merged_indexes_.size())
+      return "";
 
     size_t start = (i == 0) ? 0 : merged_indexes_[i - 1] + 1;
     size_t end = merged_indexes_[i];
 
     // Bounds check: ensure start <= end
-    if (start > end) return "";
+    if (start > end)
+      return "";
 
     // Handle quoted fields
     std::string field;
@@ -74,7 +76,7 @@ class CsvIterator {
       if (c == '"') {
         if (in_quote && j + 1 < end && buf_[j + 1] == '"') {
           field += '"';
-          ++j;  // Skip escaped quote
+          ++j; // Skip escaped quote
         } else {
           in_quote = !in_quote;
         }
@@ -88,7 +90,8 @@ class CsvIterator {
   // Check if a field ends with newline (marks end of row)
   // Supports LF (\n) and CR (\r) line endings
   bool isRowEnd(size_t i) const {
-    if (i >= merged_indexes_.size()) return true;
+    if (i >= merged_indexes_.size())
+      return true;
     size_t pos = merged_indexes_[i];
     return buf_[pos] == '\n' || buf_[pos] == '\r';
   }
@@ -114,12 +117,13 @@ class CsvIterator {
   size_t countRows() const {
     size_t count = 0;
     for (size_t i = 0; i < merged_indexes_.size(); ++i) {
-      if (isRowEnd(i)) ++count;
+      if (isRowEnd(i))
+        ++count;
     }
     return count;
   }
 
- private:
+private:
   void mergeIndexes() {
     // Calculate total size
     size_t total = 0;
@@ -167,18 +171,22 @@ void printUsage(const char* prog) {
   cerr << "\nOptions:\n";
   cerr << "  -n <num>      Number of rows (for head/tail/sample/pretty)\n";
   cerr << "  -s <seed>     Random seed for reproducible sampling (for sample)\n";
-  cerr << "  -c <cols>     Comma-separated column names or indices (for select)\n";
+  cerr << "  -c <cols>     Comma-separated column names or indices (for "
+          "select)\n";
   cerr << "  -H            No header row in input\n";
   cerr << "  -t <threads>  Number of threads (default: auto, max: " << MAX_THREADS << ")\n";
   cerr << "  -d <delim>    Field delimiter (disables auto-detection)\n";
-  cerr << "                Values: comma, tab, semicolon, pipe, or single character\n";
+  cerr << "                Values: comma, tab, semicolon, pipe, or single "
+          "character\n";
   cerr << "  -q <char>     Quote character (default: \")\n";
   cerr << "  -j            Output in JSON format (for dialect command)\n";
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
   cerr << "\nDialect Detection:\n";
-  cerr << "  By default, vroom auto-detects the CSV dialect (delimiter, quote character,\n";
-  cerr << "  escape style). Use -d to explicitly specify a delimiter and disable\n";
+  cerr << "  By default, vroom auto-detects the CSV dialect (delimiter, quote "
+          "character,\n";
+  cerr << "  escape style). Use -d to explicitly specify a delimiter and "
+          "disable\n";
   cerr << "  auto-detection.\n";
   cerr << "\nExamples:\n";
   cerr << "  " << prog << " count data.csv\n";
@@ -206,11 +214,9 @@ static bool isStdinInput(const char* filename) {
 // Parse a file or stdin - returns true on success
 // Caller is responsible for freeing data with aligned_free()
 // If detected_encoding is provided, the detected encoding will be stored there
-bool parseFile(const char* filename, int n_threads,
-               std::basic_string_view<uint8_t>& data, libvroom::index& idx,
-               const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
-               bool auto_detect = false,
-               libvroom::EncodingResult* detected_encoding = nullptr) {
+bool parseFile(const char* filename, int n_threads, std::basic_string_view<uint8_t>& data,
+               libvroom::index& idx, const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
+               bool auto_detect = false, libvroom::EncodingResult* detected_encoding = nullptr) {
   try {
     LoadResult load_result;
     if (isStdinInput(filename)) {
@@ -227,8 +233,7 @@ bool parseFile(const char* filename, int n_threads,
 
     // Report encoding if transcoding occurred
     if (load_result.encoding.needs_transcoding) {
-      cerr << "Transcoded from "
-           << libvroom::encoding_to_string(load_result.encoding.encoding)
+      cerr << "Transcoded from " << libvroom::encoding_to_string(load_result.encoding.encoding)
            << " to UTF-8" << endl;
     }
   } catch (const std::exception& e) {
@@ -248,9 +253,18 @@ bool parseFile(const char* filename, int n_threads,
   if (!auto_detect) {
     options.dialect = dialect;
   }
-  // Note: We don't collect errors for CLI (fast path - throws on errors)
 
   auto result = parser.parse(data.data(), data.size(), options);
+
+  // Note: Parser::parse() never throws for parse errors.
+  // For CLI tools, we continue with partial results and show warnings.
+  // This matches Unix CLI conventions where tools like head/cat try to output
+  // what they can.
+  if (result.has_errors()) {
+    cerr << "Warning: Parse errors: " << result.error_summary() << endl;
+    // Continue with partial results - don't fail hard
+  }
+
   idx = std::move(result.idx);
 
   // Report auto-detected dialect if applicable
@@ -291,10 +305,11 @@ libvroom::Dialect parseDialect(const std::string& delimiter_str, char quote_char
 // SIMD row counter - processes 64 bytes at a time
 // Note on escaped quotes (CSV ""): The SIMD path uses XOR-prefix to compute
 // quote state, which toggles on every quote. For escaped quotes "", this means
-// toggling twice (net effect: state unchanged). This is correct for row counting
-// because: (1) "" are adjacent by definition, so no newline can appear between
-// them, and (2) the final quote state after "" matches the correct semantics.
-// The scalar fallback explicitly handles "" for consistency with the library.
+// toggling twice (net effect: state unchanged). This is correct for row
+// counting because: (1) "" are adjacent by definition, so no newline can appear
+// between them, and (2) the final quote state after "" matches the correct
+// semantics. The scalar fallback explicitly handles "" for consistency with the
+// library.
 size_t countRowsSimd(const uint8_t* buf, size_t len) {
   size_t row_count = 0;
   size_t idx = 0;
@@ -318,13 +333,14 @@ size_t countRowsSimd(const uint8_t* buf, size_t len) {
     row_count += libvroom::count_ones(valid_newlines);
   }
 
-  // Handle remaining bytes with scalar code (properly handles escaped quotes "")
+  // Handle remaining bytes with scalar code (properly handles escaped quotes
+  // "")
   bool in_quote = (prev_iter_inside_quote != 0);
   for (; idx < len; ++idx) {
     if (buf[idx] == '"') {
       // Check for escaped quote ("")
       if (idx + 1 < len && buf[idx + 1] == '"') {
-        ++idx;  // Skip both quotes - escaped quote doesn't toggle state
+        ++idx; // Skip both quotes - escaped quote doesn't toggle state
       } else {
         in_quote = !in_quote;
       }
@@ -350,7 +366,7 @@ size_t countRowsDirect(const uint8_t* buf, size_t len) {
     if (buf[i] == '"') {
       // Check for escaped quote ("")
       if (i + 1 < len && buf[i + 1] == '"') {
-        ++i;  // Skip both quotes - escaped quote doesn't toggle state
+        ++i; // Skip both quotes - escaped quote doesn't toggle state
       } else {
         in_quote = !in_quote;
       }
@@ -367,11 +383,14 @@ size_t countRowsDirect(const uint8_t* buf, size_t len) {
 enum QuoteState { OUTSIDE_QUOTE, INSIDE_QUOTE, AMBIGUOUS };
 
 // Helper function matching two_pass.h logic
-static bool isOther(uint8_t c) { return c != ',' && c != '\n' && c != '"'; }
+static bool isOther(uint8_t c) {
+  return c != ',' && c != '\n' && c != '"';
+}
 
 static QuoteState getQuoteState(const uint8_t* buf, size_t pos) {
   // Uses the same proven logic as two_pass::get_quotation_state
-  if (pos == 0) return OUTSIDE_QUOTE;
+  if (pos == 0)
+    return OUTSIDE_QUOTE;
 
   size_t end = pos > QUOTE_LOOKBACK_LIMIT ? pos - QUOTE_LOOKBACK_LIMIT : 0;
   size_t i = pos;
@@ -380,11 +399,13 @@ static QuoteState getQuoteState(const uint8_t* buf, size_t pos) {
   // Scan backwards looking for quote-other patterns that determine state
   while (i > end) {
     if (buf[i] == '"') {
-      // q-o case: quote followed by non-delimiter means we found end of quoted field
+      // q-o case: quote followed by non-delimiter means we found end of quoted
+      // field
       if (i + 1 < pos && isOther(buf[i + 1])) {
         return num_quotes % 2 == 0 ? INSIDE_QUOTE : OUTSIDE_QUOTE;
       }
-      // o-q case: non-delimiter before quote means we found start of quoted field
+      // o-q case: non-delimiter before quote means we found start of quoted
+      // field
       else if (i > end && isOther(buf[i - 1])) {
         return num_quotes % 2 == 0 ? OUTSIDE_QUOTE : INSIDE_QUOTE;
       }
@@ -411,7 +432,7 @@ static size_t findRowBoundary(const uint8_t* buf, size_t len, size_t target) {
     if (buf[pos] == '"') {
       // Check for escaped quote ("")
       if (pos + 1 < limit && buf[pos + 1] == '"') {
-        ++pos;  // Skip both quotes - escaped quote doesn't toggle state
+        ++pos; // Skip both quotes - escaped quote doesn't toggle state
       } else {
         in_quote = !in_quote;
       }
@@ -439,9 +460,8 @@ size_t countRowsDirectParallel(const uint8_t* buf, size_t len, int n_threads) {
   std::vector<std::future<size_t>> boundary_futures;
   for (int i = 1; i < n_threads; ++i) {
     size_t target = chunk_size * i;
-    boundary_futures.push_back(std::async(std::launch::async, [buf, len, target]() {
-      return findRowBoundary(buf, len, target);
-    }));
+    boundary_futures.push_back(std::async(
+        std::launch::async, [buf, len, target]() { return findRowBoundary(buf, len, target); }));
   }
 
   for (int i = 1; i < n_threads; ++i) {
@@ -506,16 +526,16 @@ int cmdCount(const char* filename, int n_threads, bool has_header,
 // Helper function to output a row with proper quoting
 static void outputRow(const std::vector<std::string>& row, const libvroom::Dialect& dialect) {
   for (size_t i = 0; i < row.size(); ++i) {
-    if (i > 0) cout << dialect.delimiter;
-    bool needs_quote =
-        row[i].find(dialect.delimiter) != string::npos ||
-        row[i].find(dialect.quote_char) != string::npos ||
-        row[i].find('\n') != string::npos ||
-        row[i].find('\r') != string::npos;
+    if (i > 0)
+      cout << dialect.delimiter;
+    bool needs_quote = row[i].find(dialect.delimiter) != string::npos ||
+                       row[i].find(dialect.quote_char) != string::npos ||
+                       row[i].find('\n') != string::npos || row[i].find('\r') != string::npos;
     if (needs_quote) {
       cout << dialect.quote_char;
       for (char c : row[i]) {
-        if (c == dialect.quote_char) cout << dialect.quote_char;
+        if (c == dialect.quote_char)
+          cout << dialect.quote_char;
         cout << c;
       }
       cout << dialect.quote_char;
@@ -528,12 +548,12 @@ static void outputRow(const std::vector<std::string>& row, const libvroom::Diale
 
 // Command: head
 int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_header,
-            const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
-            bool auto_detect = false) {
+            const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
   libvroom::index idx;
 
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect))
+    return 1;
 
   CsvIterator iter(data.data(), idx);
   // Get num_rows + 1 if we have header to show header plus num_rows data rows
@@ -549,12 +569,12 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
 
 // Command: tail
 int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_header,
-            const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
-            bool auto_detect = false) {
+            const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
   libvroom::index idx;
 
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect))
+    return 1;
 
   CsvIterator iter(data.data(), idx);
   auto all_rows = iter.getRows();
@@ -591,12 +611,13 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
 
 // Command: sample
 int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_header,
-              const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
-              bool auto_detect = false, unsigned int seed = 0) {
+              const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
+              unsigned int seed = 0) {
   std::basic_string_view<uint8_t> data;
   libvroom::index idx;
 
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect))
+    return 1;
 
   CsvIterator iter(data.data(), idx);
   auto all_rows = iter.getRows();
@@ -658,13 +679,14 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
 }
 
 // Command: select
-int cmdSelect(const char* filename, int n_threads, const string& columns,
-              bool has_header, const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
+int cmdSelect(const char* filename, int n_threads, const string& columns, bool has_header,
+              const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
               bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
   libvroom::index idx;
 
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect))
+    return 1;
 
   CsvIterator iter(data.data(), idx);
   auto rows = iter.getRows();
@@ -694,8 +716,8 @@ int cmdSelect(const char* filename, int n_threads, const string& columns,
     if (is_numeric) {
       size_t col_idx = stoul(spec);
       if (col_idx >= num_cols) {
-        cerr << "Error: Column index " << col_idx << " is out of range (file has "
-             << num_cols << " columns, indices 0-" << (num_cols - 1) << ")" << endl;
+        cerr << "Error: Column index " << col_idx << " is out of range (file has " << num_cols
+             << " columns, indices 0-" << (num_cols - 1) << ")" << endl;
         aligned_free((void*)data.data());
         return 1;
       }
@@ -721,9 +743,11 @@ int cmdSelect(const char* filename, int n_threads, const string& columns,
   for (const auto& row : rows) {
     bool first = true;
     for (size_t col : col_indices) {
-      if (!first) cout << dialect.delimiter;
+      if (!first)
+        cout << dialect.delimiter;
       first = false;
-      // Column bounds already validated above, but handle rows with fewer columns
+      // Column bounds already validated above, but handle rows with fewer
+      // columns
       if (col < row.size()) {
         const string& field = row[col];
         bool needs_quote = field.find(dialect.delimiter) != string::npos ||
@@ -732,7 +756,8 @@ int cmdSelect(const char* filename, int n_threads, const string& columns,
         if (needs_quote) {
           cout << dialect.quote_char;
           for (char c : field) {
-            if (c == dialect.quote_char) cout << dialect.quote_char;
+            if (c == dialect.quote_char)
+              cout << dialect.quote_char;
             cout << c;
           }
           cout << dialect.quote_char;
@@ -751,12 +776,12 @@ int cmdSelect(const char* filename, int n_threads, const string& columns,
 
 // Command: info
 int cmdInfo(const char* filename, int n_threads, bool has_header,
-            const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
-            bool auto_detect = false) {
+            const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false) {
   std::basic_string_view<uint8_t> data;
   libvroom::index idx;
 
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect))
+    return 1;
 
   CsvIterator iter(data.data(), idx);
   auto rows = iter.getRows();
@@ -793,7 +818,8 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
   std::basic_string_view<uint8_t> data;
   libvroom::index idx;
 
-  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect)) return 1;
+  if (!parseFile(filename, n_threads, data, idx, dialect, auto_detect))
+    return 1;
 
   CsvIterator iter(data.data(), idx);
   auto rows = iter.getRows(has_header ? num_rows + 1 : num_rows);
@@ -865,31 +891,45 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
 // Helper: format delimiter for display
 static std::string formatDelimiter(char delim) {
   switch (delim) {
-    case ',': return "comma";
-    case '\t': return "tab";
-    case ';': return "semicolon";
-    case '|': return "pipe";
-    case ':': return "colon";
-    default: return std::string(1, delim);
+  case ',':
+    return "comma";
+  case '\t':
+    return "tab";
+  case ';':
+    return "semicolon";
+  case '|':
+    return "pipe";
+  case ':':
+    return "colon";
+  default:
+    return std::string(1, delim);
   }
 }
 
 // Helper: format quote char for display
 static std::string formatQuoteChar(char quote) {
-  if (quote == '"') return "double-quote";
-  if (quote == '\'') return "single-quote";
-  if (quote == '\0') return "none";
+  if (quote == '"')
+    return "double-quote";
+  if (quote == '\'')
+    return "single-quote";
+  if (quote == '\0')
+    return "none";
   return std::string(1, quote);
 }
 
 // Helper: format line ending for display
 static std::string formatLineEnding(libvroom::Dialect::LineEnding le) {
   switch (le) {
-    case libvroom::Dialect::LineEnding::LF: return "LF";
-    case libvroom::Dialect::LineEnding::CRLF: return "CRLF";
-    case libvroom::Dialect::LineEnding::CR: return "CR";
-    case libvroom::Dialect::LineEnding::MIXED: return "mixed";
-    default: return "unknown";
+  case libvroom::Dialect::LineEnding::LF:
+    return "LF";
+  case libvroom::Dialect::LineEnding::CRLF:
+    return "CRLF";
+  case libvroom::Dialect::LineEnding::CR:
+    return "CR";
+  case libvroom::Dialect::LineEnding::MIXED:
+    return "mixed";
+  default:
+    return "unknown";
   }
 }
 
@@ -897,25 +937,33 @@ static std::string formatLineEnding(libvroom::Dialect::LineEnding le) {
 // Handles all JSON control characters per RFC 8259
 static std::string escapeJsonChar(char c) {
   switch (c) {
-    case '"': return "\\\"";
-    case '\\': return "\\\\";
-    case '\b': return "\\b";
-    case '\f': return "\\f";
-    case '\n': return "\\n";
-    case '\r': return "\\r";
-    case '\t': return "\\t";
-    default:
-      // Escape other control characters (0x00-0x1F) as \uXXXX
-      if (static_cast<unsigned char>(c) < 0x20) {
-        char buf[7];
-        snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
-        return std::string(buf);
-      }
-      return std::string(1, c);
+  case '"':
+    return "\\\"";
+  case '\\':
+    return "\\\\";
+  case '\b':
+    return "\\b";
+  case '\f':
+    return "\\f";
+  case '\n':
+    return "\\n";
+  case '\r':
+    return "\\r";
+  case '\t':
+    return "\\t";
+  default:
+    // Escape other control characters (0x00-0x1F) as \uXXXX
+    if (static_cast<unsigned char>(c) < 0x20) {
+      char buf[7];
+      snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+      return std::string(buf);
+    }
+    return std::string(1, c);
   }
 }
 
-// Command: dialect - detect and output CSV dialect in human-readable or JSON format
+// Command: dialect - detect and output CSV dialect in human-readable or JSON
+// format
 int cmdDialect(const char* filename, bool json_output) {
   std::basic_string_view<uint8_t> data;
   libvroom::EncodingResult enc_result;
@@ -974,7 +1022,8 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "Detected dialect:\n";
     cout << "  Delimiter:    " << formatDelimiter(d.delimiter) << "\n";
     cout << "  Quote:        " << formatQuoteChar(d.quote_char) << "\n";
-    cout << "  Escape:       " << (d.double_quote ? "double-quote (\"\")" : "backslash (\\)") << "\n";
+    cout << "  Escape:       " << (d.double_quote ? "double-quote (\"\")" : "backslash (\\)")
+         << "\n";
     cout << "  Line ending:  " << formatLineEnding(d.line_ending) << "\n";
     cout << "  Encoding:     " << libvroom::encoding_to_string(enc_result.encoding) << "\n";
     cout << "  Has header:   " << (result.has_header ? "yes" : "no") << "\n";
@@ -1026,13 +1075,16 @@ int main(int argc, char* argv[]) {
 
   // Auto-detect number of threads based on hardware concurrency
   unsigned int hw_threads = std::thread::hardware_concurrency();
-  int n_threads = (hw_threads > 0) ? static_cast<int>(std::min(hw_threads, static_cast<unsigned int>(MAX_THREADS))) : 1;
+  int n_threads =
+      (hw_threads > 0)
+          ? static_cast<int>(std::min(hw_threads, static_cast<unsigned int>(MAX_THREADS)))
+          : 1;
   size_t num_rows = DEFAULT_NUM_ROWS;
   bool has_header = true;
-  bool auto_detect = true;  // Auto-detect by default
-  bool delimiter_specified = false;  // Track if user specified delimiter
-  bool json_output = false;  // JSON output for dialect command
-  unsigned int random_seed = 0;  // Random seed for sample command (0 = use random_device)
+  bool auto_detect = true;          // Auto-detect by default
+  bool delimiter_specified = false; // Track if user specified delimiter
+  bool json_output = false;         // JSON output for dialect command
+  unsigned int random_seed = 0;     // Random seed for sample command (0 = use random_device)
   string columns;
   string delimiter_str = "comma";
   char quote_char = '"';
@@ -1040,68 +1092,68 @@ int main(int argc, char* argv[]) {
   int c;
   while ((c = getopt(argc, argv, "n:c:Ht:d:q:s:jhv")) != -1) {
     switch (c) {
-      case 'n': {
-        char* endptr;
-        long val = strtol(optarg, &endptr, 10);
-        if (*endptr != '\0' || val < 0) {
-          cerr << "Error: Invalid row count '" << optarg << "'\n";
-          return 1;
-        }
-        num_rows = static_cast<size_t>(val);
-        break;
-      }
-      case 'c':
-        columns = optarg;
-        break;
-      case 'H':
-        has_header = false;
-        break;
-      case 't': {
-        char* endptr;
-        long val = strtol(optarg, &endptr, 10);
-        if (*endptr != '\0' || val < MIN_THREADS || val > MAX_THREADS) {
-          cerr << "Error: Thread count must be between " << MIN_THREADS
-               << " and " << MAX_THREADS << "\n";
-          return 1;
-        }
-        n_threads = static_cast<int>(val);
-        break;
-      }
-      case 'd':
-        delimiter_str = optarg;
-        delimiter_specified = true;
-        auto_detect = false;  // Disable auto-detect when delimiter is specified
-        break;
-      case 'q':
-        if (strlen(optarg) == 1) {
-          quote_char = optarg[0];
-        } else {
-          cerr << "Error: Quote character must be a single character\n";
-          return 1;
-        }
-        break;
-      case 's': {
-        char* endptr;
-        long val = strtol(optarg, &endptr, 10);
-        if (*endptr != '\0' || val < 0) {
-          cerr << "Error: Invalid seed value '" << optarg << "'\n";
-          return 1;
-        }
-        random_seed = static_cast<unsigned int>(val);
-        break;
-      }
-      case 'j':
-        json_output = true;
-        break;
-      case 'h':
-        printUsage(argv[0]);
-        return 0;
-      case 'v':
-        printVersion();
-        return 0;
-      default:
-        printUsage(argv[0]);
+    case 'n': {
+      char* endptr;
+      long val = strtol(optarg, &endptr, 10);
+      if (*endptr != '\0' || val < 0) {
+        cerr << "Error: Invalid row count '" << optarg << "'\n";
         return 1;
+      }
+      num_rows = static_cast<size_t>(val);
+      break;
+    }
+    case 'c':
+      columns = optarg;
+      break;
+    case 'H':
+      has_header = false;
+      break;
+    case 't': {
+      char* endptr;
+      long val = strtol(optarg, &endptr, 10);
+      if (*endptr != '\0' || val < MIN_THREADS || val > MAX_THREADS) {
+        cerr << "Error: Thread count must be between " << MIN_THREADS << " and " << MAX_THREADS
+             << "\n";
+        return 1;
+      }
+      n_threads = static_cast<int>(val);
+      break;
+    }
+    case 'd':
+      delimiter_str = optarg;
+      delimiter_specified = true;
+      auto_detect = false; // Disable auto-detect when delimiter is specified
+      break;
+    case 'q':
+      if (strlen(optarg) == 1) {
+        quote_char = optarg[0];
+      } else {
+        cerr << "Error: Quote character must be a single character\n";
+        return 1;
+      }
+      break;
+    case 's': {
+      char* endptr;
+      long val = strtol(optarg, &endptr, 10);
+      if (*endptr != '\0' || val < 0) {
+        cerr << "Error: Invalid seed value '" << optarg << "'\n";
+        return 1;
+      }
+      random_seed = static_cast<unsigned int>(val);
+      break;
+    }
+    case 'j':
+      json_output = true;
+      break;
+    case 'h':
+      printUsage(argv[0]);
+      return 0;
+    case 'v':
+      printVersion();
+      return 0;
+    default:
+      printUsage(argv[0]);
+      return 1;
     }
   }
 
@@ -1121,7 +1173,8 @@ int main(int argc, char* argv[]) {
   } else if (command == "tail") {
     result = cmdTail(filename, n_threads, num_rows, has_header, dialect, auto_detect);
   } else if (command == "sample") {
-    result = cmdSample(filename, n_threads, num_rows, has_header, dialect, auto_detect, random_seed);
+    result =
+        cmdSample(filename, n_threads, num_rows, has_header, dialect, auto_detect, random_seed);
   } else if (command == "select") {
     if (columns.empty()) {
       cerr << "Error: -c option required for select command\n";
@@ -1134,7 +1187,7 @@ int main(int argc, char* argv[]) {
     result = cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect);
   } else if (command == "dialect") {
     // Note: dialect command ignores -d flag since it's for detection
-    (void)delimiter_specified;  // Suppress unused warning
+    (void)delimiter_specified; // Suppress unused warning
     result = cmdDialect(filename, json_output);
   } else {
     cerr << "Error: Unknown command '" << command << "'\n";

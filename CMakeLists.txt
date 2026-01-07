@@ -222,7 +222,7 @@ if(BUILD_BENCHMARKS)
 endif()
 
 # Library target (SHARED or STATIC based on BUILD_SHARED_LIBS)
-add_library(vroom
+set(VROOM_SOURCES
     src/io_util.cpp
     src/error.cpp
     src/dialect.cpp
@@ -233,6 +233,13 @@ add_library(vroom
     src/two_pass.cpp
     src/branchless_state_machine.cpp
 )
+
+# Add type detection source if enabled
+if(LIBVROOM_ENABLE_TYPE_DETECTION)
+    list(APPEND VROOM_SOURCES src/libvroom_types.cpp)
+endif()
+
+add_library(vroom ${VROOM_SOURCES})
 
 target_include_directories(vroom PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
