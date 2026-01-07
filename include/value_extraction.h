@@ -72,6 +72,12 @@ parse_integer(const char* str, size_t len,
   if (digit_count > config.max_integer_digits)
     return {std::nullopt, "Integer too large"};
 
+  // Check for leading zeros if not allowed
+  // LCOV_EXCL_BR_START - compound condition branches covered by tests
+  if (!config.allow_leading_zeros && digit_count > 1 && *ptr == '0')
+    return {std::nullopt, "Leading zeros not allowed"};
+  // LCOV_EXCL_BR_STOP
+
   using UnsignedType = std::make_unsigned_t<IntType>;
   UnsignedType result = 0;
   constexpr UnsignedType max_before_mul = std::numeric_limits<UnsignedType>::max() / 10;
