@@ -231,6 +231,7 @@ add_library(vroom
     src/value_extraction.cpp
     src/streaming.cpp
     src/two_pass.cpp
+    src/branchless_state_machine.cpp
 )
 
 target_include_directories(vroom PUBLIC
