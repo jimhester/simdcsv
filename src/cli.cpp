@@ -1,11 +1,6 @@
 /**
  * vroom - Command-line utility for CSV processing using libvroom
  * Inspired by zsv (https://github.com/liquidaty/zsv)
- *
- * Note: The pretty command truncates long fields for display. This truncation
- * operates on bytes, not Unicode code points, so multi-byte UTF-8 sequences
- * may be split, resulting in invalid UTF-8 in the output. This is a display
- * limitation only; the underlying data is not modified.
  */
 
 #include "libvroom.h"
@@ -15,6 +10,7 @@
 #include "io_util.h"
 #include "mem_util.h"
 #include "simd_highway.h"
+#include "utf8.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -834,7 +830,8 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
   vector<size_t> widths(num_cols, 0);
   for (const auto& row : rows) {
     for (size_t i = 0; i < row.size(); ++i) {
-      widths[i] = max(widths[i], row[i].size());
+      // Use display width instead of byte length for proper Unicode handling
+      widths[i] = max(widths[i], libvroom::utf8_display_width(row[i]));
     }
   }
 
@@ -859,17 +856,21 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
     cout << '|';
     for (size_t i = 0; i < num_cols; ++i) {
       string val = (i < row.size()) ? row[i] : "";
-      // KNOWN LIMITATION (issue #240): Truncation operates on bytes, not
-      // Unicode code points. Multi-byte UTF-8 sequences (emoji, CJK, etc.)
-      // may be split, resulting in potentially invalid UTF-8 output.
-      // TODO: Implement UTF-8-aware truncation that respects code point
-      // boundaries for proper Unicode handling.
-      if (val.size() > widths[i] && widths[i] >= 3) {
-        val = val.substr(0, widths[i] - 3) + "...";
-      } else if (val.size() > widths[i]) {
-        val = val.substr(0, widths[i]);
+      size_t val_width = libvroom::utf8_display_width(val);
+
+      // Truncate using UTF-8-aware truncation if needed
+      if (val_width > widths[i]) {
+        val = libvroom::utf8_truncate(val, widths[i]);
+        val_width = libvroom::utf8_display_width(val);
       }
-      cout << ' ' << left << setw(widths[i]) << val << " |";
+
+      // Output the value with proper padding
+      // We need to calculate padding based on display width, not byte length
+      cout << ' ' << val;
+      if (val_width < widths[i]) {
+        cout << string(widths[i] - val_width, ' ');
+      }
+      cout << " |";
     }
     cout << '\n';
 
