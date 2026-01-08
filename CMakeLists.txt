@@ -572,6 +572,26 @@ add_dependencies(branchless_test copy_test_data)
 # Register branchless tests with CTest
 gtest_discover_tests(branchless_test)
 
+# SIMD error detection test executable (edge cases from issue #383)
+add_executable(simd_error_detection_test
+    test/simd_error_detection_test.cpp
+)
+
+target_link_libraries(simd_error_detection_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(simd_error_detection_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(simd_error_detection_test copy_test_data)
+
+# Register SIMD error detection tests with CTest
+gtest_discover_tests(simd_error_detection_test)
+
 # Size limits test executable (security feature from issue #270)
 add_executable(size_limits_test
     test/size_limits_test.cpp
