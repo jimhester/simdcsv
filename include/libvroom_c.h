@@ -789,6 +789,48 @@ const uint64_t* libvroom_index_positions(const libvroom_index_t* index);
  */
 void libvroom_index_destroy(libvroom_index_t* index);
 
+/**
+ * @brief Serialize an index to a binary file.
+ *
+ * Writes the index structure to disk for later retrieval, avoiding the need
+ * to re-parse large CSV files. This enables caching parsed indexes for
+ * faster subsequent loads.
+ *
+ * Use cases:
+ * - Caching: Parse a large CSV once, save the index, reload on subsequent runs
+ * - Sharing: Distribute pre-computed indexes across multiple processes
+ * - Testing: Establish reproducible index states for unit testing
+ *
+ * @param index The index to serialize. Must be non-null and have been populated
+ *              by a successful parse operation.
+ * @param filename Path to the output file. Will be created or overwritten.
+ * @return LIBVROOM_OK on success, or an error code:
+ *         - LIBVROOM_ERROR_NULL_POINTER if index or filename is NULL
+ *         - LIBVROOM_ERROR_IO if the file cannot be opened or written
+ *         - LIBVROOM_ERROR_INVALID_HANDLE if the index has not been populated
+ *
+ * @see libvroom_index_read() to load a previously saved index
+ */
+libvroom_error_t libvroom_index_write(const libvroom_index_t* index, const char* filename);
+
+/**
+ * @brief Deserialize an index from a binary file.
+ *
+ * Reads a previously saved index structure from disk. The returned index
+ * is fully populated and ready for use with value extraction functions.
+ *
+ * @param filename Path to the input file created by libvroom_index_write().
+ * @return Pointer to the loaded index, or NULL on error. The caller is
+ *         responsible for calling libvroom_index_destroy() to free the index.
+ *
+ * @note Errors include: file not found, corrupted file format, or memory
+ *       allocation failure. The function returns NULL in all error cases.
+ *
+ * @see libvroom_index_write() to save an index
+ * @see libvroom_index_destroy() to free the returned index
+ */
+libvroom_index_t* libvroom_index_read(const char* filename);
+
 /** @} */ /* end of index group */
 
 /**
