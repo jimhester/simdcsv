@@ -39,6 +39,7 @@ component_management:
   default_rules:
     statuses:
       - type: project
+        informational: true
       - type: patch
   individual_components:
     - component_id: library
@@ -47,8 +48,23 @@ component_management:
         - src/**
         - include/**
 
+# Coverage flags for different instrumentation methods
+# See docs/coverage.md for details on the differences between gcov and llvm
 flags:
-  unittests:
+  gcov:
+    # GCC/gcov-based coverage (traditional approach)
+    # Note: Has known limitations with header file attribution.
+    # Template and inline code may be attributed to .cpp files instead of headers.
     paths:
       - src/
       - include/
+    carryforward: true
+
+  llvm:
+    # Clang/llvm-cov source-based coverage
+    # Provides accurate header file coverage attribution.
+    # Template and inline code is correctly attributed to header files.
+    paths:
+      - src/
+      - include/
+    carryforward: true

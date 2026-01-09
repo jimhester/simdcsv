@@ -1919,6 +1919,236 @@ TEST_F(SIMDValueExtractionTest, SIMDDoubleEquivalentToScalar) {
   }
 }
 
+// =============================================================================
+// Leading Zeros Validation Tests (parse_integer_simd)
+// =============================================================================
+
+TEST_F(SIMDValueExtractionTest, AllowLeadingZerosDefault) {
+  // By default, leading zeros are allowed
+  EXPECT_TRUE(config_.allow_leading_zeros);
+
+  // Leading zeros should parse successfully with default config
+  auto result = parse_integer_simd<int64_t>("007", 3, config_);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 7);
+
+  result = parse_integer_simd<int64_t>("0123", 4, config_);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 123);
+
+  result = parse_integer_simd<int64_t>("-007", 4, config_);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), -7);
+
+  result = parse_integer_simd<int64_t>("+007", 4, config_);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 7);
+
+  // Also test unsigned integers with default config (covers A=false branch for uint64_t)
+  auto uresult = parse_integer_simd<uint64_t>("007", 3, config_);
+  EXPECT_TRUE(uresult.ok());
+  EXPECT_EQ(uresult.get(), 7u);
+
+  // Test int32_t and uint32_t with default config too
+  auto i32result = parse_integer_simd<int32_t>("007", 3, config_);
+  EXPECT_TRUE(i32result.ok());
+  EXPECT_EQ(i32result.get(), 7);
+
+  auto u32result = parse_integer_simd<uint32_t>("007", 3, config_);
+  EXPECT_TRUE(u32result.ok());
+  EXPECT_EQ(u32result.get(), 7u);
+}
+
+TEST_F(SIMDValueExtractionTest, DisallowLeadingZeros) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Leading zeros should be rejected
+  auto result = parse_integer_simd<int64_t>("007", 3, config);
+  EXPECT_FALSE(result.ok());
+  EXPECT_NE(result.error, nullptr);
+  EXPECT_STREQ(result.error, "Leading zeros not allowed");
+
+  result = parse_integer_simd<int64_t>("0123", 4, config);
+  EXPECT_FALSE(result.ok());
+
+  // With negative sign
+  result = parse_integer_simd<int64_t>("-007", 4, config);
+  EXPECT_FALSE(result.ok());
+
+  // With positive sign
+  result = parse_integer_simd<int64_t>("+007", 4, config);
+  EXPECT_FALSE(result.ok());
+}
+
+TEST_F(SIMDValueExtractionTest, DisallowLeadingZerosSingleZeroAllowed) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Single zero is not a leading zero - it's the number itself
+  auto result = parse_integer_simd<int64_t>("0", 1, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 0);
+
+  result = parse_integer_simd<int64_t>("-0", 2, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 0);
+
+  result = parse_integer_simd<int64_t>("+0", 2, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 0);
+}
+
+TEST_F(SIMDValueExtractionTest, DisallowLeadingZerosRegularNumbers) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Numbers without leading zeros should still parse
+  auto result = parse_integer_simd<int64_t>("123", 3, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 123);
+
+  result = parse_integer_simd<int64_t>("-456", 4, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), -456);
+
+  result = parse_integer_simd<int64_t>("+789", 4, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 789);
+
+  result = parse_integer_simd<int64_t>("10", 2, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 10);
+}
+
+TEST_F(SIMDValueExtractionTest, DisallowLeadingZerosUnsigned) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Unsigned integers with leading zeros should be rejected
+  auto result = parse_integer_simd<uint64_t>("007", 3, config);
+  EXPECT_FALSE(result.ok());
+
+  // Without leading zeros should work
+  result = parse_integer_simd<uint64_t>("7", 1, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 7u);
+
+  result = parse_integer_simd<uint64_t>("0", 1, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 0u);
+
+  // Multi-digit numbers not starting with 0 should work (covers C=false branch for uint64_t)
+  result = parse_integer_simd<uint64_t>("123", 3, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 123u);
+
+  result = parse_integer_simd<uint64_t>("10", 2, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 10u);
+}
+
+TEST_F(SIMDValueExtractionTest, DisallowLeadingZerosWithWhitespace) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Leading zeros should still be detected after whitespace trimming
+  auto result = parse_integer_simd<int64_t>("  007  ", 7, config);
+  EXPECT_FALSE(result.ok());
+
+  // But valid numbers with whitespace should work
+  result = parse_integer_simd<int64_t>("  7  ", 5, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 7);
+}
+
+TEST_F(SIMDValueExtractionTest, DisallowLeadingZerosInt32) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Test with int32_t type - covers A=true, B=true, C=true (error case)
+  auto result = parse_integer_simd<int32_t>("007", 3, config);
+  EXPECT_FALSE(result.ok());
+
+  // Covers A=true, B=true, C=false (multi-digit not starting with 0)
+  result = parse_integer_simd<int32_t>("123", 3, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 123);
+
+  // Covers A=true, B=false (single digit)
+  result = parse_integer_simd<int32_t>("0", 1, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 0);
+
+  result = parse_integer_simd<int32_t>("5", 1, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 5);
+}
+
+TEST_F(SIMDValueExtractionTest, DisallowLeadingZerosUint32) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Test with uint32_t type - covers A=true, B=true, C=true (error case)
+  auto result = parse_integer_simd<uint32_t>("007", 3, config);
+  EXPECT_FALSE(result.ok());
+
+  // Covers A=true, B=true, C=false (multi-digit not starting with 0)
+  result = parse_integer_simd<uint32_t>("123", 3, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 123u);
+
+  // Covers A=true, B=false (single digit)
+  result = parse_integer_simd<uint32_t>("0", 1, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 0u);
+
+  result = parse_integer_simd<uint32_t>("7", 1, config);
+  EXPECT_TRUE(result.ok());
+  EXPECT_EQ(result.get(), 7u);
+}
+
+TEST_F(SIMDValueExtractionTest, LeadingZerosEquivalentToScalar) {
+  // Test that SIMD and scalar parsers behave identically for leading zeros
+  std::vector<std::string> test_values = {"0",    "00",  "007", "0123", "-007",
+                                          "+007", "123", "-0",  "+0",   "10"};
+
+  // Test with allow_leading_zeros = true
+  for (const auto& value : test_values) {
+    auto scalar_result = parse_integer<int64_t>(value.c_str(), value.size(), config_);
+    auto simd_result = parse_integer_simd<int64_t>(value.c_str(), value.size(), config_);
+
+    EXPECT_EQ(scalar_result.ok(), simd_result.ok())
+        << "Mismatch for: " << value << " (allow_leading_zeros=true)";
+    if (scalar_result.ok() && simd_result.ok()) {
+      EXPECT_EQ(scalar_result.get(), simd_result.get())
+          << "Value mismatch for: " << value << " (allow_leading_zeros=true)";
+    }
+  }
+
+  // Test with allow_leading_zeros = false
+  ExtractionConfig no_leading_zeros_config;
+  no_leading_zeros_config.allow_leading_zeros = false;
+
+  for (const auto& value : test_values) {
+    auto scalar_result =
+        parse_integer<int64_t>(value.c_str(), value.size(), no_leading_zeros_config);
+    auto simd_result =
+        parse_integer_simd<int64_t>(value.c_str(), value.size(), no_leading_zeros_config);
+
+    EXPECT_EQ(scalar_result.ok(), simd_result.ok())
+        << "Mismatch for: " << value << " (allow_leading_zeros=false)";
+    if (scalar_result.ok() && simd_result.ok()) {
+      EXPECT_EQ(scalar_result.get(), simd_result.get())
+          << "Value mismatch for: " << value << " (allow_leading_zeros=false)";
+    }
+    if (!scalar_result.ok() && !simd_result.ok() && scalar_result.error && simd_result.error) {
+      EXPECT_STREQ(scalar_result.error, simd_result.error)
+          << "Error message mismatch for: " << value;
+    }
+  }
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

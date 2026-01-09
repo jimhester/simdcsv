@@ -12,6 +12,45 @@ export PATH="../build:$PATH"
 
 The `vroom` command line tool provides a user-friendly way to work with CSV files using the high-performance libvroom parser. It supports common operations like counting rows, displaying data, selecting columns, and detecting file formats.
 
+## Installation
+
+After building libvroom (see [Getting Started](getting-started.qmd)), the `vroom` binary is located in your build directory. To use it conveniently:
+
+### Option 1: Add Build Directory to PATH (Temporary)
+
+Add the build directory to your PATH for the current session:
+
+```bash
+export PATH="/path/to/libvroom/build:$PATH"
+```
+
+For example, if you built in the default location:
+
+```bash
+export PATH="$(pwd)/build:$PATH"
+```
+
+### Option 2: Install to System Location (Permanent)
+
+Copy the binary to a system location that's already in your PATH:
+
+```bash
+# Install for all users (requires sudo)
+sudo cp build/vroom /usr/local/bin/
+
+# Or install for current user only
+mkdir -p ~/.local/bin
+cp build/vroom ~/.local/bin/
+# Ensure ~/.local/bin is in your PATH (add to .bashrc or .zshrc if needed)
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Verify the installation:
+
+```bash
+vroom -v
+```
+
 ## Basic Usage
 
 ```bash
@@ -334,3 +373,25 @@ The `dialect` command analyzes the CSV structure and reports:
 - **Confidence**: Detection confidence level (0-100%)
 
 The command also outputs suggested CLI flags for use with other vroom commands.
+
+### JSON Output Format
+
+When using the `-j` flag, the dialect command outputs machine-readable JSON:
+
+```json
+{
+  "delimiter": ",",
+  "quote": "\"",
+  "escape": "double",
+  "line_ending": "LF",
+  "has_header": true,
+  "columns": 3,
+  "confidence": 1
+}
+```
+
+This format is useful for scripting and automation. For example, you can extract the delimiter for use in other tools:
+
+```bash
+delimiter=$(vroom dialect -j data.csv | jq -r '.delimiter')
+```

@@ -42,21 +42,31 @@ struct Dialect {
   enum class LineEnding { LF, CRLF, CR, MIXED, UNKNOWN };
   LineEnding line_ending = LineEnding::UNKNOWN;
 
+  /// Comment character for line skipping ('\0' means no comment skipping)
+  /// Lines starting with this character (after optional whitespace) are ignored during parsing
+  char comment_char = '\0';
+
   /// Factory for standard CSV (comma-separated, double-quoted)
-  static Dialect csv() { return Dialect{',', '"', '"', true, LineEnding::UNKNOWN}; }
+  static Dialect csv() { return Dialect{',', '"', '"', true, LineEnding::UNKNOWN, '\0'}; }
 
   /// Factory for TSV (tab-separated)
-  static Dialect tsv() { return Dialect{'\t', '"', '"', true, LineEnding::UNKNOWN}; }
+  static Dialect tsv() { return Dialect{'\t', '"', '"', true, LineEnding::UNKNOWN, '\0'}; }
 
   /// Factory for semicolon-separated (European style)
-  static Dialect semicolon() { return Dialect{';', '"', '"', true, LineEnding::UNKNOWN}; }
+  static Dialect semicolon() { return Dialect{';', '"', '"', true, LineEnding::UNKNOWN, '\0'}; }
 
   /// Factory for pipe-separated
-  static Dialect pipe() { return Dialect{'|', '"', '"', true, LineEnding::UNKNOWN}; }
+  static Dialect pipe() { return Dialect{'|', '"', '"', true, LineEnding::UNKNOWN, '\0'}; }
+
+  /// Factory for CSV with comment support (hash comments)
+  static Dialect csv_with_comments(char comment = '#') {
+    return Dialect{',', '"', '"', true, LineEnding::UNKNOWN, comment};
+  }
 
   bool operator==(const Dialect& other) const {
     return delimiter == other.delimiter && quote_char == other.quote_char &&
-           escape_char == other.escape_char && double_quote == other.double_quote;
+           escape_char == other.escape_char && double_quote == other.double_quote &&
+           comment_char == other.comment_char;
   }
 
   bool operator!=(const Dialect& other) const { return !(*this == other); }
@@ -116,6 +126,10 @@ struct DetectionOptions {
   /// Empty means only test double-quote escaping; backslash is common alternative
   std::vector<char> escape_chars = {'\\'};
 
+  /// Comment characters to recognize (lines starting with these are skipped)
+  /// Default includes '#' which is common in many data formats
+  std::vector<char> comment_chars = {'#'};
+
   /// Minimum confidence threshold for successful detection
   double min_confidence = 0.5;
 };
@@ -172,6 +186,12 @@ struct DetectionResult {
   size_t detected_columns = 0; ///< Number of columns detected
   size_t rows_analyzed = 0;    ///< Number of rows analyzed
   std::string warning;         ///< Any warnings during detection
+
+  /// Detected comment character ('\0' if none detected)
+  char comment_char = '\0';
+
+  /// Number of comment lines skipped during detection
+  size_t comment_lines_skipped = 0;
 
   /// All tested candidates, sorted by score (best first)
   std::vector<DialectCandidate> candidates;
@@ -265,6 +285,9 @@ private:
   /// Detect if first row is likely a header
   bool detect_header(const Dialect& dialect, const uint8_t* buf, size_t len) const;
 
+  /// Check if a row starts with a comment character
+  bool is_comment_line(const uint8_t* row_start, size_t row_len) const;
+
   /// Find row boundaries respecting quote state
   std::vector<std::pair<size_t, size_t>> find_rows(const Dialect& dialect, const uint8_t* buf,
                                                    size_t len) const;
@@ -272,6 +295,15 @@ private:
   /// Extract fields from a single row
   std::vector<std::string_view> extract_fields(const Dialect& dialect, const uint8_t* row_start,
                                                size_t row_len) const;
+
+  /// Skip leading comment lines and detect comment character
+  /// @param buf Pointer to CSV data
+  /// @param len Length of data in bytes
+  /// @param[out] comment_char Detected comment character ('\0' if none)
+  /// @param[out] lines_skipped Number of comment lines skipped
+  /// @return Offset to start of first non-comment line
+  size_t skip_comment_lines(const uint8_t* buf, size_t len, char& comment_char,
+                            size_t& lines_skipped) const;
 };
 
 } // namespace libvroom

@@ -545,6 +545,94 @@ TEST_F(ExtractionConfigTest, NoWhitespaceTrimmingNA) {
   EXPECT_TRUE(is_na("", 0, config));
 }
 
+TEST_F(ExtractionConfigTest, AllowLeadingZerosDefault) {
+  // By default, leading zeros are allowed
+  ExtractionConfig config;
+  EXPECT_TRUE(config.allow_leading_zeros);
+
+  // Leading zeros should parse successfully with default config
+  EXPECT_EQ(parse_integer<int64_t>("007", 3, config).get(), 7);
+  EXPECT_EQ(parse_integer<int64_t>("0123", 4, config).get(), 123);
+  EXPECT_EQ(parse_integer<int64_t>("-007", 4, config).get(), -7);
+  EXPECT_EQ(parse_integer<int64_t>("+007", 4, config).get(), 7);
+
+  // Also test unsigned integers with default config (allow_leading_zeros = true)
+  EXPECT_EQ(parse_integer<uint64_t>("007", 3, config).get(), 7u);
+  EXPECT_EQ(parse_integer<uint64_t>("0123", 4, config).get(), 123u);
+}
+
+TEST_F(ExtractionConfigTest, DisallowLeadingZeros) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Leading zeros should be rejected
+  auto result = parse_integer<int64_t>("007", 3, config);
+  EXPECT_FALSE(result.ok());
+  EXPECT_NE(result.error, nullptr);
+  EXPECT_STREQ(result.error, "Leading zeros not allowed");
+
+  result = parse_integer<int64_t>("0123", 4, config);
+  EXPECT_FALSE(result.ok());
+
+  // With negative sign
+  result = parse_integer<int64_t>("-007", 4, config);
+  EXPECT_FALSE(result.ok());
+
+  // With positive sign
+  result = parse_integer<int64_t>("+007", 4, config);
+  EXPECT_FALSE(result.ok());
+}
+
+TEST_F(ExtractionConfigTest, DisallowLeadingZerosSingleZeroAllowed) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Single zero is not a leading zero - it's the number itself
+  EXPECT_EQ(parse_integer<int64_t>("0", 1, config).get(), 0);
+  EXPECT_EQ(parse_integer<int64_t>("-0", 2, config).get(), 0);
+  EXPECT_EQ(parse_integer<int64_t>("+0", 2, config).get(), 0);
+}
+
+TEST_F(ExtractionConfigTest, DisallowLeadingZerosRegularNumbers) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Numbers without leading zeros should still parse
+  EXPECT_EQ(parse_integer<int64_t>("123", 3, config).get(), 123);
+  EXPECT_EQ(parse_integer<int64_t>("-456", 4, config).get(), -456);
+  EXPECT_EQ(parse_integer<int64_t>("+789", 4, config).get(), 789);
+  EXPECT_EQ(parse_integer<int64_t>("10", 2, config).get(), 10);
+}
+
+TEST_F(ExtractionConfigTest, DisallowLeadingZerosUnsigned) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Unsigned integers with leading zeros should be rejected
+  auto result = parse_integer<uint64_t>("007", 3, config);
+  EXPECT_FALSE(result.ok());
+
+  // Without leading zeros should work
+  EXPECT_EQ(parse_integer<uint64_t>("7", 1, config).get(), 7u);
+  EXPECT_EQ(parse_integer<uint64_t>("0", 1, config).get(), 0u);
+
+  // Multi-digit numbers not starting with 0 should work (covers C=false branch for uint64_t)
+  EXPECT_EQ(parse_integer<uint64_t>("123", 3, config).get(), 123u);
+  EXPECT_EQ(parse_integer<uint64_t>("10", 2, config).get(), 10u);
+}
+
+TEST_F(ExtractionConfigTest, DisallowLeadingZerosWithWhitespace) {
+  ExtractionConfig config;
+  config.allow_leading_zeros = false;
+
+  // Leading zeros should still be detected after whitespace trimming
+  auto result = parse_integer<int64_t>("  007  ", 7, config);
+  EXPECT_FALSE(result.ok());
+
+  // But valid numbers with whitespace should work
+  EXPECT_EQ(parse_integer<int64_t>("  7  ", 5, config).get(), 7);
+}
+
 class ValueExtractorTest : public ::testing::Test {
 protected:
   std::unique_ptr<TestBuffer> buffer_;

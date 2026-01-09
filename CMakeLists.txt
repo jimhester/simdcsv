@@ -23,8 +23,9 @@ option(BUILD_TESTING "Build test executables" ON)
 option(BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(BUILD_SHARED_LIBS "Build shared library instead of static" OFF)
 
-# Code coverage option
-option(ENABLE_COVERAGE "Enable code coverage reporting" OFF)
+# Code coverage options
+option(ENABLE_COVERAGE "Enable code coverage reporting (gcov-compatible)" OFF)
+option(ENABLE_LLVM_COVERAGE "Enable LLVM source-based code coverage (requires Clang)" OFF)
 
 # Sanitizer options
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
@@ -40,7 +41,7 @@ endif()
 
 # Code coverage flags
 if(ENABLE_COVERAGE)
-    message(STATUS "Code coverage enabled")
+    message(STATUS "Code coverage enabled (gcov-compatible)")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         # Use atomic profile updates for thread-safe coverage in multi-threaded code
         add_compile_options(--coverage -fprofile-arcs -ftest-coverage -fprofile-update=atomic)
@@ -48,6 +49,19 @@ if(ENABLE_COVERAGE)
     else()
         message(WARNING "Code coverage not supported for compiler: ${CMAKE_CXX_COMPILER_ID}")
     endif()
+endif()
+
+# LLVM source-based coverage (provides better header file coverage attribution)
+# See: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
+if(ENABLE_LLVM_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "LLVM source-based coverage requires Clang compiler")
+    endif()
+    message(STATUS "LLVM source-based coverage enabled")
+    # -fprofile-instr-generate: Enables execution count collection
+    # -fcoverage-mapping: Enables mapping information in generated code
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate)
 endif()
 
 # Sanitizer flags
@@ -233,6 +247,7 @@ set(VROOM_SOURCES
     src/two_pass.cpp
     src/branchless_state_machine.cpp
     src/simd_number_parsing.cpp
+    src/utf8.cpp
 )
 
 # Add type detection source if enabled
@@ -283,6 +298,18 @@ if(BUILD_TESTING)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
 
+    # =============================================================================
+    # Test data copying - single target to avoid race conditions during parallel builds
+    # All test targets depend on this target instead of each copying the data themselves.
+    # See: https://github.com/jimhester/libvroom/issues/372
+    # =============================================================================
+    add_custom_target(copy_test_data ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/data
+        ${CMAKE_CURRENT_BINARY_DIR}/test/data
+        COMMENT "Copying test data to build directory"
+    )
+
 # Test executable
 add_executable(libvroom_test
     test/csv_parser_test.cpp
@@ -298,12 +325,7 @@ target_include_directories(libvroom_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory
-add_custom_command(TARGET libvroom_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(libvroom_test copy_test_data)
 
 # Error handling test executable
 add_executable(error_handling_test
@@ -320,12 +342,7 @@ target_include_directories(error_handling_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for error handling tests
-add_custom_command(TARGET error_handling_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(error_handling_test copy_test_data)
 
 # Register tests with CTest
 include(GoogleTest)
@@ -347,12 +364,7 @@ target_include_directories(csv_parsing_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for parsing tests
-add_custom_command(TARGET csv_parsing_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(csv_parsing_test copy_test_data)
 
 # Register parsing tests with CTest
 gtest_discover_tests(csv_parsing_test)
@@ -372,12 +384,7 @@ target_include_directories(csv_parser_errors_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for parser error tests
-add_custom_command(TARGET csv_parser_errors_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(csv_parser_errors_test copy_test_data)
 
 # Register parser error tests with CTest
 gtest_discover_tests(csv_parser_errors_test)
@@ -397,12 +404,7 @@ target_include_directories(csv_extended_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for extended tests
-add_custom_command(TARGET csv_extended_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(csv_extended_test copy_test_data)
 
 # Register extended tests with CTest
 gtest_discover_tests(csv_extended_test)
@@ -422,12 +424,7 @@ target_include_directories(dialect_detection_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for dialect tests
-add_custom_command(TARGET dialect_detection_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(dialect_detection_test copy_test_data)
 
 # Register dialect detection tests with CTest
 gtest_discover_tests(dialect_detection_test)
@@ -448,12 +445,7 @@ if(LIBVROOM_ENABLE_TYPE_DETECTION)
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
 
-    # Copy test data to build directory for type detection tests
-    add_custom_command(TARGET type_detection_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-        ${CMAKE_CURRENT_BINARY_DIR}/test/data
-    )
+    add_dependencies(type_detection_test copy_test_data)
 
     # Register type detection tests with CTest
     gtest_discover_tests(type_detection_test)
@@ -474,12 +466,7 @@ target_include_directories(c_api_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for C API tests
-add_custom_command(TARGET c_api_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(c_api_test copy_test_data)
 
 # Register C API tests with CTest
 gtest_discover_tests(c_api_test)
@@ -517,12 +504,7 @@ target_include_directories(api_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for API tests
-add_custom_command(TARGET api_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(api_test copy_test_data)
 
 # Register API tests with CTest
 gtest_discover_tests(api_test)
@@ -559,12 +541,7 @@ target_include_directories(value_extraction_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for value extraction tests
-add_custom_command(TARGET value_extraction_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(value_extraction_test copy_test_data)
 
 # Register value extraction tests with CTest
 gtest_discover_tests(value_extraction_test)
@@ -584,12 +561,7 @@ target_include_directories(streaming_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for streaming tests
-add_custom_command(TARGET streaming_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(streaming_test copy_test_data)
 
 # Register streaming tests with CTest
 gtest_discover_tests(streaming_test)
@@ -609,15 +581,30 @@ target_include_directories(branchless_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for branchless tests
-add_custom_command(TARGET branchless_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(branchless_test copy_test_data)
 
 # Register branchless tests with CTest
 gtest_discover_tests(branchless_test)
+
+# SIMD error detection test executable (edge cases from issue #383)
+add_executable(simd_error_detection_test
+    test/simd_error_detection_test.cpp
+)
+
+target_link_libraries(simd_error_detection_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(simd_error_detection_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(simd_error_detection_test copy_test_data)
+
+# Register SIMD error detection tests with CTest
+gtest_discover_tests(simd_error_detection_test)
 
 # Size limits test executable (security feature from issue #270)
 add_executable(size_limits_test
@@ -652,12 +639,7 @@ target_include_directories(simd_number_parsing_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for SIMD number parsing tests
-add_custom_command(TARGET simd_number_parsing_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(simd_number_parsing_test copy_test_data)
 
 # Register SIMD number parsing tests with CTest
 gtest_discover_tests(simd_number_parsing_test)
@@ -677,12 +659,7 @@ target_include_directories(io_util_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for IO utility tests
-add_custom_command(TARGET io_util_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(io_util_test copy_test_data)
 
 # Register IO utility tests with CTest
 gtest_discover_tests(io_util_test)
@@ -701,15 +678,8 @@ target_include_directories(cli_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# CLI test depends on vroom executable being built
-add_dependencies(cli_test vroom-cli)
-
-# Copy test data to build directory for CLI tests
-add_custom_command(TARGET cli_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+# CLI test depends on vroom executable being built and test data
+add_dependencies(cli_test vroom-cli copy_test_data)
 
 # Register CLI tests with CTest
 gtest_discover_tests(cli_test)
@@ -729,12 +699,7 @@ target_include_directories(two_pass_coverage_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for two-pass coverage tests
-add_custom_command(TARGET two_pass_coverage_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(two_pass_coverage_test copy_test_data)
 
 # Register two-pass coverage tests with CTest
 gtest_discover_tests(two_pass_coverage_test)
@@ -754,15 +719,28 @@ target_include_directories(encoding_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for encoding tests
-add_custom_command(TARGET encoding_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(encoding_test copy_test_data)
 
 # Register encoding tests with CTest
 gtest_discover_tests(encoding_test)
+
+# UTF-8 utilities test executable
+add_executable(utf8_test
+    test/utf8_test.cpp
+)
+
+target_link_libraries(utf8_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(utf8_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Register UTF-8 tests with CTest
+gtest_discover_tests(utf8_test)
 
 # Bounds validation test executable (tests assertions from PR #123)
 add_executable(bounds_validation_test
@@ -784,12 +762,7 @@ if(LIBVROOM_ENABLE_TYPE_DETECTION)
     target_compile_definitions(bounds_validation_test PRIVATE LIBVROOM_ENABLE_TYPE_DETECTION)
 endif()
 
-# Copy test data to build directory for bounds validation tests
-add_custom_command(TARGET bounds_validation_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(bounds_validation_test copy_test_data)
 
 # Register bounds validation tests with CTest
 gtest_discover_tests(bounds_validation_test)
@@ -809,12 +782,7 @@ target_include_directories(integration_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for integration tests
-add_custom_command(TARGET integration_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(integration_test copy_test_data)
 
 # Register integration tests with CTest
 gtest_discover_tests(integration_test)
@@ -834,31 +802,44 @@ target_include_directories(concurrency_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Copy test data to build directory for concurrency tests
-add_custom_command(TARGET concurrency_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/test/data
-    ${CMAKE_CURRENT_BINARY_DIR}/test/data
-)
+add_dependencies(concurrency_test copy_test_data)
 
 # Register concurrency tests with CTest
 gtest_discover_tests(concurrency_test)
+
+# Comment line skipping test executable
+add_executable(comment_line_test
+    test/comment_line_test.cpp
+)
+
+target_link_libraries(comment_line_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(comment_line_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(comment_line_test copy_test_data)
+
+# Register comment line tests with CTest
+gtest_discover_tests(comment_line_test)
 
 # Arrow output test (only if Arrow is enabled)
 if(LIBVROOM_ENABLE_ARROW)
     add_executable(arrow_output_test test/arrow_output_test.cpp)
     target_link_libraries(arrow_output_test PRIVATE vroom GTest::gtest_main pthread)
     target_include_directories(arrow_output_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    add_custom_command(TARGET arrow_output_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
+    add_dependencies(arrow_output_test copy_test_data)
     gtest_discover_tests(arrow_output_test)
 
     # Arrow file-based tests (loading real CSV files)
     add_executable(arrow_file_test test/arrow_file_test.cpp)
     target_link_libraries(arrow_file_test PRIVATE vroom GTest::gtest_main pthread)
     target_include_directories(arrow_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    add_custom_command(TARGET arrow_file_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/test/data ${CMAKE_CURRENT_BINARY_DIR}/test/data)
+    add_dependencies(arrow_file_test copy_test_data)
     gtest_discover_tests(arrow_file_test)
 endif()
 
@@ -879,6 +860,7 @@ set(BENCHMARK_SOURCES
     benchmark/simd_benchmarks.cpp
     benchmark/energy_benchmarks.cpp
     benchmark/number_parsing_benchmarks.cpp
+    benchmark/error_collection_benchmark.cpp
 )
 
 # Add external parser benchmarks if any external parser is enabled
