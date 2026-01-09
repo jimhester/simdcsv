@@ -28,6 +28,7 @@ Runs on every push and pull request to main/master branches.
 - Builds with `-DENABLE_COVERAGE=ON`
 - Generates coverage with lcov
 - Uploads to Codecov
+- **Note**: Header file coverage may appear artificially low due to gcov limitations. See [docs/coverage.md](../../docs/coverage.md) for details.
 
 **Minimal Release Build** (main branch only):
 - Builds with `-DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF`

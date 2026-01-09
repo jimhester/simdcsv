@@ -359,6 +359,41 @@ struct ParseOptions {
   }
 
   /**
+   * @brief Factory for auto-detection mode with explicit intent.
+   *
+   * Returns default options configured for dialect auto-detection.
+   * This is functionally equivalent to defaults() and standard(), but
+   * provides more self-documenting code when auto-detection is the
+   * explicit requirement.
+   *
+   * @return ParseOptions configured for auto-detection.
+   *
+   * @example
+   * @code
+   * auto result = parser.parse(buf, len, ParseOptions::auto_detect());
+   * @endcode
+   */
+  static ParseOptions auto_detect() { return ParseOptions{}; }
+
+  /**
+   * @brief Factory for auto-detection with error collection.
+   *
+   * Convenience method combining dialect auto-detection with error
+   * collection. This provides more self-documenting code compared to
+   * using with_errors() when auto-detection is the explicit intent.
+   *
+   * @param e Reference to an ErrorCollector for collecting parse errors.
+   * @return ParseOptions configured for auto-detection with error collection.
+   *
+   * @example
+   * @code
+   * ErrorCollector errors(ErrorMode::PERMISSIVE);
+   * auto result = parser.parse(buf, len, ParseOptions::auto_detect_with_errors(errors));
+   * @endcode
+   */
+  static ParseOptions auto_detect_with_errors(ErrorCollector& e) { return with_errors(e); }
+
+  /**
    * @brief Factory for options with both dialect and error collection.
    */
   static ParseOptions with_dialect_and_errors(const Dialect& d, ErrorCollector& e) {
@@ -1607,9 +1642,11 @@ public:
 
     // Optimized allocation: Count separators first to allocate right-sized index.
     // This typically reduces memory usage by 2-10x for real-world CSV files.
+    // Pass n_quotes and len to handle error recovery scenarios safely.
     auto count_stats =
         TwoPass::first_pass_simd(buf, 0, len, result.dialect.quote_char, result.dialect.delimiter);
-    result.idx = parser_.init_counted_safe(count_stats.n_separators, num_threads_, collector);
+    result.idx = parser_.init_counted_safe(count_stats.n_separators, num_threads_, collector,
+                                           count_stats.n_quotes, len);
     if (result.idx.indexes == nullptr) {
       // Allocation failed or would overflow
       if (options.errors != nullptr) {

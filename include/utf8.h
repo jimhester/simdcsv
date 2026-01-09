@@ -4,7 +4,8 @@
  *
  * This header provides utilities for working with UTF-8 encoded strings,
  * including display width calculation (accounting for wide characters like
- * CJK and emoji) and truncation that respects code point boundaries.
+ * CJK and emoji) and truncation that respects code point and grapheme cluster
+ * boundaries.
  *
  * Display Width:
  * - ASCII characters: 1 column
@@ -13,8 +14,14 @@
  * - Emoji (most): 2 columns
  * - Other characters: 1 column
  *
+ * Grapheme Cluster Support:
+ * - ZWJ sequences (family emoji, profession emoji): treated as atomic
+ * - Emoji modifier sequences (skin tone variations): treated as atomic
+ * - Regional indicator pairs (flag emoji): treated as atomic
+ * - Variation selectors: grouped with base character
+ *
  * @see utf8_display_width() for calculating string display width
- * @see utf8_truncate() for safe truncation at code point boundaries
+ * @see utf8_truncate() for safe truncation at grapheme cluster boundaries
  */
 
 #ifndef LIBVROOM_UTF8_H
@@ -56,9 +63,10 @@ size_t utf8_display_width(std::string_view str);
 /**
  * @brief Truncate a UTF-8 string to fit within a maximum display width.
  *
- * Truncates the string at a code point boundary to ensure the resulting
+ * Truncates the string at a grapheme cluster boundary to ensure the resulting
  * string fits within max_width terminal columns. Never splits multi-byte
- * UTF-8 sequences.
+ * UTF-8 sequences or grapheme clusters (emoji sequences joined by ZWJ,
+ * emoji with skin tone modifiers, flag emoji, etc.).
  *
  * If truncation occurs and there's room, appends an ellipsis ("...").
  * The ellipsis itself counts as 3 columns, so the actual content will
@@ -69,6 +77,25 @@ size_t utf8_display_width(std::string_view str);
  * @return The truncated string, potentially with "..." appended
  */
 std::string utf8_truncate(std::string_view str, size_t max_width);
+
+/**
+ * @brief Read a complete grapheme cluster from a UTF-8 string.
+ *
+ * Reads one grapheme cluster starting at the given position. A grapheme
+ * cluster is the smallest unit that should not be split during text
+ * processing. This includes:
+ * - Simple code points (ASCII, basic Latin, CJK, etc.)
+ * - ZWJ (Zero-Width Joiner) sequences (family emoji, profession emoji)
+ * - Emoji modifier sequences (base emoji + skin tone modifier)
+ * - Regional indicator pairs (flag emoji)
+ * - Base characters with variation selectors
+ *
+ * @param str The UTF-8 string
+ * @param pos Starting byte position
+ * @param[out] width The total display width of the grapheme cluster
+ * @return The number of bytes consumed (0 if pos >= str.size())
+ */
+size_t utf8_read_grapheme_cluster(std::string_view str, size_t pos, int& width);
 
 /**
  * @brief Decode a UTF-8 sequence starting at the given position.

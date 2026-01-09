@@ -7,6 +7,68 @@
 
 namespace libvroom {
 
+// Unicode code points for grapheme cluster boundary detection
+namespace {
+constexpr uint32_t ZWJ = 0x200D;                   // Zero-Width Joiner
+constexpr uint32_t VARIATION_SELECTOR_15 = 0xFE0E; // Text presentation
+constexpr uint32_t VARIATION_SELECTOR_16 = 0xFE0F; // Emoji presentation
+constexpr uint32_t REGIONAL_INDICATOR_A = 0x1F1E6; // 🇦
+constexpr uint32_t REGIONAL_INDICATOR_Z = 0x1F1FF; // 🇿
+constexpr uint32_t EMOJI_MODIFIER_BASE_START = 0x1F3FB;
+constexpr uint32_t EMOJI_MODIFIER_BASE_END = 0x1F3FF; // Fitzpatrick skin tones
+
+// Check if code point is a regional indicator (A-Z for flag emoji)
+inline bool is_regional_indicator(uint32_t cp) {
+  return cp >= REGIONAL_INDICATOR_A && cp <= REGIONAL_INDICATOR_Z;
+}
+
+// Check if code point is an emoji modifier (skin tone)
+inline bool is_emoji_modifier(uint32_t cp) {
+  return cp >= EMOJI_MODIFIER_BASE_START && cp <= EMOJI_MODIFIER_BASE_END;
+}
+
+// Check if code point is a variation selector
+inline bool is_variation_selector(uint32_t cp) {
+  return cp == VARIATION_SELECTOR_15 || cp == VARIATION_SELECTOR_16;
+}
+
+// Check if code point can start an emoji sequence that may have modifiers/ZWJ
+// This is a simplified check - we look for emoji in common ranges
+inline bool is_emoji_base(uint32_t cp) {
+  // Miscellaneous Symbols and Pictographs
+  if (cp >= 0x1F300 && cp <= 0x1F5FF)
+    return true;
+  // Emoticons
+  if (cp >= 0x1F600 && cp <= 0x1F64F)
+    return true;
+  // Transport and Map Symbols
+  if (cp >= 0x1F680 && cp <= 0x1F6FF)
+    return true;
+  // Supplemental Symbols and Pictographs
+  if (cp >= 0x1F900 && cp <= 0x1F9FF)
+    return true;
+  // Symbols and Pictographs Extended-A
+  if (cp >= 0x1FA70 && cp <= 0x1FAFF)
+    return true;
+  // Dingbats (some are emoji)
+  if (cp >= 0x2700 && cp <= 0x27BF)
+    return true;
+  // Miscellaneous Symbols
+  if (cp >= 0x2600 && cp <= 0x26FF)
+    return true;
+  // Regional indicators
+  if (is_regional_indicator(cp))
+    return true;
+  return false;
+}
+
+// Check if code point can be part of an extended grapheme cluster following an emoji
+inline bool is_grapheme_extend(uint32_t cp) {
+  return cp == ZWJ || is_emoji_modifier(cp) || is_variation_selector(cp);
+}
+
+} // anonymous namespace
+
 size_t utf8_decode(std::string_view str, size_t pos, uint32_t& codepoint) {
   if (pos >= str.size()) {
     codepoint = 0xFFFD; // Replacement character
@@ -224,6 +286,10 @@ int codepoint_width(uint32_t cp) {
     return 2;
 
   // Emoji (most are wide)
+  // Enclosed Alphanumeric Supplement (includes Regional Indicators for flags)
+  if (cp >= 0x1F100 && cp <= 0x1F1FF)
+    return 2;
+
   // Miscellaneous Symbols and Pictographs
   if (cp >= 0x1F300 && cp <= 0x1F5FF)
     return 2;
@@ -289,6 +355,100 @@ size_t utf8_display_width(std::string_view str) {
   return width;
 }
 
+size_t utf8_read_grapheme_cluster(std::string_view str, size_t pos, int& width) {
+  if (pos >= str.size()) {
+    width = 0;
+    return 0;
+  }
+
+  // Decode the first code point
+  uint32_t cp;
+  size_t len = utf8_decode(str, pos, cp);
+  if (len == 0) {
+    width = 0;
+    return 0;
+  }
+
+  size_t total_bytes = len;
+  int total_width = codepoint_width(cp);
+  size_t current_pos = pos + len;
+
+  // Handle regional indicator pairs (flag emoji)
+  // Two regional indicators form a single flag emoji that displays as 2 columns
+  if (is_regional_indicator(cp)) {
+    if (current_pos < str.size()) {
+      uint32_t next_cp;
+      size_t next_len = utf8_decode(str, current_pos, next_cp);
+      if (next_len > 0 && is_regional_indicator(next_cp)) {
+        total_bytes += next_len;
+        // The second regional indicator doesn't add width - the pair displays as one 2-col flag
+        current_pos += next_len;
+      }
+    }
+    width = total_width;
+    return total_bytes;
+  }
+
+  // For emoji base characters, continue consuming:
+  // - Variation selectors (FE0E, FE0F)
+  // - Emoji modifiers (skin tones 1F3FB-1F3FF)
+  // - ZWJ sequences (ZWJ + emoji)
+  if (is_emoji_base(cp)) {
+    while (current_pos < str.size()) {
+      uint32_t next_cp;
+      size_t next_len = utf8_decode(str, current_pos, next_cp);
+      if (next_len == 0)
+        break;
+
+      if (is_variation_selector(next_cp)) {
+        // Variation selector: consume it (width 0)
+        total_bytes += next_len;
+        total_width += codepoint_width(next_cp);
+        current_pos += next_len;
+      } else if (is_emoji_modifier(next_cp)) {
+        // Emoji modifier (skin tone): consume it but don't add width
+        // The combined emoji with skin tone still renders as 2 columns
+        total_bytes += next_len;
+        // Note: we intentionally don't add width here
+        current_pos += next_len;
+      } else if (next_cp == ZWJ) {
+        // ZWJ: consume it and the following emoji
+        total_bytes += next_len;
+        total_width += codepoint_width(next_cp);
+        current_pos += next_len;
+
+        // Now consume the emoji after ZWJ
+        if (current_pos < str.size()) {
+          uint32_t emoji_cp;
+          size_t emoji_len = utf8_decode(str, current_pos, emoji_cp);
+          if (emoji_len > 0 &&
+              (is_emoji_base(emoji_cp) || emoji_cp == 0x2640 || // Female sign
+               emoji_cp == 0x2642 ||                            // Male sign
+               emoji_cp == 0x2695 ||                            // Medical symbol
+               emoji_cp == 0x2696 ||                            // Scales
+               emoji_cp == 0x2708 ||                            // Airplane
+               (emoji_cp >= 0x1F466 && emoji_cp <= 0x1F469) ||  // Boy/girl/man/woman
+               (emoji_cp >= 0x1F3A8 && emoji_cp <= 0x1F3EB) ||  // Various objects
+               (emoji_cp >= 0x2600 && emoji_cp <= 0x26FF))) {   // Misc symbols
+            total_bytes += emoji_len;
+            total_width += codepoint_width(emoji_cp);
+            current_pos += emoji_len;
+          } else {
+            // ZWJ not followed by valid emoji, stop here
+            break;
+          }
+        }
+      } else {
+        // Not part of this grapheme cluster
+        break;
+      }
+    }
+  }
+
+  width = total_width;
+  return total_bytes;
+}
+
 std::string utf8_truncate(std::string_view str, size_t max_width) {
   if (max_width == 0) {
     return "";
@@ -296,26 +456,22 @@ std::string utf8_truncate(std::string_view str, size_t max_width) {
 
   size_t width = 0;
   size_t pos = 0;
-  size_t last_valid_pos = 0;
 
-  // Calculate total width and find truncation point
+  // Calculate total width and find truncation point using grapheme clusters
   while (pos < str.size()) {
-    uint32_t cp;
-    size_t len = utf8_decode(str, pos, cp);
-    if (len == 0)
+    int cluster_width;
+    size_t cluster_len = utf8_read_grapheme_cluster(str, pos, cluster_width);
+    if (cluster_len == 0)
       break;
 
-    int cp_width = codepoint_width(cp);
-
-    // Check if adding this character would exceed the limit
-    if (width + cp_width > max_width) {
+    // Check if adding this grapheme cluster would exceed the limit
+    if (width + static_cast<size_t>(cluster_width) > max_width) {
       // We need to truncate
       break;
     }
 
-    last_valid_pos = pos + len;
-    width += cp_width;
-    pos += len;
+    width += cluster_width;
+    pos += cluster_len;
   }
 
   // If the entire string fits, return it as-is
@@ -327,22 +483,20 @@ std::string utf8_truncate(std::string_view str, size_t max_width) {
   constexpr size_t ELLIPSIS_WIDTH = 3; // "..." is 3 columns
 
   if (max_width <= ELLIPSIS_WIDTH) {
-    // Not enough room for ellipsis, just truncate
-    // Find how much we can fit
+    // Not enough room for ellipsis, just truncate using grapheme clusters
     width = 0;
     pos = 0;
     while (pos < str.size()) {
-      uint32_t cp;
-      size_t len = utf8_decode(str, pos, cp);
-      if (len == 0)
+      int cluster_width;
+      size_t cluster_len = utf8_read_grapheme_cluster(str, pos, cluster_width);
+      if (cluster_len == 0)
         break;
 
-      int cp_width = codepoint_width(cp);
-      if (width + cp_width > max_width)
+      if (width + static_cast<size_t>(cluster_width) > max_width)
         break;
 
-      width += cp_width;
-      pos += len;
+      width += cluster_width;
+      pos += cluster_len;
     }
     return std::string(str.substr(0, pos));
   }
@@ -351,24 +505,21 @@ std::string utf8_truncate(std::string_view str, size_t max_width) {
   size_t target_width = max_width - ELLIPSIS_WIDTH;
   width = 0;
   pos = 0;
-  last_valid_pos = 0;
 
   while (pos < str.size()) {
-    uint32_t cp;
-    size_t len = utf8_decode(str, pos, cp);
-    if (len == 0)
+    int cluster_width;
+    size_t cluster_len = utf8_read_grapheme_cluster(str, pos, cluster_width);
+    if (cluster_len == 0)
       break;
 
-    int cp_width = codepoint_width(cp);
-    if (width + cp_width > target_width)
+    if (width + static_cast<size_t>(cluster_width) > target_width)
       break;
 
-    width += cp_width;
-    pos += len;
-    last_valid_pos = pos;
+    width += cluster_width;
+    pos += cluster_len;
   }
 
-  return std::string(str.substr(0, last_valid_pos)) + "...";
+  return std::string(str.substr(0, pos)) + "...";
 }
 
 } // namespace libvroom
