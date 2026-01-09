@@ -1458,3 +1458,203 @@ TEST_F(CAPIEncodingTest, LoadFileWithEncodingThenParse) {
   libvroom_buffer_destroy(buffer);
   libvroom_load_result_destroy(load_result);
 }
+
+// ============================================================================
+// INDEX SERIALIZATION TESTS
+// ============================================================================
+
+TEST_F(CAPITest, IndexWriteAndRead) {
+  // Parse a CSV file to create an index
+  const uint8_t data[] = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  ASSERT_NE(buffer, nullptr);
+  ASSERT_NE(parser, nullptr);
+  ASSERT_NE(index, nullptr);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, nullptr);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Save index stats for later comparison
+  uint64_t original_count = libvroom_index_total_count(index);
+  size_t original_columns = libvroom_index_columns(index);
+  size_t original_threads = libvroom_index_num_threads(index);
+  EXPECT_GT(original_count, 0u);
+
+  // Write the index to a file
+  std::string index_file = "test_index_serialize.idx";
+  temp_files_.push_back(index_file);
+  err = libvroom_index_write(index, index_file.c_str());
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Cleanup original index
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+
+  // Read the index back
+  libvroom_index_t* loaded_index = libvroom_index_read(index_file.c_str());
+  ASSERT_NE(loaded_index, nullptr);
+
+  // Verify the loaded index matches the original
+  EXPECT_EQ(libvroom_index_total_count(loaded_index), original_count);
+  EXPECT_EQ(libvroom_index_columns(loaded_index), original_columns);
+  EXPECT_EQ(libvroom_index_num_threads(loaded_index), original_threads);
+  EXPECT_NE(libvroom_index_positions(loaded_index), nullptr);
+
+  libvroom_index_destroy(loaded_index);
+}
+
+TEST_F(CAPITest, IndexWriteNullPointers) {
+  // Test null index pointer
+  EXPECT_EQ(libvroom_index_write(nullptr, "test.idx"), LIBVROOM_ERROR_NULL_POINTER);
+
+  // Test null filename
+  libvroom_index_t* index = libvroom_index_create(100, 1);
+  ASSERT_NE(index, nullptr);
+  EXPECT_EQ(libvroom_index_write(index, nullptr), LIBVROOM_ERROR_NULL_POINTER);
+  libvroom_index_destroy(index);
+}
+
+TEST_F(CAPITest, IndexWriteUnpopulatedIndex) {
+  // Test writing an index that hasn't been populated by parse()
+  libvroom_index_t* index = libvroom_index_create(100, 1);
+  ASSERT_NE(index, nullptr);
+
+  // The index hasn't been populated yet, so write should fail
+  EXPECT_EQ(libvroom_index_write(index, "test.idx"), LIBVROOM_ERROR_INVALID_HANDLE);
+
+  libvroom_index_destroy(index);
+}
+
+TEST_F(CAPITest, IndexReadNullFilename) {
+  EXPECT_EQ(libvroom_index_read(nullptr), nullptr);
+}
+
+TEST_F(CAPITest, IndexReadNonexistentFile) {
+  EXPECT_EQ(libvroom_index_read("nonexistent_index_file.idx"), nullptr);
+}
+
+TEST_F(CAPITest, IndexWriteToInvalidPath) {
+  // Parse a CSV to create a valid index
+  const uint8_t data[] = "a,b,c\n1,2,3\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, nullptr);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Try to write to an invalid path (directory that doesn't exist)
+  err = libvroom_index_write(index, "/nonexistent/directory/test.idx");
+  EXPECT_EQ(err, LIBVROOM_ERROR_IO);
+
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, IndexReadCorruptedFile) {
+  // Create a file with invalid content
+  std::string filename = "test_corrupted_index.idx";
+  temp_files_.push_back(filename);
+  std::ofstream file(filename, std::ios::binary);
+  // Write garbage data
+  uint8_t garbage[] = {0x00, 0x01, 0x02};
+  file.write(reinterpret_cast<const char*>(garbage), sizeof(garbage));
+  file.close();
+
+  // Should return nullptr for corrupted file
+  EXPECT_EQ(libvroom_index_read(filename.c_str()), nullptr);
+}
+
+TEST_F(CAPITest, IndexSerializationRoundTripFromFile) {
+  // Full integration test: load CSV from file, parse, save index, reload index
+  std::string csv_content = "name,value,count\nalpha,1,100\nbeta,2,200\ngamma,3,300\n";
+  std::string csv_file = createTestFile(csv_content);
+  std::string index_file = "test_index_roundtrip.idx";
+  temp_files_.push_back(index_file);
+
+  // Load and parse CSV
+  libvroom_buffer_t* buffer = libvroom_buffer_load_file(csv_file.c_str());
+  ASSERT_NE(buffer, nullptr);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(libvroom_buffer_length(buffer), 1);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, nullptr);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Save the index
+  uint64_t original_count = libvroom_index_total_count(index);
+  size_t original_columns = libvroom_index_columns(index);
+  err = libvroom_index_write(index, index_file.c_str());
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Cleanup original resources
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+
+  // Reload the index from file
+  libvroom_index_t* loaded_index = libvroom_index_read(index_file.c_str());
+  ASSERT_NE(loaded_index, nullptr);
+
+  // Verify loaded index matches
+  EXPECT_EQ(libvroom_index_total_count(loaded_index), original_count);
+  EXPECT_EQ(libvroom_index_columns(loaded_index), original_columns);
+
+  // Verify we can access the positions
+  const uint64_t* positions = libvroom_index_positions(loaded_index);
+  EXPECT_NE(positions, nullptr);
+
+  // Verify per-thread count
+  EXPECT_EQ(libvroom_index_count(loaded_index, 0), original_count);
+
+  libvroom_index_destroy(loaded_index);
+}
+
+TEST_F(CAPITest, IndexSerializationMultipleWriteRead) {
+  // Test that we can write and read multiple times
+  const uint8_t data[] = "x,y\n1,2\n3,4\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, nullptr);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  uint64_t original_count = libvroom_index_total_count(index);
+
+  // Write to two different files
+  std::string file1 = "test_index_multi1.idx";
+  std::string file2 = "test_index_multi2.idx";
+  temp_files_.push_back(file1);
+  temp_files_.push_back(file2);
+
+  EXPECT_EQ(libvroom_index_write(index, file1.c_str()), LIBVROOM_OK);
+  EXPECT_EQ(libvroom_index_write(index, file2.c_str()), LIBVROOM_OK);
+
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+
+  // Read both files
+  libvroom_index_t* idx1 = libvroom_index_read(file1.c_str());
+  libvroom_index_t* idx2 = libvroom_index_read(file2.c_str());
+  ASSERT_NE(idx1, nullptr);
+  ASSERT_NE(idx2, nullptr);
+
+  // Both should have the same data
+  EXPECT_EQ(libvroom_index_total_count(idx1), original_count);
+  EXPECT_EQ(libvroom_index_total_count(idx2), original_count);
+
+  libvroom_index_destroy(idx1);
+  libvroom_index_destroy(idx2);
+}
