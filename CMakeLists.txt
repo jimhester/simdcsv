@@ -241,6 +241,7 @@ set(VROOM_SOURCES
     src/error.cpp
     src/dialect.cpp
     src/encoding.cpp
+    src/index_cache.cpp
     src/libvroom_c.cpp
     src/value_extraction.cpp
     src/streaming.cpp
@@ -806,6 +807,26 @@ add_dependencies(comment_line_test copy_test_data)
 
 # Register comment line tests with CTest
 gtest_discover_tests(comment_line_test)
+
+# Index cache test executable
+add_executable(index_cache_test
+    test/index_cache_test.cpp
+)
+
+target_link_libraries(index_cache_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(index_cache_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(index_cache_test copy_test_data)
+
+# Register index cache tests with CTest
+gtest_discover_tests(index_cache_test)
 
 # Arrow output test (only if Arrow is enabled)
 if(LIBVROOM_ENABLE_ARROW)
