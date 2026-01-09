@@ -503,6 +503,19 @@ libvroom_detection_result_t* libvroom_detect_dialect(const libvroom_buffer_t* bu
   }
 }
 
+libvroom_detection_result_t* libvroom_detect_dialect_file(const char* filename) {
+  if (!filename)
+    return nullptr;
+
+  try {
+    libvroom::DialectDetector detector;
+    auto result = detector.detect_file(filename);
+    return new (std::nothrow) libvroom_detection_result(result);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
 bool libvroom_detection_result_success(const libvroom_detection_result_t* result) {
   if (!result)
     return false;

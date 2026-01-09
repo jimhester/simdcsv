@@ -130,6 +130,30 @@ void libvroom_parser_destroy(libvroom_parser_t* parser);
 
 /* Dialect Detection */
 libvroom_detection_result_t* libvroom_detect_dialect(const libvroom_buffer_t* buffer);
+
+/**
+ * @brief Detect the CSV dialect directly from a file.
+ *
+ * Convenience function that combines file loading and dialect detection into
+ * a single operation. Internally loads a sample of the file and detects the
+ * dialect without requiring manual buffer management.
+ *
+ * @param filename Path to the CSV file to analyze.
+ * @return Detection result handle, or NULL on failure.
+ *         The caller must call libvroom_detection_result_destroy() to free the result.
+ *
+ * @example
+ * @code
+ * libvroom_detection_result_t* result = libvroom_detect_dialect_file("data.csv");
+ * if (result && libvroom_detection_result_success(result)) {
+ *     libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+ *     printf("Delimiter: %c\n", libvroom_dialect_delimiter(dialect));
+ *     libvroom_dialect_destroy(dialect);
+ * }
+ * libvroom_detection_result_destroy(result);
+ * @endcode
+ */
+libvroom_detection_result_t* libvroom_detect_dialect_file(const char* filename);
 bool libvroom_detection_result_success(const libvroom_detection_result_t* result);
 double libvroom_detection_result_confidence(const libvroom_detection_result_t* result);
 libvroom_dialect_t* libvroom_detection_result_dialect(const libvroom_detection_result_t* result);
