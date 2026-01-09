@@ -64,6 +64,11 @@
  *
  * @note The returned pointer must be freed using aligned_free(), not free().
  *
+ * @warning **Production code must check for nullptr return.** This function
+ *          can fail due to insufficient memory, especially when allocating
+ *          large buffers for CSV parsing. Always check the return value
+ *          before using the pointer to avoid undefined behavior.
+ *
  * @example
  * @code
  * // Allocate 1KB aligned to 64-byte cache line
