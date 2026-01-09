@@ -23,9 +23,18 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
+
+// mmap support for index caching prototype
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/mman.h>
+#endif
 
 using namespace std;
 
@@ -41,6 +50,324 @@ constexpr const char* VERSION = "0.1.0";
 constexpr size_t QUOTE_LOOKBACK_LIMIT = 64 * 1024; // 64KB lookback for quote state
 constexpr size_t MAX_BOUNDARY_SEARCH = 8192;       // Max search for row boundary
 constexpr size_t MIN_PARALLEL_SIZE = 1024 * 1024;  // Minimum size for parallel processing
+
+// Index cache format version (v3 includes source file metadata for validation)
+constexpr uint8_t INDEX_CACHE_VERSION = 3;
+
+//=============================================================================
+// Index Cache Prototype - mmap-based persistent index storage
+// This version uses DIRECT mmap pointers (no copy) for better performance
+//=============================================================================
+
+/// RAII wrapper for memory-mapped files
+class MmapBuffer {
+public:
+  MmapBuffer() = default;
+
+  ~MmapBuffer() { unmap(); }
+
+  // Non-copyable
+  MmapBuffer(const MmapBuffer&) = delete;
+  MmapBuffer& operator=(const MmapBuffer&) = delete;
+
+  // Moveable
+  MmapBuffer(MmapBuffer&& other) noexcept
+      : data_(other.data_), size_(other.size_)
+#ifdef _WIN32
+        ,
+        file_handle_(other.file_handle_), map_handle_(other.map_handle_)
+#else
+        ,
+        fd_(other.fd_)
+#endif
+  {
+    other.data_ = nullptr;
+    other.size_ = 0;
+#ifdef _WIN32
+    other.file_handle_ = INVALID_HANDLE_VALUE;
+    other.map_handle_ = nullptr;
+#else
+    other.fd_ = -1;
+#endif
+  }
+
+  MmapBuffer& operator=(MmapBuffer&& other) noexcept {
+    if (this != &other) {
+      unmap();
+      data_ = other.data_;
+      size_ = other.size_;
+#ifdef _WIN32
+      file_handle_ = other.file_handle_;
+      map_handle_ = other.map_handle_;
+      other.file_handle_ = INVALID_HANDLE_VALUE;
+      other.map_handle_ = nullptr;
+#else
+      fd_ = other.fd_;
+      other.fd_ = -1;
+#endif
+      other.data_ = nullptr;
+      other.size_ = 0;
+    }
+    return *this;
+  }
+
+  /// Open and map a file read-only
+  bool open(const std::string& path) {
+    unmap();
+
+#ifdef _WIN32
+    file_handle_ = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file_handle_ == INVALID_HANDLE_VALUE)
+      return false;
+
+    LARGE_INTEGER file_size;
+    if (!GetFileSizeEx(file_handle_, &file_size)) {
+      CloseHandle(file_handle_);
+      file_handle_ = INVALID_HANDLE_VALUE;
+      return false;
+    }
+    size_ = static_cast<size_t>(file_size.QuadPart);
+
+    if (size_ == 0) {
+      CloseHandle(file_handle_);
+      file_handle_ = INVALID_HANDLE_VALUE;
+      return false;
+    }
+
+    map_handle_ = CreateFileMappingA(file_handle_, nullptr, PAGE_READONLY, 0, 0, nullptr);
+    if (!map_handle_) {
+      CloseHandle(file_handle_);
+      file_handle_ = INVALID_HANDLE_VALUE;
+      return false;
+    }
+
+    data_ = MapViewOfFile(map_handle_, FILE_MAP_READ, 0, 0, 0);
+    if (!data_) {
+      CloseHandle(map_handle_);
+      CloseHandle(file_handle_);
+      map_handle_ = nullptr;
+      file_handle_ = INVALID_HANDLE_VALUE;
+      return false;
+    }
+#else
+    fd_ = ::open(path.c_str(), O_RDONLY);
+    if (fd_ < 0)
+      return false;
+
+    struct stat st;
+    if (fstat(fd_, &st) != 0 || st.st_size == 0) {
+      ::close(fd_);
+      fd_ = -1;
+      return false;
+    }
+    size_ = static_cast<size_t>(st.st_size);
+
+    data_ = mmap(nullptr, size_, PROT_READ, MAP_PRIVATE, fd_, 0);
+    if (data_ == MAP_FAILED) {
+      data_ = nullptr;
+      ::close(fd_);
+      fd_ = -1;
+      return false;
+    }
+#endif
+    return true;
+  }
+
+  const uint8_t* data() const { return static_cast<const uint8_t*>(data_); }
+  size_t size() const { return size_; }
+  bool valid() const { return data_ != nullptr; }
+
+private:
+  void unmap() {
+#ifdef _WIN32
+    if (data_)
+      UnmapViewOfFile(data_);
+    if (map_handle_)
+      CloseHandle(map_handle_);
+    if (file_handle_ != INVALID_HANDLE_VALUE)
+      CloseHandle(file_handle_);
+    file_handle_ = INVALID_HANDLE_VALUE;
+    map_handle_ = nullptr;
+#else
+    if (data_)
+      munmap(data_, size_);
+    if (fd_ >= 0)
+      ::close(fd_);
+    fd_ = -1;
+#endif
+    data_ = nullptr;
+    size_ = 0;
+  }
+
+  void* data_ = nullptr;
+  size_t size_ = 0;
+#ifdef _WIN32
+  HANDLE file_handle_ = INVALID_HANDLE_VALUE;
+  HANDLE map_handle_ = nullptr;
+#else
+  int fd_ = -1;
+#endif
+};
+
+/// Get cache file path for a source file (source.csv -> source.csv.vidx)
+static std::string getCachePath(const std::string& source_path) {
+  return source_path + ".vidx";
+}
+
+/// Get source file metadata (mtime, size) for cache validation
+struct SourceMetadata {
+  uint64_t mtime = 0; // Modification time (seconds since epoch)
+  uint64_t size = 0;  // File size in bytes
+  bool valid = false;
+
+  static SourceMetadata from_file(const std::string& path) {
+    SourceMetadata meta;
+    struct stat st;
+    if (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+      meta.mtime = static_cast<uint64_t>(st.st_mtime);
+      meta.size = static_cast<uint64_t>(st.st_size);
+      meta.valid = true;
+    }
+    return meta;
+  }
+};
+
+/// Cache file header format (v3)
+/// Layout: [version:1][mtime:8][size:8][columns:8][n_threads:2][n_indexes...][indexes...]
+struct CacheHeader {
+  static constexpr size_t HEADER_SIZE = 1 + 8 + 8 + 8 + 2; // 27 bytes
+};
+
+/// Write index to cache file with source metadata
+static bool writeCacheFile(const std::string& cache_path, const libvroom::ParseIndex& idx,
+                           const SourceMetadata& source_meta) {
+  // Write to temp file, then atomic rename
+  std::string temp_path = cache_path + ".tmp." + std::to_string(getpid());
+
+  std::FILE* fp = std::fopen(temp_path.c_str(), "wb");
+  if (!fp)
+    return false;
+
+  bool success = true;
+
+  // Write header
+  uint8_t version = INDEX_CACHE_VERSION;
+  success = success && (std::fwrite(&version, 1, 1, fp) == 1);
+  success = success && (std::fwrite(&source_meta.mtime, 8, 1, fp) == 1);
+  success = success && (std::fwrite(&source_meta.size, 8, 1, fp) == 1);
+  success = success && (std::fwrite(&idx.columns, 8, 1, fp) == 1);
+  success = success && (std::fwrite(&idx.n_threads, 2, 1, fp) == 1);
+
+  // Write n_indexes array
+  success = success && (std::fwrite(idx.n_indexes, 8, idx.n_threads, fp) == idx.n_threads);
+
+  // Write indexes array
+  size_t total_indexes = 0;
+  for (uint16_t t = 0; t < idx.n_threads; ++t) {
+    total_indexes += idx.n_indexes[t];
+  }
+  success = success && (std::fwrite(idx.indexes, 8, total_indexes, fp) == total_indexes);
+
+  std::fclose(fp);
+
+  if (!success) {
+    std::remove(temp_path.c_str());
+    return false;
+  }
+
+  // Atomic rename
+  if (std::rename(temp_path.c_str(), cache_path.c_str()) != 0) {
+    std::remove(temp_path.c_str());
+    return false;
+  }
+
+  return true;
+}
+
+/// Result of loading a cached index - provides DIRECT pointers into mmap'd memory
+struct CacheLoadResult {
+  MmapBuffer mmap;
+  bool valid = false;
+  uint64_t columns = 0;
+  uint16_t n_threads = 0;
+  // These point DIRECTLY into the mmap'd file - no copy!
+  uint64_t* n_indexes = nullptr; // Note: non-const for ParseIndex compatibility
+  uint64_t* indexes = nullptr;
+};
+
+/// Load and validate cache file, returning DIRECT mmap'd pointers into the index data
+static CacheLoadResult loadCacheFile(const std::string& cache_path,
+                                     const SourceMetadata& source_meta) {
+  CacheLoadResult result;
+
+  if (!result.mmap.open(cache_path)) {
+    return result;
+  }
+
+  const uint8_t* data = result.mmap.data();
+  size_t size = result.mmap.size();
+
+  // Validate minimum size for header
+  if (size < CacheHeader::HEADER_SIZE) {
+    return result;
+  }
+
+  // Read and validate header
+  size_t offset = 0;
+
+  uint8_t version = data[offset++];
+  if (version != INDEX_CACHE_VERSION) {
+    return result;
+  }
+
+  uint64_t cached_mtime;
+  std::memcpy(&cached_mtime, data + offset, 8);
+  offset += 8;
+
+  uint64_t cached_size;
+  std::memcpy(&cached_size, data + offset, 8);
+  offset += 8;
+
+  // Validate source file hasn't changed
+  if (cached_mtime != source_meta.mtime || cached_size != source_meta.size) {
+    return result;
+  }
+
+  std::memcpy(&result.columns, data + offset, 8);
+  offset += 8;
+
+  std::memcpy(&result.n_threads, data + offset, 2);
+  offset += 2;
+
+  // Validate we have enough data for n_indexes array
+  size_t n_indexes_size = static_cast<size_t>(result.n_threads) * 8;
+  if (offset + n_indexes_size > size) {
+    return result;
+  }
+
+  // DIRECT pointer into mmap'd data - no copy!
+  // const_cast is safe here because we're only reading, and ParseIndex needs non-const
+  result.n_indexes = const_cast<uint64_t*>(reinterpret_cast<const uint64_t*>(data + offset));
+  offset += n_indexes_size;
+
+  // Calculate total indexes and validate
+  size_t total_indexes = 0;
+  for (uint16_t t = 0; t < result.n_threads; ++t) {
+    total_indexes += result.n_indexes[t];
+  }
+
+  size_t indexes_size = total_indexes * 8;
+  if (offset + indexes_size > size) {
+    return result;
+  }
+
+  // DIRECT pointer into mmap'd data - no copy!
+  result.indexes = const_cast<uint64_t*>(reinterpret_cast<const uint64_t*>(data + offset));
+  result.valid = true;
+
+  return result;
+}
 
 /**
  * CSV Iterator - Helper class to iterate over parsed CSV data
@@ -180,6 +507,7 @@ void printUsage(const char* prog) {
   cerr << "  -j            Output in JSON format (for dialect/schema/stats)\n";
   cerr << "  -m <size>     Sample size for schema/stats (0=all rows, default: 0)\n";
   cerr << "  -S, --strict  Strict mode: exit with code 1 on any parse error\n";
+  cerr << "  --cache       Enable index caching (direct mmap, no copy)\n";
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
   cerr << "\nDialect Detection:\n";
@@ -220,18 +548,66 @@ struct ParseResult {
   LoadResult load_result;   ///< The loaded data (RAII-managed)
   libvroom::ParseIndex idx; ///< The parsed index
   bool success{false};      ///< Whether parsing was successful
+  bool used_cache{false};   ///< True if index was loaded from cache (direct mmap)
+  bool wrote_cache{false};  ///< True if cache was written
+  MmapBuffer cache_mmap;    ///< Holds mmap'd cache data (must outlive idx when used_cache=true)
 };
 
 // Parse a file or stdin - returns ParseResult with RAII-managed data
 // If detected_encoding is provided, the detected encoding will be stored there
 // If strict_mode is true, exits with error on any parse warning or error
+// If use_cache is true, tries to load index from cache (DIRECT mmap, no copy!)
 ParseResult parseFile(const char* filename, int n_threads,
                       const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
                       bool auto_detect = false,
                       libvroom::EncodingResult* detected_encoding = nullptr,
-                      bool strict_mode = false) {
+                      bool strict_mode = false, bool use_cache = false) {
   ParseResult result;
 
+  // Cache is only supported for regular files (not stdin)
+  bool can_use_cache = use_cache && !isStdinInput(filename);
+  std::string cache_path;
+  SourceMetadata source_meta;
+
+  if (can_use_cache) {
+    cache_path = getCachePath(filename);
+    source_meta = SourceMetadata::from_file(filename);
+
+    if (source_meta.valid) {
+      // Try to load from cache
+      auto cache_result = loadCacheFile(cache_path, source_meta);
+      if (cache_result.valid) {
+        // Cache hit! Load file data for field extraction
+        try {
+          result.load_result = read_file_with_encoding(filename, LIBVROOM_PADDING);
+        } catch (const std::exception& e) {
+          cerr << "Error: Could not load file '" << filename << "': " << e.what() << endl;
+          return result;
+        }
+
+        if (detected_encoding) {
+          *detected_encoding = result.load_result.encoding;
+        }
+
+        // Set ParseIndex to use DIRECT mmap'd pointers - NO COPY!
+        // The unique_ptr members remain null, so destructor won't free mmap'd memory
+        result.idx.columns = cache_result.columns;
+        result.idx.n_threads = cache_result.n_threads;
+        result.idx.n_indexes = cache_result.n_indexes; // Direct pointer into mmap
+        result.idx.indexes = cache_result.indexes;     // Direct pointer into mmap
+
+        // Keep mmap alive - it must outlive the ParseIndex
+        result.cache_mmap = std::move(cache_result.mmap);
+        result.used_cache = true;
+        result.success = true;
+
+        cerr << "Cache hit: loaded index from " << cache_path << " (direct mmap, no copy)" << endl;
+        return result;
+      }
+    }
+  }
+
+  // Cache miss or caching disabled - parse normally
   try {
     if (isStdinInput(filename)) {
       result.load_result = read_stdin_with_encoding(LIBVROOM_PADDING);
@@ -292,6 +668,14 @@ ParseResult parseFile(const char* filename, int n_threads,
   }
 
   result.success = true;
+
+  // Write cache on successful parse (if caching enabled)
+  if (can_use_cache && result.success && source_meta.valid) {
+    if (writeCacheFile(cache_path, result.idx, source_meta)) {
+      result.wrote_cache = true;
+      cerr << "Cache miss: wrote index to " << cache_path << endl;
+    }
+  }
   return result;
 }
 
@@ -570,8 +954,9 @@ static void outputRow(const std::vector<std::string>& row, const libvroom::Diale
 // Command: head
 int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-            bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+            bool strict_mode = false, bool use_cache = false) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, use_cache);
   if (!result.success)
     return 1;
 
@@ -590,8 +975,9 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
 // Command: tail
 int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-            bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+            bool strict_mode = false, bool use_cache = false) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, use_cache);
   if (!result.success)
     return 1;
 
@@ -630,8 +1016,9 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
 // Command: sample
 int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-              unsigned int seed = 0, bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+              unsigned int seed = 0, bool strict_mode = false, bool use_cache = false) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, use_cache);
   if (!result.success)
     return 1;
 
@@ -695,8 +1082,9 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
 // Command: select
 int cmdSelect(const char* filename, int n_threads, const string& columns, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-              bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+              bool strict_mode = false, bool use_cache = false) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, use_cache);
   if (!result.success)
     return 1;
 
@@ -784,8 +1172,9 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
 // Command: info
 int cmdInfo(const char* filename, int n_threads, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-            bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+            bool strict_mode = false, bool use_cache = false) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, use_cache);
   if (!result.success)
     return 1;
 
@@ -820,8 +1209,9 @@ int cmdInfo(const char* filename, int n_threads, bool has_header,
 // Command: pretty
 int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-              bool strict_mode = false) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+              bool strict_mode = false, bool use_cache = false) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, use_cache);
   if (!result.success)
     return 1;
 
@@ -1128,8 +1518,9 @@ struct ColumnStats {
 // Command: schema - display inferred schema with column names, types, and nullable
 int cmdSchema(const char* filename, int n_threads, bool has_header,
               const libvroom::Dialect& dialect, bool auto_detect, bool json_output,
-              bool strict_mode, size_t sample_size = 0) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+              bool strict_mode, size_t sample_size = 0, bool use_cache = false) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, use_cache);
   if (!result.success)
     return 1;
 
@@ -1227,8 +1618,10 @@ int cmdSchema(const char* filename, int n_threads, bool has_header,
 
 // Command: stats - display statistical summary for each column
 int cmdStats(const char* filename, int n_threads, bool has_header, const libvroom::Dialect& dialect,
-             bool auto_detect, bool json_output, bool strict_mode, size_t sample_size = 0) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+             bool auto_detect, bool json_output, bool strict_mode, size_t sample_size = 0,
+             bool use_cache = false) {
+  auto result =
+      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, use_cache);
   if (!result.success)
     return 1;
 
@@ -1413,17 +1806,26 @@ int main(int argc, char* argv[]) {
   bool delimiter_specified = false; // Track if user specified delimiter
   bool json_output = false;         // JSON output for dialect command
   bool strict_mode = false;         // Strict mode: exit with code 1 on any parse error
+  bool use_cache = false;           // Enable index caching (direct mmap)
   unsigned int random_seed = 0;     // Random seed for sample command (0 = use random_device)
   size_t sample_size = 0;           // Sample size for schema/stats (0 = all rows)
   string columns;
   string delimiter_str = "comma";
   char quote_char = '"';
 
-  // Pre-scan for --strict long option (since we're not using getopt_long)
+  // Pre-scan for long options (since we're not using getopt_long)
   for (int i = 2; i < argc; ++i) {
     if (strcmp(argv[i], "--strict") == 0) {
       strict_mode = true;
       // Remove --strict from argv by shifting remaining args
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i; // Recheck this position
+    } else if (strcmp(argv[i], "--cache") == 0) {
+      use_cache = true;
+      // Remove --cache from argv by shifting remaining args
       for (int j = i; j < argc - 1; ++j) {
         argv[j] = argv[j + 1];
       }
@@ -1524,36 +1926,39 @@ int main(int argc, char* argv[]) {
   int result = 0;
   if (command == "count") {
     // Note: count uses optimized row counting that doesn't do full parse validation,
-    // so strict_mode is not applicable (would need to use full parser for error detection)
+    // so strict_mode and use_cache are not applicable
     result = cmdCount(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "head") {
-    result = cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode);
+    result = cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
+                     use_cache);
   } else if (command == "tail") {
-    result = cmdTail(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode);
+    result = cmdTail(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
+                     use_cache);
   } else if (command == "sample") {
     result = cmdSample(filename, n_threads, num_rows, has_header, dialect, auto_detect, random_seed,
-                       strict_mode);
+                       strict_mode, use_cache);
   } else if (command == "select") {
     if (columns.empty()) {
       cerr << "Error: -c option required for select command\n";
       return 1;
     }
-    result = cmdSelect(filename, n_threads, columns, has_header, dialect, auto_detect, strict_mode);
+    result = cmdSelect(filename, n_threads, columns, has_header, dialect, auto_detect, strict_mode,
+                       use_cache);
   } else if (command == "info") {
-    result = cmdInfo(filename, n_threads, has_header, dialect, auto_detect, strict_mode);
+    result = cmdInfo(filename, n_threads, has_header, dialect, auto_detect, strict_mode, use_cache);
   } else if (command == "pretty") {
-    result =
-        cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode);
+    result = cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
+                       use_cache);
   } else if (command == "dialect") {
-    // Note: dialect command ignores -d and --strict flags since it's for detection
+    // Note: dialect command ignores -d, --strict, and --cache flags since it's for detection
     (void)delimiter_specified; // Suppress unused warning
     result = cmdDialect(filename, json_output);
   } else if (command == "schema") {
     result = cmdSchema(filename, n_threads, has_header, dialect, auto_detect, json_output,
-                       strict_mode, sample_size);
+                       strict_mode, sample_size, use_cache);
   } else if (command == "stats") {
     result = cmdStats(filename, n_threads, has_header, dialect, auto_detect, json_output,
-                      strict_mode, sample_size);
+                      strict_mode, sample_size, use_cache);
   } else {
     cerr << "Error: Unknown command '" << command << "'\n";
     printUsage(argv[0]);
