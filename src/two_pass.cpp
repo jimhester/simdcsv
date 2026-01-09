@@ -1382,7 +1382,7 @@ ParseIndex TwoPass::init_counted(uint64_t total_separators, size_t n_threads) {
 }
 
 ParseIndex TwoPass::init_counted_safe(uint64_t total_separators, size_t n_threads,
-                                      ErrorCollector* errors) {
+                                      ErrorCollector* errors, uint64_t n_quotes, size_t len) {
   ParseIndex out;
   // Ensure at least 1 thread for valid memory allocation
   if (n_threads == 0)
@@ -1391,24 +1391,51 @@ ParseIndex TwoPass::init_counted_safe(uint64_t total_separators, size_t n_thread
 
   // Calculate allocation size with overflow checking
   // See init_counted for explanation of the allocation strategy
+  //
+  // SECURITY FIX: When there are quote characters in the file, the first pass
+  // separator count may be too low due to error recovery behavior differences.
+  //
+  // The first pass uses SIMD quote masking: a quote toggles "inside quote" state,
+  // and separators inside quotes are not counted. But the second pass uses a
+  // state machine that handles error recovery differently. For example:
+  //
+  //   Input: a"b,c,d\n
+  //   First pass: Quote toggles state, so ",c,d\n" is "inside quotes" = 0 seps
+  //   Second pass: "quote in unquoted field" error, stays UNQUOTED_FIELD, so
+  //                ",c,d\n" counts as 3 separators
+  //
+  // When n_quotes is odd (unpaired), ALL separators after the last unpaired quote
+  // could be missed by the first pass but found by the second pass.
+  //
+  // Solution: When quotes are present, use the file length as an upper bound,
+  // since the maximum possible separators in a file equals its length (every
+  // byte could be a separator in the pathological case).
+  uint64_t safe_separators = total_separators;
+  if (n_quotes > 0 && len > 0) {
+    // With quotes present and file length known, use max(counted, len) as bound
+    safe_separators = std::max(total_separators, static_cast<uint64_t>(len));
+  } else if (n_quotes > 0) {
+    // Quotes but no len provided - use conservative 2x multiplier
+    safe_separators = total_separators * 2 + n_quotes;
+  }
   size_t allocation_size;
   bool overflow = false;
 
   if (n_threads == 1) {
-    // Single-threaded: allocation_size = total_separators + 8
-    if (total_separators > std::numeric_limits<size_t>::max() - 8) {
+    // Single-threaded: allocation_size = safe_separators + 8
+    if (safe_separators > std::numeric_limits<size_t>::max() - 8) {
       overflow = true;
     } else {
-      allocation_size = static_cast<size_t>(total_separators) + 8;
+      allocation_size = static_cast<size_t>(safe_separators) + 8;
     }
   } else {
-    // Multi-threaded: (total_separators + 8) * n_threads
+    // Multi-threaded: (safe_separators + 8) * n_threads
     // Worst case: all separators in one chunk need interleaved storage
     size_t sep_plus_8;
-    if (total_separators > std::numeric_limits<size_t>::max() - 8) {
+    if (safe_separators > std::numeric_limits<size_t>::max() - 8) {
       overflow = true;
     } else {
-      sep_plus_8 = static_cast<size_t>(total_separators) + 8;
+      sep_plus_8 = static_cast<size_t>(safe_separators) + 8;
       if (sep_plus_8 > std::numeric_limits<size_t>::max() / n_threads) {
         overflow = true;
       } else {

@@ -310,6 +310,51 @@ TEST_F(UnifiedAPITest, ParseOptionsDefaults) {
   EXPECT_EQ(opts.errors, nullptr);
 }
 
+// Test: ParseOptions::auto_detect() factory method
+TEST_F(UnifiedAPITest, ParseOptionsAutoDetect) {
+  // auto_detect() should return default options with no dialect set (for auto-detection)
+  auto opts = libvroom::ParseOptions::auto_detect();
+  EXPECT_FALSE(opts.dialect.has_value());
+  EXPECT_EQ(opts.errors, nullptr);
+  EXPECT_EQ(opts.algorithm, libvroom::ParseAlgorithm::AUTO);
+}
+
+// Test: ParseOptions::auto_detect() actually performs auto-detection
+TEST_F(UnifiedAPITest, ParseOptionsAutoDetectWithParsing) {
+  auto [data, len] = make_buffer("name;age;city\nJohn;25;NYC\nJane;30;LA\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  auto result = parser.parse(buffer.data(), buffer.size(), libvroom::ParseOptions::auto_detect());
+  EXPECT_TRUE(result.success());
+  EXPECT_EQ(result.dialect.delimiter, ';'); // Should auto-detect semicolon
+  EXPECT_TRUE(result.detection.success());
+}
+
+// Test: ParseOptions::auto_detect_with_errors() factory method
+TEST_F(UnifiedAPITest, ParseOptionsAutoDetectWithErrors) {
+  libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+  auto opts = libvroom::ParseOptions::auto_detect_with_errors(errors);
+  EXPECT_FALSE(opts.dialect.has_value());
+  EXPECT_EQ(opts.errors, &errors);
+}
+
+// Test: ParseOptions::auto_detect_with_errors() performs auto-detection with error collection
+TEST_F(UnifiedAPITest, ParseOptionsAutoDetectWithErrorsAndParsing) {
+  // CSV with inconsistent field count - should auto-detect delimiter and collect errors
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+  auto result = parser.parse(buffer.data(), buffer.size(),
+                             libvroom::ParseOptions::auto_detect_with_errors(errors));
+
+  EXPECT_TRUE(result.success());
+  EXPECT_EQ(result.dialect.delimiter, ','); // Should auto-detect comma
+  EXPECT_TRUE(errors.has_errors());         // Should collect field count error
+}
+
 // Test: Custom detection options
 TEST_F(UnifiedAPITest, CustomDetectionOptions) {
   auto [data, len] = make_buffer("a:b:c\n1:2:3\n4:5:6\n");

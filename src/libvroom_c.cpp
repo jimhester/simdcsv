@@ -373,6 +373,25 @@ void libvroom_error_collector_clear(libvroom_error_collector_t* collector) {
   collector->collector.clear();
 }
 
+char* libvroom_error_collector_summary(const libvroom_error_collector_t* collector) {
+  if (!collector)
+    return nullptr;
+
+  try {
+    std::string summary = collector->collector.summary();
+
+    // Allocate a copy that the caller can free()
+    char* result = static_cast<char*>(std::malloc(summary.size() + 1));
+    if (!result)
+      return nullptr;
+
+    std::memcpy(result, summary.c_str(), summary.size() + 1);
+    return result;
+  } catch (...) {
+    return nullptr;
+  }
+}
+
 void libvroom_error_collector_destroy(libvroom_error_collector_t* collector) {
   delete collector;
 }
@@ -497,6 +516,19 @@ libvroom_detection_result_t* libvroom_detect_dialect(const libvroom_buffer_t* bu
   try {
     libvroom::DialectDetector detector;
     auto result = detector.detect(buffer->data.data(), buffer->original_length);
+    return new (std::nothrow) libvroom_detection_result(result);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+libvroom_detection_result_t* libvroom_detect_dialect_file(const char* filename) {
+  if (!filename)
+    return nullptr;
+
+  try {
+    libvroom::DialectDetector detector;
+    auto result = detector.detect_file(filename);
     return new (std::nothrow) libvroom_detection_result(result);
   } catch (...) {
     return nullptr;
