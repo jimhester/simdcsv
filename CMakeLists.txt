@@ -248,6 +248,8 @@ set(VROOM_SOURCES
     src/branchless_state_machine.cpp
     src/simd_number_parsing.cpp
     src/utf8.cpp
+    src/mmap_util.cpp
+    src/index_cache.cpp
 )
 
 # Add type detection source if enabled
@@ -806,6 +808,44 @@ add_dependencies(comment_line_test copy_test_data)
 
 # Register comment line tests with CTest
 gtest_discover_tests(comment_line_test)
+
+# MmapBuffer test executable
+add_executable(mmap_util_test
+    test/mmap_util_test.cpp
+)
+
+target_link_libraries(mmap_util_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(mmap_util_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Register MmapBuffer tests with CTest
+gtest_discover_tests(mmap_util_test)
+
+# IndexCache test executable
+add_executable(index_cache_test
+    test/index_cache_test.cpp
+)
+
+target_link_libraries(index_cache_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(index_cache_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(index_cache_test copy_test_data)
+
+# Register IndexCache tests with CTest
+gtest_discover_tests(index_cache_test)
 
 # Arrow output test (only if Arrow is enabled)
 if(LIBVROOM_ENABLE_ARROW)
