@@ -442,8 +442,9 @@ TEST_F(CliTest, DialectCommandForceNotNeededForHighConfidence) {
   // Test that --force doesn't affect high-confidence detection
   auto result = CliRunner::run("dialect --force " + testDataPath("separators/semicolon.csv"));
   EXPECT_EQ(result.exit_code, 0);
-  // No warning for high-confidence detection
-  EXPECT_TRUE(result.output.find("Warning:") == std::string::npos);
+  // No low-confidence warning for high-confidence detection
+  // (Note: ambiguity warnings may still appear for files with multiple valid dialects)
+  EXPECT_TRUE(result.output.find("Warning: Low confidence") == std::string::npos);
   EXPECT_TRUE(result.output.find("LOW CONFIDENCE") == std::string::npos);
   EXPECT_TRUE(result.output.find("semicolon") != std::string::npos);
 }
