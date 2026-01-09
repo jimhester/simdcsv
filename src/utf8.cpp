@@ -62,6 +62,23 @@ inline bool is_emoji_base(uint32_t cp) {
   return false;
 }
 
+// Check if code point is a valid ZWJ sequence continuation
+// This includes emoji bases plus additional symbols commonly used after ZWJ
+inline bool is_valid_zwj_element(uint32_t cp) {
+  if (is_emoji_base(cp))
+    return true;
+  // Gender signs often used in profession emoji
+  if (cp == 0x2640 || cp == 0x2642) // Female/Male sign
+    return true;
+  // Common ZWJ sequence elements
+  if (cp == 0x2695 || cp == 0x2696 || cp == 0x2708) // Medical, scales, airplane
+    return true;
+  // Hearts (for heart emoji sequences)
+  if (cp == 0x2764 || cp == 0x1F495 || cp == 0x1F48B) // Red heart, two hearts, kiss
+    return true;
+  return false;
+}
+
 // Check if code point can be part of an extended grapheme cluster following an emoji
 inline bool is_grapheme_extend(uint32_t cp) {
   return cp == ZWJ || is_emoji_modifier(cp) || is_variation_selector(cp);
@@ -163,7 +180,10 @@ int codepoint_width(uint32_t cp) {
   // U+200D: Zero Width Joiner
   // U+2060: Word Joiner
   // U+FEFF: Zero Width No-Break Space (BOM)
-  if (cp == 0x200B || cp == 0x200C || cp == 0x200D || cp == 0x2060 || cp == 0xFEFF) {
+  // U+FE0E: Variation Selector-15 (text presentation)
+  // U+FE0F: Variation Selector-16 (emoji presentation)
+  if (cp == 0x200B || cp == 0x200C || cp == 0x200D || cp == 0x2060 || cp == 0xFEFF ||
+      cp == 0xFE0E || cp == 0xFE0F) {
     return 0;
   }
 
@@ -412,31 +432,28 @@ size_t utf8_read_grapheme_cluster(std::string_view str, size_t pos, int& width) 
         // Note: we intentionally don't add width here
         current_pos += next_len;
       } else if (next_cp == ZWJ) {
-        // ZWJ: consume it and the following emoji
-        total_bytes += next_len;
-        total_width += codepoint_width(next_cp);
-        current_pos += next_len;
-
-        // Now consume the emoji after ZWJ
-        if (current_pos < str.size()) {
+        // Peek ahead to check if ZWJ is followed by valid emoji
+        // Only consume ZWJ if there's a valid continuation
+        size_t peek_pos = current_pos + next_len;
+        if (peek_pos < str.size()) {
           uint32_t emoji_cp;
-          size_t emoji_len = utf8_decode(str, current_pos, emoji_cp);
-          if (emoji_len > 0 &&
-              (is_emoji_base(emoji_cp) || emoji_cp == 0x2640 || // Female sign
-               emoji_cp == 0x2642 ||                            // Male sign
-               emoji_cp == 0x2695 ||                            // Medical symbol
-               emoji_cp == 0x2696 ||                            // Scales
-               emoji_cp == 0x2708 ||                            // Airplane
-               (emoji_cp >= 0x1F466 && emoji_cp <= 0x1F469) ||  // Boy/girl/man/woman
-               (emoji_cp >= 0x1F3A8 && emoji_cp <= 0x1F3EB) ||  // Various objects
-               (emoji_cp >= 0x2600 && emoji_cp <= 0x26FF))) {   // Misc symbols
-            total_bytes += emoji_len;
-            total_width += codepoint_width(emoji_cp);
+          size_t emoji_len = utf8_decode(str, peek_pos, emoji_cp);
+          if (emoji_len > 0 && is_valid_zwj_element(emoji_cp)) {
+            // Valid ZWJ sequence - consume ZWJ and following emoji
+            // ZWJ has width 0, and we don't add width for the following emoji
+            // because the entire ZWJ sequence renders as a single 2-column glyph
+            total_bytes += next_len; // ZWJ
+            current_pos += next_len;
+            total_bytes += emoji_len; // emoji after ZWJ
+            // Note: we don't add width for emoji after ZWJ - sequence is already width 2
             current_pos += emoji_len;
           } else {
-            // ZWJ not followed by valid emoji, stop here
+            // ZWJ not followed by valid emoji, don't consume it
             break;
           }
+        } else {
+          // ZWJ at end of string, don't consume it
+          break;
         }
       } else {
         // Not part of this grapheme cluster

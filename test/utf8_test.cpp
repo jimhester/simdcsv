@@ -1010,15 +1010,14 @@ TEST_F(Utf8Test, TruncateFamilyEmojiDoesNotSplit) {
                        "\xF0\x9F\x91\xA9"  // 👩
                        "\xE2\x80\x8D"      // ZWJ
                        "\xF0\x9F\x91\xA7"; // 👧
-  std::string input = "A" + family + "B";
+  std::string input = "ABC" + family + "DE";
 
-  // Truncating to a width that would split the family emoji should exclude it entirely
-  // "A" = 1, family = 6 (3 emoji * 2 width each), "B" = 1, total = 8
-  // Truncate to 5: can fit "A" (1) + "..." (3) = 4, or just "A..." = 4
-  // The family emoji (width 6) won't fit in target_width=2
+  // ZWJ sequences render as a single 2-column glyph
+  // "ABC" = 3, family = 2, "DE" = 2, total = 7
+  // Truncate to 5: target_width = 2, can fit "AB" (2) but not family (2) since 2+2 > 2
+  // Result: "AB..."
   std::string result = utf8_truncate(input, 5);
-  // Result should be "A..." without the family emoji
-  EXPECT_EQ(result, "A...");
+  EXPECT_EQ(result, "AB...");
 }
 
 TEST_F(Utf8Test, ReadGraphemeClusterManZWJComputer) {
@@ -1030,6 +1029,23 @@ TEST_F(Utf8Test, ReadGraphemeClusterManZWJComputer) {
 
   size_t bytes = utf8_read_grapheme_cluster(technologist, 0, width);
   EXPECT_EQ(bytes, technologist.size());
+  // ZWJ sequence renders as single 2-column glyph, not sum of widths
+  EXPECT_EQ(width, 2);
+}
+
+TEST_F(Utf8Test, ZWJSequenceWidthIsTwo) {
+  int width;
+  // Family emoji: 👨‍👩‍👧 should be width 2, not 6
+  std::string family = "\xF0\x9F\x91\xA8"  // 👨
+                       "\xE2\x80\x8D"      // ZWJ
+                       "\xF0\x9F\x91\xA9"  // 👩
+                       "\xE2\x80\x8D"      // ZWJ
+                       "\xF0\x9F\x91\xA7"; // 👧
+
+  size_t bytes = utf8_read_grapheme_cluster(family, 0, width);
+  EXPECT_EQ(bytes, family.size());
+  // ZWJ sequences render as a single 2-column glyph
+  EXPECT_EQ(width, 2);
 }
 
 // =============================================================================
@@ -1139,6 +1155,14 @@ TEST_F(Utf8Test, ReadGraphemeClusterWithVariationSelector) {
 
   size_t bytes = utf8_read_grapheme_cluster(heart, 0, width);
   EXPECT_EQ(bytes, heart.size());
+  // Heart is width 1 (not in wide char ranges), VS16 has width 0
+  EXPECT_EQ(width, 1);
+}
+
+TEST_F(Utf8Test, VariationSelectorWidthIsZero) {
+  // Verify variation selectors have width 0
+  EXPECT_EQ(codepoint_width(0xFE0E), 0); // VS15 (text presentation)
+  EXPECT_EQ(codepoint_width(0xFE0F), 0); // VS16 (emoji presentation)
 }
 
 // =============================================================================
@@ -1179,18 +1203,17 @@ TEST_F(Utf8Test, TruncateComplexZWJSequence) {
                        "\xF0\x9F\x91\xA7"  // 👧
                        "\xF0\x9F\x8F\xBF"; // Dark skin
 
-  std::string input = "Hi" + family;
+  std::string input = "Hello" + family;
 
-  // The family should be treated as one unit
-  // "Hi" = 2, family = 6 (3 base emoji * 2, skin tones don't add width)
-  // Total = 8, fits exactly in max_width 8
+  // ZWJ sequences render as a single 2-column glyph
+  // "Hello" = 5, family = 2, total = 7
+  // Fits in max_width 8
   std::string result = utf8_truncate(input, 8);
   EXPECT_EQ(result, input);
 
-  // Truncate to 7: "Hi" = 2, family = 6, total = 8 > 7
-  // target_width = 7 - 3 = 4, "Hi" (2) fits, family (6) doesn't fit
-  result = utf8_truncate(input, 7);
-  EXPECT_EQ(result, "Hi...");
+  // Truncate to 6: target_width = 3, "Hel" (3) fits, family (2) > remaining 0
+  result = utf8_truncate(input, 6);
+  EXPECT_EQ(result, "Hel...");
 }
 
 // =============================================================================
@@ -1237,8 +1260,10 @@ TEST_F(Utf8Test, TruncateZWJNotFollowedByEmoji) {
                           "\xE2\x80\x8D"     // ZWJ
                           "A";               // ASCII (not emoji)
 
-  // Should read 👨 + ZWJ as cluster, then stop (A is not valid after ZWJ)
+  // ZWJ not followed by valid emoji should NOT be consumed
+  // This prevents malformed sequences from being included in the cluster
   size_t bytes = utf8_read_grapheme_cluster(malformed, 0, width);
-  // Should include the ZWJ but not the A
-  EXPECT_EQ(bytes, 7); // 4 (emoji) + 3 (ZWJ)
+  // Should only return the base emoji, not the orphan ZWJ
+  EXPECT_EQ(bytes, 4); // Just the 👨 emoji
+  EXPECT_EQ(width, 2);
 }
