@@ -129,6 +129,7 @@ SIMD via Google Highway 1.3.0: x86-64 (SSE4.2, AVX2), ARM (NEON), scalar fallbac
 | Topic | Location |
 |-------|----------|
 | Error handling (modes, types, recovery) | `docs/error_handling.md` |
+| Index caching (CLI options, API, cache format) | `docs/caching.qmd` |
 | Code coverage (tools, limitations, interpretation) | `docs/coverage.md` |
 | Test data organization | `test/README.md` |
 | CI workflows | `.github/workflows/README.md` |

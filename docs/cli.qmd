@@ -93,6 +93,16 @@ If `csvfile` is omitted or `-` is specified, vroom reads from standard input.
 |--------|-------------|---------|
 | `-t <threads>` | Number of threads (1-255) | auto (hardware concurrency) |
 
+### Caching Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--cache` | Enable index caching (stores `.vidx` file next to source) | disabled |
+| `--cache-dir <dir>` | Store cache files in specified directory (implies `--cache`) | - |
+| `--no-cache` | Disable index caching | (default) |
+
+See [Index Caching](caching.qmd) for detailed documentation on how caching works.
+
 ### Dialect Options
 
 | Option | Description | Default |
@@ -352,6 +362,8 @@ vroom head -d "^" caret_delimited.csv
 3. **Auto-detection overhead**: Auto-detection adds minimal overhead for the first few KB of data. If processing many files with known formats, specifying `-d` explicitly can provide a small performance improvement.
 
 4. **stdin vs files**: Reading from files allows memory mapping and parallel processing. When possible, prefer file arguments over stdin for large datasets.
+
+5. **Index caching**: For files you access repeatedly, enable caching with `--cache`. The first parse creates a `.vidx` cache file; subsequent reads are 2-3x faster by loading the pre-computed index directly. See [Index Caching](caching.qmd) for details.
 
 ## Exit Codes
 
