@@ -2364,3 +2364,115 @@ TEST_F(CliTest, StatsSampleSizeNegativeValue) {
   auto result = CliRunner::run("stats -m -5 " + testDataPath("basic/simple.csv"));
   EXPECT_EQ(result.exit_code, 1);
 }
+
+// =============================================================================
+// Extended Statistics Tests (GitHub issue #388)
+// Tests for new statistics: std dev, percentiles, histogram, string stats
+// =============================================================================
+
+TEST_F(CliTest, StatsShowsStdDev) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show standard deviation for numeric columns
+  EXPECT_TRUE(result.output.find("Std Dev") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsPercentiles) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show percentiles (p0, p25, p50, p75, p100)
+  EXPECT_TRUE(result.output.find("Percentiles") != std::string::npos);
+  EXPECT_TRUE(result.output.find("p0=") != std::string::npos);
+  EXPECT_TRUE(result.output.find("p25=") != std::string::npos);
+  EXPECT_TRUE(result.output.find("p50=") != std::string::npos);
+  EXPECT_TRUE(result.output.find("p75=") != std::string::npos);
+  EXPECT_TRUE(result.output.find("p100=") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsHistogram) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show histogram for numeric columns
+  EXPECT_TRUE(result.output.find("Histogram") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsCompleteRate) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show complete rate (non-null ratio)
+  EXPECT_TRUE(result.output.find("Complete rate") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsUniqueValues) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show unique value count
+  EXPECT_TRUE(result.output.find("Unique values") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsStringLength) {
+  auto result = CliRunner::run("stats " + testDataPath("real_world/contacts.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show min/max length for string columns
+  EXPECT_TRUE(result.output.find("Min length") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Max length") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonShowsStdDev) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should include standard deviation
+  EXPECT_TRUE(result.output.find("\"sd\":") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonShowsPercentiles) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should include all percentiles
+  EXPECT_TRUE(result.output.find("\"p0\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"p25\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"p50\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"p75\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"p100\":") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonShowsHistogram) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should include histogram
+  EXPECT_TRUE(result.output.find("\"hist\":") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonShowsCompleteRate) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should include complete_rate
+  EXPECT_TRUE(result.output.find("\"complete_rate\":") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonShowsStringStats) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should include string statistics
+  EXPECT_TRUE(result.output.find("\"n_unique\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"min_length\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"max_length\":") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsPercentileAccuracy) {
+  // Test with many_rows.csv which has IDs 1-20
+  // p50 (median) of 1-20 should be around 10.5
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // The median (p50) for 1-20 is 10.5
+  EXPECT_TRUE(result.output.find("\"p50\": 10.5") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsStdDevAccuracy) {
+  // Test with simple.csv which has values 1,2,3 / 4,5,6 / 7,8,9
+  // Column A has values 1,4,7 -> mean=4, std dev ~ 3.0
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should contain sd field with a value (not null)
+  EXPECT_TRUE(result.output.find("\"sd\": 3.") != std::string::npos);
+}
