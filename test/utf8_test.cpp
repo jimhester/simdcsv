@@ -945,3 +945,300 @@ TEST_F(Utf8Test, TruncateEmojiSequence) {
   EXPECT_EQ(result, "🎉🎊...");
   EXPECT_EQ(utf8_display_width(result), 7);
 }
+
+// =============================================================================
+// Grapheme Cluster Tests
+// =============================================================================
+
+TEST_F(Utf8Test, ReadGraphemeClusterSimpleASCII) {
+  int width;
+  std::string_view str = "Hello";
+  EXPECT_EQ(utf8_read_grapheme_cluster(str, 0, width), 1);
+  EXPECT_EQ(width, 1);
+}
+
+TEST_F(Utf8Test, ReadGraphemeClusterSimpleEmoji) {
+  int width;
+  std::string_view str = "🎉";
+  EXPECT_EQ(utf8_read_grapheme_cluster(str, 0, width), 4);
+  EXPECT_EQ(width, 2);
+}
+
+TEST_F(Utf8Test, ReadGraphemeClusterEmptyString) {
+  int width;
+  std::string_view str = "";
+  EXPECT_EQ(utf8_read_grapheme_cluster(str, 0, width), 0);
+  EXPECT_EQ(width, 0);
+}
+
+TEST_F(Utf8Test, ReadGraphemeClusterPositionBeyondEnd) {
+  int width;
+  std::string_view str = "ABC";
+  EXPECT_EQ(utf8_read_grapheme_cluster(str, 10, width), 0);
+  EXPECT_EQ(width, 0);
+}
+
+// =============================================================================
+// ZWJ (Zero-Width Joiner) Sequence Tests
+// =============================================================================
+
+TEST_F(Utf8Test, ReadGraphemeClusterFamilyEmoji) {
+  int width;
+  // Family emoji: 👨‍👩‍👧‍👦 = Man + ZWJ + Woman + ZWJ + Girl + ZWJ + Boy
+  // Each person emoji is 4 bytes, ZWJ is 3 bytes
+  // 👨 (F0 9F 91 A8) + ZWJ (E2 80 8D) + 👩 (F0 9F 91 A9) + ZWJ + 👧 (F0 9F 91 A7) + ZWJ + 👦 (F0 9F
+  // 91 A6)
+  std::string family = "\xF0\x9F\x91\xA8"  // 👨
+                       "\xE2\x80\x8D"      // ZWJ
+                       "\xF0\x9F\x91\xA9"  // 👩
+                       "\xE2\x80\x8D"      // ZWJ
+                       "\xF0\x9F\x91\xA7"  // 👧
+                       "\xE2\x80\x8D"      // ZWJ
+                       "\xF0\x9F\x91\xA6"; // 👦
+
+  size_t bytes = utf8_read_grapheme_cluster(family, 0, width);
+  // Should consume entire sequence as one grapheme cluster
+  EXPECT_EQ(bytes, family.size());
+  // Width is the sum of individual widths (even if displayed as one)
+  EXPECT_GE(width, 2); // At minimum, the first emoji has width 2
+}
+
+TEST_F(Utf8Test, TruncateFamilyEmojiDoesNotSplit) {
+  // Family emoji should not be split
+  std::string family = "\xF0\x9F\x91\xA8"  // 👨
+                       "\xE2\x80\x8D"      // ZWJ
+                       "\xF0\x9F\x91\xA9"  // 👩
+                       "\xE2\x80\x8D"      // ZWJ
+                       "\xF0\x9F\x91\xA7"; // 👧
+  std::string input = "A" + family + "B";
+
+  // Truncating to a width that would split the family emoji should exclude it entirely
+  // "A" = 1, family = 6 (3 emoji * 2 width each), "B" = 1, total = 8
+  // Truncate to 5: can fit "A" (1) + "..." (3) = 4, or just "A..." = 4
+  // The family emoji (width 6) won't fit in target_width=2
+  std::string result = utf8_truncate(input, 5);
+  // Result should be "A..." without the family emoji
+  EXPECT_EQ(result, "A...");
+}
+
+TEST_F(Utf8Test, ReadGraphemeClusterManZWJComputer) {
+  int width;
+  // Man technologist: 👨‍💻 = Man + ZWJ + Laptop
+  std::string technologist = "\xF0\x9F\x91\xA8"  // 👨
+                             "\xE2\x80\x8D"      // ZWJ
+                             "\xF0\x9F\x92\xBB"; // 💻
+
+  size_t bytes = utf8_read_grapheme_cluster(technologist, 0, width);
+  EXPECT_EQ(bytes, technologist.size());
+}
+
+// =============================================================================
+// Emoji Modifier (Skin Tone) Tests
+// =============================================================================
+
+TEST_F(Utf8Test, ReadGraphemeClusterEmojiWithSkinTone) {
+  int width;
+  // Woman with medium skin tone: 👩🏽 = Woman + Medium skin tone modifier
+  std::string woman_medium = "\xF0\x9F\x91\xA9"  // 👩
+                             "\xF0\x9F\x8F\xBD"; // 🏽 (medium skin tone)
+
+  size_t bytes = utf8_read_grapheme_cluster(woman_medium, 0, width);
+  EXPECT_EQ(bytes, woman_medium.size());
+  EXPECT_EQ(width, 2); // Base emoji width
+}
+
+TEST_F(Utf8Test, TruncateEmojiWithSkinToneDoesNotSplit) {
+  // Emoji with skin tone modifier should not be split
+  std::string emoji = "\xF0\x9F\x91\xA9"  // 👩
+                      "\xF0\x9F\x8F\xBD"; // 🏽 (medium skin tone)
+  std::string input = "AB" + emoji + "CD";
+
+  // "AB" = 2, emoji = 2, "CD" = 2, total = 6
+  // Truncate to 5: target = 2, can fit "AB" (2), then emoji (2) doesn't fit
+  std::string result = utf8_truncate(input, 5);
+  // Result should be "AB..." without splitting the skin-toned emoji
+  EXPECT_EQ(result, "AB...");
+}
+
+TEST_F(Utf8Test, ReadGraphemeClusterAllSkinTones) {
+  // Test all Fitzpatrick skin tone modifiers
+  std::string base = "\xF0\x9F\x91\x8B"; // 👋 (waving hand)
+
+  std::string skin_tones[] = {
+      "\xF0\x9F\x8F\xBB", // Light skin tone (1F3FB)
+      "\xF0\x9F\x8F\xBC", // Medium-light skin tone (1F3FC)
+      "\xF0\x9F\x8F\xBD", // Medium skin tone (1F3FD)
+      "\xF0\x9F\x8F\xBE", // Medium-dark skin tone (1F3FE)
+      "\xF0\x9F\x8F\xBF"  // Dark skin tone (1F3FF)
+  };
+
+  for (const auto& tone : skin_tones) {
+    int width;
+    std::string emoji_with_tone = base + tone;
+    size_t bytes = utf8_read_grapheme_cluster(emoji_with_tone, 0, width);
+    EXPECT_EQ(bytes, emoji_with_tone.size()) << "Failed for skin tone";
+  }
+}
+
+// =============================================================================
+// Regional Indicator (Flag) Tests
+// =============================================================================
+
+TEST_F(Utf8Test, ReadGraphemeClusterFlagEmoji) {
+  int width;
+  // US flag: 🇺🇸 = Regional indicator U + Regional indicator S
+  std::string us_flag = "\xF0\x9F\x87\xBA"  // 🇺 (U+1F1FA)
+                        "\xF0\x9F\x87\xB8"; // 🇸 (U+1F1F8)
+
+  size_t bytes = utf8_read_grapheme_cluster(us_flag, 0, width);
+  EXPECT_EQ(bytes, us_flag.size());
+  // Flag emoji displays as a single 2-column character
+  EXPECT_EQ(width, 2);
+}
+
+TEST_F(Utf8Test, TruncateFlagEmojiDoesNotSplit) {
+  // Flag emoji should not be split
+  std::string flag = "\xF0\x9F\x87\xFA"  // 🇺 Regional indicator U
+                     "\xF0\x9F\x87\xB8"; // 🇸 Regional indicator S
+  std::string input = "AB" + flag + "CD";
+
+  // "AB" = 2, flag = 2, "CD" = 2, total = 6
+  // The flag (width 2) displays as one emoji
+  // Truncate to 5: target = 2, can fit "AB" (2), then flag (2) > remaining 0
+  std::string result = utf8_truncate(input, 5);
+  // Result should be "AB..." without splitting the flag
+  EXPECT_EQ(result, "AB...");
+}
+
+TEST_F(Utf8Test, ReadGraphemeClusterMultipleFlags) {
+  int width;
+  // Two flags in sequence
+  std::string us_flag = "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"; // 🇺🇸
+  std::string jp_flag = "\xF0\x9F\x87\xAF\xF0\x9F\x87\xB5"; // 🇯🇵
+
+  std::string two_flags = us_flag + jp_flag;
+
+  // First call should return just the US flag
+  size_t bytes = utf8_read_grapheme_cluster(two_flags, 0, width);
+  EXPECT_EQ(bytes, us_flag.size());
+
+  // Second call at US flag end should return JP flag
+  bytes = utf8_read_grapheme_cluster(two_flags, us_flag.size(), width);
+  EXPECT_EQ(bytes, jp_flag.size());
+}
+
+// =============================================================================
+// Variation Selector Tests
+// =============================================================================
+
+TEST_F(Utf8Test, ReadGraphemeClusterWithVariationSelector) {
+  int width;
+  // Heart with emoji presentation: ❤️ = Heart + VS16
+  std::string heart = "\xE2\x9D\xA4"  // ❤ (U+2764)
+                      "\xEF\xB8\x8F"; // VS16 (U+FE0F)
+
+  size_t bytes = utf8_read_grapheme_cluster(heart, 0, width);
+  EXPECT_EQ(bytes, heart.size());
+}
+
+// =============================================================================
+// Complex ZWJ Sequence Tests
+// =============================================================================
+
+TEST_F(Utf8Test, ReadGraphemeClusterWomanScientist) {
+  int width;
+  // Woman scientist: 👩‍🔬 = Woman + ZWJ + Microscope
+  std::string scientist = "\xF0\x9F\x91\xA9"  // 👩
+                          "\xE2\x80\x8D"      // ZWJ
+                          "\xF0\x9F\x94\xAC"; // 🔬
+
+  size_t bytes = utf8_read_grapheme_cluster(scientist, 0, width);
+  EXPECT_EQ(bytes, scientist.size());
+}
+
+TEST_F(Utf8Test, ReadGraphemeClusterWomanScientistWithSkinTone) {
+  int width;
+  // Woman scientist with medium skin: 👩🏽‍🔬 = Woman + Medium skin + ZWJ + Microscope
+  std::string scientist = "\xF0\x9F\x91\xA9"  // 👩
+                          "\xF0\x9F\x8F\xBD"  // 🏽 (medium skin tone)
+                          "\xE2\x80\x8D"      // ZWJ
+                          "\xF0\x9F\x94\xAC"; // 🔬
+
+  size_t bytes = utf8_read_grapheme_cluster(scientist, 0, width);
+  EXPECT_EQ(bytes, scientist.size());
+}
+
+TEST_F(Utf8Test, TruncateComplexZWJSequence) {
+  // Man, woman, girl sequence with skin tones
+  std::string family = "\xF0\x9F\x91\xA8"  // 👨
+                       "\xF0\x9F\x8F\xBB"  // Light skin
+                       "\xE2\x80\x8D"      // ZWJ
+                       "\xF0\x9F\x91\xA9"  // 👩
+                       "\xF0\x9F\x8F\xBD"  // Medium skin
+                       "\xE2\x80\x8D"      // ZWJ
+                       "\xF0\x9F\x91\xA7"  // 👧
+                       "\xF0\x9F\x8F\xBF"; // Dark skin
+
+  std::string input = "Hi" + family;
+
+  // The family should be treated as one unit
+  // "Hi" = 2, family = 6 (3 base emoji * 2, skin tones don't add width)
+  // Total = 8, fits exactly in max_width 8
+  std::string result = utf8_truncate(input, 8);
+  EXPECT_EQ(result, input);
+
+  // Truncate to 7: "Hi" = 2, family = 6, total = 8 > 7
+  // target_width = 7 - 3 = 4, "Hi" (2) fits, family (6) doesn't fit
+  result = utf8_truncate(input, 7);
+  EXPECT_EQ(result, "Hi...");
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+TEST_F(Utf8Test, ReadGraphemeClusterSingleRegionalIndicator) {
+  int width;
+  // Single regional indicator (incomplete flag)
+  std::string single = "\xF0\x9F\x87\xBA"; // 🇺 alone
+
+  size_t bytes = utf8_read_grapheme_cluster(single, 0, width);
+  EXPECT_EQ(bytes, single.size());
+  EXPECT_EQ(width, 2);
+}
+
+TEST_F(Utf8Test, TruncatePreservesExistingBehaviorForPlainText) {
+  // Verify that plain ASCII and CJK still work correctly
+  EXPECT_EQ(utf8_truncate("Hello World", 8), "Hello...");
+  EXPECT_EQ(utf8_truncate("日本語", 5), "日...");
+  EXPECT_EQ(utf8_truncate("Hello", 5), "Hello");
+}
+
+TEST_F(Utf8Test, TruncateMixedTextAndEmoji) {
+  // Mix of text and emoji (non-ZWJ emoji)
+  std::string input = "Hi🎉Bye";
+  // "Hi" = 2, 🎉 = 2, "Bye" = 3, total = 7
+  // Truncate to 8: fits entirely
+  EXPECT_EQ(utf8_truncate(input, 8), input);
+
+  // Truncate to 7: fits entirely
+  EXPECT_EQ(utf8_truncate(input, 7), input);
+
+  // Truncate to 6: needs truncation, target = 3
+  // "Hi" = 2, 🎉 = 2 won't fit in 3
+  std::string result = utf8_truncate(input, 6);
+  EXPECT_EQ(result, "Hi...");
+}
+
+TEST_F(Utf8Test, TruncateZWJNotFollowedByEmoji) {
+  int width;
+  // ZWJ without following emoji (malformed, but should handle gracefully)
+  std::string malformed = "\xF0\x9F\x91\xA8" // 👨
+                          "\xE2\x80\x8D"     // ZWJ
+                          "A";               // ASCII (not emoji)
+
+  // Should read 👨 + ZWJ as cluster, then stop (A is not valid after ZWJ)
+  size_t bytes = utf8_read_grapheme_cluster(malformed, 0, width);
+  // Should include the ZWJ but not the A
+  EXPECT_EQ(bytes, 7); // 4 (emoji) + 3 (ZWJ)
+}
