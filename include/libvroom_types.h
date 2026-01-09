@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace libvroom {
@@ -375,29 +376,21 @@ private:
 /**
  * TypeHints allows users to override auto-detected types for specific columns.
  *
- * Note: Uses linear search O(n) for column lookups. For CSVs with typical
- * column counts (<100), this is sufficient. For very wide CSVs, consider
- * using std::unordered_map instead.
+ * Uses std::unordered_map for O(1) average-case column lookups, which scales
+ * well for CSVs with many columns.
  */
 struct TypeHints {
-  std::vector<std::pair<std::string, FieldType>> column_types;
+  std::unordered_map<std::string, FieldType> column_types;
 
-  void add(const std::string& column, FieldType type) { column_types.emplace_back(column, type); }
+  void add(const std::string& column, FieldType type) { column_types[column] = type; }
 
   FieldType get(const std::string& column) const {
-    for (const auto& pair : column_types) {
-      if (pair.first == column)
-        return pair.second;
-    }
-    return FieldType::STRING;
+    auto it = column_types.find(column);
+    return it != column_types.end() ? it->second : FieldType::STRING;
   }
 
   bool has_hint(const std::string& column) const {
-    for (const auto& pair : column_types) {
-      if (pair.first == column)
-        return true;
-    }
-    return false;
+    return column_types.find(column) != column_types.end();
   }
 };
 
