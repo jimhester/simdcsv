@@ -639,6 +639,48 @@ TEST_F(TypeHintsTest, HasHint) {
   EXPECT_FALSE(hints.has_hint("unknown"));
 }
 
+TEST_F(TypeHintsTest, OverwriteHint) {
+  // Adding the same column twice should overwrite the previous value
+  hints.add("col", FieldType::INTEGER);
+  EXPECT_EQ(hints.get("col"), FieldType::INTEGER);
+  hints.add("col", FieldType::FLOAT);
+  EXPECT_EQ(hints.get("col"), FieldType::FLOAT);
+}
+
+TEST_F(TypeHintsTest, ManyColumns) {
+  // Test with many columns to verify unordered_map performance
+  const int num_columns = 1000;
+  for (int i = 0; i < num_columns; ++i) {
+    hints.add("column_" + std::to_string(i), FieldType::INTEGER);
+  }
+
+  // Verify all columns are accessible
+  for (int i = 0; i < num_columns; ++i) {
+    EXPECT_TRUE(hints.has_hint("column_" + std::to_string(i)));
+    EXPECT_EQ(hints.get("column_" + std::to_string(i)), FieldType::INTEGER);
+  }
+
+  // Verify non-existent columns return defaults
+  EXPECT_FALSE(hints.has_hint("nonexistent"));
+  EXPECT_EQ(hints.get("nonexistent"), FieldType::STRING);
+}
+
+TEST_F(TypeHintsTest, AllFieldTypes) {
+  hints.add("bool_col", FieldType::BOOLEAN);
+  hints.add("int_col", FieldType::INTEGER);
+  hints.add("float_col", FieldType::FLOAT);
+  hints.add("date_col", FieldType::DATE);
+  hints.add("string_col", FieldType::STRING);
+  hints.add("empty_col", FieldType::EMPTY);
+
+  EXPECT_EQ(hints.get("bool_col"), FieldType::BOOLEAN);
+  EXPECT_EQ(hints.get("int_col"), FieldType::INTEGER);
+  EXPECT_EQ(hints.get("float_col"), FieldType::FLOAT);
+  EXPECT_EQ(hints.get("date_col"), FieldType::DATE);
+  EXPECT_EQ(hints.get("string_col"), FieldType::STRING);
+  EXPECT_EQ(hints.get("empty_col"), FieldType::EMPTY);
+}
+
 // ============================================================================
 // Additional ColumnTypeStats Tests
 // ============================================================================
