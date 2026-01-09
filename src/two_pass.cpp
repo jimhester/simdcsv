@@ -150,15 +150,20 @@ void ParseIndex::write(const std::string& filename, const SourceMetadata& source
   success = success && (std::fwrite(&n_threads, sizeof(uint16_t), 1, fp) == 1);
   success = success && (std::fwrite(padding2, 1, 6, fp) == 6); // Align n_indexes array to 8 bytes
 
-  // Write n_indexes array
-  success = success && (std::fwrite(n_indexes, sizeof(uint64_t), n_threads, fp) == n_threads);
+  // Write n_indexes array (skip if empty/null)
+  if (n_threads > 0 && n_indexes != nullptr) {
+    success = success && (std::fwrite(n_indexes, sizeof(uint64_t), n_threads, fp) == n_threads);
 
-  // Write indexes array
-  size_t total_indexes = 0;
-  for (uint16_t i = 0; i < n_threads; ++i) {
-    total_indexes += n_indexes[i];
+    // Write indexes array
+    size_t total_indexes = 0;
+    for (uint16_t i = 0; i < n_threads; ++i) {
+      total_indexes += n_indexes[i];
+    }
+    if (total_indexes > 0 && indexes != nullptr) {
+      success =
+          success && (std::fwrite(indexes, sizeof(uint64_t), total_indexes, fp) == total_indexes);
+    }
   }
-  success = success && (std::fwrite(indexes, sizeof(uint64_t), total_indexes, fp) == total_indexes);
 
   std::fclose(fp);
 
