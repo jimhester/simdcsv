@@ -967,11 +967,17 @@ using SIMDDateTimeResult = SIMDParseResult<DateTime>;
  * interface as parse_integer(). The function handles NA values, whitespace
  * trimming, and overflow detection just like the scalar version.
  *
+ * @note This function checks ExtractionConfig::na_values and returns NA
+ *       (nullopt with no error) when the input matches. This differs from
+ *       parse_double_simd() which does NOT check na_values.
+ *
  * @tparam IntType The target integer type (int64_t, int32_t, uint64_t, uint32_t)
  * @param str Pointer to the string to parse
  * @param len Length of the string
- * @param config Extraction configuration for NA values and whitespace handling
+ * @param config Extraction configuration (uses na_values, trim_whitespace, max_integer_digits)
  * @return ExtractResult with parsed value or error
+ *
+ * @see parse_double_simd() which does NOT check na_values
  */
 template <typename IntType>
 really_inline ExtractResult<IntType>
@@ -1059,17 +1065,30 @@ parse_integer_simd(const char* str, size_t len,
 }
 
 /**
- * SIMD-accelerated double parsing with NA value support.
- * This integrates SIMDDoubleParser with ExtractionConfig for NA handling.
+ * SIMD-accelerated double parsing.
+ * This integrates SIMDDoubleParser with ExtractionConfig.
  *
  * Use this function when you need SIMD-accelerated parsing with the same
- * interface as parse_double(). The function handles NA values, whitespace
- * trimming, and special values (NaN, Inf) just like the scalar version.
+ * interface as parse_double(). The function handles whitespace trimming
+ * and special values (NaN, Inf) just like the scalar version.
+ *
+ * @note **NA Handling Difference**: Unlike parse_integer_simd(), this function
+ *       does NOT check ExtractionConfig::na_values. This is intentional because
+ *       floating-point numbers have valid special values like NaN and Inf that
+ *       overlap with common NA representations ("NaN" is both a valid double
+ *       and a common NA string). To avoid ambiguity:
+ *       - If you need NA detection for doubles, use is_na() before parsing,
+ *         or check at a higher level (e.g., ValueExtractor).
+ *       - Strings like "NA", "null", etc. will return a parse error, not NA.
+ *       - The only fields from ExtractionConfig used are: trim_whitespace.
  *
  * @param str Pointer to the string to parse
  * @param len Length of the string
- * @param config Extraction configuration for NA values and whitespace handling
+ * @param config Extraction configuration (only trim_whitespace is used)
  * @return ExtractResult with parsed value or error
+ *
+ * @see parse_integer_simd() which DOES check na_values
+ * @see is_na() to check for NA values before parsing
  */
 really_inline ExtractResult<double>
 parse_double_simd(const char* str, size_t len,

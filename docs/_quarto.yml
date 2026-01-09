@@ -23,6 +23,8 @@ website:
         href: cli.qmd
       - text: "Streaming Parser"
         href: streaming.qmd
+      - text: "Caching"
+        href: caching.qmd
       - text: "C API"
         href: c-api.qmd
       - text: "Architecture"

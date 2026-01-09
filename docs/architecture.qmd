@@ -98,15 +98,15 @@ for each 64-byte block:
 
 ## State Machine
 
-The parser uses a five-state finite state machine compliant with RFC 4180. State transitions depend on the current state and the character class (DELIMITER, QUOTE, NEWLINE, or OTHER).
+The parser uses a five-state finite state machine compliant with RFC 4180:
 
 ```
 States: RECORD_START → FIELD_START → UNQUOTED_FIELD
-                    ↘            ↘
-               QUOTED_FIELD → QUOTED_END
+                           ↓
+                      QUOTED_FIELD → QUOTED_END
 ```
 
-The state machine has five states compliant with RFC 4180. Transitions are determined by the character class: delimiter (`,`), quote (`"`), newline (`\n`), or other characters.
+State transitions are determined by the character class: delimiter (`,`), quote (`"`), newline (`\n`), or other characters.
 
 ### State Descriptions
 
@@ -183,7 +183,8 @@ When parsing in parallel, quoted fields may span chunk boundaries. libvroom hand
 Chunk 1: ...data,"quoted     Chunk 2: field",normal...
                   ↑                   ↑
             (odd quotes)         (even quotes)
-            Use first_odd_nl     Safe to split here
+            Inside quoted field! Safe to split here
+            Use first_odd_nl
 ```
 
 If a chunk's `first_even_nl` or `first_odd_nl` is invalid (`null_pos`), the parser falls back to single-threaded mode for correctness.

@@ -115,6 +115,7 @@ target_link_libraries(your_target PRIVATE libvroom_lib)
 - **SIMD-accelerated parsing** via [Google Highway](https://github.com/google/highway) (x86-64 SSE4.2/AVX2/AVX-512, ARM NEON)
 - **Multi-threaded** speculative chunking for parallel processing of large files
 - **Streaming parser** for memory-efficient processing of files larger than RAM
+- **Index caching** for instant re-reads of previously parsed files
 - **Automatic dialect detection** (delimiter, quoting style, line endings, encoding)
 - **Automatic encoding detection** with transcoding support (UTF-8, UTF-16, UTF-32, Latin-1)
 - **Schema inference** with type detection (integer, float, boolean, string)
@@ -139,6 +140,7 @@ Multi-threaded throughput reaches 6+ GB/s on large files. See [Benchmarks](https
 - [Getting Started](https://jimhester.github.io/libvroom/getting-started.html) - Build instructions and basic usage
 - [CLI Reference](https://jimhester.github.io/libvroom/cli.html) - Command line tool options
 - [Streaming Parser](https://jimhester.github.io/libvroom/streaming.html) - Memory-efficient parsing for large files
+- [Index Caching](https://jimhester.github.io/libvroom/caching.html) - Speed up repeated file reads
 - [C API Reference](https://jimhester.github.io/libvroom/c-api.html) - C bindings for FFI
 - [Architecture](https://jimhester.github.io/libvroom/architecture.html) - Two-pass algorithm details
 - [Error Handling](https://jimhester.github.io/libvroom/error-handling.html) - Error modes and recovery

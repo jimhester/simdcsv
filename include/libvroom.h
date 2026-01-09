@@ -18,8 +18,10 @@
 
 #include "dialect.h"
 #include "error.h"
+#include "index_cache.h"
 #include "io_util.h"
 #include "mem_util.h"
+#include "mmap_util.h"
 #include "two_pass.h"
 #include "value_extraction.h"
 
@@ -324,6 +326,42 @@ struct ParseOptions {
   SizeLimits limits = SizeLimits::defaults();
 
   /**
+   * @brief Index caching configuration.
+   *
+   * When set (has_value()), the parser will attempt to load a cached index from
+   * disk on cache hit, or write the parsed index to disk on cache miss. This
+   * can dramatically speed up repeated reads of the same file.
+   *
+   * When nullopt (default), caching is disabled.
+   *
+   * @note Caching requires a file path to be provided via source_path.
+   *       Caching is not supported for stdin or memory-only buffers.
+   *
+   * @see CacheConfig for location options (SAME_DIR, XDG_CACHE, CUSTOM)
+   */
+  std::optional<CacheConfig> cache = std::nullopt;
+
+  /**
+   * @brief Source file path for caching.
+   *
+   * Required when caching is enabled. Used to compute the cache file path
+   * and to validate cache freshness against the source file metadata.
+   * If empty when caching is enabled, caching will be silently disabled.
+   */
+  std::string source_path;
+
+  /**
+   * @brief Force re-parsing even if a valid cache exists.
+   *
+   * When true, ignores any existing cache and re-parses the file, then
+   * writes a new cache file. Useful for refreshing stale caches or
+   * debugging cache issues.
+   *
+   * Only applies when caching is enabled (cache.has_value()).
+   */
+  bool force_cache_refresh = false;
+
+  /**
    * @brief Factory for default options (auto-detect dialect, fast path).
    *
    * Equivalent to standard(). Both methods create identical options.
@@ -359,6 +397,41 @@ struct ParseOptions {
   }
 
   /**
+   * @brief Factory for auto-detection mode with explicit intent.
+   *
+   * Returns default options configured for dialect auto-detection.
+   * This is functionally equivalent to defaults() and standard(), but
+   * provides more self-documenting code when auto-detection is the
+   * explicit requirement.
+   *
+   * @return ParseOptions configured for auto-detection.
+   *
+   * @example
+   * @code
+   * auto result = parser.parse(buf, len, ParseOptions::auto_detect());
+   * @endcode
+   */
+  static ParseOptions auto_detect() { return ParseOptions{}; }
+
+  /**
+   * @brief Factory for auto-detection with error collection.
+   *
+   * Convenience method combining dialect auto-detection with error
+   * collection. This provides more self-documenting code compared to
+   * using with_errors() when auto-detection is the explicit intent.
+   *
+   * @param e Reference to an ErrorCollector for collecting parse errors.
+   * @return ParseOptions configured for auto-detection with error collection.
+   *
+   * @example
+   * @code
+   * ErrorCollector errors(ErrorMode::PERMISSIVE);
+   * auto result = parser.parse(buf, len, ParseOptions::auto_detect_with_errors(errors));
+   * @endcode
+   */
+  static ParseOptions auto_detect_with_errors(ErrorCollector& e) { return with_errors(e); }
+
+  /**
    * @brief Factory for options with both dialect and error collection.
    */
   static ParseOptions with_dialect_and_errors(const Dialect& d, ErrorCollector& e) {
@@ -388,6 +461,37 @@ struct ParseOptions {
     ParseOptions opts;
     opts.dialect = d;
     opts.algorithm = ParseAlgorithm::BRANCHLESS;
+    return opts;
+  }
+
+  /**
+   * @brief Factory for options with caching enabled.
+   *
+   * Creates options with automatic caching enabled. Cache files are placed
+   * in the default location (same directory as source, or XDG_CACHE as fallback).
+   *
+   * @param file_path Path to the source CSV file (required for caching)
+   */
+  static ParseOptions with_cache(const std::string& file_path) {
+    ParseOptions opts;
+    opts.cache = CacheConfig::defaults();
+    opts.source_path = file_path;
+    return opts;
+  }
+
+  /**
+   * @brief Factory for options with caching to a custom directory.
+   *
+   * Creates options with caching enabled, storing cache files in the
+   * specified directory.
+   *
+   * @param file_path Path to the source CSV file
+   * @param cache_dir Directory to store cache files
+   */
+  static ParseOptions with_cache_dir(const std::string& file_path, const std::string& cache_dir) {
+    ParseOptions opts;
+    opts.cache = CacheConfig::custom(cache_dir);
+    opts.source_path = file_path;
     return opts;
   }
 };
@@ -1088,6 +1192,8 @@ public:
     bool successful{false};    ///< Whether parsing completed without fatal errors.
     Dialect dialect;           ///< The dialect used for parsing.
     DetectionResult detection; ///< Detection result (populated by parse_auto).
+    bool used_cache{false};    ///< True if index was loaded from cache.
+    std::string cache_path;    ///< Path to cache file (empty if caching disabled).
 
   private:
     const uint8_t* buf_{nullptr};                                ///< Pointer to the parsed buffer.
@@ -1595,6 +1701,57 @@ public:
       }
     }
 
+    // =======================================================================
+    // Index Caching Logic
+    // =======================================================================
+    // Caching is only supported when:
+    // 1. CacheConfig is provided (cache.has_value())
+    // 2. A source file path is provided (!source_path.empty())
+    bool can_use_cache = options.cache.has_value() && !options.source_path.empty();
+
+    if (can_use_cache) {
+      const CacheConfig& cache_config = *options.cache;
+      auto [cache_path, writable] =
+          IndexCache::try_compute_writable_path(options.source_path, cache_config);
+      result.cache_path = cache_path;
+
+      // Try to load from cache (unless force_cache_refresh is set)
+      if (!options.force_cache_refresh && !cache_path.empty()) {
+        SourceMetadata source_meta = SourceMetadata::from_file(options.source_path);
+        if (source_meta.valid) {
+          ParseIndex cached_idx = ParseIndex::from_mmap(cache_path, source_meta);
+          if (cached_idx.is_valid()) {
+            // Cache hit! Use the cached index
+            result.idx = std::move(cached_idx);
+            result.used_cache = true;
+            result.successful = true;
+
+            // Determine dialect for cached result
+            if (options.dialect.has_value()) {
+              result.dialect = options.dialect.value();
+            } else {
+              // Auto-detect dialect even for cached indexes
+              DialectDetector detector(options.detection_options);
+              result.detection = detector.detect(buf, len);
+              result.dialect =
+                  result.detection.success() ? result.detection.dialect : Dialect::csv();
+            }
+
+            // Store buffer reference to enable row/column iteration
+            result.set_buffer(buf, len);
+
+            return result;
+          }
+        }
+      }
+
+      // Cache miss - continue with normal parsing, then write cache
+    }
+
+    // =======================================================================
+    // Normal Parsing Path
+    // =======================================================================
+
     // Determine dialect (explicit or auto-detect)
     if (options.dialect.has_value()) {
       result.dialect = options.dialect.value();
@@ -1607,9 +1764,11 @@ public:
 
     // Optimized allocation: Count separators first to allocate right-sized index.
     // This typically reduces memory usage by 2-10x for real-world CSV files.
+    // Pass n_quotes and len to handle error recovery scenarios safely.
     auto count_stats =
         TwoPass::first_pass_simd(buf, 0, len, result.dialect.quote_char, result.dialect.delimiter);
-    result.idx = parser_.init_counted_safe(count_stats.n_separators, num_threads_, collector);
+    result.idx = parser_.init_counted_safe(count_stats.n_separators, num_threads_, collector,
+                                           count_stats.n_quotes, len);
     if (result.idx.indexes == nullptr) {
       // Allocation failed or would overflow
       if (options.errors != nullptr) {
@@ -1665,6 +1824,17 @@ public:
     // If external collector was used, copy errors to internal collector
     if (options.errors != nullptr) {
       result.error_collector().merge_from(*options.errors);
+    }
+
+    // =======================================================================
+    // Write Cache on Miss (if caching enabled and parse successful)
+    // =======================================================================
+    if (can_use_cache && result.successful && !result.cache_path.empty()) {
+      // Store column count in idx for caching (idx.columns may be 0 because
+      // num_columns() typically uses the ValueExtractor)
+      result.idx.columns = result.num_columns();
+      // Write cache file (failures are silent - caching is best-effort)
+      IndexCache::write_atomic(result.cache_path, result.idx, options.source_path);
     }
 
     // Store buffer reference to enable row/column iteration

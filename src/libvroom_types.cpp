@@ -39,7 +39,7 @@ FieldType TypeDetector::detect_field(const uint8_t* data, size_t length,
 
   // Check date first for compact format (8 digits like YYYYMMDD)
   // to avoid misdetecting as integer
-  if (is_date(field, len))
+  if (is_date(field, len, options))
     return FieldType::DATE;
   if (is_boolean(field, len, options))
     return FieldType::BOOLEAN;
@@ -186,18 +186,36 @@ bool TypeDetector::is_float(const uint8_t* data, size_t length,
   return has_digit && (has_decimal || has_exponent) && i == length;
 }
 
-bool TypeDetector::is_date(const uint8_t* data, size_t length) {
+bool TypeDetector::is_date(const uint8_t* data, size_t length,
+                           const TypeDetectionOptions& options) {
   if (length < 8)
     return false;
 
+  // ISO format is always checked first (unambiguous)
   if (is_date_iso(data, length))
     return true;
-  if (is_date_us(data, length))
-    return true;
-  if (is_date_eu(data, length))
-    return true;
+
+  // Compact format is also unambiguous
   if (is_date_compact(data, length))
     return true;
+
+  // For ISO_ONLY mode, skip US/EU format checking
+  if (options.date_format_preference == DateFormatPreference::ISO_ONLY)
+    return false;
+
+  // Check US and EU based on preference
+  if (options.date_format_preference == DateFormatPreference::EU_FIRST) {
+    if (is_date_eu(data, length))
+      return true;
+    if (is_date_us(data, length))
+      return true;
+  } else {
+    // AUTO and US_FIRST both check US first
+    if (is_date_us(data, length))
+      return true;
+    if (is_date_eu(data, length))
+      return true;
+  }
 
   return false;
 }

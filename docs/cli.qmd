@@ -12,6 +12,45 @@ export PATH="../build:$PATH"
 
 The `vroom` command line tool provides a user-friendly way to work with CSV files using the high-performance libvroom parser. It supports common operations like counting rows, displaying data, selecting columns, and detecting file formats.
 
+## Installation
+
+After building libvroom (see [Getting Started](getting-started.qmd)), the `vroom` binary is located in your build directory. To use it conveniently:
+
+### Option 1: Add Build Directory to PATH (Temporary)
+
+Add the build directory to your PATH for the current session:
+
+```bash
+export PATH="/path/to/libvroom/build:$PATH"
+```
+
+For example, if you built in the default location:
+
+```bash
+export PATH="$(pwd)/build:$PATH"
+```
+
+### Option 2: Install to System Location (Permanent)
+
+Copy the binary to a system location that's already in your PATH:
+
+```bash
+# Install for all users (requires sudo)
+sudo cp build/vroom /usr/local/bin/
+
+# Or install for current user only
+mkdir -p ~/.local/bin
+cp build/vroom ~/.local/bin/
+# Ensure ~/.local/bin is in your PATH (add to .bashrc or .zshrc if needed)
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Verify the installation:
+
+```bash
+vroom -v
+```
+
 ## Basic Usage
 
 ```bash
@@ -58,6 +97,16 @@ If `csvfile` is omitted or `-` is specified, vroom reads from standard input.
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-t <threads>` | Number of threads (1-1024) | auto (hardware concurrency) |
+
+### Caching Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--cache` | Enable index caching (stores `.vidx` file next to source) | disabled |
+| `--cache-dir <dir>` | Store cache files in specified directory (implies `--cache`) | - |
+| `--no-cache` | Disable index caching | (default) |
+
+See [Index Caching](caching.qmd) for detailed documentation on how caching works.
 
 ### Dialect Options
 
@@ -412,6 +461,8 @@ vroom head -e utf-16le windows_export.csv
 
 6. **Schema/stats sampling**: For very large files, use `-m` to sample a subset of rows for type inference, which can be much faster while still providing accurate results.
 
+5. **Index caching**: For files you access repeatedly, enable caching with `--cache`. The first parse creates a `.vidx` cache file; subsequent reads are 2-3x faster by loading the pre-computed index directly. See [Index Caching](caching.qmd) for details.
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -433,3 +484,25 @@ The `dialect` command analyzes the CSV structure and reports:
 - **Confidence**: Detection confidence level (0-100%)
 
 The command also outputs suggested CLI flags for use with other vroom commands.
+
+### JSON Output Format
+
+When using the `-j` flag, the dialect command outputs machine-readable JSON:
+
+```json
+{
+  "delimiter": ",",
+  "quote": "\"",
+  "escape": "double",
+  "line_ending": "LF",
+  "has_header": true,
+  "columns": 3,
+  "confidence": 1
+}
+```
+
+This format is useful for scripting and automation. For example, you can extract the delimiter for use in other tools:
+
+```bash
+delimiter=$(vroom dialect -j data.csv | jq -r '.delimiter')
+```

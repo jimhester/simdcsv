@@ -15,6 +15,7 @@
 #include "mem_util.h"
 
 #include <cstring>
+#include <limits>
 #include <new>
 #include <string>
 #include <thread>
@@ -31,11 +32,16 @@ struct libvroom_index {
   libvroom::ParseIndex idx;
   size_t num_threads;
 
+  // Memory management for indexes loaded from file (not owned by ParseIndex's unique_ptrs)
+  // These are only used when the index is loaded via libvroom_index_read()
+  std::unique_ptr<uint64_t[]> external_n_indexes;
+  std::unique_ptr<uint64_t[]> external_indexes;
+
   // Default constructor - index will be populated by Parser::parse()
   libvroom_index(size_t threads) : idx(), num_threads(threads) {}
 
-  // Note: No explicit destructor needed - libvroom::ParseIndex has its own destructor
-  // that handles cleanup of n_indexes and indexes arrays
+  // Note: For indexes populated by Parser::parse(), ParseIndex's destructor handles cleanup.
+  // For indexes loaded via libvroom_index_read(), the external_* unique_ptrs handle cleanup.
 };
 
 struct libvroom_buffer {
@@ -373,6 +379,25 @@ void libvroom_error_collector_clear(libvroom_error_collector_t* collector) {
   collector->collector.clear();
 }
 
+char* libvroom_error_collector_summary(const libvroom_error_collector_t* collector) {
+  if (!collector)
+    return nullptr;
+
+  try {
+    std::string summary = collector->collector.summary();
+
+    // Allocate a copy that the caller can free()
+    char* result = static_cast<char*>(std::malloc(summary.size() + 1));
+    if (!result)
+      return nullptr;
+
+    std::memcpy(result, summary.c_str(), summary.size() + 1);
+    return result;
+  } catch (...) {
+    return nullptr;
+  }
+}
+
 void libvroom_error_collector_destroy(libvroom_error_collector_t* collector) {
   delete collector;
 }
@@ -433,6 +458,148 @@ const uint64_t* libvroom_index_positions(const libvroom_index_t* index) {
 
 void libvroom_index_destroy(libvroom_index_t* index) {
   delete index;
+}
+
+libvroom_error_t libvroom_index_write(const libvroom_index_t* index, const char* filename) {
+  if (!index || !filename)
+    return LIBVROOM_ERROR_NULL_POINTER;
+
+  // Check if the index has been populated (has valid data)
+  if (!index->idx.indexes || !index->idx.n_indexes)
+    return LIBVROOM_ERROR_INVALID_HANDLE;
+
+  try {
+    // Use a const_cast here because ParseIndex::write() is not const-qualified,
+    // but it doesn't actually modify the index. We need the cast because we're
+    // implementing a const C API function.
+    const_cast<libvroom::ParseIndex&>(index->idx).write(filename);
+    return LIBVROOM_OK;
+  } catch (const std::runtime_error&) {
+    return LIBVROOM_ERROR_IO;
+  } catch (...) {
+    return LIBVROOM_ERROR_INTERNAL;
+  }
+}
+
+libvroom_index_t* libvroom_index_read(const char* filename) {
+  if (!filename)
+    return nullptr;
+
+  std::FILE* fp = std::fopen(filename, "rb");
+  if (!fp)
+    return nullptr;
+
+  try {
+    // Index file format version for backward compatibility
+    // Version 1 (legacy): columns (uint64_t), n_threads (uint8_t), n_indexes, indexes
+    // Version 2: version (uint8_t=2), columns (uint64_t), n_threads (uint16_t), n_indexes, indexes
+    static constexpr uint8_t INDEX_FORMAT_VERSION = 2;
+
+    uint64_t columns = 0;
+    uint16_t n_threads = 0;
+
+    // Read first byte to detect version
+    uint8_t first_byte;
+    if (std::fread(&first_byte, sizeof(uint8_t), 1, fp) != 1) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    if (first_byte == INDEX_FORMAT_VERSION) {
+      // Version 2 format: read columns, n_threads (16-bit)
+      if (std::fread(&columns, sizeof(uint64_t), 1, fp) != 1 ||
+          std::fread(&n_threads, sizeof(uint16_t), 1, fp) != 1) {
+        std::fclose(fp);
+        return nullptr;
+      }
+    } else {
+      // Version 1 (legacy) format: first_byte is part of columns
+      uint8_t columns_rest[7];
+      if (std::fread(columns_rest, 1, 7, fp) != 7) {
+        std::fclose(fp);
+        return nullptr;
+      }
+      // Reconstruct columns from first_byte + columns_rest (little-endian)
+      columns = first_byte;
+      for (int i = 0; i < 7; ++i) {
+        columns |= static_cast<uint64_t>(columns_rest[i]) << (8 * (i + 1));
+      }
+      // Read n_threads as uint8_t
+      uint8_t n_threads_v1;
+      if (std::fread(&n_threads_v1, sizeof(uint8_t), 1, fp) != 1) {
+        std::fclose(fp);
+        return nullptr;
+      }
+      n_threads = n_threads_v1;
+    }
+
+    // Validate n_threads
+    if (n_threads == 0) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    // Create the index wrapper using unique_ptr for RAII-safe cleanup
+    std::unique_ptr<libvroom_index> index;
+    try {
+      index = std::make_unique<libvroom_index>(n_threads);
+    } catch (...) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    // Allocate and populate the ParseIndex
+    index->idx.columns = columns;
+    index->idx.n_threads = n_threads;
+
+    // Allocate n_indexes array
+    auto n_indexes_ptr = std::make_unique<uint64_t[]>(n_threads);
+    if (std::fread(n_indexes_ptr.get(), sizeof(uint64_t), n_threads, fp) != n_threads) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    // Calculate total indexes size with overflow checking
+    size_t total_size = 0;
+    for (uint16_t i = 0; i < n_threads; ++i) {
+      // Check for overflow before adding
+      if (n_indexes_ptr[i] > std::numeric_limits<size_t>::max() - total_size) {
+        std::fclose(fp);
+        return nullptr;
+      }
+      total_size += n_indexes_ptr[i];
+    }
+
+    // Validate that total_size won't cause issues with memory allocation
+    // total_size * sizeof(uint64_t) must not overflow
+    if (total_size > std::numeric_limits<size_t>::max() / sizeof(uint64_t)) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    // Allocate indexes array
+    auto indexes_ptr = std::make_unique<uint64_t[]>(total_size);
+    if (std::fread(indexes_ptr.get(), sizeof(uint64_t), total_size, fp) != total_size) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    std::fclose(fp);
+
+    // Transfer ownership to the external memory managers in libvroom_index
+    // This ensures proper cleanup when the index is destroyed
+    index->external_n_indexes = std::move(n_indexes_ptr);
+    index->external_indexes = std::move(indexes_ptr);
+
+    // Set the raw pointers in ParseIndex to point to the externally-managed memory
+    index->idx.n_indexes = index->external_n_indexes.get();
+    index->idx.indexes = index->external_indexes.get();
+
+    return index.release();
+  } catch (...) {
+    std::fclose(fp);
+    return nullptr;
+  }
 }
 
 // Parser
@@ -497,6 +664,19 @@ libvroom_detection_result_t* libvroom_detect_dialect(const libvroom_buffer_t* bu
   try {
     libvroom::DialectDetector detector;
     auto result = detector.detect(buffer->data.data(), buffer->original_length);
+    return new (std::nothrow) libvroom_detection_result(result);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+libvroom_detection_result_t* libvroom_detect_dialect_file(const char* filename) {
+  if (!filename)
+    return nullptr;
+
+  try {
+    libvroom::DialectDetector detector;
+    auto result = detector.detect_file(filename);
     return new (std::nothrow) libvroom_detection_result(result);
   } catch (...) {
     return nullptr;

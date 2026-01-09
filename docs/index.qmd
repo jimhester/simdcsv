@@ -21,7 +21,7 @@ The parser achieves **4+ GB/s throughput** on modern hardware using a speculativ
 - **SIMD-accelerated** parsing using Google Highway
 - **Multi-threaded** speculative parsing for large files
 - **Streaming parser** for memory-constrained environments
-- **Branchless state machine** for maximum throughput
+- **Index caching** for instant re-reads of parsed files
 :::
 
 ::: {.g-col-6}
@@ -115,6 +115,7 @@ Learn more in the [Architecture](architecture.qmd) documentation.
 | [Getting Started](getting-started.qmd) | Build instructions and basic usage |
 | [CLI Reference](cli.qmd) | Command-line tool documentation |
 | [Streaming Parser](streaming.qmd) | Memory-efficient parsing for large files |
+| [Index Caching](caching.qmd) | Speed up repeated file reads |
 | [C API Reference](c-api.qmd) | C bindings for FFI integration |
 | [Architecture](architecture.qmd) | Two-pass algorithm details |
 | [Error Handling](error-handling.qmd) | Error modes and recovery |
