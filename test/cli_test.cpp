@@ -404,6 +404,58 @@ TEST_F(CliTest, DialectCommandJson) {
   EXPECT_TRUE(result.output.find("\"confidence\":") != std::string::npos);
 }
 
+TEST_F(CliTest, DialectCommandLowConfidenceFails) {
+  // Test that dialect command fails for low-confidence detection without --force
+  auto result = CliRunner::run("dialect " + testDataPath("edge_cases/single_cell.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Error:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Hint:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("--force") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandForceShort) {
+  // Test that -f flag outputs best guess for low-confidence detection
+  auto result = CliRunner::run("dialect -f " + testDataPath("edge_cases/single_cell.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Warning: Low confidence") != std::string::npos);
+  EXPECT_TRUE(result.output.find("LOW CONFIDENCE") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Delimiter:") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandForceLong) {
+  // Test that --force flag outputs best guess for low-confidence detection
+  auto result = CliRunner::run("dialect --force " + testDataPath("edge_cases/single_cell.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Warning: Low confidence") != std::string::npos);
+  EXPECT_TRUE(result.output.find("LOW CONFIDENCE") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandForceJson) {
+  // Test that -f flag works with JSON output
+  auto result = CliRunner::run("dialect -f -j " + testDataPath("edge_cases/single_cell.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("\"low_confidence\": true") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Warning: Low confidence") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandForceNotNeededForHighConfidence) {
+  // Test that --force doesn't affect high-confidence detection
+  auto result = CliRunner::run("dialect --force " + testDataPath("separators/semicolon.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // No low-confidence warning for high-confidence detection
+  // (Note: ambiguity warnings may still appear for files with multiple valid dialects)
+  EXPECT_TRUE(result.output.find("Warning: Low confidence") == std::string::npos);
+  EXPECT_TRUE(result.output.find("LOW CONFIDENCE") == std::string::npos);
+  EXPECT_TRUE(result.output.find("semicolon") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandJsonLowConfidenceField) {
+  // Test that JSON output includes low_confidence field for high-confidence detection
+  auto result = CliRunner::run("dialect -j " + testDataPath("separators/semicolon.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("\"low_confidence\": false") != std::string::npos);
+}
+
 TEST_F(CliTest, AutoDetectDisabledWithExplicitDelimiter) {
   // When -d is specified, auto-detect should be disabled
   // Even for a semicolon file, if we specify comma, it should use comma
