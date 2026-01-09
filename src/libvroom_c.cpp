@@ -15,6 +15,7 @@
 #include "mem_util.h"
 
 #include <cstring>
+#include <limits>
 #include <new>
 #include <string>
 #include <thread>
@@ -538,9 +539,11 @@ libvroom_index_t* libvroom_index_read(const char* filename) {
       return nullptr;
     }
 
-    // Create the index wrapper
-    auto* index = new (std::nothrow) libvroom_index(n_threads);
-    if (!index) {
+    // Create the index wrapper using unique_ptr for RAII-safe cleanup
+    std::unique_ptr<libvroom_index> index;
+    try {
+      index = std::make_unique<libvroom_index>(n_threads);
+    } catch (...) {
       std::fclose(fp);
       return nullptr;
     }
@@ -553,21 +556,31 @@ libvroom_index_t* libvroom_index_read(const char* filename) {
     auto n_indexes_ptr = std::make_unique<uint64_t[]>(n_threads);
     if (std::fread(n_indexes_ptr.get(), sizeof(uint64_t), n_threads, fp) != n_threads) {
       std::fclose(fp);
-      delete index;
       return nullptr;
     }
 
-    // Calculate total indexes size
+    // Calculate total indexes size with overflow checking
     size_t total_size = 0;
     for (uint16_t i = 0; i < n_threads; ++i) {
+      // Check for overflow before adding
+      if (n_indexes_ptr[i] > std::numeric_limits<size_t>::max() - total_size) {
+        std::fclose(fp);
+        return nullptr;
+      }
       total_size += n_indexes_ptr[i];
+    }
+
+    // Validate that total_size won't cause issues with memory allocation
+    // total_size * sizeof(uint64_t) must not overflow
+    if (total_size > std::numeric_limits<size_t>::max() / sizeof(uint64_t)) {
+      std::fclose(fp);
+      return nullptr;
     }
 
     // Allocate indexes array
     auto indexes_ptr = std::make_unique<uint64_t[]>(total_size);
     if (std::fread(indexes_ptr.get(), sizeof(uint64_t), total_size, fp) != total_size) {
       std::fclose(fp);
-      delete index;
       return nullptr;
     }
 
@@ -582,7 +595,7 @@ libvroom_index_t* libvroom_index_read(const char* filename) {
     index->idx.n_indexes = index->external_n_indexes.get();
     index->idx.indexes = index->external_indexes.get();
 
-    return index;
+    return index.release();
   } catch (...) {
     std::fclose(fp);
     return nullptr;
