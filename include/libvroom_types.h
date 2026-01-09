@@ -9,13 +9,15 @@
  * Features:
  * - Field type enumeration (BOOLEAN, INTEGER, FLOAT, DATE, STRING, EMPTY)
  * - Multi-format date detection (ISO, US, EU, compact formats)
+ * - Configurable date format preference for ambiguous dates
  * - Boolean variant recognition (true/false, yes/no, on/off, 0/1)
  * - SIMD-accelerated digit classification
  * - Column type inference with configurable confidence thresholds
  * - Type hint system for overriding auto-detected types
  *
  * @note Date format detection has inherent ambiguity between US (MM/DD/YYYY)
- * and EU (DD/MM/YYYY) formats. The implementation checks US format first.
+ * and EU (DD/MM/YYYY) formats. Use DateFormatPreference in TypeDetectionOptions
+ * to control how ambiguous dates are interpreted.
  */
 
 #ifndef LIBVROOM_TYPES_H
@@ -60,6 +62,22 @@ inline const char* field_type_to_string(FieldType type) {
   return "unknown";
 }
 
+/**
+ * Preference for interpreting ambiguous date formats.
+ *
+ * Dates like "01/02/2024" can be interpreted as either:
+ * - US format: January 2nd, 2024 (MM/DD/YYYY)
+ * - EU format: February 1st, 2024 (DD/MM/YYYY)
+ *
+ * This enum controls which interpretation is preferred when both are valid.
+ */
+enum class DateFormatPreference : uint8_t {
+  AUTO = 0,     ///< Default behavior: check US format first, then EU
+  US_FIRST = 1, ///< Explicitly prefer MM/DD/YYYY for ambiguous dates
+  EU_FIRST = 2, ///< Prefer DD/MM/YYYY for ambiguous dates
+  ISO_ONLY = 3  ///< Accept only YYYY-MM-DD (or YYYY/MM/DD) and YYYYMMDD formats
+};
+
 struct TypeDetectionOptions {
   bool bool_as_int = true;
   bool trim_whitespace = true;
@@ -68,6 +86,7 @@ struct TypeDetectionOptions {
   char thousands_sep = ',';
   char decimal_point = '.';
   double confidence_threshold = 0.9;
+  DateFormatPreference date_format_preference = DateFormatPreference::AUTO;
 
   static TypeDetectionOptions defaults() { return TypeDetectionOptions(); }
 };
@@ -167,13 +186,13 @@ public:
    * - EU: DD/MM/YYYY or DD-MM-YYYY
    * - Compact: YYYYMMDD
    *
-   * Note: For dates like "01/02/2024", there is ambiguity between US format
-   * (January 2nd) and EU format (February 1st). The current implementation
-   * checks US format first, so ambiguous dates will be interpreted as US format.
-   * If your data uses EU format exclusively, you may need to handle this at
-   * a higher level (e.g., by specifying locale preferences).
+   * The date_format_preference option controls ambiguity resolution:
+   * - AUTO/US_FIRST: Check US format before EU (default)
+   * - EU_FIRST: Check EU format before US
+   * - ISO_ONLY: Accept only ISO and compact formats
    */
-  static bool is_date(const uint8_t* data, size_t length);
+  static bool is_date(const uint8_t* data, size_t length,
+                      const TypeDetectionOptions& options = TypeDetectionOptions());
 
 private:
   // Performance-critical inline helpers

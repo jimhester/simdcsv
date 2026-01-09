@@ -1196,8 +1196,8 @@ TEST_F(DirectMethodTest, IsFloatDirect) {
 }
 
 TEST_F(DirectMethodTest, IsDateDirect) {
-  EXPECT_TRUE(TypeDetector::is_date(reinterpret_cast<const uint8_t*>("2024-01-15"), 10));
-  EXPECT_FALSE(TypeDetector::is_date(reinterpret_cast<const uint8_t*>("hello"), 5));
+  EXPECT_TRUE(TypeDetector::is_date(reinterpret_cast<const uint8_t*>("2024-01-15"), 10, options));
+  EXPECT_FALSE(TypeDetector::is_date(reinterpret_cast<const uint8_t*>("hello"), 5, options));
 }
 
 TEST_F(DirectMethodTest, IsIntegerEmpty) {
@@ -1235,6 +1235,170 @@ TEST_F(TypePriorityTest, BooleanBeforeIntegerSingleDigit) {
   options.bool_as_int = false;
   EXPECT_EQ(TypeDetector::detect_field("0", options), FieldType::INTEGER);
   EXPECT_EQ(TypeDetector::detect_field("1", options), FieldType::INTEGER);
+}
+
+// ============================================================================
+// Date Format Preference Tests (GitHub issue #58)
+// ============================================================================
+
+class DateFormatPreferenceTest : public ::testing::Test {
+protected:
+  TypeDetectionOptions options;
+  void SetUp() override { options = TypeDetectionOptions::defaults(); }
+};
+
+TEST_F(DateFormatPreferenceTest, DefaultIsAuto) {
+  // Default should be AUTO
+  EXPECT_EQ(options.date_format_preference, DateFormatPreference::AUTO);
+}
+
+TEST_F(DateFormatPreferenceTest, ISOFormatAlwaysAccepted) {
+  // ISO format should work with all preferences
+  for (auto pref : {DateFormatPreference::AUTO, DateFormatPreference::US_FIRST,
+                    DateFormatPreference::EU_FIRST, DateFormatPreference::ISO_ONLY}) {
+    options.date_format_preference = pref;
+    EXPECT_EQ(TypeDetector::detect_field("2024-01-15", options), FieldType::DATE)
+        << "ISO format should work with preference " << static_cast<int>(pref);
+    EXPECT_EQ(TypeDetector::detect_field("2024/12/25", options), FieldType::DATE)
+        << "ISO format with slash should work with preference " << static_cast<int>(pref);
+  }
+}
+
+TEST_F(DateFormatPreferenceTest, CompactFormatAlwaysAccepted) {
+  // Compact format (YYYYMMDD) should work with all preferences
+  for (auto pref : {DateFormatPreference::AUTO, DateFormatPreference::US_FIRST,
+                    DateFormatPreference::EU_FIRST, DateFormatPreference::ISO_ONLY}) {
+    options.date_format_preference = pref;
+    EXPECT_EQ(TypeDetector::detect_field("20240115", options), FieldType::DATE)
+        << "Compact format should work with preference " << static_cast<int>(pref);
+  }
+}
+
+TEST_F(DateFormatPreferenceTest, USFormatWithAuto) {
+  // AUTO should accept US format (MM/DD/YYYY)
+  options.date_format_preference = DateFormatPreference::AUTO;
+  EXPECT_EQ(TypeDetector::detect_field("01/15/2024", options), FieldType::DATE);
+  EXPECT_EQ(TypeDetector::detect_field("12-25-2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, EUFormatWithAuto) {
+  // AUTO should accept EU format (DD/MM/YYYY) when unambiguous
+  options.date_format_preference = DateFormatPreference::AUTO;
+  // 15/01/2024 can only be EU (day 15 > 12)
+  EXPECT_EQ(TypeDetector::detect_field("15/01/2024", options), FieldType::DATE);
+  EXPECT_EQ(TypeDetector::detect_field("25-12-2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, USFirstAcceptsBothFormats) {
+  options.date_format_preference = DateFormatPreference::US_FIRST;
+  // Clear US format
+  EXPECT_EQ(TypeDetector::detect_field("01/15/2024", options), FieldType::DATE);
+  // Clear EU format (day > 12)
+  EXPECT_EQ(TypeDetector::detect_field("25/12/2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, EUFirstAcceptsBothFormats) {
+  options.date_format_preference = DateFormatPreference::EU_FIRST;
+  // Clear EU format
+  EXPECT_EQ(TypeDetector::detect_field("15/01/2024", options), FieldType::DATE);
+  // Clear US format (month > 12 would fail, so test valid US that's also valid EU)
+  EXPECT_EQ(TypeDetector::detect_field("01/12/2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, ISOOnlyRejectsUSFormat) {
+  options.date_format_preference = DateFormatPreference::ISO_ONLY;
+  // US format should be rejected
+  EXPECT_NE(TypeDetector::detect_field("01/15/2024", options), FieldType::DATE);
+  EXPECT_NE(TypeDetector::detect_field("12-25-2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, ISOOnlyRejectsEUFormat) {
+  options.date_format_preference = DateFormatPreference::ISO_ONLY;
+  // EU format should be rejected
+  EXPECT_NE(TypeDetector::detect_field("15/01/2024", options), FieldType::DATE);
+  EXPECT_NE(TypeDetector::detect_field("25-12-2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, AmbiguousDateWithAutoDefaultsToUS) {
+  // "01/02/2024" is ambiguous - could be Jan 2 (US) or Feb 1 (EU)
+  // With AUTO, US format is checked first, so this is valid as Jan 2
+  options.date_format_preference = DateFormatPreference::AUTO;
+  EXPECT_EQ(TypeDetector::detect_field("01/02/2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, AmbiguousDateWithUSFirst) {
+  // "01/02/2024" with US_FIRST should be detected as date (Jan 2)
+  options.date_format_preference = DateFormatPreference::US_FIRST;
+  EXPECT_EQ(TypeDetector::detect_field("01/02/2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, AmbiguousDateWithEUFirst) {
+  // "01/02/2024" with EU_FIRST should be detected as date (Feb 1)
+  options.date_format_preference = DateFormatPreference::EU_FIRST;
+  EXPECT_EQ(TypeDetector::detect_field("01/02/2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, InvalidDateStillRejected) {
+  // Invalid dates should be rejected regardless of preference
+  for (auto pref : {DateFormatPreference::AUTO, DateFormatPreference::US_FIRST,
+                    DateFormatPreference::EU_FIRST, DateFormatPreference::ISO_ONLY}) {
+    options.date_format_preference = pref;
+    // Invalid month 13
+    EXPECT_NE(TypeDetector::detect_field("2024-13-01", options), FieldType::DATE);
+    // Invalid day 32
+    EXPECT_NE(TypeDetector::detect_field("2024-01-32", options), FieldType::DATE);
+  }
+}
+
+TEST_F(DateFormatPreferenceTest, ColumnTypeInferenceWithPreference) {
+  // Test that ColumnTypeInference respects date_format_preference
+  TypeDetectionOptions opts;
+  opts.date_format_preference = DateFormatPreference::ISO_ONLY;
+
+  ColumnTypeInference inference(0, opts);
+
+  // Add rows with US-format dates - should be detected as STRING in ISO_ONLY mode
+  for (int i = 0; i < 10; ++i) {
+    inference.add_row({"01/15/2024"});
+  }
+
+  auto types = inference.infer_types();
+  EXPECT_EQ(types[0], FieldType::STRING);
+}
+
+TEST_F(DateFormatPreferenceTest, ColumnTypeInferenceWithISODates) {
+  // Test that ColumnTypeInference correctly detects ISO dates
+  TypeDetectionOptions opts;
+  opts.date_format_preference = DateFormatPreference::ISO_ONLY;
+
+  ColumnTypeInference inference(0, opts);
+
+  // Add rows with ISO-format dates
+  for (int i = 0; i < 10; ++i) {
+    inference.add_row({"2024-01-15"});
+  }
+
+  auto types = inference.infer_types();
+  EXPECT_EQ(types[0], FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, DirectIsDateMethodWithPreference) {
+  // Test the is_date method directly with different preferences
+  const uint8_t* us_date = reinterpret_cast<const uint8_t*>("01/15/2024");
+  const uint8_t* eu_date = reinterpret_cast<const uint8_t*>("15/01/2024");
+  const uint8_t* iso_date = reinterpret_cast<const uint8_t*>("2024-01-15");
+
+  // AUTO accepts all
+  options.date_format_preference = DateFormatPreference::AUTO;
+  EXPECT_TRUE(TypeDetector::is_date(us_date, 10, options));
+  EXPECT_TRUE(TypeDetector::is_date(eu_date, 10, options));
+  EXPECT_TRUE(TypeDetector::is_date(iso_date, 10, options));
+
+  // ISO_ONLY only accepts ISO
+  options.date_format_preference = DateFormatPreference::ISO_ONLY;
+  EXPECT_FALSE(TypeDetector::is_date(us_date, 10, options));
+  EXPECT_FALSE(TypeDetector::is_date(eu_date, 10, options));
+  EXPECT_TRUE(TypeDetector::is_date(iso_date, 10, options));
 }
 
 int main(int argc, char** argv) {
