@@ -260,21 +260,57 @@ int main() {
         return 1;
     }
 
-    // Create parser and error collector
-    libvroom::Parser parser;
-    libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+    // Create parser (optionally specify thread count)
+    libvroom::Parser parser(4);  // Use 4 threads
 
     // Parse with automatic dialect detection
-    auto result = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
+    auto result = parser.parse(buffer.data(), buffer.size());
 
     if (result.success()) {
         std::cout << "Columns: " << result.num_columns() << "\n";
+        std::cout << "Rows: " << result.num_rows() << "\n";
         std::cout << "Delimiter: '" << result.dialect.delimiter << "'\n";
     }
 
-    if (errors.has_errors()) {
-        std::cerr << errors.summary() << "\n";
+    // Check for errors (unified API)
+    if (result.has_errors()) {
+        std::cerr << result.error_summary() << "\n";
     }
+
+    return 0;
+}
+```
+
+### Row and Column Iteration
+
+Access parsed data with type-safe extraction:
+
+```cpp
+#include <libvroom.h>
+#include <iostream>
+
+int main() {
+    libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
+    libvroom::Parser parser;
+    auto result = parser.parse(buffer.data(), buffer.size());
+
+    // Iterate over rows
+    for (auto row : result.rows()) {
+        // Access by column name
+        auto name = row.get<std::string>("name");
+        auto age = row.get<int>("age");
+
+        if (name.ok() && age.ok()) {
+            std::cout << name.get() << " is " << age.get() << " years old\n";
+        }
+    }
+
+    // Or extract entire columns
+    auto names = result.column<std::string>("name");
+    auto ages = result.column<int64_t>("age");
+
+    // With default values for missing data
+    auto scores = result.column_or<double>("score", 0.0);
 
     return 0;
 }
@@ -289,14 +325,16 @@ If you know the CSV dialect in advance:
 
 int main() {
     libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
-
     libvroom::Parser parser;
-    libvroom::Dialect dialect = libvroom::Dialect::csv();  // Standard CSV
-    // Or: libvroom::Dialect::tsv() for tab-separated
-    // Or: libvroom::Dialect::semicolon() for semicolon-separated
-    // Or: libvroom::Dialect::pipe() for pipe-separated
 
-    auto result = parser.parse(buffer.data(), buffer.size(), dialect);
+    // Predefined dialects
+    auto result = parser.parse(buffer.data(), buffer.size(),
+        {.dialect = libvroom::Dialect::csv()});  // Standard CSV
+
+    // Other predefined dialects:
+    // libvroom::Dialect::tsv()       - Tab-separated
+    // libvroom::Dialect::semicolon() - Semicolon-separated
+    // libvroom::Dialect::pipe()      - Pipe-separated
 
     return result.success() ? 0 : 1;
 }
@@ -316,12 +354,44 @@ int main() {
     if (detection.success()) {
         std::cout << "Delimiter: '" << detection.dialect.delimiter << "'\n";
         std::cout << "Quote char: '" << detection.dialect.quote_char << "'\n";
+        std::cout << "Has header: " << (detection.has_header ? "yes" : "no") << "\n";
+        std::cout << "Columns: " << detection.detected_columns << "\n";
         std::cout << "Confidence: " << (detection.confidence * 100) << "%\n";
     }
 
     return 0;
 }
 ```
+
+### Streaming Parser (Large Files)
+
+For files that don't fit in memory, use the streaming parser:
+
+```cpp
+#include <streaming.h>
+#include <iostream>
+
+int main() {
+    // Range-based iteration (simplest)
+    libvroom::StreamReader reader("large_file.csv");
+
+    for (const auto& row : reader) {
+        std::cout << row[0].str() << "\n";
+    }
+
+    // Or explicit iteration with more control
+    libvroom::StreamReader reader2("large_file.csv");
+
+    while (reader2.next_row()) {
+        const auto& row = reader2.row();
+        std::cout << row[0].str() << ", " << row[1].str() << "\n";
+    }
+
+    return 0;
+}
+```
+
+See [Streaming Parser](streaming.qmd) for detailed documentation.
 
 ## Error Handling
 
@@ -330,14 +400,22 @@ libvroom provides three error handling modes for different use cases:
 ```cpp
 #include <libvroom.h>
 
-// Strict mode - stop on first error
-libvroom::ErrorCollector strict_errors(libvroom::ErrorMode::STRICT);
+// Method 1: Use Result's built-in error collector (recommended)
+auto result = parser.parse(buffer.data(), buffer.size());
+if (result.has_errors()) {
+    for (const auto& err : result.errors()) {
+        std::cerr << err.to_string() << "\n";
+    }
+}
 
-// Permissive mode - collect all errors, try to recover
-libvroom::ErrorCollector permissive_errors(libvroom::ErrorMode::PERMISSIVE);
+// Method 2: External error collector with specific mode
+libvroom::ErrorCollector errors(libvroom::ErrorMode::STRICT);
+auto result2 = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
 
-// Best-effort mode - ignore errors, parse what's possible
-libvroom::ErrorCollector best_effort(libvroom::ErrorMode::BEST_EFFORT);
+// Error modes:
+// STRICT     - Stop on first error
+// PERMISSIVE - Collect all errors, try to recover
+// BEST_EFFORT - Ignore errors, parse what's possible
 ```
 
 See [Error Handling](error-handling.qmd) for detailed documentation.
