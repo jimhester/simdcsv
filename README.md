@@ -59,6 +59,7 @@ target_link_libraries(your_target PRIVATE vroom)
 - **SIMD-accelerated parsing** via [Google Highway](https://github.com/google/highway) (x86-64 SSE4.2/AVX2, ARM NEON)
 - **Multi-threaded** speculative chunking for large files
 - **Automatic dialect detection** (delimiter, quoting, line endings)
+- **Index caching** for instant re-reads of previously parsed files
 - **Three error modes**: `STRICT` (stop on first error), `PERMISSIVE` (collect all errors), `BEST_EFFORT` (ignore errors)
 - **Cross-platform** support for Linux and macOS
 
@@ -66,6 +67,7 @@ target_link_libraries(your_target PRIVATE vroom)
 
 - [Getting Started](https://jimhester.github.io/libvroom/getting-started.html) - Build instructions and basic usage
 - [CLI Reference](https://jimhester.github.io/libvroom/cli.html) - Command line tool options
+- [Index Caching](https://jimhester.github.io/libvroom/caching.html) - Speed up repeated file reads
 - [Architecture](https://jimhester.github.io/libvroom/architecture.html) - Two-pass algorithm details
 - [API Reference](https://jimhester.github.io/libvroom/api/) - Full API documentation
 

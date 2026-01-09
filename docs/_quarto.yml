@@ -21,6 +21,8 @@ website:
         href: integration-guide.qmd
       - text: "CLI"
         href: cli.qmd
+      - text: "Caching"
+        href: caching.qmd
       - text: "Architecture"
         href: architecture.qmd
       - text: "Error Handling"
