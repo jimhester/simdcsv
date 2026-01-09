@@ -1642,9 +1642,11 @@ public:
 
     // Optimized allocation: Count separators first to allocate right-sized index.
     // This typically reduces memory usage by 2-10x for real-world CSV files.
+    // Pass n_quotes and len to handle error recovery scenarios safely.
     auto count_stats =
         TwoPass::first_pass_simd(buf, 0, len, result.dialect.quote_char, result.dialect.delimiter);
-    result.idx = parser_.init_counted_safe(count_stats.n_separators, num_threads_, collector);
+    result.idx = parser_.init_counted_safe(count_stats.n_separators, num_threads_, collector,
+                                           count_stats.n_quotes, len);
     if (result.idx.indexes == nullptr) {
       // Allocation failed or would overflow
       if (options.errors != nullptr) {

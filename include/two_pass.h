@@ -795,10 +795,15 @@ public:
    * @param total_separators Total number of separators found in first pass.
    * @param n_threads Number of threads for parsing.
    * @param errors Optional error collector for overflow errors.
+   * @param n_quotes Number of quote characters found in first pass. Used to
+   *        determine if safety padding is needed for error recovery scenarios.
+   * @param len File length in bytes. Used as upper bound when n_quotes > 0
+   *        to ensure sufficient allocation for error recovery scenarios.
    * @return ParseIndex with right-sized allocation, or empty on error.
    */
   ParseIndex init_counted_safe(uint64_t total_separators, size_t n_threads,
-                               ErrorCollector* errors = nullptr);
+                               ErrorCollector* errors = nullptr, uint64_t n_quotes = 0,
+                               size_t len = 0);
 };
 
 } // namespace libvroom
