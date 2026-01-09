@@ -32,11 +32,42 @@ option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 
+# GPU acceleration (experimental)
+option(ENABLE_GPU "Enable CUDA GPU acceleration (experimental)" OFF)
+
 # Compiler flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-O0 -g)
 else()
     add_compile_options(-O3)
+endif()
+
+# =============================================================================
+# SIMD optimization flags
+# Enable AVX2/SSE4.2 on x86-64 for Highway SIMD performance
+# =============================================================================
+option(ENABLE_NATIVE_ARCH "Use -march=native for best performance on local CPU" OFF)
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+    if(ENABLE_NATIVE_ARCH)
+        # Best performance on build machine, but may not run on older CPUs
+        message(STATUS "Using -march=native for best local performance")
+        add_compile_options(-march=native)
+    else()
+        # AVX2 is widely supported (Intel Haswell 2013+, AMD Excavator 2015+)
+        # This is a good default that works on most modern x86-64 CPUs
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
+        if(COMPILER_SUPPORTS_AVX2)
+            message(STATUS "Enabling AVX2 SIMD optimizations")
+            add_compile_options(-mavx2 -mfma -mbmi -mbmi2 -mf16c -maes -mpclmul)
+        else()
+            message(STATUS "AVX2 not supported by compiler, using baseline x86-64")
+        endif()
+    endif()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    # ARM64 (Apple Silicon, AWS Graviton, etc.) - NEON is always available
+    message(STATUS "ARM64 detected - NEON SIMD enabled by default")
 endif()
 
 # Code coverage flags
@@ -89,6 +120,36 @@ if(ENABLE_ASAN OR ENABLE_UBSAN OR ENABLE_TSAN)
         endif()
     else()
         message(WARNING "Sanitizers not supported for compiler: ${CMAKE_CXX_COMPILER_ID}")
+    endif()
+endif()
+
+# =============================================================================
+# GPU Acceleration (CUDA)
+# =============================================================================
+if(ENABLE_GPU)
+    message(STATUS "GPU acceleration enabled - looking for CUDA")
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(CMAKE_CUDA_COMPILER)
+        enable_language(CUDA)
+        find_package(CUDAToolkit REQUIRED)
+        message(STATUS "CUDA found: ${CMAKE_CUDA_COMPILER}")
+        message(STATUS "CUDA version: ${CMAKE_CUDA_COMPILER_VERSION}")
+        message(STATUS "CUDA toolkit: ${CUDAToolkit_LIBRARY_DIR}")
+
+        # Set CUDA standard to match C++ standard
+        set(CMAKE_CUDA_STANDARD 17)
+        set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
+        # CUDA architecture (default to common architectures)
+        if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+            # Turing (75), Ampere (80, 86), Ada (89), Hopper (90), Blackwell (100, 120)
+            # Note: Volta (70) and earlier dropped in CUDA 13.x
+            set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90;100;120")
+        endif()
+        message(STATUS "CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+    else()
+        message(FATAL_ERROR "ENABLE_GPU is ON but no CUDA compiler found")
     endif()
 endif()
 
@@ -266,6 +327,13 @@ target_include_directories(vroom PUBLIC
 target_link_libraries(vroom PUBLIC
     hwy
 )
+
+# Optional GPU acceleration
+if(ENABLE_GPU)
+    add_subdirectory(cuda)
+    target_link_libraries(vroom PUBLIC vroom_gpu)
+    # LIBVROOM_ENABLE_GPU is defined by vroom_gpu target (propagates via PUBLIC)
+endif()
 
 # Optional Apache Arrow output integration
 include(cmake/ArrowIntegration.cmake)
