@@ -3,11 +3,14 @@
  * @brief Tests for the libvroom C API wrapper.
  */
 
+#include <atomic>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <sstream>
 #include <string>
+#include <thread>
 
 extern "C" {
 #include "libvroom_c.h"
@@ -23,13 +26,16 @@ protected:
       fs::remove(f);
   }
   std::string createTestFile(const std::string& content) {
-    static int counter = 0;
-    std::string filename = "test_c_api_" + std::to_string(counter++) + ".csv";
-    std::ofstream file(filename);
+    // Use atomic counter and thread ID for unique filenames across parallel tests
+    static std::atomic<int> counter{0};
+    std::ostringstream filename;
+    filename << "test_c_api_" << std::this_thread::get_id() << "_" << counter++ << ".csv";
+    std::string fname = filename.str();
+    std::ofstream file(fname);
     file << content;
     file.close();
-    temp_files_.push_back(filename);
-    return filename;
+    temp_files_.push_back(fname);
+    return fname;
   }
   std::vector<std::string> temp_files_;
 
