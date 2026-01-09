@@ -110,6 +110,34 @@ size_t libvroom_error_collector_count(const libvroom_error_collector_t* collecto
 libvroom_error_t libvroom_error_collector_get(const libvroom_error_collector_t* collector,
                                               size_t index, libvroom_parse_error_t* error);
 void libvroom_error_collector_clear(libvroom_error_collector_t* collector);
+
+/**
+ * @brief Generate a human-readable summary of all collected parse errors.
+ *
+ * Creates a formatted string containing:
+ * - Total error count with breakdown by severity (warnings, errors, fatal)
+ * - Detailed listing of each error with location and message
+ *
+ * @param collector The error collector to summarize.
+ * @return Newly allocated string containing the summary. The caller is responsible
+ *         for freeing this string using free(). Returns NULL if collector is NULL
+ *         or if memory allocation fails.
+ *
+ * @example
+ * @code
+ * libvroom_error_collector_t* errors = libvroom_error_collector_create(LIBVROOM_MODE_PERMISSIVE,
+ * 100);
+ * // ... parse with errors ...
+ * char* summary = libvroom_error_collector_summary(errors);
+ * if (summary) {
+ *     printf("%s\n", summary);
+ *     free(summary);
+ * }
+ * libvroom_error_collector_destroy(errors);
+ * @endcode
+ */
+char* libvroom_error_collector_summary(const libvroom_error_collector_t* collector);
+
 void libvroom_error_collector_destroy(libvroom_error_collector_t* collector);
 
 /* Index Structure */

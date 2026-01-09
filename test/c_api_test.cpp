@@ -252,7 +252,112 @@ TEST_F(CAPITest, ErrorCollectorNullHandling) {
   EXPECT_EQ(libvroom_error_collector_count(nullptr), 0u);
   libvroom_parse_error_t error;
   EXPECT_EQ(libvroom_error_collector_get(nullptr, 0, &error), LIBVROOM_ERROR_NULL_POINTER);
+  EXPECT_EQ(libvroom_error_collector_summary(nullptr), nullptr);
   libvroom_error_collector_destroy(nullptr);
+}
+
+TEST_F(CAPITest, ErrorCollectorSummaryNoErrors) {
+  libvroom_error_collector_t* c = libvroom_error_collector_create(LIBVROOM_MODE_PERMISSIVE, 100);
+  ASSERT_NE(c, nullptr);
+
+  char* summary = libvroom_error_collector_summary(c);
+  ASSERT_NE(summary, nullptr);
+  EXPECT_STREQ(summary, "No errors");
+  free(summary);
+
+  libvroom_error_collector_destroy(c);
+}
+
+TEST_F(CAPITest, ErrorCollectorSummaryWithErrors) {
+  // Parse data with errors to populate the collector
+  const uint8_t data[] = "a,b,c\n1,2\n3,4,5\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_error_collector_t* errors =
+      libvroom_error_collector_create(LIBVROOM_MODE_PERMISSIVE, 100);
+
+  libvroom_parse(parser, buffer, index, errors, nullptr);
+
+  // Should have errors from inconsistent field count
+  EXPECT_TRUE(libvroom_error_collector_has_errors(errors));
+
+  char* summary = libvroom_error_collector_summary(errors);
+  ASSERT_NE(summary, nullptr);
+
+  // Summary should contain error information
+  std::string summary_str(summary);
+  EXPECT_TRUE(summary_str.find("Total errors:") != std::string::npos);
+  EXPECT_TRUE(summary_str.find("Details:") != std::string::npos);
+
+  free(summary);
+  libvroom_error_collector_destroy(errors);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, ErrorCollectorSummaryWithFatalError) {
+  // Parse data with fatal error (unclosed quote)
+  const uint8_t data[] = "a,b,c\n\"unclosed";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_error_collector_t* errors =
+      libvroom_error_collector_create(LIBVROOM_MODE_PERMISSIVE, 100);
+
+  libvroom_parse(parser, buffer, index, errors, nullptr);
+
+  EXPECT_TRUE(libvroom_error_collector_has_fatal(errors));
+
+  char* summary = libvroom_error_collector_summary(errors);
+  ASSERT_NE(summary, nullptr);
+
+  // Summary should mention fatal errors
+  std::string summary_str(summary);
+  EXPECT_TRUE(summary_str.find("Fatal:") != std::string::npos ||
+              summary_str.find("FATAL") != std::string::npos);
+
+  free(summary);
+  libvroom_error_collector_destroy(errors);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, ErrorCollectorSummaryWithMixedSeverities) {
+  // Parse data that triggers both warning (mixed line endings) and error (inconsistent field count)
+  const uint8_t data[] = "a,b,c\n1,2,3\r\n4,5\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_error_collector_t* errors =
+      libvroom_error_collector_create(LIBVROOM_MODE_PERMISSIVE, 100);
+
+  libvroom_parse(parser, buffer, index, errors, nullptr);
+
+  // Should have multiple errors
+  EXPECT_TRUE(libvroom_error_collector_has_errors(errors));
+  EXPECT_GT(libvroom_error_collector_count(errors), 1u);
+
+  char* summary = libvroom_error_collector_summary(errors);
+  ASSERT_NE(summary, nullptr);
+
+  // Summary should contain breakdown information
+  std::string summary_str(summary);
+  EXPECT_TRUE(summary_str.find("Total errors:") != std::string::npos);
+
+  free(summary);
+  libvroom_error_collector_destroy(errors);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
 }
 
 // Index Tests
