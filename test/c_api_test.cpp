@@ -3,11 +3,14 @@
  * @brief Tests for the libvroom C API wrapper.
  */
 
+#include <atomic>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <sstream>
 #include <string>
+#include <thread>
 
 extern "C" {
 #include "libvroom_c.h"
@@ -23,13 +26,16 @@ protected:
       fs::remove(f);
   }
   std::string createTestFile(const std::string& content) {
-    static int counter = 0;
-    std::string filename = "test_c_api_" + std::to_string(counter++) + ".csv";
-    std::ofstream file(filename);
+    // Use atomic counter and thread ID for unique filenames across parallel tests
+    static std::atomic<int> counter{0};
+    std::ostringstream filename;
+    filename << "test_c_api_" << std::this_thread::get_id() << "_" << counter++ << ".csv";
+    std::string fname = filename.str();
+    std::ofstream file(fname);
     file << content;
     file.close();
-    temp_files_.push_back(filename);
-    return filename;
+    temp_files_.push_back(fname);
+    return fname;
   }
   std::vector<std::string> temp_files_;
 
@@ -558,6 +564,113 @@ TEST_F(CAPITest, DetectDialectCSV) {
 
 TEST_F(CAPITest, DetectDialectNull) {
   EXPECT_EQ(libvroom_detect_dialect(nullptr), nullptr);
+}
+
+// Direct file dialect detection tests
+TEST_F(CAPITest, DetectDialectFileCSV) {
+  std::string content = "name,value,count\nalpha,1,100\nbeta,2,200\ngamma,3,300\n";
+  std::string filename = createTestFile(content);
+
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file(filename.c_str());
+  ASSERT_NE(result, nullptr);
+
+  EXPECT_TRUE(libvroom_detection_result_success(result));
+  EXPECT_GT(libvroom_detection_result_confidence(result), 0.5);
+
+  libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+  ASSERT_NE(dialect, nullptr);
+  EXPECT_EQ(libvroom_dialect_delimiter(dialect), ',');
+
+  EXPECT_EQ(libvroom_detection_result_columns(result), 3u);
+  EXPECT_GE(libvroom_detection_result_rows_analyzed(result), 1u);
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_detection_result_destroy(result);
+}
+
+TEST_F(CAPITest, DetectDialectFileTSV) {
+  std::string content = "name\tvalue\tcount\nalpha\t1\t100\nbeta\t2\t200\n";
+  std::string filename = createTestFile(content);
+
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file(filename.c_str());
+  ASSERT_NE(result, nullptr);
+
+  EXPECT_TRUE(libvroom_detection_result_success(result));
+
+  libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+  ASSERT_NE(dialect, nullptr);
+  EXPECT_EQ(libvroom_dialect_delimiter(dialect), '\t');
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_detection_result_destroy(result);
+}
+
+TEST_F(CAPITest, DetectDialectFileSemicolon) {
+  std::string content = "name;value;count\nalpha;1;100\nbeta;2;200\n";
+  std::string filename = createTestFile(content);
+
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file(filename.c_str());
+  ASSERT_NE(result, nullptr);
+
+  EXPECT_TRUE(libvroom_detection_result_success(result));
+
+  libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+  ASSERT_NE(dialect, nullptr);
+  EXPECT_EQ(libvroom_dialect_delimiter(dialect), ';');
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_detection_result_destroy(result);
+}
+
+TEST_F(CAPITest, DetectDialectFilePipe) {
+  std::string content = "name|value|count\nalpha|1|100\nbeta|2|200\n";
+  std::string filename = createTestFile(content);
+
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file(filename.c_str());
+  ASSERT_NE(result, nullptr);
+
+  EXPECT_TRUE(libvroom_detection_result_success(result));
+
+  libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+  ASSERT_NE(dialect, nullptr);
+  EXPECT_EQ(libvroom_dialect_delimiter(dialect), '|');
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_detection_result_destroy(result);
+}
+
+TEST_F(CAPITest, DetectDialectFileNull) {
+  EXPECT_EQ(libvroom_detect_dialect_file(nullptr), nullptr);
+}
+
+TEST_F(CAPITest, DetectDialectFileNotFound) {
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file("nonexistent_file.csv");
+  ASSERT_NE(result, nullptr);
+
+  // Detection fails, but result object is returned with warning
+  EXPECT_FALSE(libvroom_detection_result_success(result));
+  EXPECT_NE(libvroom_detection_result_warning(result), nullptr);
+
+  libvroom_detection_result_destroy(result);
+}
+
+TEST_F(CAPITest, DetectDialectFileWithQuotedFields) {
+  std::string content =
+      "name,description,value\n\"Alice\",\"A person\",100\n\"Bob\",\"Another person\",200\n";
+  std::string filename = createTestFile(content);
+
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file(filename.c_str());
+  ASSERT_NE(result, nullptr);
+
+  EXPECT_TRUE(libvroom_detection_result_success(result));
+
+  libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+  ASSERT_NE(dialect, nullptr);
+  EXPECT_EQ(libvroom_dialect_delimiter(dialect), ',');
+  EXPECT_EQ(libvroom_dialect_quote_char(dialect), '"');
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_detection_result_destroy(result);
 }
 
 TEST_F(CAPITest, DetectionResultAllAccessors) {
