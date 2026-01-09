@@ -193,13 +193,17 @@ If a chunk's `first_even_nl` or `first_odd_nl` is invalid (`null_pos`), the pars
 
 | File | Purpose |
 |------|---------|
+| `include/libvroom.h` | Main public API - Parser class, unified interface |
 | `include/two_pass.h` | Core two-pass parsing algorithm with multi-threading |
+| `include/streaming.h` | Streaming parser for memory-efficient large file processing |
 | `include/simd_highway.h` | Portable SIMD operations using Google Highway |
 | `include/branchless_state_machine.h` | Lookup table-based state machine (branch-free) |
 | `include/error.h` | Error codes, severity levels, ErrorCollector class |
 | `include/dialect.h` | CSV dialect detection (delimiter, quote char) |
+| `include/encoding.h` | Encoding detection and transcoding (UTF-16, UTF-32) |
 | `include/io_util.h` | File loading with SIMD-aligned padding (32+ bytes) |
 | `include/mem_util.h` | Aligned memory allocation for SIMD |
+| `include/libvroom_c.h` | C API wrapper for FFI bindings |
 
 ## Memory Layout
 

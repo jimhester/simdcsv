@@ -303,7 +303,8 @@ libvroom provides several CMake options to customize your build:
 | `BUILD_TESTING` | `ON` | Build test executables |
 | `BUILD_BENCHMARKS` | `ON` | Build benchmark executables |
 | `BUILD_SHARED_LIBS` | `OFF` | Build shared library instead of static |
-| `ENABLE_COVERAGE` | `OFF` | Enable code coverage reporting |
+| `ENABLE_COVERAGE` | `OFF` | Enable code coverage reporting (gcov) |
+| `ENABLE_LLVM_COVERAGE` | `OFF` | Enable LLVM source-based coverage (requires Clang) |
 | `LIBVROOM_ENABLE_ARROW` | `OFF` | Enable Apache Arrow output integration |
 | `ENABLE_FUZZING` | `OFF` | Enable fuzz testing targets (requires Clang) |
 
