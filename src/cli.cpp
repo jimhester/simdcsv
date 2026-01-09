@@ -1669,16 +1669,18 @@ int cmdStats(const char* filename, int n_threads, bool has_header, const libvroo
         cout << "      \"hist\": null";
       }
 
-      // String statistics (for all columns with non-empty values)
-      if (s.has_string && s.min_str_length != SIZE_MAX) {
+      // String statistics (for all columns)
+      // Note: has_string implies min_str_length != SIZE_MAX because both are set
+      // together in add_string_value(). We use has_string as the primary check.
+      if (s.has_string) {
         cout << ",\n";
         cout << "      \"n_unique\": " << s.unique_values.size() << ",\n";
         cout << "      \"min_length\": " << s.min_str_length << ",\n";
         cout << "      \"max_length\": " << s.max_str_length << "\n";
       } else {
-        // No non-empty string values, or defensive check failed
+        // No non-empty string values
         cout << ",\n";
-        cout << "      \"n_unique\": " << s.unique_values.size() << ",\n";
+        cout << "      \"n_unique\": 0,\n";
         cout << "      \"min_length\": null,\n";
         cout << "      \"max_length\": null\n";
       }
@@ -1721,15 +1723,14 @@ int cmdStats(const char* filename, int n_threads, bool has_header, const libvroo
       }
 
       // String statistics for non-numeric columns or columns with string values
-      if (s.has_string && !s.has_numeric && s.min_str_length != SIZE_MAX) {
+      // Note: has_string is only true if add_string_value was called, which requires
+      // non-empty fields. So if has_string is true, min_str_length is always valid.
+      if (s.has_string && !s.has_numeric) {
         cout << "  Unique values: " << s.unique_values.size() << "\n";
         cout << "  Min length:    " << s.min_str_length << "\n";
         cout << "  Max length:    " << s.max_str_length << "\n";
       } else if (s.has_string && s.has_numeric) {
         // For numeric columns, still show unique count
-        cout << "  Unique values: " << s.unique_values.size() << "\n";
-      } else if (s.has_string && !s.has_numeric) {
-        // Only empty strings were present
         cout << "  Unique values: " << s.unique_values.size() << "\n";
       }
       cout << "\n";
