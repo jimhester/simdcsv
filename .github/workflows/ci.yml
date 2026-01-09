@@ -64,8 +64,12 @@ jobs:
       run: |
         cd build && ctest --output-on-failure --build-config ${{ matrix.build_type }} -j
 
+  # GCC-based coverage (gcov/lcov) - traditional approach
+  # Note: gcov has known limitations with header-only code attribution.
+  # Template and inline code in headers may be attributed to .cpp files.
+  # See docs/coverage.md for details.
   coverage:
-    name: Code Coverage
+    name: Code Coverage (GCC/lcov)
     runs-on: ubuntu-latest
 
     steps:
@@ -124,6 +128,111 @@ jobs:
       continue-on-error: true
       with:
         files: ./build/coverage.info
+        flags: gcov
+        fail_ci_if_error: false
+        verbose: true
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+  # Clang source-based coverage - provides accurate header file attribution
+  # This approach correctly attributes template/inline code to header files.
+  # See: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
+  coverage-llvm:
+    name: Code Coverage (Clang/llvm-cov)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake clang llvm
+
+    - name: Cache FetchContent dependencies
+      uses: actions/cache@v4
+      with:
+        path: build/_deps
+        key: deps-Linux-Clang-Debug-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: |
+          deps-Linux-Clang-Debug-
+
+    - name: Configure CMake with LLVM coverage
+      run: |
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_COMPILER=clang \
+          -DCMAKE_CXX_COMPILER=clang++ \
+          -DENABLE_LLVM_COVERAGE=ON
+
+    - name: Build with coverage
+      run: |
+        cmake --build build -j
+
+    - name: Run tests and collect coverage
+      run: |
+        cd build
+        # Set up profile output path
+        export LLVM_PROFILE_FILE="coverage-%p.profraw"
+        # Run all tests
+        ctest --output-on-failure -j
+
+    - name: Generate coverage report
+      run: |
+        cd build
+        # Find llvm-profdata and llvm-cov (version may vary)
+        LLVM_PROFDATA=$(which llvm-profdata || find /usr -name 'llvm-profdata*' -type f | head -1)
+        LLVM_COV=$(which llvm-cov || find /usr -name 'llvm-cov*' -type f | head -1)
+
+        echo "Using llvm-profdata: $LLVM_PROFDATA"
+        echo "Using llvm-cov: $LLVM_COV"
+
+        # Merge raw profiles
+        $LLVM_PROFDATA merge -sparse coverage-*.profraw -o coverage.profdata
+
+        # Find all test executables (they contain the coverage mapping)
+        TEST_BINARIES=$(find . -maxdepth 1 -type f -executable -name '*_test' | tr '\n' ' ')
+        VROOM_CLI="./vroom"
+
+        # Create object list for llvm-cov
+        OBJECTS=""
+        for bin in $TEST_BINARIES; do
+          OBJECTS="$OBJECTS -object $bin"
+        done
+        if [ -f "$VROOM_CLI" ]; then
+          OBJECTS="$OBJECTS -object $VROOM_CLI"
+        fi
+
+        # Generate coverage report in lcov format
+        # Use the first test binary as the main binary, others as objects
+        FIRST_BIN=$(echo $TEST_BINARIES | cut -d' ' -f1)
+        $LLVM_COV export $FIRST_BIN $OBJECTS \
+          -instr-profile=coverage.profdata \
+          -format=lcov \
+          -ignore-filename-regex='(test/|benchmark/|_deps/|/usr/)' \
+          > coverage-llvm.info
+
+        # Show summary
+        echo "=== LLVM Coverage Summary ==="
+        $LLVM_COV report $FIRST_BIN $OBJECTS \
+          -instr-profile=coverage.profdata \
+          -ignore-filename-regex='(test/|benchmark/|_deps/|/usr/)' \
+          --show-region-summary=false
+
+        echo ""
+        echo "=== Header File Coverage ==="
+        $LLVM_COV report $FIRST_BIN $OBJECTS \
+          -instr-profile=coverage.profdata \
+          -ignore-filename-regex='(test/|benchmark/|_deps/|/usr/)' \
+          --show-region-summary=false | grep -E '\.h$' || echo "No header files in report"
+
+    - name: Upload LLVM coverage to Codecov
+      uses: codecov/codecov-action@v4
+      if: github.repository == 'jimhester/libvroom'
+      continue-on-error: true
+      with:
+        files: ./build/coverage-llvm.info
+        flags: llvm
         fail_ci_if_error: false
         verbose: true
         token: ${{ secrets.CODECOV_TOKEN }}

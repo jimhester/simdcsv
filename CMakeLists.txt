@@ -23,8 +23,9 @@ option(BUILD_TESTING "Build test executables" ON)
 option(BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(BUILD_SHARED_LIBS "Build shared library instead of static" OFF)
 
-# Code coverage option
-option(ENABLE_COVERAGE "Enable code coverage reporting" OFF)
+# Code coverage options
+option(ENABLE_COVERAGE "Enable code coverage reporting (gcov-compatible)" OFF)
+option(ENABLE_LLVM_COVERAGE "Enable LLVM source-based code coverage (requires Clang)" OFF)
 
 # Sanitizer options
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
@@ -40,7 +41,7 @@ endif()
 
 # Code coverage flags
 if(ENABLE_COVERAGE)
-    message(STATUS "Code coverage enabled")
+    message(STATUS "Code coverage enabled (gcov-compatible)")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         # Use atomic profile updates for thread-safe coverage in multi-threaded code
         add_compile_options(--coverage -fprofile-arcs -ftest-coverage -fprofile-update=atomic)
@@ -48,6 +49,19 @@ if(ENABLE_COVERAGE)
     else()
         message(WARNING "Code coverage not supported for compiler: ${CMAKE_CXX_COMPILER_ID}")
     endif()
+endif()
+
+# LLVM source-based coverage (provides better header file coverage attribution)
+# See: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
+if(ENABLE_LLVM_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "LLVM source-based coverage requires Clang compiler")
+    endif()
+    message(STATUS "LLVM source-based coverage enabled")
+    # -fprofile-instr-generate: Enables execution count collection
+    # -fcoverage-mapping: Enables mapping information in generated code
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate)
 endif()
 
 # Sanitizer flags
@@ -571,6 +585,26 @@ add_dependencies(branchless_test copy_test_data)
 
 # Register branchless tests with CTest
 gtest_discover_tests(branchless_test)
+
+# SIMD error detection test executable (edge cases from issue #383)
+add_executable(simd_error_detection_test
+    test/simd_error_detection_test.cpp
+)
+
+target_link_libraries(simd_error_detection_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(simd_error_detection_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(simd_error_detection_test copy_test_data)
+
+# Register SIMD error detection tests with CTest
+gtest_discover_tests(simd_error_detection_test)
 
 # Size limits test executable (security feature from issue #270)
 add_executable(size_limits_test
