@@ -2528,3 +2528,25 @@ TEST_F(CliTest, StatsStdDevAccuracy) {
   // Should contain sd field with a value (not null)
   EXPECT_TRUE(result.output.find("\"sd\": 3.") != std::string::npos);
 }
+
+TEST_F(CliTest, StatsAllEmptyColumn) {
+  // Test that columns with only empty values are handled correctly
+  // The JSON output should have null for min_length/max_length and 0 for n_unique
+  auto result = CliRunner::run("stats -j " + testDataPath("edge_cases/all_empty_column.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Check the JSON is valid (not corrupted by SIZE_MAX values)
+  // Look for the empty_col column which should have null for string lengths
+  EXPECT_TRUE(result.output.find("\"min_length\": null") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"max_length\": null") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"n_unique\": 0") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsAllEmptyColumnHumanReadable) {
+  // Test that human-readable output handles all-empty columns gracefully
+  auto result = CliRunner::run("stats " + testDataPath("edge_cases/all_empty_column.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // The empty column should not crash or show SIZE_MAX values
+  // Should show the column exists with proper null count
+  EXPECT_TRUE(result.output.find("empty_col") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Nulls") != std::string::npos);
+}
