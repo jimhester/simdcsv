@@ -15,7 +15,9 @@
 #include "utf8.h"
 
 #include <algorithm>
+#include <array>
 #include <cfloat>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -27,6 +29,7 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include <unordered_set>
 #include <vector>
 
 using namespace std;
@@ -1303,7 +1306,136 @@ struct ColumnStats {
   double sum = 0.0;
   size_t numeric_count = 0;
 
-  double mean() const { return numeric_count > 0 ? sum / numeric_count : 0.0; }
+  // For Welford's online algorithm (numerically stable variance calculation)
+  double mean_accum = 0.0;
+  double m2_accum = 0.0; // Sum of squares of differences from current mean
+
+  // Store numeric values for percentile calculation
+  std::vector<double> numeric_values;
+
+  // String statistics
+  size_t min_str_length = SIZE_MAX;
+  size_t max_str_length = 0;
+  std::unordered_set<std::string> unique_values;
+  bool has_string = false;
+
+  double mean() const { return numeric_count > 0 ? mean_accum : 0.0; }
+
+  double variance() const {
+    if (numeric_count < 2)
+      return 0.0;
+    return m2_accum / (numeric_count - 1); // Sample variance (Bessel's correction)
+  }
+
+  double std_dev() const { return std::sqrt(variance()); }
+
+  // Update running mean and variance using Welford's algorithm
+  void add_numeric_value(double val) {
+    numeric_count++;
+    double delta = val - mean_accum;
+    mean_accum += delta / numeric_count;
+    double delta2 = val - mean_accum;
+    m2_accum += delta * delta2;
+
+    // Update sum for backwards compatibility
+    sum += val;
+
+    // Track min/max
+    if (val < min_value)
+      min_value = val;
+    if (val > max_value)
+      max_value = val;
+
+    // Store value for percentile calculation
+    numeric_values.push_back(val);
+    has_numeric = true;
+  }
+
+  // Update string statistics
+  void add_string_value(const std::string& val) {
+    size_t len = val.length();
+    if (len < min_str_length)
+      min_str_length = len;
+    if (len > max_str_length)
+      max_str_length = len;
+    unique_values.insert(val);
+    has_string = true;
+  }
+
+  // Calculate percentile (0-100)
+  double percentile(double p) const {
+    if (numeric_values.empty())
+      return 0.0;
+
+    // Make a sorted copy
+    std::vector<double> sorted_values = numeric_values;
+    std::sort(sorted_values.begin(), sorted_values.end());
+
+    if (p <= 0)
+      return sorted_values.front();
+    if (p >= 100)
+      return sorted_values.back();
+
+    // Linear interpolation for percentile
+    double idx = (p / 100.0) * (sorted_values.size() - 1);
+    size_t lower_idx = static_cast<size_t>(std::floor(idx));
+    size_t upper_idx = static_cast<size_t>(std::ceil(idx));
+
+    if (lower_idx == upper_idx)
+      return sorted_values[lower_idx];
+
+    double fraction = idx - lower_idx;
+    return sorted_values[lower_idx] * (1 - fraction) + sorted_values[upper_idx] * fraction;
+  }
+
+  // Generate a text histogram using Unicode block characters
+  // Returns an 8-character histogram showing distribution
+  std::string histogram() const {
+    if (numeric_values.empty())
+      return "";
+
+    constexpr size_t NUM_BINS = 8;
+    std::array<size_t, NUM_BINS> bins = {0};
+
+    double range = max_value - min_value;
+    if (range == 0) {
+      // All values are the same - fill middle bins
+      bins[NUM_BINS / 2] = numeric_values.size();
+    } else {
+      double bin_width = range / NUM_BINS;
+      for (double val : numeric_values) {
+        size_t bin = static_cast<size_t>((val - min_value) / bin_width);
+        if (bin >= NUM_BINS)
+          bin = NUM_BINS - 1;
+        bins[bin]++;
+      }
+    }
+
+    // Find max bin count for normalization
+    size_t max_count = *std::max_element(bins.begin(), bins.end());
+    if (max_count == 0)
+      return std::string(NUM_BINS, ' ');
+
+    // Unicode block characters: empty to full block (8 levels)
+    // Using simple ASCII for maximum compatibility
+    static const char* block_chars[] = {" ",
+                                        "\xe2\x96\x81",
+                                        "\xe2\x96\x82",
+                                        "\xe2\x96\x83",
+                                        "\xe2\x96\x84",
+                                        "\xe2\x96\x85",
+                                        "\xe2\x96\x86",
+                                        "\xe2\x96\x87",
+                                        "\xe2\x96\x88"};
+
+    std::string result;
+    for (size_t i = 0; i < NUM_BINS; ++i) {
+      // Map count to 0-8 range
+      size_t level = (bins[i] * 8) / max_count;
+      result += block_chars[level];
+    }
+    return result;
+  }
 };
 
 // Command: schema - display inferred schema with column names, types, and nullable
@@ -1469,19 +1601,19 @@ int cmdStats(const char* filename, int n_threads, bool has_header, const libvroo
         continue;
       }
 
-      // Try to parse as numeric for min/max/mean
+      // Try to parse as numeric for extended statistics
       auto numeric_result = libvroom::parse_double(field.c_str(), field.size(),
                                                    libvroom::ExtractionConfig::defaults());
       if (numeric_result.ok()) {
         double val = numeric_result.get();
         if (!std::isnan(val) && !std::isinf(val)) {
-          stats[c].has_numeric = true;
-          stats[c].min_value = std::min(stats[c].min_value, val);
-          stats[c].max_value = std::max(stats[c].max_value, val);
-          stats[c].sum += val;
-          stats[c].numeric_count++;
+          // Use Welford's algorithm for numerically stable mean/variance
+          stats[c].add_numeric_value(val);
         }
       }
+
+      // Track string statistics for non-empty fields
+      stats[c].add_string_value(field);
     }
     ++rows_processed;
   }
@@ -1507,18 +1639,50 @@ int cmdStats(const char* filename, int n_threads, bool has_header, const libvroo
       cout << "      \"count\": " << s.count << ",\n";
       cout << "      \"nulls\": " << s.null_count << ",\n";
       cout << "      \"non_null_count\": " << (s.count - s.null_count) << ",\n";
+      cout << "      \"complete_rate\": "
+           << (s.count > 0 ? static_cast<double>(s.count - s.null_count) / s.count : 0.0) << ",\n";
 
       if (s.has_numeric) {
         // Use fixed precision for JSON numbers
         cout << fixed << setprecision(6);
         cout << "      \"min\": " << s.min_value << ",\n";
         cout << "      \"max\": " << s.max_value << ",\n";
-        cout << "      \"mean\": " << s.mean() << "\n";
+        cout << "      \"mean\": " << s.mean() << ",\n";
+        cout << "      \"sd\": " << s.std_dev() << ",\n";
+        cout << "      \"p0\": " << s.percentile(0) << ",\n";
+        cout << "      \"p25\": " << s.percentile(25) << ",\n";
+        cout << "      \"p50\": " << s.percentile(50) << ",\n";
+        cout << "      \"p75\": " << s.percentile(75) << ",\n";
+        cout << "      \"p100\": " << s.percentile(100) << ",\n";
         cout << defaultfloat;
+        cout << "      \"hist\": \"" << s.histogram() << "\"";
       } else {
         cout << "      \"min\": null,\n";
         cout << "      \"max\": null,\n";
-        cout << "      \"mean\": null\n";
+        cout << "      \"mean\": null,\n";
+        cout << "      \"sd\": null,\n";
+        cout << "      \"p0\": null,\n";
+        cout << "      \"p25\": null,\n";
+        cout << "      \"p50\": null,\n";
+        cout << "      \"p75\": null,\n";
+        cout << "      \"p100\": null,\n";
+        cout << "      \"hist\": null";
+      }
+
+      // String statistics (for all columns)
+      // Note: has_string implies min_str_length != SIZE_MAX because both are set
+      // together in add_string_value(). We use has_string as the primary check.
+      if (s.has_string) {
+        cout << ",\n";
+        cout << "      \"n_unique\": " << s.unique_values.size() << ",\n";
+        cout << "      \"min_length\": " << s.min_str_length << ",\n";
+        cout << "      \"max_length\": " << s.max_str_length << "\n";
+      } else {
+        // No non-empty string values
+        cout << ",\n";
+        cout << "      \"n_unique\": 0,\n";
+        cout << "      \"min_length\": null,\n";
+        cout << "      \"max_length\": null\n";
       }
 
       cout << "    }";
@@ -1534,19 +1698,40 @@ int cmdStats(const char* filename, int n_threads, bool has_header, const libvroo
 
     for (size_t i = 0; i < num_cols; ++i) {
       const auto& s = stats[i];
+      double complete_rate =
+          s.count > 0 ? static_cast<double>(s.count - s.null_count) / s.count : 0.0;
+
       cout << "Column " << i << ": " << s.name << "\n";
-      cout << "  Type:       " << libvroom::field_type_to_string(s.type) << "\n";
-      cout << "  Count:      " << s.count << "\n";
-      cout << "  Nulls:      " << s.null_count << " ("
+      cout << "  Type:          " << libvroom::field_type_to_string(s.type) << "\n";
+      cout << "  Count:         " << s.count << "\n";
+      cout << "  Nulls:         " << s.null_count << " ("
            << (s.count > 0 ? static_cast<int>(100.0 * s.null_count / s.count) : 0) << "%)\n";
-      cout << "  Non-null:   " << (s.count - s.null_count) << "\n";
+      cout << "  Complete rate: " << fixed << setprecision(2) << (complete_rate * 100) << "%\n";
+      cout << defaultfloat;
 
       if (s.has_numeric) {
         cout << fixed << setprecision(2);
-        cout << "  Min:        " << s.min_value << "\n";
-        cout << "  Max:        " << s.max_value << "\n";
-        cout << "  Mean:       " << s.mean() << "\n";
+        cout << "  Min:           " << s.min_value << "\n";
+        cout << "  Max:           " << s.max_value << "\n";
+        cout << "  Mean:          " << s.mean() << "\n";
+        cout << "  Std Dev:       " << s.std_dev() << "\n";
+        cout << "  Percentiles:   p0=" << s.percentile(0) << ", p25=" << s.percentile(25)
+             << ", p50=" << s.percentile(50) << ", p75=" << s.percentile(75)
+             << ", p100=" << s.percentile(100) << "\n";
         cout << defaultfloat;
+        cout << "  Histogram:     " << s.histogram() << "\n";
+      }
+
+      // String statistics for non-numeric columns or columns with string values
+      // Note: has_string is only true if add_string_value was called, which requires
+      // non-empty fields. So if has_string is true, min_str_length is always valid.
+      if (s.has_string && !s.has_numeric) {
+        cout << "  Unique values: " << s.unique_values.size() << "\n";
+        cout << "  Min length:    " << s.min_str_length << "\n";
+        cout << "  Max length:    " << s.max_str_length << "\n";
+      } else if (s.has_string && s.has_numeric) {
+        // For numeric columns, still show unique count
+        cout << "  Unique values: " << s.unique_values.size() << "\n";
       }
       cout << "\n";
     }

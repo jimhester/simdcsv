@@ -52,6 +52,7 @@
 #include "branchless_state_machine.h"
 #include "dialect.h"
 #include "error.h"
+#include "mmap_util.h"
 #include "simd_highway.h"
 
 #include <cassert>
@@ -138,7 +139,7 @@ public:
   ParseIndex(ParseIndex&& other) noexcept
       : columns(other.columns), n_threads(other.n_threads), n_indexes(other.n_indexes),
         indexes(other.indexes), n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
-        indexes_ptr_(std::move(other.indexes_ptr_)) {
+        indexes_ptr_(std::move(other.indexes_ptr_)), mmap_buffer_(std::move(other.mmap_buffer_)) {
     other.n_indexes = nullptr;
     other.indexes = nullptr;
   }
@@ -160,6 +161,7 @@ public:
       indexes = other.indexes;
       n_indexes_ptr_ = std::move(other.n_indexes_ptr_);
       indexes_ptr_ = std::move(other.indexes_ptr_);
+      mmap_buffer_ = std::move(other.mmap_buffer_);
       other.n_indexes = nullptr;
       other.indexes = nullptr;
     }
@@ -171,7 +173,7 @@ public:
   ParseIndex& operator=(const ParseIndex&) = delete;
 
   /**
-   * @brief Serialize the index to a binary file.
+   * @brief Serialize the index to a binary file (v2 format).
    *
    * Writes the index structure to disk for later retrieval, avoiding the need
    * to re-parse large CSV files.
@@ -180,6 +182,18 @@ public:
    * @throws std::runtime_error If writing fails.
    */
   void write(const std::string& filename);
+
+  /**
+   * @brief Serialize the index to a binary file (v3 format with source metadata).
+   *
+   * Writes the index structure with source file metadata (mtime, size) for
+   * cache validation. This format supports mmap-based loading.
+   *
+   * @param filename Path to the output file.
+   * @param source_meta Metadata of the source CSV file for cache validation.
+   * @throws std::runtime_error If writing fails.
+   */
+  void write(const std::string& filename, const SourceMetadata& source_meta);
 
   /**
    * @brief Deserialize the index from a binary file.
@@ -195,9 +209,41 @@ public:
   void read(const std::string& filename);
 
   /**
+   * @brief Load index from a cache file using memory-mapping.
+   *
+   * This factory method creates a ParseIndex that directly references data
+   * in a memory-mapped file, avoiding any copying. The returned ParseIndex
+   * owns the memory mapping and will release it on destruction.
+   *
+   * @param cache_path Path to the cache file (.vidx format).
+   * @param source_meta Metadata of the source CSV file for validation.
+   * @return ParseIndex with mmap-backed data, or empty ParseIndex if
+   *         the cache is invalid or cannot be loaded.
+   *
+   * @note If the cache file is missing, invalid, or the source file has changed,
+   *       an empty ParseIndex is returned (check with is_valid()).
+   */
+  static ParseIndex from_mmap(const std::string& cache_path, const SourceMetadata& source_meta);
+
+  /**
+   * @brief Check if this index contains valid data.
+   *
+   * @return true if the index has been populated (either by parsing or loading).
+   */
+  bool is_valid() const { return n_indexes != nullptr && indexes != nullptr; }
+
+  /**
+   * @brief Check if this index is backed by memory-mapped data.
+   *
+   * @return true if the index data is memory-mapped (from from_mmap()).
+   */
+  bool is_mmap_backed() const { return mmap_buffer_ != nullptr; }
+
+  /**
    * @brief Destructor. Releases allocated index arrays via RAII.
    *
    * Memory is automatically freed when the unique_ptr members are destroyed.
+   * For mmap-backed indexes, the memory mapping is released instead.
    */
   ~ParseIndex() = default;
 
@@ -205,10 +251,16 @@ public:
 
 private:
   /// RAII owner for n_indexes array. Memory freed automatically on destruction.
+  /// Null when using mmap-backed data.
   std::unique_ptr<uint64_t[]> n_indexes_ptr_;
 
   /// RAII owner for indexes array. Memory freed automatically on destruction.
+  /// Null when using mmap-backed data.
   std::unique_ptr<uint64_t[]> indexes_ptr_;
+
+  /// Memory-mapped buffer for mmap-backed indexes.
+  /// When set, n_indexes and indexes point directly into this buffer's data.
+  std::unique_ptr<MmapBuffer> mmap_buffer_;
 
   // Allow TwoPass::init() to set the private members
   friend class TwoPass;
