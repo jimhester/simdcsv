@@ -21,7 +21,21 @@ namespace libvroom {
 // Version 1 (legacy): columns (uint64_t), n_threads (uint8_t), n_indexes,
 // indexes Version 2: version (uint8_t=2), columns (uint64_t), n_threads
 // (uint16_t), n_indexes, indexes
+// Version 3: version (uint8_t=3), source_mtime (uint64_t), source_size (uint64_t),
+// columns (uint64_t), n_threads (uint16_t), n_indexes[], indexes[]
 static constexpr uint8_t INDEX_FORMAT_VERSION = 2;
+static constexpr uint8_t INDEX_FORMAT_VERSION_V3 = 3;
+
+// V3 header layout (32 bytes, 8-byte aligned for direct mmap pointer access):
+// - version:    1 byte
+// - padding:    7 bytes (alignment padding)
+// - mtime:      8 bytes (uint64_t)
+// - size:       8 bytes (uint64_t)
+// - columns:    8 bytes (uint64_t)
+// - n_threads:  2 bytes (uint16_t)
+// - padding2:   6 bytes (alignment padding to ensure arrays are 8-byte aligned)
+// Total: 40 bytes
+static constexpr size_t INDEX_V3_HEADER_SIZE = 40;
 
 void ParseIndex::write(const std::string& filename) {
   std::FILE* fp = std::fopen(filename.c_str(), "wb");
@@ -109,6 +123,168 @@ void ParseIndex::read(const std::string& filename) {
   }
 
   std::fclose(fp);
+}
+
+void ParseIndex::write(const std::string& filename, const SourceMetadata& source_meta) {
+  // Write to temp file, then atomic rename for crash safety
+  std::string temp_path = filename + ".tmp";
+
+  std::FILE* fp = std::fopen(temp_path.c_str(), "wb");
+  if (!fp) {
+    throw std::runtime_error("error opening file for writing: " + filename);
+  }
+
+  bool success = true;
+
+  // Write v3 header with alignment padding (40 bytes total)
+  // Layout: version(1) + padding(7) + mtime(8) + size(8) + columns(8) + n_threads(2) + padding(6)
+  uint8_t version = INDEX_FORMAT_VERSION_V3;
+  uint8_t padding[7] = {0};
+  uint8_t padding2[6] = {0};
+
+  success = success && (std::fwrite(&version, sizeof(uint8_t), 1, fp) == 1);
+  success = success && (std::fwrite(padding, 1, 7, fp) == 7); // Align mtime to 8 bytes
+  success = success && (std::fwrite(&source_meta.mtime, sizeof(uint64_t), 1, fp) == 1);
+  success = success && (std::fwrite(&source_meta.size, sizeof(uint64_t), 1, fp) == 1);
+  success = success && (std::fwrite(&columns, sizeof(uint64_t), 1, fp) == 1);
+  success = success && (std::fwrite(&n_threads, sizeof(uint16_t), 1, fp) == 1);
+  success = success && (std::fwrite(padding2, 1, 6, fp) == 6); // Align n_indexes array to 8 bytes
+
+  // Write n_indexes array
+  success = success && (std::fwrite(n_indexes, sizeof(uint64_t), n_threads, fp) == n_threads);
+
+  // Write indexes array
+  size_t total_indexes = 0;
+  for (uint16_t i = 0; i < n_threads; ++i) {
+    total_indexes += n_indexes[i];
+  }
+  success = success && (std::fwrite(indexes, sizeof(uint64_t), total_indexes, fp) == total_indexes);
+
+  std::fclose(fp);
+
+  if (!success) {
+    std::remove(temp_path.c_str());
+    throw std::runtime_error("error writing index v3");
+  }
+
+  // Atomic rename
+  if (std::rename(temp_path.c_str(), filename.c_str()) != 0) {
+    std::remove(temp_path.c_str());
+    throw std::runtime_error("error renaming temp file to: " + filename);
+  }
+}
+
+ParseIndex ParseIndex::from_mmap(const std::string& cache_path, const SourceMetadata& source_meta) {
+  ParseIndex result;
+
+  // Allocate MmapBuffer
+  auto mmap = std::make_unique<MmapBuffer>();
+  if (!mmap->open(cache_path)) {
+    return result; // Return empty, invalid index
+  }
+
+  const uint8_t* data = mmap->data();
+  size_t file_size = mmap->size();
+
+  // Validate minimum size for header
+  if (file_size < INDEX_V3_HEADER_SIZE) {
+    return result;
+  }
+
+  size_t offset = 0;
+
+  // Read and validate version
+  uint8_t version = data[offset];
+  offset += 1;
+  if (version != INDEX_FORMAT_VERSION_V3) {
+    return result; // Not a v3 format file
+  }
+
+  // Skip padding (7 bytes to align mtime to 8-byte boundary)
+  offset += 7;
+
+  // Read source file metadata (now 8-byte aligned)
+  uint64_t cached_mtime;
+  std::memcpy(&cached_mtime, data + offset, sizeof(uint64_t));
+  offset += sizeof(uint64_t);
+
+  uint64_t cached_size;
+  std::memcpy(&cached_size, data + offset, sizeof(uint64_t));
+  offset += sizeof(uint64_t);
+
+  // Validate source file hasn't changed
+  if (cached_mtime != source_meta.mtime || cached_size != source_meta.size) {
+    return result; // Source file changed, cache is stale
+  }
+
+  // Read columns (8-byte aligned)
+  std::memcpy(&result.columns, data + offset, sizeof(uint64_t));
+  offset += sizeof(uint64_t);
+
+  // Read n_threads
+  std::memcpy(&result.n_threads, data + offset, sizeof(uint16_t));
+  offset += sizeof(uint16_t);
+
+  // Skip padding2 (6 bytes to align n_indexes array to 8-byte boundary)
+  offset += 6;
+
+  // Validate we have enough data for n_indexes array
+  size_t n_indexes_size = static_cast<size_t>(result.n_threads) * sizeof(uint64_t);
+  if (offset + n_indexes_size > file_size) {
+    result.n_threads = 0;
+    return result;
+  }
+
+  // Set n_indexes to point directly into mmap'd data
+  // const_cast is safe because we're only reading, and ParseIndex needs non-const
+  result.n_indexes = const_cast<uint64_t*>(reinterpret_cast<const uint64_t*>(data + offset));
+  offset += n_indexes_size;
+
+  // Calculate total indexes and validate with overflow checks
+  // Remaining bytes after n_indexes array
+  size_t remaining_bytes = file_size - offset;
+  size_t max_possible_indexes = remaining_bytes / sizeof(uint64_t);
+
+  size_t total_indexes = 0;
+  for (uint16_t i = 0; i < result.n_threads; ++i) {
+    uint64_t n_idx = result.n_indexes[i];
+    // Validate each value is within bounds (prevents overflow and ensures sanity)
+    if (n_idx > max_possible_indexes) {
+      result.n_indexes = nullptr;
+      result.n_threads = 0;
+      return result;
+    }
+    // Check for overflow before adding
+    if (total_indexes > SIZE_MAX - static_cast<size_t>(n_idx)) {
+      result.n_indexes = nullptr;
+      result.n_threads = 0;
+      return result;
+    }
+    total_indexes += static_cast<size_t>(n_idx);
+  }
+
+  // Check for multiplication overflow before computing indexes_size
+  if (total_indexes > SIZE_MAX / sizeof(uint64_t)) {
+    result.n_indexes = nullptr;
+    result.n_threads = 0;
+    return result;
+  }
+  size_t indexes_size = total_indexes * sizeof(uint64_t);
+
+  // Final bounds check (using subtraction to avoid overflow in comparison)
+  if (indexes_size > remaining_bytes) {
+    result.n_indexes = nullptr;
+    result.n_threads = 0;
+    return result;
+  }
+
+  // Set indexes to point directly into mmap'd data
+  result.indexes = const_cast<uint64_t*>(reinterpret_cast<const uint64_t*>(data + offset));
+
+  // Transfer mmap ownership to the ParseIndex
+  result.mmap_buffer_ = std::move(mmap);
+
+  return result;
 }
 
 //-----------------------------------------------------------------------------
