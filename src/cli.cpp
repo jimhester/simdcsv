@@ -189,6 +189,9 @@ void printUsage(const char* prog) {
   cerr << "  -m <size>     Sample size for schema/stats (0=all rows, default: 0)\n";
   cerr << "  -f, --force   Force output even with low confidence (for dialect command)\n";
   cerr << "  -S, --strict  Strict mode: exit with code 1 on any parse error\n";
+  cerr << "  --cache       Enable index caching for faster re-reads\n";
+  cerr << "  --cache-dir <dir>  Store cache files in specified directory\n";
+  cerr << "  --no-cache    Disable index caching (default)\n";
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
   cerr << "\nDialect Detection:\n";
@@ -234,18 +237,28 @@ struct ParseResult {
   LoadResult load_result;   ///< The loaded data (RAII-managed)
   libvroom::ParseIndex idx; ///< The parsed index
   bool success{false};      ///< Whether parsing was successful
+  bool used_cache{false};   ///< Whether a cache was used
+  std::string cache_path;   ///< Path to cache file if caching is enabled
+};
+
+/// Configuration for index caching in CLI
+struct CliCacheConfig {
+  bool enabled{false};   ///< Whether caching is enabled
+  std::string cache_dir; ///< Custom cache directory (empty = same dir)
 };
 
 // Parse a file or stdin - returns ParseResult with RAII-managed data
 // If detected_encoding is provided, the detected encoding will be stored there
 // If strict_mode is true, exits with error on any parse warning or error
 // If forced_encoding is not UNKNOWN, it overrides auto-detection
+// If cache_config is provided and enabled, enables index caching
 ParseResult parseFile(const char* filename, int n_threads,
                       const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
                       bool auto_detect = false,
                       libvroom::EncodingResult* detected_encoding = nullptr,
                       bool strict_mode = false,
-                      libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
+                      libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
+                      const CliCacheConfig* cache_config = nullptr) {
   ParseResult result;
 
   try {
@@ -300,6 +313,16 @@ ParseResult parseFile(const char* filename, int n_threads,
     options.errors = &errors;
   }
 
+  // Set up caching if enabled and we have a real file (not stdin)
+  if (cache_config != nullptr && cache_config->enabled && !isStdinInput(filename)) {
+    if (cache_config->cache_dir.empty()) {
+      options.cache = libvroom::CacheConfig::defaults();
+    } else {
+      options.cache = libvroom::CacheConfig::custom(cache_config->cache_dir);
+    }
+    options.source_path = filename;
+  }
+
   auto parse_result = parser.parse(result.load_result.data(), result.load_result.size, options);
   result.idx = std::move(parse_result.idx);
 
@@ -316,6 +339,10 @@ ParseResult parseFile(const char* filename, int n_threads,
     }
     return result;
   }
+
+  // Capture cache information
+  result.used_cache = parse_result.used_cache;
+  result.cache_path = parse_result.cache_path;
 
   result.success = true;
   return result;
@@ -597,9 +624,10 @@ static void outputRow(const std::vector<std::string>& row, const libvroom::Diale
 int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
             bool strict_mode = false,
-            libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
-  auto result =
-      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, forced_encoding);
+            libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
+            const CliCacheConfig* cache_config = nullptr) {
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
+                          forced_encoding, cache_config);
   if (!result.success)
     return 1;
 
@@ -788,9 +816,10 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
 int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               unsigned int seed = 0, bool strict_mode = false,
-              libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
-  auto result =
-      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, forced_encoding);
+              libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
+              const CliCacheConfig* cache_config = nullptr) {
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
+                          forced_encoding, cache_config);
   if (!result.success)
     return 1;
 
@@ -855,9 +884,10 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
 int cmdSelect(const char* filename, int n_threads, const string& columns, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               bool strict_mode = false,
-              libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
-  auto result =
-      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, forced_encoding);
+              libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
+              const CliCacheConfig* cache_config = nullptr) {
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
+                          forced_encoding, cache_config);
   if (!result.success)
     return 1;
 
@@ -946,9 +976,10 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
 int cmdInfo(const char* filename, int n_threads, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
             bool strict_mode = false,
-            libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
-  auto result =
-      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, forced_encoding);
+            libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
+            const CliCacheConfig* cache_config = nullptr) {
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
+                          forced_encoding, cache_config);
   if (!result.success)
     return 1;
 
@@ -984,9 +1015,10 @@ int cmdInfo(const char* filename, int n_threads, bool has_header,
 int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_header,
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               bool strict_mode = false,
-              libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN) {
-  auto result =
-      parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode, forced_encoding);
+              libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
+              const CliCacheConfig* cache_config = nullptr) {
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
+                          forced_encoding, cache_config);
   if (!result.success)
     return 1;
 
@@ -1782,7 +1814,8 @@ int main(int argc, char* argv[]) {
   bool strict_mode = false;         // Strict mode: exit with code 1 on any parse error
   unsigned int random_seed = 0;     // Random seed for sample command (0 = use random_device)
   libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN; // User-specified encoding
-  size_t sample_size = 0; // Sample size for schema/stats (0 = all rows)
+  size_t sample_size = 0;      // Sample size for schema/stats (0 = all rows)
+  CliCacheConfig cache_config; // Index caching configuration
   string columns;
   string delimiter_str = "comma";
   string encoding_str; // User-specified encoding string
@@ -1805,6 +1838,41 @@ int main(int argc, char* argv[]) {
         argv[j] = argv[j + 1];
       }
       --argc;
+      --i; // Recheck this position
+    } else if (strcmp(argv[i], "--cache") == 0) {
+      cache_config.enabled = true;
+      // Remove --cache from argv by shifting remaining args
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i; // Recheck this position
+    } else if (strcmp(argv[i], "--no-cache") == 0) {
+      cache_config.enabled = false;
+      cache_config.cache_dir.clear();
+      // Remove --no-cache from argv by shifting remaining args
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i; // Recheck this position
+    } else if (strncmp(argv[i], "--cache-dir=", 12) == 0) {
+      cache_config.enabled = true;
+      cache_config.cache_dir = argv[i] + 12;
+      // Remove --cache-dir=... from argv by shifting remaining args
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i; // Recheck this position
+    } else if (strcmp(argv[i], "--cache-dir") == 0 && i + 1 < argc) {
+      cache_config.enabled = true;
+      cache_config.cache_dir = argv[i + 1];
+      // Remove both --cache-dir and its argument from argv
+      for (int j = i; j < argc - 2; ++j) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
       --i; // Recheck this position
     }
   }
@@ -1914,30 +1982,31 @@ int main(int argc, char* argv[]) {
   int result = 0;
   if (command == "count") {
     // Note: count uses optimized row counting that doesn't do full parse validation,
-    // so strict_mode and forced_encoding are not applicable
+    // so strict_mode, forced_encoding, and caching are not applicable
     result = cmdCount(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "head") {
     result = cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
-                     forced_encoding);
+                     forced_encoding, &cache_config);
   } else if (command == "tail") {
+    // Note: tail uses streaming API which doesn't support caching yet
     result = cmdTail(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
                      forced_encoding);
   } else if (command == "sample") {
     result = cmdSample(filename, n_threads, num_rows, has_header, dialect, auto_detect, random_seed,
-                       strict_mode, forced_encoding);
+                       strict_mode, forced_encoding, &cache_config);
   } else if (command == "select") {
     if (columns.empty()) {
       cerr << "Error: -c option required for select command\n";
       return 1;
     }
     result = cmdSelect(filename, n_threads, columns, has_header, dialect, auto_detect, strict_mode,
-                       forced_encoding);
+                       forced_encoding, &cache_config);
   } else if (command == "info") {
     result = cmdInfo(filename, n_threads, has_header, dialect, auto_detect, strict_mode,
-                     forced_encoding);
+                     forced_encoding, &cache_config);
   } else if (command == "pretty") {
     result = cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
-                       forced_encoding);
+                       forced_encoding, &cache_config);
   } else if (command == "dialect") {
     // Note: dialect command ignores -d, --strict, and -e flags since it's for detection
     (void)delimiter_specified; // Suppress unused warning
