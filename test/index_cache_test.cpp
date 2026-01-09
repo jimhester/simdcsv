@@ -496,11 +496,17 @@ TEST_F(IndexCacheTest, Integration_FullCacheWorkflow) {
   // Cache should now be valid
   EXPECT_TRUE(IndexCache::is_valid(source_path, cache_path));
 
-  // Verify cache file structure (basic sanity check)
+  // Verify cache file structure (v3 format with alignment padding)
+  // Layout: version(1) + padding(7) + mtime(8) + size(8)
   std::ifstream cache_file(cache_path, std::ios::binary);
   uint8_t version;
   cache_file.read(reinterpret_cast<char*>(&version), 1);
-  EXPECT_EQ(version, INDEX_CACHE_VERSION);
+  constexpr uint8_t INDEX_FORMAT_VERSION_V3 = 3;
+  EXPECT_EQ(version, INDEX_FORMAT_VERSION_V3);
+
+  // Skip 7 bytes of alignment padding
+  char padding[7];
+  cache_file.read(padding, 7);
 
   uint64_t mtime, size;
   cache_file.read(reinterpret_cast<char*>(&mtime), 8);
@@ -642,4 +648,250 @@ TEST_F(IndexCacheTest, EdgeCase_EmptyIndex) {
   if (success) {
     EXPECT_TRUE(fs::exists(cache_path));
   }
+}
+
+// =============================================================================
+// Parser API Integration Tests
+// =============================================================================
+
+TEST_F(IndexCacheTest, ParserApi_WithCacheFactory) {
+  // Test ParseOptions::with_cache factory method
+  std::string content = "name,age\nAlice,30\nBob,25\n";
+  std::string source_path = createTempFile("api_factory.csv", content);
+
+  auto opts = libvroom::ParseOptions::with_cache(source_path);
+
+  EXPECT_TRUE(opts.cache.has_value());
+  EXPECT_EQ(opts.cache->location, CacheConfig::SAME_DIR);
+  EXPECT_EQ(opts.source_path, source_path);
+}
+
+TEST_F(IndexCacheTest, ParserApi_WithCacheDirFactory) {
+  // Test ParseOptions::with_cache_dir factory method
+  std::string custom_dir = createTempDir("custom_cache_api");
+  std::string source_path = "/path/to/file.csv";
+
+  auto opts = libvroom::ParseOptions::with_cache_dir(source_path, custom_dir);
+
+  EXPECT_TRUE(opts.cache.has_value());
+  EXPECT_EQ(opts.cache->location, CacheConfig::CUSTOM);
+  EXPECT_EQ(opts.cache->custom_path, custom_dir);
+  EXPECT_EQ(opts.source_path, source_path);
+}
+
+TEST_F(IndexCacheTest, ParserApi_CacheMissWritesFile) {
+  // First parse should write cache file
+  std::string content = "name,age,city\nAlice,30,NYC\nBob,25,LA\n";
+  std::string source_path = createTempFile("cache_miss.csv", content);
+  std::string expected_cache_path = source_path + ".vidx";
+
+  // Ensure no cache exists
+  ASSERT_FALSE(fs::exists(expected_cache_path));
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+
+  auto opts = libvroom::ParseOptions::with_cache(source_path);
+  auto result = parser.parse(buffer.data(), buffer.size, opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_FALSE(result.used_cache); // Cache miss
+  EXPECT_FALSE(result.cache_path.empty());
+  EXPECT_TRUE(fs::exists(result.cache_path)); // Cache was written
+}
+
+TEST_F(IndexCacheTest, ParserApi_CacheHitLoadsMmap) {
+  // First parse creates cache, second parse should load from cache
+  std::string content = "name,age,city\nAlice,30,NYC\nBob,25,LA\n";
+  std::string source_path = createTempFile("cache_hit.csv", content);
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto opts = libvroom::ParseOptions::with_cache(source_path);
+
+  // First parse - cache miss
+  auto result1 = parser.parse(buffer.data(), buffer.size, opts);
+  ASSERT_TRUE(result1.success());
+  EXPECT_FALSE(result1.used_cache);
+  EXPECT_TRUE(fs::exists(result1.cache_path));
+
+  // Second parse - cache hit
+  auto result2 = parser.parse(buffer.data(), buffer.size, opts);
+  EXPECT_TRUE(result2.success());
+  EXPECT_TRUE(result2.used_cache); // Cache hit!
+  EXPECT_EQ(result2.cache_path, result1.cache_path);
+}
+
+TEST_F(IndexCacheTest, ParserApi_CacheResultsCorrect) {
+  // Verify that cached results produce correct data access
+  std::string content = "name,age\nAlice,30\nBob,25\nCharlie,35\n";
+  std::string source_path = createTempFile("cache_verify.csv", content);
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto opts = libvroom::ParseOptions::with_cache(source_path);
+
+  // First parse - cache miss
+  auto result1 = parser.parse(buffer.data(), buffer.size, opts);
+  ASSERT_TRUE(result1.success());
+  EXPECT_EQ(result1.num_rows(), 3);
+
+  // Second parse - cache hit
+  auto result2 = parser.parse(buffer.data(), buffer.size, opts);
+  ASSERT_TRUE(result2.success());
+  EXPECT_TRUE(result2.used_cache);
+  EXPECT_EQ(result2.num_rows(), 3); // Same row count
+
+  // Verify we can still access data
+  auto names = result2.column_string(0);
+  EXPECT_EQ(names.size(), 3u);
+  EXPECT_EQ(names[0], "Alice");
+  EXPECT_EQ(names[1], "Bob");
+  EXPECT_EQ(names[2], "Charlie");
+}
+
+TEST_F(IndexCacheTest, ParserApi_NoCacheByDefault) {
+  // Parsing without cache options should not create cache
+  std::string content = "a,b\n1,2\n";
+  std::string source_path = createTempFile("no_cache.csv", content);
+  std::string cache_path = source_path + ".vidx";
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+
+  // Parse without cache options
+  auto result = parser.parse(buffer.data(), buffer.size);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_FALSE(result.used_cache);
+  EXPECT_TRUE(result.cache_path.empty()); // No cache path set
+  EXPECT_FALSE(fs::exists(cache_path));   // No cache file created
+}
+
+TEST_F(IndexCacheTest, ParserApi_ForceCacheRefresh) {
+  // Test force_cache_refresh option
+  std::string content = "a,b\n1,2\n";
+  std::string source_path = createTempFile("force_refresh.csv", content);
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto opts = libvroom::ParseOptions::with_cache(source_path);
+
+  // First parse - creates cache
+  auto result1 = parser.parse(buffer.data(), buffer.size, opts);
+  ASSERT_TRUE(result1.success());
+  EXPECT_FALSE(result1.used_cache);
+
+  // Get cache file mtime
+  auto cache_path = result1.cache_path;
+  auto mtime1 = fs::last_write_time(cache_path);
+
+  // Wait a bit to ensure different mtime
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  // Second parse with force_cache_refresh
+  opts.force_cache_refresh = true;
+  auto result2 = parser.parse(buffer.data(), buffer.size, opts);
+  EXPECT_TRUE(result2.success());
+  EXPECT_FALSE(result2.used_cache); // Force refresh means cache miss
+
+  // Cache file should have been rewritten (newer mtime)
+  auto mtime2 = fs::last_write_time(cache_path);
+  EXPECT_GE(mtime2, mtime1);
+}
+
+TEST_F(IndexCacheTest, ParserApi_CacheInvalidAfterSourceChange) {
+  // Cache should become invalid if source file changes
+  std::string content = "a,b\n1,2\n";
+  std::string source_path = createTempFile("change.csv", content);
+
+  libvroom::Parser parser;
+  auto opts = libvroom::ParseOptions::with_cache(source_path);
+
+  // First parse - creates cache
+  {
+    auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+    auto result = parser.parse(buffer.data(), buffer.size, opts);
+    ASSERT_TRUE(result.success());
+    EXPECT_FALSE(result.used_cache);
+  }
+
+  // Modify source file and wait for mtime change
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  std::ofstream file(source_path, std::ios::binary);
+  file << "a,b,c\n1,2,3\n4,5,6\n";
+  file.close();
+
+  // Second parse - cache should be invalid
+  {
+    auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+    auto result = parser.parse(buffer.data(), buffer.size, opts);
+    EXPECT_TRUE(result.success());
+    EXPECT_FALSE(result.used_cache); // Cache was stale
+    EXPECT_EQ(result.num_rows(), 2); // New content has 2 data rows
+  }
+}
+
+TEST_F(IndexCacheTest, ParserApi_CustomCacheDir) {
+  // Test caching to custom directory
+  std::string custom_dir = createTempDir("custom_api_dir");
+  std::string content = "a,b\n1,2\n";
+  std::string source_path = createTempFile("custom_dir.csv", content);
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto opts = libvroom::ParseOptions::with_cache_dir(source_path, custom_dir);
+
+  auto result = parser.parse(buffer.data(), buffer.size, opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_FALSE(result.used_cache);
+  EXPECT_TRUE(result.cache_path.find(custom_dir) != std::string::npos);
+  EXPECT_TRUE(fs::exists(result.cache_path));
+}
+
+TEST_F(IndexCacheTest, ParserApi_EmptySourcePathDisablesCache) {
+  // If source_path is empty, caching should be silently disabled
+  std::string content = "a,b\n1,2\n";
+  std::string source_path = createTempFile("empty_source.csv", content);
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+
+  // Create options with cache but empty source_path
+  libvroom::ParseOptions opts;
+  opts.cache = CacheConfig::defaults();
+  opts.source_path = ""; // Empty - caching disabled
+
+  auto result = parser.parse(buffer.data(), buffer.size, opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_FALSE(result.used_cache);
+  EXPECT_TRUE(result.cache_path.empty()); // No cache due to empty source_path
+}
+
+TEST_F(IndexCacheTest, ParserApi_DialectDetectionWithCache) {
+  // Auto-detected dialect should work with cached results
+  std::string content = "name\tage\nAlice\t30\nBob\t25\n"; // TSV format
+  std::string source_path = createTempFile("tsv_cache.csv", content);
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+
+  // Parse with cache and auto-detection
+  libvroom::ParseOptions opts;
+  opts.cache = CacheConfig::defaults();
+  opts.source_path = source_path;
+  // dialect is nullopt (default) - auto-detect
+
+  // First parse
+  auto result1 = parser.parse(buffer.data(), buffer.size, opts);
+  ASSERT_TRUE(result1.success());
+  EXPECT_EQ(result1.dialect.delimiter, '\t'); // Detected TSV
+
+  // Second parse - cache hit, dialect should still be detected
+  auto result2 = parser.parse(buffer.data(), buffer.size, opts);
+  EXPECT_TRUE(result2.success());
+  EXPECT_TRUE(result2.used_cache);
+  EXPECT_EQ(result2.dialect.delimiter, '\t'); // Still TSV
 }

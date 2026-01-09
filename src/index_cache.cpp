@@ -5,6 +5,8 @@
 
 #include "index_cache.h"
 
+#include "mmap_util.h"
+
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -92,8 +94,8 @@ std::pair<std::string, bool> IndexCache::try_compute_writable_path(const std::st
 
 bool IndexCache::is_valid(const std::string& source_path, const std::string& cache_path) {
   // Get current source metadata
-  auto [source_mtime, source_size] = get_source_metadata(source_path);
-  if (source_mtime == 0 && source_size == 0) {
+  SourceMetadata source_meta = SourceMetadata::from_file(source_path);
+  if (!source_meta.valid) {
     // Source file doesn't exist or can't be read
     return false;
   }
@@ -106,9 +108,19 @@ bool IndexCache::is_valid(const std::string& source_path, const std::string& cac
 
   bool valid = false;
 
-  // Read and validate header
+  // Read and validate header - v3 format: version(1) + padding(7) + mtime(8) + size(8)
+  // Total: 24 bytes to get to mtime and size
+  static constexpr uint8_t INDEX_FORMAT_VERSION_V3 = 3;
+
   uint8_t version = 0;
-  if (std::fread(&version, 1, 1, fp) != 1 || version != INDEX_CACHE_VERSION) {
+  if (std::fread(&version, 1, 1, fp) != 1 || version != INDEX_FORMAT_VERSION_V3) {
+    std::fclose(fp);
+    return false;
+  }
+
+  // Skip 7 bytes of alignment padding
+  uint8_t padding[7];
+  if (std::fread(padding, 1, 7, fp) != 7) {
     std::fclose(fp);
     return false;
   }
@@ -121,7 +133,7 @@ bool IndexCache::is_valid(const std::string& source_path, const std::string& cac
   }
 
   // Compare metadata
-  if (cached_mtime == source_mtime && cached_size == source_size) {
+  if (cached_mtime == source_meta.mtime && cached_size == source_meta.size) {
     valid = true;
   }
 
@@ -132,61 +144,20 @@ bool IndexCache::is_valid(const std::string& source_path, const std::string& cac
 bool IndexCache::write_atomic(const std::string& path, const ParseIndex& index,
                               const std::string& source_path) {
   // Get source metadata
-  auto [mtime, size] = get_source_metadata(source_path);
-  if (mtime == 0 && size == 0) {
+  SourceMetadata source_meta = SourceMetadata::from_file(source_path);
+  if (!source_meta.valid) {
     // Can't get source metadata
     return false;
   }
 
-  // Generate temp file path
-  std::string temp_path = path + ".tmp." + std::to_string(getpid());
-
-  // Open temp file for writing
-  std::FILE* fp = std::fopen(temp_path.c_str(), "wb");
-  if (!fp) {
+  // Delegate to ParseIndex::write which writes v3 format with atomic rename
+  // Need to const_cast because write() is not const (but doesn't modify data)
+  try {
+    const_cast<ParseIndex&>(index).write(path, source_meta);
+    return true;
+  } catch (const std::exception&) {
     return false;
   }
-
-  bool success = true;
-
-  // Write header
-  uint8_t version = INDEX_CACHE_VERSION;
-  success = success && (std::fwrite(&version, 1, 1, fp) == 1);
-  success = success && (std::fwrite(&mtime, 8, 1, fp) == 1);
-  success = success && (std::fwrite(&size, 8, 1, fp) == 1);
-  success = success && (std::fwrite(&index.columns, 8, 1, fp) == 1);
-  success = success && (std::fwrite(&index.n_threads, 2, 1, fp) == 1);
-
-  // Write n_indexes array
-  if (success && index.n_indexes != nullptr && index.n_threads > 0) {
-    success = (std::fwrite(index.n_indexes, 8, index.n_threads, fp) == index.n_threads);
-  }
-
-  // Write indexes array
-  if (success && index.indexes != nullptr && index.n_threads > 0) {
-    size_t total_indexes = 0;
-    for (uint16_t t = 0; t < index.n_threads; ++t) {
-      total_indexes += index.n_indexes[t];
-    }
-    if (total_indexes > 0) {
-      success = (std::fwrite(index.indexes, 8, total_indexes, fp) == total_indexes);
-    }
-  }
-
-  std::fclose(fp);
-
-  if (!success) {
-    std::remove(temp_path.c_str());
-    return false;
-  }
-
-  // Atomic rename
-  if (std::rename(temp_path.c_str(), path.c_str()) != 0) {
-    std::remove(temp_path.c_str());
-    return false;
-  }
-
-  return true;
 }
 
 std::pair<uint64_t, uint64_t> IndexCache::get_source_metadata(const std::string& source_path) {
