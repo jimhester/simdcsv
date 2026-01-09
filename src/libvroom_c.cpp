@@ -373,6 +373,25 @@ void libvroom_error_collector_clear(libvroom_error_collector_t* collector) {
   collector->collector.clear();
 }
 
+char* libvroom_error_collector_summary(const libvroom_error_collector_t* collector) {
+  if (!collector)
+    return nullptr;
+
+  try {
+    std::string summary = collector->collector.summary();
+
+    // Allocate a copy that the caller can free()
+    char* result = static_cast<char*>(std::malloc(summary.size() + 1));
+    if (!result)
+      return nullptr;
+
+    std::memcpy(result, summary.c_str(), summary.size() + 1);
+    return result;
+  } catch (...) {
+    return nullptr;
+  }
+}
+
 void libvroom_error_collector_destroy(libvroom_error_collector_t* collector) {
   delete collector;
 }
