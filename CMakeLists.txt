@@ -242,6 +242,7 @@ set(VROOM_SOURCES
     src/dialect.cpp
     src/encoding.cpp
     src/libvroom_c.cpp
+    src/mmap_util.cpp
     src/value_extraction.cpp
     src/streaming.cpp
     src/two_pass.cpp
@@ -806,6 +807,26 @@ add_dependencies(comment_line_test copy_test_data)
 
 # Register comment line tests with CTest
 gtest_discover_tests(comment_line_test)
+
+# Memory-mapped file utilities test executable
+add_executable(mmap_util_test
+    test/mmap_util_test.cpp
+)
+
+target_link_libraries(mmap_util_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(mmap_util_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(mmap_util_test copy_test_data)
+
+# Register mmap utility tests with CTest
+gtest_discover_tests(mmap_util_test)
 
 # Arrow output test (only if Arrow is enabled)
 if(LIBVROOM_ENABLE_ARROW)
