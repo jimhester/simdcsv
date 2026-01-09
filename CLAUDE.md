@@ -40,8 +40,14 @@ cd build && ctest --output-on-failure -j$(nproc)
 # Run benchmarks
 ./build/libvroom_benchmark
 
-# Build with code coverage
+# Build with code coverage (gcov)
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+cmake --build build -j$(nproc)
+
+# Build with LLVM source-based coverage (requires Clang, better for headers)
+cmake -B build -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+  -DENABLE_LLVM_COVERAGE=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -123,6 +129,7 @@ SIMD via Google Highway 1.3.0: x86-64 (SSE4.2, AVX2), ARM (NEON), scalar fallbac
 | Topic | Location |
 |-------|----------|
 | Error handling (modes, types, recovery) | `docs/error_handling.md` |
+| Code coverage (tools, limitations, interpretation) | `docs/coverage.md` |
 | Test data organization | `test/README.md` |
 | CI workflows | `.github/workflows/README.md` |
 

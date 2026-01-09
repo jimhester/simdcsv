@@ -3,11 +3,14 @@
  * @brief Tests for the libvroom C API wrapper.
  */
 
+#include <atomic>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <sstream>
 #include <string>
+#include <thread>
 
 extern "C" {
 #include "libvroom_c.h"
@@ -23,13 +26,16 @@ protected:
       fs::remove(f);
   }
   std::string createTestFile(const std::string& content) {
-    static int counter = 0;
-    std::string filename = "test_c_api_" + std::to_string(counter++) + ".csv";
-    std::ofstream file(filename);
+    // Use atomic counter and thread ID for unique filenames across parallel tests
+    static std::atomic<int> counter{0};
+    std::ostringstream filename;
+    filename << "test_c_api_" << std::this_thread::get_id() << "_" << counter++ << ".csv";
+    std::string fname = filename.str();
+    std::ofstream file(fname);
     file << content;
     file.close();
-    temp_files_.push_back(filename);
-    return filename;
+    temp_files_.push_back(fname);
+    return fname;
   }
   std::vector<std::string> temp_files_;
 
@@ -252,7 +258,112 @@ TEST_F(CAPITest, ErrorCollectorNullHandling) {
   EXPECT_EQ(libvroom_error_collector_count(nullptr), 0u);
   libvroom_parse_error_t error;
   EXPECT_EQ(libvroom_error_collector_get(nullptr, 0, &error), LIBVROOM_ERROR_NULL_POINTER);
+  EXPECT_EQ(libvroom_error_collector_summary(nullptr), nullptr);
   libvroom_error_collector_destroy(nullptr);
+}
+
+TEST_F(CAPITest, ErrorCollectorSummaryNoErrors) {
+  libvroom_error_collector_t* c = libvroom_error_collector_create(LIBVROOM_MODE_PERMISSIVE, 100);
+  ASSERT_NE(c, nullptr);
+
+  char* summary = libvroom_error_collector_summary(c);
+  ASSERT_NE(summary, nullptr);
+  EXPECT_STREQ(summary, "No errors");
+  free(summary);
+
+  libvroom_error_collector_destroy(c);
+}
+
+TEST_F(CAPITest, ErrorCollectorSummaryWithErrors) {
+  // Parse data with errors to populate the collector
+  const uint8_t data[] = "a,b,c\n1,2\n3,4,5\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_error_collector_t* errors =
+      libvroom_error_collector_create(LIBVROOM_MODE_PERMISSIVE, 100);
+
+  libvroom_parse(parser, buffer, index, errors, nullptr);
+
+  // Should have errors from inconsistent field count
+  EXPECT_TRUE(libvroom_error_collector_has_errors(errors));
+
+  char* summary = libvroom_error_collector_summary(errors);
+  ASSERT_NE(summary, nullptr);
+
+  // Summary should contain error information
+  std::string summary_str(summary);
+  EXPECT_TRUE(summary_str.find("Total errors:") != std::string::npos);
+  EXPECT_TRUE(summary_str.find("Details:") != std::string::npos);
+
+  free(summary);
+  libvroom_error_collector_destroy(errors);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, ErrorCollectorSummaryWithFatalError) {
+  // Parse data with fatal error (unclosed quote)
+  const uint8_t data[] = "a,b,c\n\"unclosed";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_error_collector_t* errors =
+      libvroom_error_collector_create(LIBVROOM_MODE_PERMISSIVE, 100);
+
+  libvroom_parse(parser, buffer, index, errors, nullptr);
+
+  EXPECT_TRUE(libvroom_error_collector_has_fatal(errors));
+
+  char* summary = libvroom_error_collector_summary(errors);
+  ASSERT_NE(summary, nullptr);
+
+  // Summary should mention fatal errors
+  std::string summary_str(summary);
+  EXPECT_TRUE(summary_str.find("Fatal:") != std::string::npos ||
+              summary_str.find("FATAL") != std::string::npos);
+
+  free(summary);
+  libvroom_error_collector_destroy(errors);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, ErrorCollectorSummaryWithMixedSeverities) {
+  // Parse data that triggers both warning (mixed line endings) and error (inconsistent field count)
+  const uint8_t data[] = "a,b,c\n1,2,3\r\n4,5\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_error_collector_t* errors =
+      libvroom_error_collector_create(LIBVROOM_MODE_PERMISSIVE, 100);
+
+  libvroom_parse(parser, buffer, index, errors, nullptr);
+
+  // Should have multiple errors
+  EXPECT_TRUE(libvroom_error_collector_has_errors(errors));
+  EXPECT_GT(libvroom_error_collector_count(errors), 1u);
+
+  char* summary = libvroom_error_collector_summary(errors);
+  ASSERT_NE(summary, nullptr);
+
+  // Summary should contain breakdown information
+  std::string summary_str(summary);
+  EXPECT_TRUE(summary_str.find("Total errors:") != std::string::npos);
+
+  free(summary);
+  libvroom_error_collector_destroy(errors);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
 }
 
 // Index Tests
@@ -453,6 +564,113 @@ TEST_F(CAPITest, DetectDialectCSV) {
 
 TEST_F(CAPITest, DetectDialectNull) {
   EXPECT_EQ(libvroom_detect_dialect(nullptr), nullptr);
+}
+
+// Direct file dialect detection tests
+TEST_F(CAPITest, DetectDialectFileCSV) {
+  std::string content = "name,value,count\nalpha,1,100\nbeta,2,200\ngamma,3,300\n";
+  std::string filename = createTestFile(content);
+
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file(filename.c_str());
+  ASSERT_NE(result, nullptr);
+
+  EXPECT_TRUE(libvroom_detection_result_success(result));
+  EXPECT_GT(libvroom_detection_result_confidence(result), 0.5);
+
+  libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+  ASSERT_NE(dialect, nullptr);
+  EXPECT_EQ(libvroom_dialect_delimiter(dialect), ',');
+
+  EXPECT_EQ(libvroom_detection_result_columns(result), 3u);
+  EXPECT_GE(libvroom_detection_result_rows_analyzed(result), 1u);
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_detection_result_destroy(result);
+}
+
+TEST_F(CAPITest, DetectDialectFileTSV) {
+  std::string content = "name\tvalue\tcount\nalpha\t1\t100\nbeta\t2\t200\n";
+  std::string filename = createTestFile(content);
+
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file(filename.c_str());
+  ASSERT_NE(result, nullptr);
+
+  EXPECT_TRUE(libvroom_detection_result_success(result));
+
+  libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+  ASSERT_NE(dialect, nullptr);
+  EXPECT_EQ(libvroom_dialect_delimiter(dialect), '\t');
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_detection_result_destroy(result);
+}
+
+TEST_F(CAPITest, DetectDialectFileSemicolon) {
+  std::string content = "name;value;count\nalpha;1;100\nbeta;2;200\n";
+  std::string filename = createTestFile(content);
+
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file(filename.c_str());
+  ASSERT_NE(result, nullptr);
+
+  EXPECT_TRUE(libvroom_detection_result_success(result));
+
+  libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+  ASSERT_NE(dialect, nullptr);
+  EXPECT_EQ(libvroom_dialect_delimiter(dialect), ';');
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_detection_result_destroy(result);
+}
+
+TEST_F(CAPITest, DetectDialectFilePipe) {
+  std::string content = "name|value|count\nalpha|1|100\nbeta|2|200\n";
+  std::string filename = createTestFile(content);
+
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file(filename.c_str());
+  ASSERT_NE(result, nullptr);
+
+  EXPECT_TRUE(libvroom_detection_result_success(result));
+
+  libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+  ASSERT_NE(dialect, nullptr);
+  EXPECT_EQ(libvroom_dialect_delimiter(dialect), '|');
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_detection_result_destroy(result);
+}
+
+TEST_F(CAPITest, DetectDialectFileNull) {
+  EXPECT_EQ(libvroom_detect_dialect_file(nullptr), nullptr);
+}
+
+TEST_F(CAPITest, DetectDialectFileNotFound) {
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file("nonexistent_file.csv");
+  ASSERT_NE(result, nullptr);
+
+  // Detection fails, but result object is returned with warning
+  EXPECT_FALSE(libvroom_detection_result_success(result));
+  EXPECT_NE(libvroom_detection_result_warning(result), nullptr);
+
+  libvroom_detection_result_destroy(result);
+}
+
+TEST_F(CAPITest, DetectDialectFileWithQuotedFields) {
+  std::string content =
+      "name,description,value\n\"Alice\",\"A person\",100\n\"Bob\",\"Another person\",200\n";
+  std::string filename = createTestFile(content);
+
+  libvroom_detection_result_t* result = libvroom_detect_dialect_file(filename.c_str());
+  ASSERT_NE(result, nullptr);
+
+  EXPECT_TRUE(libvroom_detection_result_success(result));
+
+  libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+  ASSERT_NE(dialect, nullptr);
+  EXPECT_EQ(libvroom_dialect_delimiter(dialect), ',');
+  EXPECT_EQ(libvroom_dialect_quote_char(dialect), '"');
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_detection_result_destroy(result);
 }
 
 TEST_F(CAPITest, DetectionResultAllAccessors) {

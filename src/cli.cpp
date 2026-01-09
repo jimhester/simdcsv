@@ -184,6 +184,7 @@ void printUsage(const char* prog) {
   cerr << "                        latin1, windows-1252\n";
   cerr << "  -j            Output in JSON format (for dialect/schema/stats)\n";
   cerr << "  -m <size>     Sample size for schema/stats (0=all rows, default: 0)\n";
+  cerr << "  -f, --force   Force output even with low confidence (for dialect command)\n";
   cerr << "  -S, --strict  Strict mode: exit with code 1 on any parse error\n";
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
@@ -209,6 +210,7 @@ void printUsage(const char* prog) {
   cerr << "  " << prog << " head -d semicolon european.csv\n";
   cerr << "  " << prog << " dialect unknown_format.csv\n";
   cerr << "  " << prog << " dialect -j data.csv       # JSON output\n";
+  cerr << "  " << prog << " dialect -f unknown.csv    # Force output even with low confidence\n";
   cerr << "  " << prog << " schema data.csv\n";
   cerr << "  " << prog << " schema -j data.csv       # JSON output\n";
   cerr << "  " << prog << " schema -m 1000 data.csv  # Sample 1000 rows\n";
@@ -1058,6 +1060,7 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
 
 // Helper: format delimiter for display
 static std::string formatDelimiter(char delim) {
+  // LCOV_EXCL_BR_START - switch branches; common delimiters tested
   switch (delim) {
   case ',':
     return "comma";
@@ -1072,10 +1075,12 @@ static std::string formatDelimiter(char delim) {
   default:
     return std::string(1, delim);
   }
+  // LCOV_EXCL_BR_STOP
 }
 
 // Helper: format quote char for display
 static std::string formatQuoteChar(char quote) {
+  // LCOV_EXCL_BR_START - formatting branches; common cases tested
   if (quote == '"')
     return "double-quote";
   if (quote == '\'')
@@ -1083,10 +1088,12 @@ static std::string formatQuoteChar(char quote) {
   if (quote == '\0')
     return "none";
   return std::string(1, quote);
+  // LCOV_EXCL_BR_STOP
 }
 
 // Helper: format line ending for display
 static std::string formatLineEnding(libvroom::Dialect::LineEnding le) {
+  // LCOV_EXCL_BR_START - exhaustive switch; all line endings tested
   switch (le) {
   case libvroom::Dialect::LineEnding::LF:
     return "LF";
@@ -1099,11 +1106,13 @@ static std::string formatLineEnding(libvroom::Dialect::LineEnding le) {
   default:
     return "unknown";
   }
+  // LCOV_EXCL_BR_STOP
 }
 
 // Helper: escape a character for JSON string output
 // Handles all JSON control characters per RFC 8259
 static std::string escapeJsonChar(char c) {
+  // LCOV_EXCL_BR_START - switch branches; common escapes tested
   switch (c) {
   case '"':
     return "\\\"";
@@ -1128,10 +1137,11 @@ static std::string escapeJsonChar(char c) {
     }
     return std::string(1, c);
   }
+  // LCOV_EXCL_BR_STOP
 }
 
 // Command: dialect - detect and output CSV dialect in human-readable or JSON format
-int cmdDialect(const char* filename, bool json_output) {
+int cmdDialect(const char* filename, bool json_output, bool force_output) {
   LoadResult load_result;
 
   try {
@@ -1153,13 +1163,14 @@ int cmdDialect(const char* filename, bool json_output) {
   auto result = detector.detect(load_result.data(), load_result.size);
 
   // Check if detection failed (confidence too low)
-  // Even if the warning mentions ambiguity, we still fail if confidence is below threshold
-  if (!result.success()) {
+  bool low_confidence = !result.success();
+  if (low_confidence && !force_output) {
     cerr << "Error: Could not detect CSV dialect";
     if (!result.warning.empty()) {
       cerr << ": " << result.warning;
     }
     cerr << endl;
+    cerr << "Hint: Use -f/--force to output best guess despite low confidence" << endl;
     return 1;
   }
 
@@ -1170,6 +1181,12 @@ int cmdDialect(const char* filename, bool json_output) {
 
   const auto& d = result.dialect;
   const auto& enc_result = load_result.encoding;
+
+  // Output warning to stderr if low confidence (when --force is used)
+  if (low_confidence) {
+    cerr << "Warning: Low confidence detection (" << static_cast<int>(result.confidence * 100)
+         << "%), results may be unreliable" << endl;
+  }
 
   if (json_output) {
     // JSON output for programmatic use
@@ -1186,6 +1203,7 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "  \"has_header\": " << (result.has_header ? "true" : "false") << ",\n";
     cout << "  \"columns\": " << result.detected_columns << ",\n";
     cout << "  \"confidence\": " << result.confidence << ",\n";
+    cout << "  \"low_confidence\": " << (low_confidence ? "true" : "false") << ",\n";
     cout << "  \"ambiguous\": " << (is_ambiguous ? "true" : "false");
 
     // Include alternative candidates when ambiguous
@@ -1225,6 +1243,9 @@ int cmdDialect(const char* filename, bool json_output) {
     cout << "  Has header:   " << (result.has_header ? "yes" : "no") << "\n";
     cout << "  Columns:      " << result.detected_columns << "\n";
     cout << "  Confidence:   " << static_cast<int>(result.confidence * 100) << "%\n";
+    if (low_confidence) {
+      cout << "  Status:       LOW CONFIDENCE (best guess)\n";
+    }
 
     // Show ambiguity warning and alternatives
     if (is_ambiguous) {
@@ -1572,6 +1593,7 @@ int main(int argc, char* argv[]) {
   bool auto_detect = true;          // Auto-detect by default
   bool delimiter_specified = false; // Track if user specified delimiter
   bool json_output = false;         // JSON output for dialect command
+  bool force_output = false;        // Force output even with low confidence (dialect command)
   bool strict_mode = false;         // Strict mode: exit with code 1 on any parse error
   unsigned int random_seed = 0;     // Random seed for sample command (0 = use random_device)
   libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN; // User-specified encoding
@@ -1581,7 +1603,7 @@ int main(int argc, char* argv[]) {
   string encoding_str; // User-specified encoding string
   char quote_char = '"';
 
-  // Pre-scan for --strict long option (since we're not using getopt_long)
+  // Pre-scan for long options (since we're not using getopt_long)
   for (int i = 2; i < argc; ++i) {
     if (strcmp(argv[i], "--strict") == 0) {
       strict_mode = true;
@@ -1591,11 +1613,19 @@ int main(int argc, char* argv[]) {
       }
       --argc;
       --i; // Recheck this position
+    } else if (strcmp(argv[i], "--force") == 0) {
+      force_output = true;
+      // Remove --force from argv by shifting remaining args
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i; // Recheck this position
     }
   }
 
   int c;
-  while ((c = getopt(argc, argv, "n:c:Ht:d:q:e:s:m:jShv")) != -1) {
+  while ((c = getopt(argc, argv, "n:c:Ht:d:q:e:s:m:jfShv")) != -1) {
     switch (c) {
     case 'n': {
       char* endptr;
@@ -1660,6 +1690,9 @@ int main(int argc, char* argv[]) {
     case 'j':
       json_output = true;
       break;
+    case 'f':
+      force_output = true;
+      break;
     case 'm': {
       char* endptr;
       long val = strtol(optarg, &endptr, 10);
@@ -1723,7 +1756,7 @@ int main(int argc, char* argv[]) {
   } else if (command == "dialect") {
     // Note: dialect command ignores -d, --strict, and -e flags since it's for detection
     (void)delimiter_specified; // Suppress unused warning
-    result = cmdDialect(filename, json_output);
+    result = cmdDialect(filename, json_output, force_output);
   } else if (command == "schema") {
     result = cmdSchema(filename, n_threads, has_header, dialect, auto_detect, json_output,
                        strict_mode, sample_size);

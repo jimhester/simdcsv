@@ -661,6 +661,33 @@ libvroom_error_t libvroom_error_collector_get(const libvroom_error_collector_t* 
 void libvroom_error_collector_clear(libvroom_error_collector_t* collector);
 
 /**
+ * @brief Generate a human-readable summary of all collected parse errors.
+ *
+ * Creates a formatted string containing:
+ * - Total error count with breakdown by severity (warnings, errors, fatal)
+ * - Detailed listing of each error with location and message
+ *
+ * @param collector The error collector to summarize.
+ * @return Newly allocated string containing the summary. The caller is responsible
+ *         for freeing this string using free(). Returns NULL if collector is NULL
+ *         or if memory allocation fails.
+ *
+ * @example
+ * @code
+ * libvroom_error_collector_t* errors = libvroom_error_collector_create(LIBVROOM_MODE_PERMISSIVE,
+ * 100);
+ * // ... parse with errors ...
+ * char* summary = libvroom_error_collector_summary(errors);
+ * if (summary) {
+ *     printf("%s\n", summary);
+ *     free(summary);
+ * }
+ * libvroom_error_collector_destroy(errors);
+ * @endcode
+ */
+char* libvroom_error_collector_summary(const libvroom_error_collector_t* collector);
+
+/**
  * @brief Destroy an error collector and free its resources.
  *
  * @param collector The collector to destroy. May be NULL (no-op).
@@ -841,6 +868,30 @@ void libvroom_parser_destroy(libvroom_parser_t* parser);
  * @see libvroom_parse_auto() to detect and parse in one step.
  */
 libvroom_detection_result_t* libvroom_detect_dialect(const libvroom_buffer_t* buffer);
+
+/**
+ * @brief Detect the CSV dialect directly from a file.
+ *
+ * Convenience function that combines file loading and dialect detection into
+ * a single operation. Internally loads a sample of the file and detects the
+ * dialect without requiring manual buffer management.
+ *
+ * @param filename Path to the CSV file to analyze.
+ * @return Detection result handle, or NULL on failure.
+ *         The caller must call libvroom_detection_result_destroy() to free the result.
+ *
+ * @example
+ * @code
+ * libvroom_detection_result_t* result = libvroom_detect_dialect_file("data.csv");
+ * if (result && libvroom_detection_result_success(result)) {
+ *     libvroom_dialect_t* dialect = libvroom_detection_result_dialect(result);
+ *     printf("Delimiter: %c\n", libvroom_dialect_delimiter(dialect));
+ *     libvroom_dialect_destroy(dialect);
+ * }
+ * libvroom_detection_result_destroy(result);
+ * @endcode
+ */
+libvroom_detection_result_t* libvroom_detect_dialect_file(const char* filename);
 
 /**
  * @brief Check if dialect detection was successful.
