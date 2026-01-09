@@ -359,6 +359,41 @@ struct ParseOptions {
   }
 
   /**
+   * @brief Factory for auto-detection mode with explicit intent.
+   *
+   * Returns default options configured for dialect auto-detection.
+   * This is functionally equivalent to defaults() and standard(), but
+   * provides more self-documenting code when auto-detection is the
+   * explicit requirement.
+   *
+   * @return ParseOptions configured for auto-detection.
+   *
+   * @example
+   * @code
+   * auto result = parser.parse(buf, len, ParseOptions::auto_detect());
+   * @endcode
+   */
+  static ParseOptions auto_detect() { return ParseOptions{}; }
+
+  /**
+   * @brief Factory for auto-detection with error collection.
+   *
+   * Convenience method combining dialect auto-detection with error
+   * collection. This provides more self-documenting code compared to
+   * using with_errors() when auto-detection is the explicit intent.
+   *
+   * @param e Reference to an ErrorCollector for collecting parse errors.
+   * @return ParseOptions configured for auto-detection with error collection.
+   *
+   * @example
+   * @code
+   * ErrorCollector errors(ErrorMode::PERMISSIVE);
+   * auto result = parser.parse(buf, len, ParseOptions::auto_detect_with_errors(errors));
+   * @endcode
+   */
+  static ParseOptions auto_detect_with_errors(ErrorCollector& e) { return with_errors(e); }
+
+  /**
    * @brief Factory for options with both dialect and error collection.
    */
   static ParseOptions with_dialect_and_errors(const Dialect& d, ErrorCollector& e) {
