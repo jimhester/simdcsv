@@ -1709,6 +1709,13 @@ public:
     // 2. A source file path is provided (!source_path.empty())
     bool can_use_cache = options.cache.has_value() && !options.source_path.empty();
 
+    // Helper to emit cache warnings (captures warning callback from config)
+    auto cache_warn = [&options]([[maybe_unused]] const std::string& message) {
+      if (options.cache.has_value() && options.cache->warning_callback) {
+        options.cache->warning_callback(message);
+      }
+    };
+
     if (can_use_cache) {
       const CacheConfig& cache_config = *options.cache;
       auto [cache_path, writable] =
@@ -1742,12 +1749,10 @@ public:
           return result;
         }
 
-        // Cache miss or corruption - if corrupted, file was already deleted
+        // Cache miss or corruption
         // Log corruption as a warning (non-fatal) so callers are aware
         if (load_result.was_corrupted) {
-          collector->add_error(ErrorCode::NONE, ErrorSeverity::WARNING, 0, 0, 0,
-                               "Cache corruption detected and file deleted: " +
-                                   load_result.error_message);
+          cache_warn("Cache corruption detected and file deleted: " + load_result.error_message);
         }
       }
 
@@ -1839,8 +1844,13 @@ public:
       // Store column count in idx for caching (idx.columns may be 0 because
       // num_columns() typically uses the ValueExtractor)
       result.idx.columns = result.num_columns();
-      // Write cache file (failures are silent - caching is best-effort)
-      IndexCache::write_atomic(result.cache_path, result.idx, options.source_path);
+      // Write cache file - emit warning on failure
+      bool write_success =
+          IndexCache::write_atomic(result.cache_path, result.idx, options.source_path);
+      if (!write_success) {
+        cache_warn("Failed to write cache file '" + result.cache_path +
+                   "'; caching disabled for this parse");
+      }
     }
 
     // Store buffer reference to enable row/column iteration
