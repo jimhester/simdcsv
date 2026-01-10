@@ -895,3 +895,191 @@ TEST_F(IndexCacheTest, ParserApi_DialectDetectionWithCache) {
   EXPECT_TRUE(result2.used_cache);
   EXPECT_EQ(result2.dialect.delimiter, '\t'); // Still TSV
 }
+
+// =============================================================================
+// Warning Callback Tests
+// =============================================================================
+
+TEST_F(IndexCacheTest, WarningCallback_NotCalledOnSuccess) {
+  // Warning callback should NOT be called when everything works normally
+  std::string content = "a,b\n1,2\n";
+  std::string source_path = createTempFile("no_warn.csv", content);
+
+  std::vector<std::string> warnings;
+  CacheConfig config = CacheConfig::defaults();
+  config.warning_callback = [&warnings](const std::string& msg) { warnings.push_back(msg); };
+
+  auto [cache_path, success] = IndexCache::try_compute_writable_path(source_path, config);
+
+  EXPECT_TRUE(success);
+  EXPECT_FALSE(cache_path.empty());
+  EXPECT_TRUE(warnings.empty()); // No warnings for successful operation
+}
+
+TEST_F(IndexCacheTest, WarningCallback_FallbackToXdg) {
+  // Warning should be emitted when falling back from SAME_DIR to XDG_CACHE
+  std::string ro_dir = createTempDir("readonly_dir");
+
+  // Create a file in read-only directory
+  std::string source_path = ro_dir + "/data.csv";
+  std::ofstream file(source_path, std::ios::binary);
+  file << "a,b\n1,2\n";
+  file.close();
+
+  // Make directory read-only
+  chmod(ro_dir.c_str(), 0555);
+
+  std::vector<std::string> warnings;
+  CacheConfig config = CacheConfig::defaults();
+  config.warning_callback = [&warnings](const std::string& msg) { warnings.push_back(msg); };
+
+  auto [cache_path, success] = IndexCache::try_compute_writable_path(source_path, config);
+
+  // Restore permissions for cleanup
+  chmod(ro_dir.c_str(), 0755);
+
+  // Should fall back to XDG cache and emit a warning
+  if (success) {
+    ASSERT_EQ(warnings.size(), 1u);
+    EXPECT_TRUE(warnings[0].find("falling back to XDG cache") != std::string::npos);
+    EXPECT_TRUE(cache_path.find(".cache/libvroom") != std::string::npos);
+  } else {
+    // If XDG is also not writable, we get a different warning
+    ASSERT_GE(warnings.size(), 1u);
+    EXPECT_TRUE(warnings[0].find("not writable") != std::string::npos);
+  }
+}
+
+TEST_F(IndexCacheTest, WarningCallback_CustomDirNotWritable) {
+  // Warning should be emitted when custom directory is not writable
+  std::vector<std::string> warnings;
+  CacheConfig config = CacheConfig::custom("/nonexistent/directory");
+  config.warning_callback = [&warnings](const std::string& msg) { warnings.push_back(msg); };
+
+  std::string source_path = temp_dir + "/test.csv";
+  auto [cache_path, success] = IndexCache::try_compute_writable_path(source_path, config);
+
+  EXPECT_FALSE(success);
+  EXPECT_TRUE(cache_path.empty());
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_TRUE(warnings[0].find("not writable") != std::string::npos);
+  EXPECT_TRUE(warnings[0].find("/nonexistent/directory") != std::string::npos);
+}
+
+TEST_F(IndexCacheTest, WarningCallback_EmptyCustomPath) {
+  // Warning should be emitted when custom path is empty
+  std::vector<std::string> warnings;
+  CacheConfig config = CacheConfig::custom("");
+  config.warning_callback = [&warnings](const std::string& msg) { warnings.push_back(msg); };
+
+  std::string source_path = temp_dir + "/test.csv";
+  auto [cache_path, success] = IndexCache::try_compute_writable_path(source_path, config);
+
+  EXPECT_FALSE(success);
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_TRUE(warnings[0].find("empty") != std::string::npos);
+}
+
+TEST_F(IndexCacheTest, WarningCallback_NullCallbackDoesNotCrash) {
+  // Null callback should not cause issues
+  CacheConfig config = CacheConfig::custom("/nonexistent/directory");
+  // warning_callback is not set (nullptr by default)
+
+  std::string source_path = temp_dir + "/test.csv";
+  auto [cache_path, success] = IndexCache::try_compute_writable_path(source_path, config);
+
+  // Should complete without crash, just no warnings emitted
+  EXPECT_FALSE(success);
+  EXPECT_TRUE(cache_path.empty());
+}
+
+TEST_F(IndexCacheTest, WarningCallback_ParserApi_CacheWriteFailure) {
+  // Test that warning is emitted when cache write fails
+  std::string content = "a,b\n1,2\n";
+  std::string source_path = createTempFile("write_fail.csv", content);
+  std::string ro_dir = createTempDir("readonly_cache");
+
+  // Make directory read-only after creation
+  chmod(ro_dir.c_str(), 0555);
+
+  std::vector<std::string> warnings;
+  libvroom::ParseOptions opts;
+  opts.cache = CacheConfig::custom(ro_dir);
+  opts.cache->warning_callback = [&warnings](const std::string& msg) { warnings.push_back(msg); };
+  opts.source_path = source_path;
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto result = parser.parse(buffer.data(), buffer.size, opts);
+
+  // Restore permissions for cleanup
+  chmod(ro_dir.c_str(), 0755);
+
+  // Parsing should succeed
+  EXPECT_TRUE(result.success());
+  EXPECT_FALSE(result.used_cache);
+
+  // Warning should be emitted about cache write failure or directory not writable
+  ASSERT_GE(warnings.size(), 1u);
+  // Either "not writable" (path computation) or "Failed to write" (write attempt)
+  bool has_relevant_warning = false;
+  for (const auto& w : warnings) {
+    if (w.find("not writable") != std::string::npos ||
+        w.find("Failed to write") != std::string::npos) {
+      has_relevant_warning = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(has_relevant_warning);
+}
+
+TEST_F(IndexCacheTest, WarningCallback_ParserApi_InvalidCache) {
+  // Test that warning is emitted when cache is invalid
+  std::string content = "a,b\n1,2\n";
+  std::string source_path = createTempFile("invalid_cache.csv", content);
+  std::string cache_path = source_path + ".vidx";
+
+  // Create an invalid cache file (wrong version or corrupted)
+  std::ofstream cache_file(cache_path, std::ios::binary);
+  cache_file << "invalid_cache_data";
+  cache_file.close();
+
+  std::vector<std::string> warnings;
+  libvroom::ParseOptions opts;
+  opts.cache = CacheConfig::defaults();
+  opts.cache->warning_callback = [&warnings](const std::string& msg) { warnings.push_back(msg); };
+  opts.source_path = source_path;
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto result = parser.parse(buffer.data(), buffer.size, opts);
+
+  // Parsing should succeed (re-parsing after cache miss)
+  EXPECT_TRUE(result.success());
+  EXPECT_FALSE(result.used_cache);
+
+  // Warning should be emitted about invalid cache
+  ASSERT_GE(warnings.size(), 1u);
+  EXPECT_TRUE(warnings[0].find("invalid") != std::string::npos ||
+              warnings[0].find("version mismatch") != std::string::npos ||
+              warnings[0].find("corruption") != std::string::npos);
+}
+
+TEST_F(IndexCacheTest, WarningCallback_MultipleWarnings) {
+  // Test that multiple warnings can be collected
+  std::vector<std::string> warnings;
+  CacheConfig config = CacheConfig::custom("/nonexistent/path1");
+  config.warning_callback = [&warnings](const std::string& msg) { warnings.push_back(msg); };
+
+  // This should emit a warning
+  auto [path1, success1] = IndexCache::try_compute_writable_path("/test1.csv", config);
+  EXPECT_FALSE(success1);
+
+  // Update config and try again
+  config.custom_path = "/nonexistent/path2";
+  auto [path2, success2] = IndexCache::try_compute_writable_path("/test2.csv", config);
+  EXPECT_FALSE(success2);
+
+  // Both warnings should be collected
+  EXPECT_EQ(warnings.size(), 2u);
+}

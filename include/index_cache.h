@@ -37,6 +37,7 @@
 #include "two_pass.h"
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <utility>
 
@@ -44,6 +45,31 @@ namespace libvroom {
 
 /// Index cache format version (v1 includes source file metadata for validation)
 constexpr uint8_t INDEX_CACHE_VERSION = 1;
+
+/**
+ * @brief Callback type for cache warning messages.
+ *
+ * This callback is invoked when cache operations encounter non-fatal issues
+ * that users may want to be aware of for debugging or logging purposes.
+ *
+ * Warning scenarios include:
+ * - Cache file corruption requiring deletion and re-parsing
+ * - Cache write failures due to storage constraints
+ * - Location fallback (e.g., from source directory to XDG_CACHE)
+ * - Version mismatch invalidating cached data
+ * - Permission errors when accessing cache files
+ *
+ * @param message A human-readable description of the warning
+ *
+ * @example
+ * @code
+ * CacheConfig config = CacheConfig::defaults();
+ * config.warning_callback = [](const std::string& msg) {
+ *     std::cerr << "[cache warning] " << msg << std::endl;
+ * };
+ * @endcode
+ */
+using CacheWarningCallback = std::function<void(const std::string&)>;
 
 /**
  * @brief Configuration for cache location resolution.
@@ -92,6 +118,9 @@ struct CacheConfig {
 
   /// Extension used for cache files.
   static constexpr const char* CACHE_EXTENSION = ".vidx";
+
+  /// Optional callback for warning messages during cache operations.
+  CacheWarningCallback warning_callback;
 
   /**
    * @brief Create default configuration (SAME_DIR mode).
