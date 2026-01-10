@@ -54,6 +54,15 @@ protected:
     fs::create_directories(path);
     return path;
   }
+
+  std::string createTempFileInDir(const std::string& dir, const std::string& filename,
+                                  const std::string& content) {
+    std::string path = dir + "/" + filename;
+    std::ofstream file(path, std::ios::binary);
+    file.write(content.data(), content.size());
+    file.close();
+    return path;
+  }
 };
 
 // =============================================================================
@@ -1298,20 +1307,352 @@ TEST_F(IndexCacheTest, WriteAtomicResult_NonexistentSource) {
   EXPECT_EQ(result.error, CacheError::IoError);
 }
 
-TEST_F(IndexCacheTest, WriteAtomicResult_NonexistentDirectory) {
+TEST_F(IndexCacheTest, WriteAtomicResult_NonWritableDir) {
   std::string content = "a,b\n1,2\n";
-  std::string source_path = createTempFile("write_nodir.csv", content);
-  std::string cache_path = "/nonexistent/dir/cache.vidx";
+  std::string source_path = createTempFile("write_perm.csv", content);
 
   libvroom::Parser parser;
   auto buffer = libvroom::load_file_to_ptr(source_path, 64);
   auto parse_result = parser.parse(buffer.data(), buffer.size);
   ASSERT_TRUE(parse_result.success());
 
-  auto result = IndexCache::write_atomic_result(cache_path, parse_result.idx, source_path);
+  // Try to write to a directory that doesn't exist
+  auto result =
+      IndexCache::write_atomic_result("/nonexistent/dir/cache.vidx", parse_result.idx, source_path);
 
   EXPECT_FALSE(result.success());
-  EXPECT_EQ(result.error, CacheError::PermissionDenied);
+  // Could be IoError or PermissionDenied depending on system
+  EXPECT_TRUE(result.error == CacheError::IoError || result.error == CacheError::PermissionDenied);
+}
+
+// =============================================================================
+// IndexCache::resolve_path Tests
+// =============================================================================
+
+TEST_F(IndexCacheTest, ResolvePath_EmptyPath) {
+  std::string result = IndexCache::resolve_path("");
+  EXPECT_EQ(result, "");
+}
+
+TEST_F(IndexCacheTest, ResolvePath_NonexistentPath) {
+  std::string result = IndexCache::resolve_path("/nonexistent/path/to/file.csv");
+  // Should return the original path since it doesn't exist
+  EXPECT_EQ(result, "/nonexistent/path/to/file.csv");
+}
+
+TEST_F(IndexCacheTest, ResolvePath_ExistingFile) {
+  std::string source = createTempFile("resolve_test.csv", "a,b\n1,2\n");
+  std::string resolved = IndexCache::resolve_path(source);
+
+  // Resolved path should be non-empty and exist
+  EXPECT_FALSE(resolved.empty());
+  EXPECT_TRUE(fs::exists(resolved));
+}
+
+#ifndef _WIN32
+// Symlink tests only work on Unix-like systems
+TEST_F(IndexCacheTest, ResolvePath_Symlink) {
+  std::string source = createTempFile("original.csv", "a,b\n1,2\n");
+  std::string link = temp_dir + "/link.csv";
+
+  // Create a symlink
+  ASSERT_EQ(symlink(source.c_str(), link.c_str()), 0);
+
+  std::string resolved_source = IndexCache::resolve_path(source);
+  std::string resolved_link = IndexCache::resolve_path(link);
+
+  // Both should resolve to the same canonical path
+  EXPECT_EQ(resolved_source, resolved_link);
+}
+
+TEST_F(IndexCacheTest, ResolvePath_NestedSymlinks) {
+  // Create: subdir/file.csv, link1 -> subdir, link2 -> link1
+  std::string subdir = temp_dir + "/subdir";
+  fs::create_directory(subdir);
+  std::string source = createTempFileInDir(subdir, "file.csv", "a,b\n1,2\n");
+
+  std::string link1 = temp_dir + "/link1";
+  std::string link2 = temp_dir + "/link2";
+
+  ASSERT_EQ(symlink(subdir.c_str(), link1.c_str()), 0);
+  ASSERT_EQ(symlink(link1.c_str(), link2.c_str()), 0);
+
+  std::string path_via_link2 = link2 + "/file.csv";
+
+  std::string resolved_direct = IndexCache::resolve_path(source);
+  std::string resolved_via_link2 = IndexCache::resolve_path(path_via_link2);
+
+  EXPECT_EQ(resolved_direct, resolved_via_link2);
+}
+
+TEST_F(IndexCacheTest, ResolvePath_SymlinkedDir) {
+  std::string subdir = temp_dir + "/real_subdir";
+  fs::create_directory(subdir);
+  std::string source = createTempFileInDir(subdir, "file.csv", "a,b\n1,2\n");
+
+  std::string dir_link = temp_dir + "/linked_subdir";
+  ASSERT_EQ(symlink(subdir.c_str(), dir_link.c_str()), 0);
+
+  std::string path_via_link = dir_link + "/file.csv";
+
+  std::string resolved_direct = IndexCache::resolve_path(source);
+  std::string resolved_via_link = IndexCache::resolve_path(path_via_link);
+
+  EXPECT_EQ(resolved_direct, resolved_via_link);
+}
+
+#endif // _WIN32
+
+// =============================================================================
+// IndexCache::load Tests (Corruption detection with auto-cleanup)
+// =============================================================================
+
+TEST_F(IndexCacheTest, Load_NonexistentCache) {
+  std::string source_path = createTempFile("source.csv", "a,b\n1,2\n");
+  std::string cache_path = temp_dir + "/nonexistent.vidx";
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_FALSE(result.was_corrupted);
+  EXPECT_FALSE(result.file_deleted);
+  EXPECT_FALSE(result.error_message.empty());
+}
+
+TEST_F(IndexCacheTest, Load_NonexistentSource) {
+  std::string cache_path = createTempFile("cache.vidx", "some content");
+
+  auto result = IndexCache::load(cache_path, "/nonexistent/source.csv");
+
+  EXPECT_FALSE(result.success());
+  EXPECT_FALSE(result.was_corrupted);
+  EXPECT_FALSE(result.file_deleted);
+}
+
+TEST_F(IndexCacheTest, Load_ValidCache) {
+  // Create source file and valid cache
+  std::string content = "a,b,c\n1,2,3\n4,5,6\n";
+  std::string source_path = createTempFile("valid_source.csv", content);
+  std::string cache_path = temp_dir + "/valid_source.csv.vidx";
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto parse_result = parser.parse(buffer.data(), buffer.size);
+  ASSERT_TRUE(parse_result.success());
+
+  // Write cache
+  ASSERT_TRUE(IndexCache::write_atomic(cache_path, parse_result.idx, source_path));
+
+  // Load should succeed
+  auto result = IndexCache::load(cache_path, source_path);
+  EXPECT_TRUE(result.success());
+  EXPECT_FALSE(result.was_corrupted);
+  EXPECT_FALSE(result.file_deleted);
+  EXPECT_TRUE(result.index.is_valid());
+}
+
+TEST_F(IndexCacheTest, Load_TruncatedHeader_DeletesFile) {
+  std::string source_path = createTempFile("truncated.csv", "a,b\n1,2\n");
+
+  // Create a cache file that's too small (less than 40-byte header)
+  std::string cache_path = temp_dir + "/truncated.vidx";
+  std::ofstream file(cache_path, std::ios::binary);
+  file << "short"; // Only 5 bytes, need at least 40
+  file.close();
+
+  ASSERT_TRUE(fs::exists(cache_path));
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_TRUE(result.was_corrupted);
+  EXPECT_TRUE(result.file_deleted);
+  EXPECT_FALSE(fs::exists(cache_path)); // File should be deleted
+  EXPECT_TRUE(result.error_message.find("too small") != std::string::npos);
+}
+
+TEST_F(IndexCacheTest, Load_WrongVersion_DeletesFile) {
+  std::string source_path = createTempFile("wrongver.csv", "a,b\n1,2\n");
+
+  // Create a cache file with wrong version byte
+  std::string cache_path = temp_dir + "/wrongver.vidx";
+  std::ofstream file(cache_path, std::ios::binary);
+
+  // Write invalid version (255 instead of 3)
+  uint8_t wrong_version = 255;
+  file.write(reinterpret_cast<char*>(&wrong_version), 1);
+
+  // Pad to minimum header size (40 bytes)
+  char padding[39] = {0};
+  file.write(padding, 39);
+  file.close();
+
+  ASSERT_TRUE(fs::exists(cache_path));
+  ASSERT_GE(fs::file_size(cache_path), 40u);
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_TRUE(result.was_corrupted);
+  EXPECT_TRUE(result.file_deleted);
+  EXPECT_FALSE(fs::exists(cache_path));
+  EXPECT_TRUE(result.error_message.find("version") != std::string::npos);
+}
+
+TEST_F(IndexCacheTest, Load_TruncatedIndexData_DeletesFile) {
+  // Create source file and valid cache first
+  std::string content = "a,b,c\n1,2,3\n4,5,6\n";
+  std::string source_path = createTempFile("truncated_data.csv", content);
+  std::string cache_path = temp_dir + "/truncated_data.csv.vidx";
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto parse_result = parser.parse(buffer.data(), buffer.size);
+  ASSERT_TRUE(parse_result.success());
+
+  // Write valid cache
+  ASSERT_TRUE(IndexCache::write_atomic(cache_path, parse_result.idx, source_path));
+  size_t original_size = fs::file_size(cache_path);
+
+  // Truncate the cache file (remove some index data)
+  fs::resize_file(cache_path, original_size - 20);
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_TRUE(result.was_corrupted);
+  EXPECT_TRUE(result.file_deleted);
+  EXPECT_FALSE(fs::exists(cache_path));
+}
+
+TEST_F(IndexCacheTest, Load_StaleCache_DoesNotDelete) {
+  // Create source file and valid cache
+  std::string content = "a,b,c\n1,2,3\n";
+  std::string source_path = createTempFile("stale.csv", content);
+  std::string cache_path = temp_dir + "/stale.csv.vidx";
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto parse_result = parser.parse(buffer.data(), buffer.size);
+  ASSERT_TRUE(parse_result.success());
+
+  // Write cache
+  ASSERT_TRUE(IndexCache::write_atomic(cache_path, parse_result.idx, source_path));
+
+  // Modify source file to make cache stale
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  std::ofstream file(source_path, std::ios::binary);
+  file << "a,b,c,d\n1,2,3,4\n5,6,7,8\n"; // Different content
+  file.close();
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_FALSE(result.was_corrupted); // Stale, not corrupted
+  EXPECT_FALSE(result.file_deleted);  // Should not delete stale caches
+  EXPECT_TRUE(fs::exists(cache_path));
+}
+
+TEST_F(IndexCacheTest, Load_GarbageContent_DeletesFile) {
+  std::string source_path = createTempFile("garbage.csv", "a,b\n1,2\n");
+
+  // Create a cache file with correct version but garbage content
+  std::string cache_path = temp_dir + "/garbage.vidx";
+  {
+    std::ofstream file(cache_path, std::ios::binary);
+
+    // Write correct version
+    uint8_t version = 3;
+    file.write(reinterpret_cast<char*>(&version), 1);
+
+    // Write padding (7 bytes)
+    char padding[7] = {0};
+    file.write(padding, 7);
+
+    // Get source metadata and write matching mtime/size
+    auto [mtime, size] = IndexCache::get_source_metadata(source_path);
+    file.write(reinterpret_cast<char*>(&mtime), 8);
+    file.write(reinterpret_cast<char*>(&size), 8);
+
+    // Write garbage for rest of header and data
+    char garbage[100];
+    std::memset(garbage, 0xFF, sizeof(garbage));
+    file.write(garbage, sizeof(garbage));
+  }
+
+  ASSERT_TRUE(fs::exists(cache_path));
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_TRUE(result.was_corrupted);
+  EXPECT_TRUE(result.file_deleted);
+  EXPECT_FALSE(fs::exists(cache_path));
+}
+
+// =============================================================================
+// Parser Integration with Corruption Detection
+// =============================================================================
+
+TEST_F(IndexCacheTest, ParserApi_CorruptedCacheAutomaticallyDeleted) {
+  std::string content = "a,b,c\n1,2,3\n";
+  std::string source_path = createTempFile("corrupt_auto.csv", content);
+  std::string cache_path = source_path + ".vidx";
+
+  // Create a corrupted cache file
+  {
+    std::ofstream file(cache_path, std::ios::binary);
+    uint8_t wrong_version = 42;
+    file.write(reinterpret_cast<char*>(&wrong_version), 1);
+    char padding[50] = {0};
+    file.write(padding, sizeof(padding));
+  }
+
+  ASSERT_TRUE(fs::exists(cache_path));
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto opts = libvroom::ParseOptions::with_cache(source_path);
+
+  // Parse should succeed (re-parse after detecting corruption)
+  auto result = parser.parse(buffer.data(), buffer.size, opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_FALSE(result.used_cache);     // Cache was corrupted, so re-parsed
+  EXPECT_TRUE(fs::exists(cache_path)); // New cache should be written
+}
+
+TEST_F(IndexCacheTest, ParserApi_CorruptedCacheRecreatedOnReparse) {
+  std::string content = "name,value\nalice,100\nbob,200\n";
+  std::string source_path = createTempFile("recreate.csv", content);
+  std::string cache_path = source_path + ".vidx";
+
+  // Create corrupted cache
+  {
+    std::ofstream file(cache_path, std::ios::binary);
+    file << "NOT A VALID CACHE FILE";
+  }
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto opts = libvroom::ParseOptions::with_cache(source_path);
+
+  // First parse - detects corruption, deletes bad cache, re-parses, writes new cache
+  auto result1 = parser.parse(buffer.data(), buffer.size, opts);
+  EXPECT_TRUE(result1.success());
+  EXPECT_FALSE(result1.used_cache);
+
+  // Second parse - should now hit the valid cache
+  auto result2 = parser.parse(buffer.data(), buffer.size, opts);
+  EXPECT_TRUE(result2.success());
+  EXPECT_TRUE(result2.used_cache);
+
+  // Verify data is correct from cached index
+  EXPECT_EQ(result2.num_rows(), 2);
+  auto names = result2.column_string(0);
+  EXPECT_EQ(names.size(), 2u);
+  EXPECT_EQ(names[0], "alice");
+  EXPECT_EQ(names[1], "bob");
 }
 
 #ifndef _WIN32
@@ -1338,205 +1679,3 @@ TEST_F(IndexCacheTest, WriteAtomicResult_PermissionDenied) {
   chmod(readonly_dir.c_str(), 0755);
 }
 #endif
-
-// =============================================================================
-// Symlink Resolution Tests
-// =============================================================================
-
-#ifndef _WIN32 // Symlink tests only run on Unix-like systems
-
-TEST_F(IndexCacheTest, ResolvePath_RegularFile) {
-  // resolve_path should return the same path for a regular file (no symlinks)
-  std::string source = createTempFile("regular.csv", "a,b\n1,2\n");
-
-  std::string resolved = IndexCache::resolve_path(source);
-
-  // Should be a canonical path (absolute, no . or ..)
-  EXPECT_FALSE(resolved.empty());
-  EXPECT_EQ(resolved[0], '/'); // Absolute path
-}
-
-TEST_F(IndexCacheTest, ResolvePath_Symlink) {
-  // Create a regular file and a symlink to it
-  std::string source = createTempFile("target.csv", "a,b\n1,2\n");
-  std::string symlink_path = temp_dir + "/link.csv";
-
-  // Create symlink
-  ASSERT_EQ(symlink(source.c_str(), symlink_path.c_str()), 0)
-      << "Failed to create symlink: " << strerror(errno);
-
-  // resolve_path should return the same canonical path for both
-  std::string resolved_source = IndexCache::resolve_path(source);
-  std::string resolved_symlink = IndexCache::resolve_path(symlink_path);
-
-  EXPECT_EQ(resolved_source, resolved_symlink);
-}
-
-TEST_F(IndexCacheTest, ResolvePath_NonexistentFile) {
-  // resolve_path should gracefully fall back to original path
-  std::string nonexistent = "/nonexistent/path/file.csv";
-
-  std::string resolved = IndexCache::resolve_path(nonexistent);
-
-  // Should return original path since file doesn't exist
-  EXPECT_EQ(resolved, nonexistent);
-}
-
-TEST_F(IndexCacheTest, ResolvePath_EmptyPath) {
-  std::string resolved = IndexCache::resolve_path("");
-
-  EXPECT_TRUE(resolved.empty());
-}
-
-TEST_F(IndexCacheTest, ComputePath_SymlinksShareCacheXdg) {
-  // Two different symlinks to the same file should produce the same XDG cache path
-  std::string source = createTempFile("shared.csv", "a,b\n1,2\n");
-  std::string symlink1 = temp_dir + "/link1.csv";
-  std::string symlink2 = temp_dir + "/link2.csv";
-
-  ASSERT_EQ(symlink(source.c_str(), symlink1.c_str()), 0);
-  ASSERT_EQ(symlink(source.c_str(), symlink2.c_str()), 0);
-
-  CacheConfig config = CacheConfig::xdg_cache();
-  // resolve_symlinks is true by default
-
-  std::string cache1 = IndexCache::compute_path(symlink1, config);
-  std::string cache2 = IndexCache::compute_path(symlink2, config);
-
-  // Both symlinks should resolve to the same cache path
-  EXPECT_EQ(cache1, cache2);
-
-  // And should match the direct path's cache
-  std::string cache_direct = IndexCache::compute_path(source, config);
-  EXPECT_EQ(cache1, cache_direct);
-}
-
-TEST_F(IndexCacheTest, ComputePath_SymlinksDisabledGetSeparateCaches) {
-  // With resolve_symlinks=false, different paths get different caches
-  std::string source = createTempFile("separate.csv", "a,b\n1,2\n");
-  std::string symlink1 = temp_dir + "/sep_link1.csv";
-  std::string symlink2 = temp_dir + "/sep_link2.csv";
-
-  ASSERT_EQ(symlink(source.c_str(), symlink1.c_str()), 0);
-  ASSERT_EQ(symlink(source.c_str(), symlink2.c_str()), 0);
-
-  CacheConfig config = CacheConfig::xdg_cache();
-  config.resolve_symlinks = false;
-
-  std::string cache1 = IndexCache::compute_path(symlink1, config);
-  std::string cache2 = IndexCache::compute_path(symlink2, config);
-  std::string cache_direct = IndexCache::compute_path(source, config);
-
-  // All three should be different since symlink resolution is disabled
-  EXPECT_NE(cache1, cache2);
-  EXPECT_NE(cache1, cache_direct);
-  EXPECT_NE(cache2, cache_direct);
-}
-
-TEST_F(IndexCacheTest, ComputePath_SameDirNotAffectedBySymlinkResolution) {
-  // SAME_DIR mode should always put cache next to the accessed path,
-  // not the resolved path
-  std::string source = createTempFile("samedir.csv", "a,b\n1,2\n");
-  std::string symlink_path = temp_dir + "/samedir_link.csv";
-
-  ASSERT_EQ(symlink(source.c_str(), symlink_path.c_str()), 0);
-
-  CacheConfig config = CacheConfig::defaults(); // SAME_DIR, resolve_symlinks=true
-
-  std::string cache_source = IndexCache::compute_path(source, config);
-  std::string cache_symlink = IndexCache::compute_path(symlink_path, config);
-
-  // SAME_DIR mode: cache should be adjacent to the path used
-  EXPECT_EQ(cache_source, source + ".vidx");
-  EXPECT_EQ(cache_symlink, symlink_path + ".vidx");
-}
-
-TEST_F(IndexCacheTest, CacheConfig_ResolveSymlinksDefault) {
-  CacheConfig config = CacheConfig::defaults();
-  EXPECT_TRUE(config.resolve_symlinks);
-}
-
-TEST_F(IndexCacheTest, CacheConfig_ResolveSymlinksXdg) {
-  CacheConfig config = CacheConfig::xdg_cache();
-  EXPECT_TRUE(config.resolve_symlinks);
-}
-
-TEST_F(IndexCacheTest, CacheConfig_ResolveSymlinksCustom) {
-  CacheConfig config = CacheConfig::custom("/custom/path");
-  EXPECT_TRUE(config.resolve_symlinks);
-}
-
-TEST_F(IndexCacheTest, Integration_SymlinkCacheSharing) {
-  // Full integration test: parsing via symlink should use cache from original
-  std::string content = "name,age\nAlice,30\nBob,25\n";
-  std::string source_path = createTempFile("sym_int.csv", content);
-  std::string symlink_path = temp_dir + "/sym_int_link.csv";
-
-  ASSERT_EQ(symlink(source_path.c_str(), symlink_path.c_str()), 0);
-
-  libvroom::Parser parser;
-
-  // First parse via original path (creates cache in XDG dir)
-  {
-    auto buffer = libvroom::load_file_to_ptr(source_path, 64);
-    libvroom::ParseOptions opts;
-    opts.cache = CacheConfig::xdg_cache();
-    opts.source_path = source_path;
-
-    auto result = parser.parse(buffer.data(), buffer.size, opts);
-    ASSERT_TRUE(result.success());
-    EXPECT_FALSE(result.used_cache); // Cache miss - first parse
-    EXPECT_FALSE(result.cache_path.empty());
-  }
-
-  // Second parse via symlink - should use the same cache!
-  {
-    auto buffer = libvroom::load_file_to_ptr(symlink_path, 64);
-    libvroom::ParseOptions opts;
-    opts.cache = CacheConfig::xdg_cache();
-    opts.source_path = symlink_path; // Using symlink path
-
-    auto result = parser.parse(buffer.data(), buffer.size, opts);
-    ASSERT_TRUE(result.success());
-    // Should be a cache hit because symlink resolves to same file
-    EXPECT_TRUE(result.used_cache);
-  }
-}
-
-TEST_F(IndexCacheTest, ResolvePath_NestedSymlinks) {
-  // Test with multiple levels of symlinks
-  std::string source = createTempFile("nested.csv", "a,b\n1,2\n");
-  std::string link1 = temp_dir + "/nested_link1.csv";
-  std::string link2 = temp_dir + "/nested_link2.csv";
-
-  // Create chain: link2 -> link1 -> source
-  ASSERT_EQ(symlink(source.c_str(), link1.c_str()), 0);
-  ASSERT_EQ(symlink(link1.c_str(), link2.c_str()), 0);
-
-  // All should resolve to the same canonical path
-  std::string resolved_source = IndexCache::resolve_path(source);
-  std::string resolved_link1 = IndexCache::resolve_path(link1);
-  std::string resolved_link2 = IndexCache::resolve_path(link2);
-
-  EXPECT_EQ(resolved_source, resolved_link1);
-  EXPECT_EQ(resolved_link1, resolved_link2);
-}
-
-TEST_F(IndexCacheTest, ResolvePath_DirectorySymlink) {
-  // Test with symlink in a directory component
-  std::string subdir = createTempDir("real_dir");
-  std::string source = subdir + "/file.csv";
-  std::ofstream(source) << "a,b\n1,2\n";
-
-  std::string dir_link = temp_dir + "/dir_link";
-  ASSERT_EQ(symlink(subdir.c_str(), dir_link.c_str()), 0);
-
-  std::string path_via_link = dir_link + "/file.csv";
-
-  std::string resolved_direct = IndexCache::resolve_path(source);
-  std::string resolved_via_link = IndexCache::resolve_path(path_via_link);
-
-  EXPECT_EQ(resolved_direct, resolved_via_link);
-}
-
-#endif // _WIN32

@@ -433,6 +433,120 @@ std::string IndexCache::hash_path(const std::string& path) {
   return std::string(buf);
 }
 
+IndexCache::LoadResult IndexCache::load(const std::string& cache_path,
+                                        const std::string& source_path) {
+  LoadResult result;
+
+  // Check if cache file exists
+  struct stat cache_st;
+  if (stat(cache_path.c_str(), &cache_st) != 0) {
+    // Cache file doesn't exist - not corruption, just a miss
+    result.error_message = "Cache file does not exist";
+    return result;
+  }
+
+  // Get source file metadata
+  SourceMetadata source_meta = SourceMetadata::from_file(source_path);
+  if (!source_meta.valid) {
+    // Source file doesn't exist or can't be read - not corruption
+    result.error_message = "Source file does not exist or cannot be read";
+    return result;
+  }
+
+  // Check minimum file size for header
+  // V3 header is 40 bytes minimum
+  static constexpr size_t INDEX_V3_HEADER_SIZE = 40;
+  if (static_cast<size_t>(cache_st.st_size) < INDEX_V3_HEADER_SIZE) {
+    result.was_corrupted = true;
+    result.error_message = "Cache file is too small to contain a valid header (expected at least " +
+                           std::to_string(INDEX_V3_HEADER_SIZE) + " bytes, got " +
+                           std::to_string(cache_st.st_size) + ")";
+
+    // Delete corrupted cache file
+    if (std::remove(cache_path.c_str()) == 0) {
+      result.file_deleted = true;
+    }
+    return result;
+  }
+
+  // Open and read version byte to check magic/format
+  std::FILE* fp = std::fopen(cache_path.c_str(), "rb");
+  if (!fp) {
+    result.error_message = "Failed to open cache file";
+    return result;
+  }
+
+  uint8_t version = 0;
+  if (std::fread(&version, 1, 1, fp) != 1) {
+    std::fclose(fp);
+    result.was_corrupted = true;
+    result.error_message = "Failed to read version byte from cache file";
+    if (std::remove(cache_path.c_str()) == 0) {
+      result.file_deleted = true;
+    }
+    return result;
+  }
+
+  // Expected v3 format version
+  static constexpr uint8_t INDEX_FORMAT_VERSION_V3 = 3;
+  if (version != INDEX_FORMAT_VERSION_V3) {
+    std::fclose(fp);
+    result.was_corrupted = true;
+    result.error_message = "Invalid cache version byte (expected " +
+                           std::to_string(INDEX_FORMAT_VERSION_V3) + ", got " +
+                           std::to_string(version) + ")";
+    if (std::remove(cache_path.c_str()) == 0) {
+      result.file_deleted = true;
+    }
+    return result;
+  }
+
+  std::fclose(fp);
+
+  // Version is correct, try to load the full index via mmap
+  // ParseIndex::from_mmap performs additional validation (size bounds, overflow checks)
+  result.index = ParseIndex::from_mmap(cache_path, source_meta);
+
+  if (!result.index.is_valid()) {
+    // Loading failed - this could be:
+    // 1. Source file changed (stale cache) - mtime/size mismatch
+    // 2. Truncated/corrupted index data
+
+    // Re-read the header to determine if it's corruption vs staleness
+    // We need to check if mtime/size match to distinguish
+    fp = std::fopen(cache_path.c_str(), "rb");
+    if (fp) {
+      uint8_t header_buf[24]; // version(1) + padding(7) + mtime(8) + size(8)
+      if (std::fread(header_buf, 1, 24, fp) == 24) {
+        uint64_t cached_mtime;
+        uint64_t cached_size;
+        std::memcpy(&cached_mtime, header_buf + 8, sizeof(uint64_t));
+        std::memcpy(&cached_size, header_buf + 16, sizeof(uint64_t));
+
+        if (cached_mtime != source_meta.mtime || cached_size != source_meta.size) {
+          // Stale cache - source file changed, not corruption
+          std::fclose(fp);
+          result.error_message = "Cache is stale (source file has changed)";
+          return result;
+        }
+      }
+      std::fclose(fp);
+    }
+
+    // If we get here, metadata matches but index load still failed
+    // This means the index data itself is corrupted (truncated arrays, etc)
+    result.was_corrupted = true;
+    result.error_message = "Cache file is corrupted (truncated or invalid index data)";
+    if (std::remove(cache_path.c_str()) == 0) {
+      result.file_deleted = true;
+    }
+    return result;
+  }
+
+  // Success!
+  return result;
+}
+
 std::string IndexCache::resolve_path(const std::string& path) {
   if (path.empty()) {
     return path;
