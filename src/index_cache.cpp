@@ -286,15 +286,16 @@ CacheWriteResult IndexCache::write_atomic_result(const std::string& path, const 
   } catch (const std::exception& e) {
     std::string error_msg = e.what();
 
-    // Try to determine the specific error type from the exception message
-    // or errno if available
+    // Classify error based on exception message content
+    // Note: We only check the message text, not errno, because errno may be stale
+    // after the exception propagates through multiple system calls
     if (error_msg.find("permission") != std::string::npos ||
-        error_msg.find("Permission") != std::string::npos || errno == EACCES) {
+        error_msg.find("Permission") != std::string::npos) {
       return CacheWriteResult::fail(CacheError::PermissionDenied,
                                     "Permission denied writing cache file: " + error_msg);
     }
     if (error_msg.find("space") != std::string::npos ||
-        error_msg.find("disk") != std::string::npos || errno == ENOSPC) {
+        error_msg.find("disk") != std::string::npos) {
       return CacheWriteResult::fail(CacheError::DiskFull,
                                     "Disk full, cannot write cache file: " + error_msg);
     }
