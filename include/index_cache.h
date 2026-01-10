@@ -38,10 +38,183 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 
 namespace libvroom {
+
+/**
+ * @brief Error codes for cache operations.
+ *
+ * CacheError provides specific error codes for cache load and write operations,
+ * enabling callers to distinguish between different failure modes and provide
+ * informative user-facing messages.
+ */
+enum class CacheError {
+  None,             ///< No error, operation succeeded
+  Corrupted,        ///< Cache file exists but is corrupted or unreadable
+  PermissionDenied, ///< Insufficient permissions to read/write cache file
+  DiskFull,         ///< Disk is full, cannot write cache file
+  VersionMismatch,  ///< Cache file format version doesn't match current version
+  SourceChanged,    ///< Source file has changed since cache was created
+  IoError,          ///< General I/O error during cache operation
+  NotFound          ///< Cache file does not exist
+};
+
+/**
+ * @brief Convert a CacheError to its string representation.
+ *
+ * @param error The CacheError to convert
+ * @return C-string name of the error code (e.g., "Corrupted", "PermissionDenied")
+ */
+inline const char* cache_error_to_string(CacheError error) {
+  switch (error) {
+  case CacheError::None:
+    return "None";
+  case CacheError::Corrupted:
+    return "Corrupted";
+  case CacheError::PermissionDenied:
+    return "PermissionDenied";
+  case CacheError::DiskFull:
+    return "DiskFull";
+  case CacheError::VersionMismatch:
+    return "VersionMismatch";
+  case CacheError::SourceChanged:
+    return "SourceChanged";
+  case CacheError::IoError:
+    return "IoError";
+  case CacheError::NotFound:
+    return "NotFound";
+  default:
+    return "Unknown";
+  }
+}
+
+/**
+ * @brief Result of a cache load operation.
+ *
+ * CacheLoadResult provides detailed information about a cache load attempt,
+ * including the loaded index (on success), error code, and descriptive message.
+ * This enables callers to distinguish between different failure modes and
+ * provide informative user-facing messages.
+ *
+ * @example
+ * @code
+ * auto result = IndexCache::load("data.csv.vidx", source_meta);
+ * if (result.success()) {
+ *     // Use result.index
+ *     ParseIndex idx = std::move(*result.index);
+ * } else {
+ *     std::cerr << "Cache load failed: " << result.message << std::endl;
+ *     if (result.error == CacheError::SourceChanged) {
+ *         // Re-parse the file
+ *     }
+ * }
+ * @endcode
+ */
+struct CacheLoadResult {
+  std::unique_ptr<ParseIndex> index; ///< The loaded index (present only on success)
+  CacheError error;                  ///< Error code indicating the type of failure
+  std::string message;               ///< Human-readable description of the result
+
+  /// Default constructor creates a failed result with no index.
+  CacheLoadResult() : index(nullptr), error(CacheError::NotFound), message("No cache loaded") {}
+
+  /// Constructor for success with an index.
+  CacheLoadResult(ParseIndex idx, CacheError err, std::string msg)
+      : index(new ParseIndex(std::move(idx))), error(err), message(std::move(msg)) {}
+
+  /// Constructor for failure without an index.
+  CacheLoadResult(std::nullptr_t, CacheError err, std::string msg)
+      : index(nullptr), error(err), message(std::move(msg)) {}
+
+  // Move-only type (ParseIndex is move-only)
+  CacheLoadResult(CacheLoadResult&&) = default;
+  CacheLoadResult& operator=(CacheLoadResult&&) = default;
+  CacheLoadResult(const CacheLoadResult&) = delete;
+  CacheLoadResult& operator=(const CacheLoadResult&) = delete;
+
+  /**
+   * @brief Check if the load operation succeeded.
+   * @return true if the index was successfully loaded.
+   */
+  bool success() const { return error == CacheError::None && index != nullptr; }
+
+  /**
+   * @brief Check if an index is present.
+   * @return true if the index was loaded (regardless of error state).
+   */
+  bool has_index() const { return index != nullptr; }
+
+  /**
+   * @brief Create a successful result with a loaded index.
+   * @param idx The successfully loaded ParseIndex.
+   * @return CacheLoadResult indicating success.
+   */
+  static CacheLoadResult ok(ParseIndex idx) {
+    return CacheLoadResult(std::move(idx), CacheError::None, "Cache loaded successfully");
+  }
+
+  /**
+   * @brief Create a failed result with the specified error.
+   * @param err The error code.
+   * @param msg Human-readable error message.
+   * @return CacheLoadResult indicating failure.
+   */
+  static CacheLoadResult fail(CacheError err, const std::string& msg) {
+    return CacheLoadResult(nullptr, err, msg);
+  }
+};
+
+/**
+ * @brief Result of a cache write operation.
+ *
+ * CacheWriteResult provides detailed information about a cache write attempt,
+ * including success status, error code, and descriptive message. This enables
+ * callers to understand why a write failed and take appropriate action.
+ *
+ * @example
+ * @code
+ * auto result = IndexCache::write("data.csv.vidx", parsed_index, source_meta);
+ * if (!result.success()) {
+ *     if (result.error == CacheError::DiskFull) {
+ *         std::cerr << "Warning: Disk full, cache not written" << std::endl;
+ *     } else if (result.error == CacheError::PermissionDenied) {
+ *         std::cerr << "Warning: Permission denied, cache not written" << std::endl;
+ *     }
+ * }
+ * @endcode
+ */
+struct CacheWriteResult {
+  bool successful;     ///< Whether the write operation succeeded
+  CacheError error;    ///< Error code indicating the type of failure
+  std::string message; ///< Human-readable description of the result
+
+  /**
+   * @brief Check if the write operation succeeded.
+   * @return true if the cache was successfully written.
+   */
+  bool success() const { return successful; }
+
+  /**
+   * @brief Create a successful result.
+   * @return CacheWriteResult indicating success.
+   */
+  static CacheWriteResult ok() {
+    return CacheWriteResult{true, CacheError::None, "Cache written successfully"};
+  }
+
+  /**
+   * @brief Create a failed result with the specified error.
+   * @param err The error code.
+   * @param msg Human-readable error message.
+   * @return CacheWriteResult indicating failure.
+   */
+  static CacheWriteResult fail(CacheError err, const std::string& msg) {
+    return CacheWriteResult{false, err, msg};
+  }
+};
 
 /// Index cache format version (v1 includes source file metadata for validation)
 constexpr uint8_t INDEX_CACHE_VERSION = 1;
@@ -115,6 +288,20 @@ struct CacheConfig {
 
   /// Custom directory path (only used when location == CUSTOM).
   std::string custom_path;
+
+  /**
+   * @brief Whether to resolve symlinks when computing cache paths.
+   *
+   * When true (default), symlinks in the source file path are resolved to
+   * their canonical paths before computing the cache location. This ensures
+   * that files accessed through different symlink paths share a single cache
+   * file rather than creating duplicate caches.
+   *
+   * Set to false if you want separate caches for different symlink paths
+   * pointing to the same file, or if symlink resolution causes issues in
+   * your environment.
+   */
+  bool resolve_symlinks = true;
 
   /// Extension used for cache files.
   static constexpr const char* CACHE_EXTENSION = ".vidx";
@@ -255,6 +442,60 @@ public:
                            const std::string& source_path);
 
   /**
+   * @brief Validate a cache file and load if valid, with detailed error reporting.
+   *
+   * This method combines is_valid() and ParseIndex::from_mmap() functionality
+   * into a single call that returns detailed error information. It validates
+   * the cache against the source file and loads it if valid.
+   *
+   * @param source_path Path to the source CSV file.
+   * @param cache_path Path to the cache file.
+   * @return CacheLoadResult with the loaded index on success, or detailed
+   *         error information on failure.
+   *
+   * @example
+   * @code
+   * auto result = IndexCache::validate_and_load("data.csv", "data.csv.vidx");
+   * if (result.success()) {
+   *     ParseIndex idx = std::move(*result.index);
+   *     // Use the loaded index
+   * } else if (result.error == CacheError::SourceChanged) {
+   *     // Re-parse the file, source has been modified
+   * } else if (result.error == CacheError::VersionMismatch) {
+   *     // Cache format is outdated, re-parse
+   * }
+   * @endcode
+   */
+  static CacheLoadResult validate_and_load(const std::string& source_path,
+                                           const std::string& cache_path);
+
+  /**
+   * @brief Write a ParseIndex to a cache file atomically, with detailed error reporting.
+   *
+   * Like write_atomic(), but returns a CacheWriteResult with detailed error
+   * information instead of a simple boolean.
+   *
+   * @param path Path to write the cache file.
+   * @param index The ParseIndex to serialize.
+   * @param source_path Path to the source file (for metadata extraction).
+   * @return CacheWriteResult indicating success or detailed failure information.
+   *
+   * @example
+   * @code
+   * auto result = IndexCache::write_atomic_result(cache_path, idx, source_path);
+   * if (!result.success()) {
+   *     if (result.error == CacheError::DiskFull) {
+   *         std::cerr << "Disk full: " << result.message << std::endl;
+   *     } else if (result.error == CacheError::PermissionDenied) {
+   *         std::cerr << "Permission denied: " << result.message << std::endl;
+   *     }
+   * }
+   * @endcode
+   */
+  static CacheWriteResult write_atomic_result(const std::string& path, const ParseIndex& index,
+                                              const std::string& source_path);
+
+  /**
    * @brief Get source file metadata (modification time and size).
    *
    * Retrieves the modification time and size of a file for cache validation.
@@ -297,6 +538,23 @@ public:
    * @return A hexadecimal hash string.
    */
   static std::string hash_path(const std::string& path);
+
+  /**
+   * @brief Resolve symlinks in a file path to get the canonical path.
+   *
+   * Uses std::filesystem::canonical() to resolve all symlinks, '.', and '..'
+   * components in the path. If resolution fails (e.g., file doesn't exist,
+   * permission denied, or too many symlink levels), gracefully falls back
+   * to the original path.
+   *
+   * @param path The file path to resolve.
+   * @return The canonical path if resolution succeeds, or the original path
+   *         if resolution fails.
+   *
+   * @note This function is used internally by compute_path() when
+   *       CacheConfig::resolve_symlinks is true.
+   */
+  static std::string resolve_path(const std::string& path);
 
   /**
    * @brief Cache file header size in bytes.

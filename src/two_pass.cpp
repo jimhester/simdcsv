@@ -735,7 +735,7 @@ bool TwoPass::parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
   }
   std::vector<uint64_t> chunk_pos(n_threads + 1);
   std::vector<std::future<Stats>> first_pass_fut(n_threads);
-  std::vector<std::future<uint64_t>> second_pass_fut(n_threads);
+  std::vector<std::future<SecondPassResult>> second_pass_fut(n_threads);
 
   for (int i = 0; i < n_threads; ++i) {
     first_pass_fut[i] = std::async(std::launch::async, [buf, chunk_size, i, delim, quote]() {
@@ -761,14 +761,38 @@ bool TwoPass::parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
     }
   }
 
+  // Launch second pass with state tracking for validation
   for (int i = 0; i < n_threads; ++i) {
     second_pass_fut[i] = std::async(std::launch::async, [buf, &out, &chunk_pos, i, delim, quote]() {
-      return second_pass_simd(buf, chunk_pos[i], chunk_pos[i + 1], &out, i, delim, quote);
+      return second_pass_simd_with_state(buf, chunk_pos[i], chunk_pos[i + 1], &out, i, delim,
+                                         quote);
     });
   }
 
+  // Collect results and validate per Chang et al. Algorithm 1:
+  // Each chunk must end at a record boundary for speculation to be valid.
+  // If any chunk ends inside a quoted field, the speculation was incorrect
+  // and we must fall back to the reliable two-pass algorithm.
+  std::vector<SecondPassResult> results(n_threads);
+  bool speculation_valid = true;
+
   for (int i = 0; i < n_threads; ++i) {
-    out.n_indexes[i] = second_pass_fut[i].get();
+    results[i] = second_pass_fut[i].get();
+    out.n_indexes[i] = results[i].n_indexes;
+
+    // For all chunks except the last, verify they ended at a record boundary.
+    // The last chunk (i == n_threads - 1) may end mid-record if the file
+    // doesn't end with a newline, which is valid.
+    if (i < n_threads - 1 && !results[i].at_record_boundary) {
+      speculation_valid = false;
+    }
+  }
+
+  // If speculation was invalid, fall back to reliable two-pass parsing.
+  // This should be extremely rare (< 1 in 10 million chunks per the paper).
+  if (!speculation_valid) {
+    // Reset the index and re-parse using the two-pass algorithm
+    return parse_two_pass(buf, out, len, dialect);
   }
 
   return true;
