@@ -590,7 +590,9 @@ public:
    * - File is too small to contain a valid header
    * - Version byte is not the expected v3 format
    * - File is truncated (indexes extend beyond file boundary)
-   * - Stored metadata doesn't match source file (stale, not corrupt)
+   *
+   * Note: Stale caches (where source file metadata has changed) are NOT deleted,
+   * only true corruption is cleaned up. Stale caches are simply re-parsed.
    *
    * @param cache_path Path to the cache file.
    * @param source_path Path to the source CSV file (for metadata validation).
