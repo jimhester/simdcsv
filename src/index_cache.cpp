@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <sys/stat.h>
 
 #ifdef _WIN32
@@ -28,8 +29,14 @@
 namespace libvroom {
 
 std::string IndexCache::compute_path(const std::string& source_path, const CacheConfig& config) {
+  // Resolve symlinks if enabled to ensure files accessed through different
+  // symlink paths share a single cache file
+  std::string resolved_path = config.resolve_symlinks ? resolve_path(source_path) : source_path;
+
   switch (config.location) {
   case CacheConfig::SAME_DIR:
+    // For SAME_DIR mode, use the original path for the cache location
+    // (keep cache adjacent to the symlink, not the target)
     return source_path + CacheConfig::CACHE_EXTENSION;
 
   case CacheConfig::XDG_CACHE: {
@@ -38,7 +45,8 @@ std::string IndexCache::compute_path(const std::string& source_path, const Cache
       // Fallback to same-dir if XDG cache unavailable
       return source_path + CacheConfig::CACHE_EXTENSION;
     }
-    return cache_dir + "/" + hash_path(source_path) + CacheConfig::CACHE_EXTENSION;
+    // Use resolved path for hashing to ensure symlinks share the same cache
+    return cache_dir + "/" + hash_path(resolved_path) + CacheConfig::CACHE_EXTENSION;
   }
 
   case CacheConfig::CUSTOM: {
@@ -46,10 +54,11 @@ std::string IndexCache::compute_path(const std::string& source_path, const Cache
       // No custom path specified, fallback to same-dir
       return source_path + CacheConfig::CACHE_EXTENSION;
     }
-    // Extract filename from source path
-    size_t last_sep = source_path.find_last_of("/\\");
+    // Extract filename from resolved path for custom directory
+    // Use resolved path to ensure consistent cache filenames
+    size_t last_sep = resolved_path.find_last_of("/\\");
     std::string filename =
-        (last_sep == std::string::npos) ? source_path : source_path.substr(last_sep + 1);
+        (last_sep == std::string::npos) ? resolved_path : resolved_path.substr(last_sep + 1);
     return config.custom_path + "/" + filename + CacheConfig::CACHE_EXTENSION;
   }
 
@@ -68,10 +77,12 @@ std::pair<std::string, bool> IndexCache::try_compute_writable_path(const std::st
     std::string dir = (last_sep == std::string::npos) ? "." : source_path.substr(0, last_sep);
 
     if (!is_directory_writable(dir)) {
-      // Fall back to XDG cache
+      // Fall back to XDG cache - use resolved path for consistent hashing
       std::string xdg_dir = get_xdg_cache_dir();
       if (!xdg_dir.empty()) {
-        path = xdg_dir + "/" + hash_path(source_path) + CacheConfig::CACHE_EXTENSION;
+        std::string resolved_path =
+            config.resolve_symlinks ? resolve_path(source_path) : source_path;
+        path = xdg_dir + "/" + hash_path(resolved_path) + CacheConfig::CACHE_EXTENSION;
         if (is_directory_writable(xdg_dir)) {
           return {path, true};
         }
@@ -263,6 +274,22 @@ std::string IndexCache::hash_path(const std::string& path) {
   char buf[17]; // 16 hex digits + null terminator
   std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(hash));
   return std::string(buf);
+}
+
+std::string IndexCache::resolve_path(const std::string& path) {
+  if (path.empty()) {
+    return path;
+  }
+
+  try {
+    std::filesystem::path fs_path(path);
+    std::filesystem::path canonical = std::filesystem::canonical(fs_path);
+    return canonical.string();
+  } catch (const std::filesystem::filesystem_error&) {
+    // Resolution failed (file doesn't exist, permission denied, etc.)
+    // Gracefully fall back to the original path
+    return path;
+  }
 }
 
 } // namespace libvroom
