@@ -91,6 +91,14 @@ To manually format a file: `clang-format -i <file>`
 - **Check for merge conflicts**: When opening a branch, check for merge conflicts with main. If CI status checks aren't appearing on a PR, merge conflicts are often the cause
 - **Use auto-merge**: Enable auto-merge on PRs when there are no outstanding review comments. The PR will merge automatically once CI passes
 
+### Roborev Code Review
+
+This repo has automated code review via roborev (`~/p/roborev`). Agents should check for roborev reviews at these points:
+
+1. **Before opening a PR**: Run roborev to catch issues early
+2. **After incremental commits**: Check for new review comments on open PRs
+3. **Before final merge**: Ensure all roborev feedback has been addressed
+
 ```bash
 # Check for conflicts before creating PR
 git fetch origin main
