@@ -69,6 +69,13 @@ std::string IndexCache::compute_path(const std::string& source_path, const Cache
 
 std::pair<std::string, bool> IndexCache::try_compute_writable_path(const std::string& source_path,
                                                                    const CacheConfig& config) {
+  // Helper to emit warnings if callback is set
+  auto warn = [&config](const std::string& message) {
+    if (config.warning_callback) {
+      config.warning_callback(message);
+    }
+  };
+
   std::string path = compute_path(source_path, config);
 
   if (config.location == CacheConfig::SAME_DIR) {
@@ -84,18 +91,35 @@ std::pair<std::string, bool> IndexCache::try_compute_writable_path(const std::st
             config.resolve_symlinks ? resolve_path(source_path) : source_path;
         path = xdg_dir + "/" + hash_path(resolved_path) + CacheConfig::CACHE_EXTENSION;
         if (is_directory_writable(xdg_dir)) {
+          warn("Source directory '" + dir +
+               "' is not writable, falling back to XDG cache: " + path);
           return {path, true};
         }
+        warn("Source directory '" + dir + "' is not writable and XDG cache directory '" + xdg_dir +
+             "' is also not writable; cache disabled");
+      } else {
+        warn("Source directory '" + dir +
+             "' is not writable and XDG cache directory could not be created; cache disabled");
       }
       return {"", false};
     }
   } else if (config.location == CacheConfig::XDG_CACHE) {
     std::string xdg_dir = get_xdg_cache_dir();
-    if (xdg_dir.empty() || !is_directory_writable(xdg_dir)) {
+    if (xdg_dir.empty()) {
+      warn("XDG cache directory could not be created; cache disabled");
+      return {"", false};
+    }
+    if (!is_directory_writable(xdg_dir)) {
+      warn("XDG cache directory '" + xdg_dir + "' is not writable; cache disabled");
       return {"", false};
     }
   } else if (config.location == CacheConfig::CUSTOM) {
-    if (config.custom_path.empty() || !is_directory_writable(config.custom_path)) {
+    if (config.custom_path.empty()) {
+      warn("Custom cache path is empty; cache disabled");
+      return {"", false};
+    }
+    if (!is_directory_writable(config.custom_path)) {
+      warn("Custom cache directory '" + config.custom_path + "' is not writable; cache disabled");
       return {"", false};
     }
   }
