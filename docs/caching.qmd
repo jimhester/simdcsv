@@ -159,6 +159,7 @@ struct CacheConfig {
 
     Location location = SAME_DIR;
     std::string custom_path;  // Only used when location == CUSTOM
+    bool resolve_symlinks = true;  // Resolve symlinks before computing cache path
 
     // Factory methods
     static CacheConfig defaults();              // SAME_DIR mode
@@ -166,6 +167,14 @@ struct CacheConfig {
     static CacheConfig custom(const std::string& path);  // CUSTOM mode
 };
 ```
+
+The `resolve_symlinks` option (default: `true`) ensures that files accessed through different symlink paths share a single cache file. When enabled, symlinks are resolved to their canonical paths before computing cache locations. This provides:
+
+- **Single cache per unique file** instead of duplicates for each symlink
+- **Consistent behavior** regardless of how the file is accessed
+- **More efficient storage utilization**
+
+Set to `false` if you need separate caches for different symlink paths pointing to the same file.
 
 #### ParseOptions (Cache-related fields)
 
@@ -220,6 +229,16 @@ Depending on configuration, cache files are stored in different locations:
 | CUSTOM | User-specified | `/tmp/cache/a1b2c3d4.vidx` |
 
 For XDG_CACHE and CUSTOM modes, filenames are generated using a hash of the absolute source file path to avoid collisions.
+
+### Symlink Handling
+
+When `resolve_symlinks` is enabled (default), symlinks are resolved to their canonical paths before computing cache locations:
+
+- **XDG_CACHE mode**: Multiple symlinks to the same file share a single cache entry
+- **CUSTOM mode**: Uses the resolved filename for cache file naming
+- **SAME_DIR mode**: Cache is placed adjacent to the accessed path (not the resolved target)
+
+This ensures efficient cache utilization when the same file is accessed via different symlinks, while SAME_DIR mode keeps cache files where you expect them.
 
 ### Automatic Fallback
 

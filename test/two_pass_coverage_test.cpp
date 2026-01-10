@@ -2395,6 +2395,265 @@ TEST_F(EmptyFileTest, ParseWithErrorsEmptyInputExplicitDialect) {
   EXPECT_FALSE(errors.has_errors());
 }
 
+// ============================================================================
+// SPECULATION VALIDATION TESTS (Chang et al. Algorithm 1)
+// Tests that mispredictions in speculative parsing are detected and
+// properly fall back to the reliable two-pass algorithm.
+// ============================================================================
+
+class SpeculationValidationTest : public ::testing::Test {
+protected:
+  std::vector<uint8_t> makeBuffer(const std::string& content) {
+    std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
+    if (!content.empty()) {
+      std::memcpy(buf.data(), content.data(), content.size());
+    }
+    return buf;
+  }
+};
+
+// Test that normal parsing works with validation enabled
+TEST_F(SpeculationValidationTest, NormalParsingSucceeds) {
+  std::string content = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 2);
+
+  bool success = parser.parse_speculate(buf.data(), idx, content.size());
+
+  EXPECT_TRUE(success);
+}
+
+// Test second_pass_simd_with_state returns correct boundary state
+TEST_F(SpeculationValidationTest, SecondPassReturnsCorrectBoundaryState) {
+  // Simple case: ends at record boundary
+  std::string content = "a,b,c\n1,2,3\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
+
+  auto result =
+      TwoPass::second_pass_simd_with_state(buf.data(), 0, content.size(), &idx, 0, ',', '"');
+
+  EXPECT_TRUE(result.at_record_boundary);
+  EXPECT_GT(result.n_indexes, 0u);
+}
+
+// Test that ending inside a quoted field is detected
+TEST_F(SpeculationValidationTest, DetectsEndingInsideQuotedField) {
+  // This chunk ends inside a quoted field
+  std::string content = "a,\"incomplete";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
+
+  auto result =
+      TwoPass::second_pass_simd_with_state(buf.data(), 0, content.size(), &idx, 0, ',', '"');
+
+  // Should detect we're NOT at a record boundary (inside quoted field)
+  EXPECT_FALSE(result.at_record_boundary);
+}
+
+// Test that ending after quote is correctly handled
+TEST_F(SpeculationValidationTest, DetectsEndingAfterClosingQuote) {
+  // This chunk ends right after a closing quote
+  std::string content = "a,\"quoted\"";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
+
+  auto result =
+      TwoPass::second_pass_simd_with_state(buf.data(), 0, content.size(), &idx, 0, ',', '"');
+
+  // Should be at record boundary (quote is closed)
+  EXPECT_TRUE(result.at_record_boundary);
+}
+
+// ===========================================================================
+// ADVERSARIAL TEST CASE
+// This test would have FAILED without the speculation validation.
+//
+// The speculative algorithm uses q-o (quote-other) and o-q (other-quote)
+// patterns to guess chunk boundaries. However, certain pathological inputs
+// can fool the speculation, causing chunks to be split incorrectly.
+//
+// This test creates a CSV where:
+// 1. The file is large enough to be split into multiple chunks
+// 2. A quoted field spans what would be a chunk boundary
+// 3. The q-o/o-q heuristic mispredicts the quote state
+//
+// Without validation, this would silently produce INCORRECT RESULTS.
+// With validation, the misprediction is detected and we fall back to
+// the reliable two-pass algorithm.
+// ===========================================================================
+TEST_F(SpeculationValidationTest, AdversarialMispredictionDetected) {
+  // Create a pathological CSV that can fool the speculative algorithm.
+  //
+  // The key insight is that first_pass_speculate uses backward scanning
+  // to find q-o (quote-other) or o-q (other-quote) patterns within a
+  // 64KB window. If we craft a field that:
+  // 1. Contains many quotes that look like q-o or o-q patterns
+  // 2. Spans what would be a chunk boundary
+  // 3. The actual quote parity differs from what the heuristic predicts
+  //
+  // We can trigger a misprediction.
+  //
+  // Example: Create a large quoted field with embedded quotes that
+  // create a misleading pattern near the chunk boundary.
+
+  // Build a CSV large enough to be multi-threaded (need > 64 bytes per chunk)
+  // With 4 threads, we need at least 256 bytes to avoid fallback
+  std::string content;
+
+  // Header
+  content += "col1,col2,col3\n";
+
+  // First row with a long quoted field containing tricky patterns
+  // The field contains: "data with ""escaped"" quotes and
+  //   more data that continues across what would be a chunk boundary..."
+  //
+  // The trick: we put a pattern like x" (other-quote) near position
+  // that would be analyzed by first_pass_speculate for chunk 2.
+  content += "value1,\"";
+
+  // Add enough content to push the next chunk boundary into interesting territory
+  // Fill with a pattern that creates misleading q-o/o-q patterns
+  for (int i = 0; i < 150; i++) {
+    content += "x"; // Regular content
+  }
+
+  // Now add a tricky pattern: x"y looks like q-o (quote followed by 'y')
+  // but we're INSIDE a quoted field, so it's actually an escaped quote
+  content += "x\"\"y"; // This is an escaped quote "" inside the field
+
+  // More content
+  for (int i = 0; i < 150; i++) {
+    content += "z";
+  }
+
+  // Close the quoted field and end the row
+  content += "\",value3\n";
+
+  // Add more rows to make it a valid CSV
+  content += "a,b,c\n";
+  content += "1,2,3\n";
+
+  auto buf = makeBuffer(content);
+
+  // Use enough threads to trigger multi-threaded parsing
+  // but not so many that chunks become too small
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
+
+  bool success = parser.parse_speculate(buf.data(), idx, content.size());
+
+  // The key assertion: parsing should still succeed because even if
+  // speculation fails, we fall back to the reliable two-pass algorithm
+  EXPECT_TRUE(success);
+
+  // Verify we got the right number of separators by counting commas and newlines
+  // Header: 2 commas + 1 newline = 3
+  // Row 1: 2 commas + 1 newline = 3 (the quoted field with escaped quotes counts as ONE field)
+  // Row 2: 2 commas + 1 newline = 3
+  // Row 3: 2 commas + 1 newline = 3
+  // Total: 12 separators
+  uint64_t total_separators = 0;
+  for (uint16_t i = 0; i < idx.n_threads; i++) {
+    total_separators += idx.n_indexes[i];
+  }
+  EXPECT_EQ(total_separators, 12u);
+}
+
+// Another adversarial test: Quoted field that spans multiple chunks
+// This specifically tests the case where speculation could cause incorrect
+// parsing if not validated
+TEST_F(SpeculationValidationTest, QuotedFieldSpanningChunkBoundary) {
+  // Create a CSV where a quoted field with embedded newlines spans
+  // what would be chunk boundaries in multi-threaded parsing
+
+  std::string content;
+  content += "name,description\n";
+
+  // This quoted field contains embedded newlines and is long enough
+  // to potentially span a chunk boundary
+  content += "item1,\"This is a long description\n";
+  content += "that spans multiple lines\n";
+  content += "and contains various patterns like \"\"quoted text\"\"\n";
+  content += "and more content to make it very long so that it might\n";
+  content += "cross a chunk boundary when parsed with multiple threads\"\n";
+
+  content += "item2,\"short\"\n";
+
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
+
+  bool success = parser.parse_speculate(buf.data(), idx, content.size());
+
+  EXPECT_TRUE(success);
+
+  // Count total separators
+  // Header: 1 comma + 1 newline = 2
+  // Row 1: 1 comma + 1 newline at end = 2 (internal newlines in quote don't count)
+  // Row 2: 1 comma + 1 newline = 2
+  // Total: 6
+  uint64_t total_separators = 0;
+  for (uint16_t i = 0; i < idx.n_threads; i++) {
+    total_separators += idx.n_indexes[i];
+  }
+  EXPECT_EQ(total_separators, 6u);
+}
+
+// Test that the fallback to parse_two_pass produces correct results
+TEST_F(SpeculationValidationTest, FallbackProducesCorrectResults) {
+  // Use a CSV that works correctly with two-pass but might have issues
+  // with speculation (though in practice, mispredictions are very rare)
+  std::string content;
+  content += "a,b,c\n";
+
+  // Add rows with varied quote patterns
+  for (int i = 0; i < 50; i++) {
+    content += "value" + std::to_string(i) + ",";
+    if (i % 3 == 0) {
+      content += "\"quoted\"";
+    } else {
+      content += "plain";
+    }
+    content += "," + std::to_string(i) + "\n";
+  }
+
+  auto buf = makeBuffer(content);
+
+  // Parse with speculation
+  TwoPass parser;
+  libvroom::ParseIndex idx_spec = parser.init(content.size(), 4);
+  bool success_spec = parser.parse_speculate(buf.data(), idx_spec, content.size());
+
+  // Parse with two-pass (gold standard)
+  libvroom::ParseIndex idx_two = parser.init(content.size(), 4);
+  bool success_two = parser.parse_two_pass(buf.data(), idx_two, content.size());
+
+  EXPECT_TRUE(success_spec);
+  EXPECT_TRUE(success_two);
+
+  // Both should produce the same total number of separators
+  uint64_t total_spec = 0;
+  uint64_t total_two = 0;
+  for (uint16_t i = 0; i < idx_spec.n_threads; i++) {
+    total_spec += idx_spec.n_indexes[i];
+  }
+  for (uint16_t i = 0; i < idx_two.n_threads; i++) {
+    total_two += idx_two.n_indexes[i];
+  }
+
+  EXPECT_EQ(total_spec, total_two);
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

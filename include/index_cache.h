@@ -263,6 +263,20 @@ struct CacheConfig {
   /// Custom directory path (only used when location == CUSTOM).
   std::string custom_path;
 
+  /**
+   * @brief Whether to resolve symlinks when computing cache paths.
+   *
+   * When true (default), symlinks in the source file path are resolved to
+   * their canonical paths before computing the cache location. This ensures
+   * that files accessed through different symlink paths share a single cache
+   * file rather than creating duplicate caches.
+   *
+   * Set to false if you want separate caches for different symlink paths
+   * pointing to the same file, or if symlink resolution causes issues in
+   * your environment.
+   */
+  bool resolve_symlinks = true;
+
   /// Extension used for cache files.
   static constexpr const char* CACHE_EXTENSION = ".vidx";
 
@@ -495,6 +509,23 @@ public:
    * @return A hexadecimal hash string.
    */
   static std::string hash_path(const std::string& path);
+
+  /**
+   * @brief Resolve symlinks in a file path to get the canonical path.
+   *
+   * Uses std::filesystem::canonical() to resolve all symlinks, '.', and '..'
+   * components in the path. If resolution fails (e.g., file doesn't exist,
+   * permission denied, or too many symlink levels), gracefully falls back
+   * to the original path.
+   *
+   * @param path The file path to resolve.
+   * @return The canonical path if resolution succeeds, or the original path
+   *         if resolution fails.
+   *
+   * @note This function is used internally by compute_path() when
+   *       CacheConfig::resolve_symlinks is true.
+   */
+  static std::string resolve_path(const std::string& path);
 
   /**
    * @brief Cache file header size in bytes.
