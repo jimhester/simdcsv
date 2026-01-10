@@ -1717,31 +1717,37 @@ public:
 
       // Try to load from cache (unless force_cache_refresh is set)
       if (!options.force_cache_refresh && !cache_path.empty()) {
-        SourceMetadata source_meta = SourceMetadata::from_file(options.source_path);
-        if (source_meta.valid) {
-          ParseIndex cached_idx = ParseIndex::from_mmap(cache_path, source_meta);
-          if (cached_idx.is_valid()) {
-            // Cache hit! Use the cached index
-            result.idx = std::move(cached_idx);
-            result.used_cache = true;
-            result.successful = true;
+        // Use IndexCache::load() for automatic corruption detection and cleanup
+        auto load_result = IndexCache::load(cache_path, options.source_path);
 
-            // Determine dialect for cached result
-            if (options.dialect.has_value()) {
-              result.dialect = options.dialect.value();
-            } else {
-              // Auto-detect dialect even for cached indexes
-              DialectDetector detector(options.detection_options);
-              result.detection = detector.detect(buf, len);
-              result.dialect =
-                  result.detection.success() ? result.detection.dialect : Dialect::csv();
-            }
+        if (load_result.success()) {
+          // Cache hit! Use the cached index
+          result.idx = std::move(load_result.index);
+          result.used_cache = true;
+          result.successful = true;
 
-            // Store buffer reference to enable row/column iteration
-            result.set_buffer(buf, len);
-
-            return result;
+          // Determine dialect for cached result
+          if (options.dialect.has_value()) {
+            result.dialect = options.dialect.value();
+          } else {
+            // Auto-detect dialect even for cached indexes
+            DialectDetector detector(options.detection_options);
+            result.detection = detector.detect(buf, len);
+            result.dialect = result.detection.success() ? result.detection.dialect : Dialect::csv();
           }
+
+          // Store buffer reference to enable row/column iteration
+          result.set_buffer(buf, len);
+
+          return result;
+        }
+
+        // Cache miss or corruption - if corrupted, file was already deleted
+        // Log corruption as a warning (non-fatal) so callers are aware
+        if (load_result.was_corrupted) {
+          collector->add_error(ErrorCode::NONE, ErrorSeverity::WARNING, 0, 0, 0,
+                               "Cache corruption detected and file deleted: " +
+                                   load_result.error_message);
         }
       }
 

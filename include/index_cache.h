@@ -275,6 +275,57 @@ public:
    * Layout: [version:1][mtime:8][size:8][columns:8][n_threads:2] = 27 bytes
    */
   static constexpr size_t HEADER_SIZE = 1 + 8 + 8 + 8 + 2;
+
+  /**
+   * @brief Result of a cache load operation.
+   *
+   * Contains the loaded index (if successful) and status information about
+   * why a load might have failed.
+   */
+  struct LoadResult {
+    ParseIndex index;          ///< The loaded index (check is_valid() for success)
+    bool was_corrupted{false}; ///< True if cache file was corrupted and deleted
+    bool file_deleted{false};  ///< True if corrupted cache file was deleted
+    std::string error_message; ///< Description of any error encountered
+
+    /// @return true if the index was loaded successfully
+    bool success() const { return index.is_valid(); }
+  };
+
+  /**
+   * @brief Load a cached index with automatic corruption handling.
+   *
+   * Attempts to load a cached ParseIndex from disk. If the cache file is
+   * corrupted (invalid version, truncated, or fails validation), it is
+   * automatically deleted to allow re-caching on the next parse.
+   *
+   * Corruption conditions that trigger automatic cleanup:
+   * - File is too small to contain a valid header
+   * - Version byte is not the expected v3 format
+   * - File is truncated (indexes extend beyond file boundary)
+   * - Stored metadata doesn't match source file (stale, not corrupt)
+   *
+   * @param cache_path Path to the cache file.
+   * @param source_path Path to the source CSV file (for metadata validation).
+   * @return LoadResult containing the index and status information.
+   *
+   * @example
+   * @code
+   * auto result = IndexCache::load("data.csv.vidx", "data.csv");
+   * if (result.success()) {
+   *     // Use result.index
+   * } else if (result.was_corrupted) {
+   *     std::cerr << "Cache was corrupted and deleted: " << result.error_message << "\n";
+   *     // Re-parse the file and write new cache
+   * } else {
+   *     // Cache miss (file doesn't exist or source changed)
+   * }
+   * @endcode
+   *
+   * @see is_valid() for validation-only checks without loading
+   * @see write_atomic() for writing cache files
+   */
+  static LoadResult load(const std::string& cache_path, const std::string& source_path);
 };
 
 } // namespace libvroom

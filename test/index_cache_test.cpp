@@ -895,3 +895,255 @@ TEST_F(IndexCacheTest, ParserApi_DialectDetectionWithCache) {
   EXPECT_TRUE(result2.used_cache);
   EXPECT_EQ(result2.dialect.delimiter, '\t'); // Still TSV
 }
+
+// =============================================================================
+// IndexCache::load Tests (New corruption detection API)
+// =============================================================================
+
+TEST_F(IndexCacheTest, Load_NonexistentCache) {
+  std::string source_path = createTempFile("source.csv", "a,b\n1,2\n");
+  std::string cache_path = temp_dir + "/nonexistent.vidx";
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_FALSE(result.was_corrupted);
+  EXPECT_FALSE(result.file_deleted);
+  EXPECT_FALSE(result.error_message.empty());
+}
+
+TEST_F(IndexCacheTest, Load_NonexistentSource) {
+  std::string cache_path = createTempFile("cache.vidx", "some content");
+
+  auto result = IndexCache::load(cache_path, "/nonexistent/source.csv");
+
+  EXPECT_FALSE(result.success());
+  EXPECT_FALSE(result.was_corrupted);
+  EXPECT_FALSE(result.file_deleted);
+}
+
+TEST_F(IndexCacheTest, Load_ValidCache) {
+  // Create source file and valid cache
+  std::string content = "a,b,c\n1,2,3\n4,5,6\n";
+  std::string source_path = createTempFile("valid_source.csv", content);
+  std::string cache_path = temp_dir + "/valid_source.csv.vidx";
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto parse_result = parser.parse(buffer.data(), buffer.size);
+  ASSERT_TRUE(parse_result.success());
+
+  // Write cache
+  ASSERT_TRUE(IndexCache::write_atomic(cache_path, parse_result.idx, source_path));
+
+  // Load should succeed
+  auto result = IndexCache::load(cache_path, source_path);
+  EXPECT_TRUE(result.success());
+  EXPECT_FALSE(result.was_corrupted);
+  EXPECT_FALSE(result.file_deleted);
+  EXPECT_TRUE(result.index.is_valid());
+}
+
+TEST_F(IndexCacheTest, Load_TruncatedHeader_DeletesFile) {
+  std::string source_path = createTempFile("truncated.csv", "a,b\n1,2\n");
+
+  // Create a cache file that's too small (less than 40-byte header)
+  std::string cache_path = temp_dir + "/truncated.vidx";
+  std::ofstream file(cache_path, std::ios::binary);
+  file << "short"; // Only 5 bytes, need at least 40
+  file.close();
+
+  ASSERT_TRUE(fs::exists(cache_path));
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_TRUE(result.was_corrupted);
+  EXPECT_TRUE(result.file_deleted);
+  EXPECT_FALSE(fs::exists(cache_path)); // File should be deleted
+  EXPECT_TRUE(result.error_message.find("too small") != std::string::npos);
+}
+
+TEST_F(IndexCacheTest, Load_WrongVersion_DeletesFile) {
+  std::string source_path = createTempFile("wrongver.csv", "a,b\n1,2\n");
+
+  // Create a cache file with wrong version byte
+  std::string cache_path = temp_dir + "/wrongver.vidx";
+  std::ofstream file(cache_path, std::ios::binary);
+
+  // Write invalid version (255 instead of 3)
+  uint8_t wrong_version = 255;
+  file.write(reinterpret_cast<char*>(&wrong_version), 1);
+
+  // Pad to minimum header size (40 bytes)
+  char padding[39] = {0};
+  file.write(padding, 39);
+  file.close();
+
+  ASSERT_TRUE(fs::exists(cache_path));
+  ASSERT_GE(fs::file_size(cache_path), 40u);
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_TRUE(result.was_corrupted);
+  EXPECT_TRUE(result.file_deleted);
+  EXPECT_FALSE(fs::exists(cache_path));
+  EXPECT_TRUE(result.error_message.find("version") != std::string::npos);
+}
+
+TEST_F(IndexCacheTest, Load_TruncatedIndexData_DeletesFile) {
+  // Create source file and valid cache first
+  std::string content = "a,b,c\n1,2,3\n4,5,6\n";
+  std::string source_path = createTempFile("truncated_data.csv", content);
+  std::string cache_path = temp_dir + "/truncated_data.csv.vidx";
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto parse_result = parser.parse(buffer.data(), buffer.size);
+  ASSERT_TRUE(parse_result.success());
+
+  // Write valid cache
+  ASSERT_TRUE(IndexCache::write_atomic(cache_path, parse_result.idx, source_path));
+  size_t original_size = fs::file_size(cache_path);
+
+  // Truncate the cache file (remove some index data)
+  fs::resize_file(cache_path, original_size - 20);
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_TRUE(result.was_corrupted);
+  EXPECT_TRUE(result.file_deleted);
+  EXPECT_FALSE(fs::exists(cache_path));
+}
+
+TEST_F(IndexCacheTest, Load_StaleCache_DoesNotDelete) {
+  // Create source file and valid cache
+  std::string content = "a,b,c\n1,2,3\n";
+  std::string source_path = createTempFile("stale.csv", content);
+  std::string cache_path = temp_dir + "/stale.csv.vidx";
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto parse_result = parser.parse(buffer.data(), buffer.size);
+  ASSERT_TRUE(parse_result.success());
+
+  // Write cache
+  ASSERT_TRUE(IndexCache::write_atomic(cache_path, parse_result.idx, source_path));
+
+  // Modify source file to make cache stale
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  std::ofstream file(source_path, std::ios::binary);
+  file << "a,b,c,d\n1,2,3,4\n5,6,7,8\n"; // Different content
+  file.close();
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_FALSE(result.was_corrupted); // Stale, not corrupted
+  EXPECT_FALSE(result.file_deleted);  // Should not delete stale caches
+  EXPECT_TRUE(fs::exists(cache_path));
+}
+
+TEST_F(IndexCacheTest, Load_GarbageContent_DeletesFile) {
+  std::string source_path = createTempFile("garbage.csv", "a,b\n1,2\n");
+
+  // Create a cache file with correct version but garbage content
+  std::string cache_path = temp_dir + "/garbage.vidx";
+  {
+    std::ofstream file(cache_path, std::ios::binary);
+
+    // Write correct version
+    uint8_t version = 3;
+    file.write(reinterpret_cast<char*>(&version), 1);
+
+    // Write padding (7 bytes)
+    char padding[7] = {0};
+    file.write(padding, 7);
+
+    // Get source metadata and write matching mtime/size
+    auto [mtime, size] = IndexCache::get_source_metadata(source_path);
+    file.write(reinterpret_cast<char*>(&mtime), 8);
+    file.write(reinterpret_cast<char*>(&size), 8);
+
+    // Write garbage for rest of header and data
+    char garbage[100];
+    std::memset(garbage, 0xFF, sizeof(garbage));
+    file.write(garbage, sizeof(garbage));
+  }
+
+  ASSERT_TRUE(fs::exists(cache_path));
+
+  auto result = IndexCache::load(cache_path, source_path);
+
+  EXPECT_FALSE(result.success());
+  EXPECT_TRUE(result.was_corrupted);
+  EXPECT_TRUE(result.file_deleted);
+  EXPECT_FALSE(fs::exists(cache_path));
+}
+
+// =============================================================================
+// Parser Integration with Corruption Detection
+// =============================================================================
+
+TEST_F(IndexCacheTest, ParserApi_CorruptedCacheAutomaticallyDeleted) {
+  std::string content = "a,b,c\n1,2,3\n";
+  std::string source_path = createTempFile("corrupt_auto.csv", content);
+  std::string cache_path = source_path + ".vidx";
+
+  // Create a corrupted cache file
+  {
+    std::ofstream file(cache_path, std::ios::binary);
+    uint8_t wrong_version = 42;
+    file.write(reinterpret_cast<char*>(&wrong_version), 1);
+    char padding[50] = {0};
+    file.write(padding, sizeof(padding));
+  }
+
+  ASSERT_TRUE(fs::exists(cache_path));
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto opts = libvroom::ParseOptions::with_cache(source_path);
+
+  // Parse should succeed (re-parse after detecting corruption)
+  auto result = parser.parse(buffer.data(), buffer.size, opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_FALSE(result.used_cache);     // Cache was corrupted, so re-parsed
+  EXPECT_TRUE(fs::exists(cache_path)); // New cache should be written
+}
+
+TEST_F(IndexCacheTest, ParserApi_CorruptedCacheRecreatedOnReparse) {
+  std::string content = "name,value\nalice,100\nbob,200\n";
+  std::string source_path = createTempFile("recreate.csv", content);
+  std::string cache_path = source_path + ".vidx";
+
+  // Create corrupted cache
+  {
+    std::ofstream file(cache_path, std::ios::binary);
+    file << "NOT A VALID CACHE FILE";
+  }
+
+  libvroom::Parser parser;
+  auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+  auto opts = libvroom::ParseOptions::with_cache(source_path);
+
+  // First parse - detects corruption, deletes bad cache, re-parses, writes new cache
+  auto result1 = parser.parse(buffer.data(), buffer.size, opts);
+  EXPECT_TRUE(result1.success());
+  EXPECT_FALSE(result1.used_cache);
+
+  // Second parse - should now hit the valid cache
+  auto result2 = parser.parse(buffer.data(), buffer.size, opts);
+  EXPECT_TRUE(result2.success());
+  EXPECT_TRUE(result2.used_cache);
+
+  // Verify data is correct from cached index
+  EXPECT_EQ(result2.num_rows(), 2);
+  auto names = result2.column_string(0);
+  EXPECT_EQ(names.size(), 2u);
+  EXPECT_EQ(names[0], "alice");
+  EXPECT_EQ(names[1], "bob");
+}
