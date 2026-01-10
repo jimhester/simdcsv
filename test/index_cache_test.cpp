@@ -895,3 +895,205 @@ TEST_F(IndexCacheTest, ParserApi_DialectDetectionWithCache) {
   EXPECT_TRUE(result2.used_cache);
   EXPECT_EQ(result2.dialect.delimiter, '\t'); // Still TSV
 }
+
+// =============================================================================
+// Symlink Resolution Tests
+// =============================================================================
+
+#ifndef _WIN32 // Symlink tests only run on Unix-like systems
+
+TEST_F(IndexCacheTest, ResolvePath_RegularFile) {
+  // resolve_path should return the same path for a regular file (no symlinks)
+  std::string source = createTempFile("regular.csv", "a,b\n1,2\n");
+
+  std::string resolved = IndexCache::resolve_path(source);
+
+  // Should be a canonical path (absolute, no . or ..)
+  EXPECT_FALSE(resolved.empty());
+  EXPECT_EQ(resolved[0], '/'); // Absolute path
+}
+
+TEST_F(IndexCacheTest, ResolvePath_Symlink) {
+  // Create a regular file and a symlink to it
+  std::string source = createTempFile("target.csv", "a,b\n1,2\n");
+  std::string symlink_path = temp_dir + "/link.csv";
+
+  // Create symlink
+  ASSERT_EQ(symlink(source.c_str(), symlink_path.c_str()), 0)
+      << "Failed to create symlink: " << strerror(errno);
+
+  // resolve_path should return the same canonical path for both
+  std::string resolved_source = IndexCache::resolve_path(source);
+  std::string resolved_symlink = IndexCache::resolve_path(symlink_path);
+
+  EXPECT_EQ(resolved_source, resolved_symlink);
+}
+
+TEST_F(IndexCacheTest, ResolvePath_NonexistentFile) {
+  // resolve_path should gracefully fall back to original path
+  std::string nonexistent = "/nonexistent/path/file.csv";
+
+  std::string resolved = IndexCache::resolve_path(nonexistent);
+
+  // Should return original path since file doesn't exist
+  EXPECT_EQ(resolved, nonexistent);
+}
+
+TEST_F(IndexCacheTest, ResolvePath_EmptyPath) {
+  std::string resolved = IndexCache::resolve_path("");
+
+  EXPECT_TRUE(resolved.empty());
+}
+
+TEST_F(IndexCacheTest, ComputePath_SymlinksShareCacheXdg) {
+  // Two different symlinks to the same file should produce the same XDG cache path
+  std::string source = createTempFile("shared.csv", "a,b\n1,2\n");
+  std::string symlink1 = temp_dir + "/link1.csv";
+  std::string symlink2 = temp_dir + "/link2.csv";
+
+  ASSERT_EQ(symlink(source.c_str(), symlink1.c_str()), 0);
+  ASSERT_EQ(symlink(source.c_str(), symlink2.c_str()), 0);
+
+  CacheConfig config = CacheConfig::xdg_cache();
+  // resolve_symlinks is true by default
+
+  std::string cache1 = IndexCache::compute_path(symlink1, config);
+  std::string cache2 = IndexCache::compute_path(symlink2, config);
+
+  // Both symlinks should resolve to the same cache path
+  EXPECT_EQ(cache1, cache2);
+
+  // And should match the direct path's cache
+  std::string cache_direct = IndexCache::compute_path(source, config);
+  EXPECT_EQ(cache1, cache_direct);
+}
+
+TEST_F(IndexCacheTest, ComputePath_SymlinksDisabledGetSeparateCaches) {
+  // With resolve_symlinks=false, different paths get different caches
+  std::string source = createTempFile("separate.csv", "a,b\n1,2\n");
+  std::string symlink1 = temp_dir + "/sep_link1.csv";
+  std::string symlink2 = temp_dir + "/sep_link2.csv";
+
+  ASSERT_EQ(symlink(source.c_str(), symlink1.c_str()), 0);
+  ASSERT_EQ(symlink(source.c_str(), symlink2.c_str()), 0);
+
+  CacheConfig config = CacheConfig::xdg_cache();
+  config.resolve_symlinks = false;
+
+  std::string cache1 = IndexCache::compute_path(symlink1, config);
+  std::string cache2 = IndexCache::compute_path(symlink2, config);
+  std::string cache_direct = IndexCache::compute_path(source, config);
+
+  // All three should be different since symlink resolution is disabled
+  EXPECT_NE(cache1, cache2);
+  EXPECT_NE(cache1, cache_direct);
+  EXPECT_NE(cache2, cache_direct);
+}
+
+TEST_F(IndexCacheTest, ComputePath_SameDirNotAffectedBySymlinkResolution) {
+  // SAME_DIR mode should always put cache next to the accessed path,
+  // not the resolved path
+  std::string source = createTempFile("samedir.csv", "a,b\n1,2\n");
+  std::string symlink_path = temp_dir + "/samedir_link.csv";
+
+  ASSERT_EQ(symlink(source.c_str(), symlink_path.c_str()), 0);
+
+  CacheConfig config = CacheConfig::defaults(); // SAME_DIR, resolve_symlinks=true
+
+  std::string cache_source = IndexCache::compute_path(source, config);
+  std::string cache_symlink = IndexCache::compute_path(symlink_path, config);
+
+  // SAME_DIR mode: cache should be adjacent to the path used
+  EXPECT_EQ(cache_source, source + ".vidx");
+  EXPECT_EQ(cache_symlink, symlink_path + ".vidx");
+}
+
+TEST_F(IndexCacheTest, CacheConfig_ResolveSymlinksDefault) {
+  CacheConfig config = CacheConfig::defaults();
+  EXPECT_TRUE(config.resolve_symlinks);
+}
+
+TEST_F(IndexCacheTest, CacheConfig_ResolveSymlinksXdg) {
+  CacheConfig config = CacheConfig::xdg_cache();
+  EXPECT_TRUE(config.resolve_symlinks);
+}
+
+TEST_F(IndexCacheTest, CacheConfig_ResolveSymlinksCustom) {
+  CacheConfig config = CacheConfig::custom("/custom/path");
+  EXPECT_TRUE(config.resolve_symlinks);
+}
+
+TEST_F(IndexCacheTest, Integration_SymlinkCacheSharing) {
+  // Full integration test: parsing via symlink should use cache from original
+  std::string content = "name,age\nAlice,30\nBob,25\n";
+  std::string source_path = createTempFile("sym_int.csv", content);
+  std::string symlink_path = temp_dir + "/sym_int_link.csv";
+
+  ASSERT_EQ(symlink(source_path.c_str(), symlink_path.c_str()), 0);
+
+  libvroom::Parser parser;
+
+  // First parse via original path (creates cache in XDG dir)
+  {
+    auto buffer = libvroom::load_file_to_ptr(source_path, 64);
+    libvroom::ParseOptions opts;
+    opts.cache = CacheConfig::xdg_cache();
+    opts.source_path = source_path;
+
+    auto result = parser.parse(buffer.data(), buffer.size, opts);
+    ASSERT_TRUE(result.success());
+    EXPECT_FALSE(result.used_cache); // Cache miss - first parse
+    EXPECT_FALSE(result.cache_path.empty());
+  }
+
+  // Second parse via symlink - should use the same cache!
+  {
+    auto buffer = libvroom::load_file_to_ptr(symlink_path, 64);
+    libvroom::ParseOptions opts;
+    opts.cache = CacheConfig::xdg_cache();
+    opts.source_path = symlink_path; // Using symlink path
+
+    auto result = parser.parse(buffer.data(), buffer.size, opts);
+    ASSERT_TRUE(result.success());
+    // Should be a cache hit because symlink resolves to same file
+    EXPECT_TRUE(result.used_cache);
+  }
+}
+
+TEST_F(IndexCacheTest, ResolvePath_NestedSymlinks) {
+  // Test with multiple levels of symlinks
+  std::string source = createTempFile("nested.csv", "a,b\n1,2\n");
+  std::string link1 = temp_dir + "/nested_link1.csv";
+  std::string link2 = temp_dir + "/nested_link2.csv";
+
+  // Create chain: link2 -> link1 -> source
+  ASSERT_EQ(symlink(source.c_str(), link1.c_str()), 0);
+  ASSERT_EQ(symlink(link1.c_str(), link2.c_str()), 0);
+
+  // All should resolve to the same canonical path
+  std::string resolved_source = IndexCache::resolve_path(source);
+  std::string resolved_link1 = IndexCache::resolve_path(link1);
+  std::string resolved_link2 = IndexCache::resolve_path(link2);
+
+  EXPECT_EQ(resolved_source, resolved_link1);
+  EXPECT_EQ(resolved_link1, resolved_link2);
+}
+
+TEST_F(IndexCacheTest, ResolvePath_DirectorySymlink) {
+  // Test with symlink in a directory component
+  std::string subdir = createTempDir("real_dir");
+  std::string source = subdir + "/file.csv";
+  std::ofstream(source) << "a,b\n1,2\n";
+
+  std::string dir_link = temp_dir + "/dir_link";
+  ASSERT_EQ(symlink(subdir.c_str(), dir_link.c_str()), 0);
+
+  std::string path_via_link = dir_link + "/file.csv";
+
+  std::string resolved_direct = IndexCache::resolve_path(source);
+  std::string resolved_via_link = IndexCache::resolve_path(path_via_link);
+
+  EXPECT_EQ(resolved_direct, resolved_via_link);
+}
+
+#endif // _WIN32
