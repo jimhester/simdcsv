@@ -182,27 +182,42 @@ class RegressionDetector:
         """Detect performance regressions (threshold in %)."""
         if not self.baseline:
             print("No baseline provided, skipping regression detection.")
-            return []
-        
+            return [], []
+
         regressions = []
-        
+        skipped = []
+
+        # Minimum time threshold (1ms in nanoseconds) to avoid division by zero
+        # and unreliable comparisons for very fast benchmarks
+        MIN_TIME_THRESHOLD_NS = 1_000_000
+
         # Create lookup for baseline benchmarks
         baseline_lookup = {b['name']: b for b in self.baseline.benchmarks}
-        
+
         for current_bench in self.current.benchmarks:
             name = current_bench['name']
             baseline_bench = baseline_lookup.get(name)
-            
+
             if not baseline_bench:
                 continue
-            
+
             # Compare key metrics
             current_time = current_bench['real_time']
             baseline_time = baseline_bench['real_time']
-            
+
+            # Skip comparison if baseline time is zero or below threshold
+            if baseline_time <= 0 or baseline_time < MIN_TIME_THRESHOLD_NS:
+                skipped.append({
+                    'name': name,
+                    'current_time': current_time,
+                    'baseline_time': baseline_time,
+                    'reason': 'baseline time below 1ms threshold'
+                })
+                continue
+
             # Performance regression = current is slower than baseline
             time_change_percent = ((current_time - baseline_time) / baseline_time) * 100
-            
+
             if time_change_percent > threshold:
                 regressions.append({
                     'name': name,
@@ -210,29 +225,37 @@ class RegressionDetector:
                     'baseline_time': baseline_time,
                     'regression_percent': time_change_percent
                 })
-        
-        return regressions
+
+        return regressions, skipped
     
     def generate_regression_report(self, output_file='regression_report.md', threshold=10.0):
         """Generate regression detection report."""
-        regressions = self.detect_regressions(threshold)
-        
+        regressions, skipped = self.detect_regressions(threshold)
+
         with open(output_file, 'w') as f:
             f.write(f"# Regression Detection Report\n\n")
             f.write(f"Generated: {datetime.now().isoformat()}\n")
             f.write(f"Threshold: {threshold}% performance degradation\n\n")
-            
+
+            if skipped:
+                f.write(f"⏭️  **{len(skipped)} benchmark(s) skipped** (baseline time below 1ms threshold):\n\n")
+                f.write("| Benchmark | Baseline Time (ns) | Current Time (ns) | Reason |\n")
+                f.write("|-----------|-------------------|-------------------|--------|\n")
+                for skip in skipped:
+                    f.write(f"| {skip['name']} | {skip['baseline_time']:,.0f} | {skip['current_time']:,.0f} | {skip['reason']} |\n")
+                f.write("\n")
+
             if not regressions:
                 f.write("✅ **No performance regressions detected!**\n\n")
             else:
                 f.write(f"⚠️  **{len(regressions)} performance regressions detected:**\n\n")
                 f.write("| Benchmark | Current Time (ns) | Baseline Time (ns) | Regression (%) |\n")
                 f.write("|-----------|-------------------|-------------------|----------------|\n")
-                
+
                 for reg in regressions:
                     f.write(f"| {reg['name']} | {reg['current_time']:,} | {reg['baseline_time']:,} | +{reg['regression_percent']:.1f}% |\n")
                 f.write("\n")
-        
+
         print(f"Regression report generated: {output_file}")
         return len(regressions)
 
