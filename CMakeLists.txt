@@ -39,6 +39,81 @@ else()
     add_compile_options(-O3)
 endif()
 
+# =============================================================================
+# SIMD compiler flags for Highway (issue #443)
+# =============================================================================
+# Highway requires specific compiler flags to detect and use advanced SIMD
+# instructions. Without these flags, Highway falls back to SSE2 which is
+# ~10x slower than AVX2/AVX-512.
+#
+# Required flags for x86-64:
+# - -mavx2: AVX2 instructions (256-bit vectors)
+# - -mfma: Fused multiply-add (required for many AVX2 operations)
+# - -mbmi -mbmi2: Bit manipulation instructions (used by Highway)
+# - -mf16c: Half-precision float conversion
+# - -maes -mpclmul: AES/carry-less multiply (required for Highway baseline detection)
+#
+# See: https://github.com/google/highway/blob/master/g3doc/quick_reference.md
+# =============================================================================
+include(CheckCXXCompilerFlag)
+
+# Detect target architecture
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+    message(STATUS "Detected x86-64 architecture, enabling AVX2/SIMD flags for Highway")
+
+    # Check which flags are supported by the compiler
+    set(SIMD_FLAGS "")
+
+    check_cxx_compiler_flag("-mavx2" HAVE_AVX2)
+    if(HAVE_AVX2)
+        list(APPEND SIMD_FLAGS "-mavx2")
+    endif()
+
+    check_cxx_compiler_flag("-mfma" HAVE_FMA)
+    if(HAVE_FMA)
+        list(APPEND SIMD_FLAGS "-mfma")
+    endif()
+
+    check_cxx_compiler_flag("-mbmi" HAVE_BMI)
+    if(HAVE_BMI)
+        list(APPEND SIMD_FLAGS "-mbmi")
+    endif()
+
+    check_cxx_compiler_flag("-mbmi2" HAVE_BMI2)
+    if(HAVE_BMI2)
+        list(APPEND SIMD_FLAGS "-mbmi2")
+    endif()
+
+    check_cxx_compiler_flag("-mf16c" HAVE_F16C)
+    if(HAVE_F16C)
+        list(APPEND SIMD_FLAGS "-mf16c")
+    endif()
+
+    # These are critical for Highway SIMD baseline detection
+    check_cxx_compiler_flag("-maes" HAVE_AES)
+    if(HAVE_AES)
+        list(APPEND SIMD_FLAGS "-maes")
+    endif()
+
+    check_cxx_compiler_flag("-mpclmul" HAVE_PCLMUL)
+    if(HAVE_PCLMUL)
+        list(APPEND SIMD_FLAGS "-mpclmul")
+    endif()
+
+    if(SIMD_FLAGS)
+        message(STATUS "Enabling SIMD flags: ${SIMD_FLAGS}")
+        add_compile_options(${SIMD_FLAGS})
+    else()
+        message(WARNING "No SIMD flags supported - Highway may fall back to SSE2 (slow)")
+    endif()
+
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+    message(STATUS "Detected ARM64 architecture, NEON is enabled by default")
+    # ARM NEON is typically enabled by default on aarch64
+else()
+    message(STATUS "Unknown architecture: ${CMAKE_SYSTEM_PROCESSOR}, relying on Highway defaults")
+endif()
+
 # Code coverage flags
 if(ENABLE_COVERAGE)
     message(STATUS "Code coverage enabled (gcov-compatible)")
