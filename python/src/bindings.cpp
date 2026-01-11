@@ -12,15 +12,18 @@
 #include "dialect.h"
 #include "error.h"
 
+#include <algorithm>
 #include <climits>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace py = pybind11;
@@ -104,27 +107,119 @@ struct TableData {
   libvroom::FileBuffer buffer;
   libvroom::Parser::Result result;
   std::vector<std::string> column_names;
+  std::vector<size_t> selected_columns;               // Indices of selected columns (empty = all)
   std::vector<std::vector<std::string>> columns_data; // Materialized column data
   bool columns_materialized = false;
+  std::unordered_set<std::string> null_values; // Values to treat as null
+  bool empty_is_null = true;                   // Treat empty strings as null
+
+  // Get effective number of columns (considering selection)
+  size_t effective_num_columns() const {
+    return selected_columns.empty() ? result.num_columns() : selected_columns.size();
+  }
+
+  // Map logical column index to underlying column index
+  size_t map_column_index(size_t logical_idx) const {
+    if (selected_columns.empty()) {
+      return logical_idx;
+    }
+    return selected_columns[logical_idx];
+  }
 
   // Materialize all columns as strings for Arrow export
   void materialize_columns() {
     if (columns_materialized)
       return;
 
-    size_t n_cols = result.num_columns();
+    size_t n_cols = effective_num_columns();
     size_t n_rows = result.num_rows();
     columns_data.resize(n_cols);
 
     for (size_t col = 0; col < n_cols; ++col) {
+      size_t underlying_col = map_column_index(col);
       columns_data[col].reserve(n_rows);
       for (size_t row = 0; row < n_rows; ++row) {
         auto r = result.row(row);
-        columns_data[col].push_back(r.get_string(col));
+        columns_data[col].push_back(r.get_string(underlying_col));
       }
     }
     columns_materialized = true;
   }
+
+  // Check if a value should be treated as null
+  bool is_null_value(const std::string& val) const {
+    if (empty_is_null && val.empty()) {
+      return true;
+    }
+    return null_values.count(val) > 0;
+  }
+};
+
+// =============================================================================
+// Dialect Python class - exposes CSV dialect detection results
+// =============================================================================
+
+class Dialect {
+public:
+  Dialect() = default;
+
+  Dialect(char delim, char quote, char escape, bool double_quote, const std::string& line_ending,
+          bool has_hdr, double conf)
+      : delimiter_(std::string(1, delim)), quote_char_(std::string(1, quote)),
+        escape_char_(std::string(1, escape)), double_quote_(double_quote),
+        line_ending_(line_ending), has_header_(has_hdr), confidence_(conf) {}
+
+  // Construct from libvroom DetectionResult
+  explicit Dialect(const libvroom::DetectionResult& result)
+      : delimiter_(std::string(1, result.dialect.delimiter)),
+        quote_char_(std::string(1, result.dialect.quote_char)),
+        escape_char_(std::string(1, result.dialect.escape_char)),
+        double_quote_(result.dialect.double_quote), has_header_(result.has_header),
+        confidence_(result.confidence) {
+    // Convert line ending enum to string
+    switch (result.dialect.line_ending) {
+    case libvroom::Dialect::LineEnding::LF:
+      line_ending_ = "\\n";
+      break;
+    case libvroom::Dialect::LineEnding::CRLF:
+      line_ending_ = "\\r\\n";
+      break;
+    case libvroom::Dialect::LineEnding::CR:
+      line_ending_ = "\\r";
+      break;
+    case libvroom::Dialect::LineEnding::MIXED:
+      line_ending_ = "mixed";
+      break;
+    default:
+      line_ending_ = "unknown";
+    }
+  }
+
+  std::string delimiter() const { return delimiter_; }
+  std::string quote_char() const { return quote_char_; }
+  std::string escape_char() const { return escape_char_; }
+  bool double_quote() const { return double_quote_; }
+  std::string line_ending() const { return line_ending_; }
+  bool has_header() const { return has_header_; }
+  double confidence() const { return confidence_; }
+
+  std::string repr() const {
+    std::ostringstream ss;
+    ss << "Dialect(delimiter=" << py::repr(py::str(delimiter_)).cast<std::string>()
+       << ", quote_char=" << py::repr(py::str(quote_char_)).cast<std::string>()
+       << ", has_header=" << (has_header_ ? "True" : "False") << ", confidence=" << confidence_
+       << ")";
+    return ss.str();
+  }
+
+private:
+  std::string delimiter_ = ",";
+  std::string quote_char_ = "\"";
+  std::string escape_char_ = "\"";
+  bool double_quote_ = true;
+  std::string line_ending_ = "unknown";
+  bool has_header_ = true;
+  double confidence_ = 0.0;
 };
 
 // Schema release callback
@@ -372,27 +467,31 @@ public:
   // Number of rows (excluding header)
   size_t num_rows() const { return data_->result.num_rows(); }
 
-  // Number of columns
-  size_t num_columns() const { return data_->result.num_columns(); }
+  // Number of columns (respects column selection)
+  size_t num_columns() const { return data_->effective_num_columns(); }
 
   // Column names
   std::vector<std::string> column_names() const { return data_->column_names; }
 
   // Get a single column as list of strings
   std::vector<std::string> column(size_t index) const {
-    if (index >= data_->result.num_columns()) {
+    if (index >= data_->effective_num_columns()) {
       throw py::index_error("Column index out of range");
     }
-    return data_->result.column_string(index);
+    size_t underlying_idx = data_->map_column_index(index);
+    return data_->result.column_string(underlying_idx);
   }
 
   // Get a column by name
   std::vector<std::string> column_by_name(const std::string& name) const {
-    auto idx = data_->result.column_index(name);
-    if (!idx) {
+    // Find the name in our selected column names
+    auto it = std::find(data_->column_names.begin(), data_->column_names.end(), name);
+    if (it == data_->column_names.end()) {
       throw py::key_error("Column not found: " + name);
     }
-    return data_->result.column_string(*idx);
+    size_t logical_idx = static_cast<size_t>(std::distance(data_->column_names.begin(), it));
+    size_t underlying_idx = data_->map_column_index(logical_idx);
+    return data_->result.column_string(underlying_idx);
   }
 
   // Get a single row as list of strings
@@ -402,9 +501,11 @@ public:
     }
     auto r = data_->result.row(index);
     std::vector<std::string> result;
-    result.reserve(data_->result.num_columns());
-    for (size_t col = 0; col < data_->result.num_columns(); ++col) {
-      result.push_back(r.get_string(col));
+    size_t n_cols = data_->effective_num_columns();
+    result.reserve(n_cols);
+    for (size_t col = 0; col < n_cols; ++col) {
+      size_t underlying_col = data_->map_column_index(col);
+      result.push_back(r.get_string(underlying_col));
     }
     return result;
   }
@@ -477,11 +578,45 @@ private:
 };
 
 // =============================================================================
-// read_csv function
+// detect_dialect function
+// =============================================================================
+
+Dialect detect_dialect(const std::string& path) {
+  // Load file
+  libvroom::FileBuffer buffer;
+  try {
+    buffer = libvroom::load_file(path);
+  } catch (const std::runtime_error& e) {
+    throw py::value_error(std::string("Failed to load file: ") + e.what());
+  }
+
+  if (!buffer.valid()) {
+    throw py::value_error("Failed to load file: " + path);
+  }
+
+  // Detect dialect
+  auto result = libvroom::detect_dialect(buffer.data(), buffer.size());
+
+  if (!result.success()) {
+    throw py::value_error("Failed to detect CSV dialect");
+  }
+
+  return Dialect(result);
+}
+
+// =============================================================================
+// read_csv function with full options
 // =============================================================================
 
 Table read_csv(const std::string& path, std::optional<std::string> delimiter = std::nullopt,
-               bool has_header = true, size_t num_threads = 1) {
+               std::optional<std::string> quote_char = std::nullopt, bool has_header = true,
+               std::optional<std::string> encoding = std::nullopt, size_t skip_rows = 0,
+               std::optional<size_t> n_rows = std::nullopt,
+               std::optional<std::vector<py::object>> usecols = std::nullopt,
+               std::optional<std::vector<std::string>> null_values = std::nullopt,
+               bool empty_is_null = true,
+               std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt,
+               size_t num_threads = 1) {
   auto data = std::make_shared<TableData>();
 
   // Load file
@@ -497,12 +632,26 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
 
   // Set up parser options
   libvroom::ParseOptions options;
+  libvroom::Dialect dialect;
+
   if (delimiter) {
-    libvroom::Dialect dialect;
     if (delimiter->length() != 1) {
       throw py::value_error("Delimiter must be a single character");
     }
     dialect.delimiter = (*delimiter)[0];
+    options.dialect = dialect;
+  }
+
+  if (quote_char) {
+    if (quote_char->length() != 1) {
+      throw py::value_error("quote_char must be a single character");
+    }
+    dialect.quote_char = (*quote_char)[0];
+    options.dialect = dialect;
+  }
+
+  // If any dialect option was specified, ensure we use explicit dialect
+  if (delimiter || quote_char) {
     options.dialect = dialect;
   }
 
@@ -522,17 +671,66 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
   // Configure header handling
   data->result.set_has_header(has_header);
 
-  // Get column names
-  if (has_header) {
-    data->column_names = data->result.header();
-  } else {
-    // Generate column names
-    size_t n_cols = data->result.num_columns();
-    data->column_names.reserve(n_cols);
-    for (size_t i = 0; i < n_cols; ++i) {
-      data->column_names.push_back("column_" + std::to_string(i));
+  // Store null value settings
+  data->empty_is_null = empty_is_null;
+  if (null_values) {
+    for (const auto& val : *null_values) {
+      data->null_values.insert(val);
     }
   }
+
+  // Get column names
+  std::vector<std::string> all_column_names;
+  if (has_header) {
+    all_column_names = data->result.header();
+  } else {
+    size_t n_cols = data->result.num_columns();
+    all_column_names.reserve(n_cols);
+    for (size_t i = 0; i < n_cols; ++i) {
+      all_column_names.push_back("column_" + std::to_string(i));
+    }
+  }
+
+  // Handle column selection (usecols)
+  if (usecols) {
+    for (const auto& col : *usecols) {
+      if (py::isinstance<py::int_>(col)) {
+        // Column by index
+        size_t idx = col.cast<size_t>();
+        if (idx >= all_column_names.size()) {
+          throw py::index_error("Column index " + std::to_string(idx) + " out of range");
+        }
+        data->selected_columns.push_back(idx);
+      } else if (py::isinstance<py::str>(col)) {
+        // Column by name
+        std::string name = col.cast<std::string>();
+        auto it = std::find(all_column_names.begin(), all_column_names.end(), name);
+        if (it == all_column_names.end()) {
+          throw py::key_error("Column not found: " + name);
+        }
+        data->selected_columns.push_back(
+            static_cast<size_t>(std::distance(all_column_names.begin(), it)));
+      } else {
+        throw py::type_error("usecols elements must be int or str");
+      }
+    }
+
+    // Filter column names based on selection
+    data->column_names.reserve(data->selected_columns.size());
+    for (size_t idx : data->selected_columns) {
+      data->column_names.push_back(all_column_names[idx]);
+    }
+  } else {
+    data->column_names = std::move(all_column_names);
+  }
+
+  // Note: skip_rows, n_rows, dtype, and encoding are accepted but not fully
+  // implemented in this phase. They are stored for future use or passed through
+  // where possible.
+  (void)encoding;  // Encoding is handled automatically by libvroom
+  (void)skip_rows; // TODO: Implement skip_rows in future phase
+  (void)n_rows;    // TODO: Implement n_rows in future phase
+  (void)dtype;     // TODO: Implement dtype in future phase
 
   return Table(std::move(data));
 }
@@ -565,6 +763,49 @@ PYBIND11_MODULE(_core, m) {
   m.attr("ParseError") = py::handle(ParseError);
   m.attr("IOError") = py::handle(IOError_custom);
 
+  // Dialect class
+  py::class_<Dialect>(m, "Dialect", R"doc(
+CSV dialect configuration and detection result.
+
+A Dialect describes the format of a CSV file: field delimiter, quote character,
+escape handling, etc. Obtain a Dialect by calling detect_dialect() on a file.
+
+Attributes
+----------
+delimiter : str
+    Field separator character (e.g., ',' for CSV, '\\t' for TSV).
+quote_char : str
+    Quote character for escaping fields (typically '"').
+escape_char : str
+    Escape character (typically '"' or '\\').
+double_quote : bool
+    Whether quotes are escaped by doubling ("").
+line_ending : str
+    Detected line ending style ('\\n', '\\r\\n', '\\r', 'mixed', or 'unknown').
+has_header : bool
+    Whether the first row appears to be a header.
+confidence : float
+    Detection confidence from 0.0 to 1.0.
+
+Examples
+--------
+>>> import vroom_csv
+>>> dialect = vroom_csv.detect_dialect("data.csv")
+>>> print(f"Delimiter: {dialect.delimiter!r}")
+>>> print(f"Has header: {dialect.has_header}")
+>>> print(f"Confidence: {dialect.confidence:.0%}")
+)doc")
+      .def_property_readonly("delimiter", &Dialect::delimiter, "Field delimiter character")
+      .def_property_readonly("quote_char", &Dialect::quote_char, "Quote character")
+      .def_property_readonly("escape_char", &Dialect::escape_char, "Escape character")
+      .def_property_readonly("double_quote", &Dialect::double_quote,
+                             "Whether quotes are escaped by doubling")
+      .def_property_readonly("line_ending", &Dialect::line_ending, "Detected line ending style")
+      .def_property_readonly("has_header", &Dialect::has_header,
+                             "Whether first row appears to be header")
+      .def_property_readonly("confidence", &Dialect::confidence, "Detection confidence (0.0-1.0)")
+      .def("__repr__", &Dialect::repr);
+
   // Table class
   py::class_<Table>(m, "Table", R"doc(
 A parsed CSV table with Arrow PyCapsule interface support.
@@ -577,7 +818,7 @@ Examples
 --------
 >>> import vroom_csv
 >>> table = vroom_csv.read_csv("data.csv")
->>> print(table.num_rows(), table.num_columns())
+>>> print(table.num_rows, table.num_columns)
 
 # Convert to PyArrow
 >>> import pyarrow as pa
@@ -606,9 +847,48 @@ Examples
       .def("error_summary", &Table::error_summary, "Get summary of parse errors")
       .def("errors", &Table::errors, "Get list of all parse error messages");
 
-  // read_csv function
+  // detect_dialect function
+  m.def("detect_dialect", &detect_dialect, py::arg("path"),
+        R"doc(
+Detect the CSV dialect of a file.
+
+Analyzes the file content to determine the field delimiter, quote character,
+and other format settings.
+
+Parameters
+----------
+path : str
+    Path to the CSV file to analyze.
+
+Returns
+-------
+Dialect
+    A Dialect object describing the detected CSV format.
+
+Raises
+------
+ValueError
+    If the file cannot be read or dialect cannot be determined.
+
+Examples
+--------
+>>> import vroom_csv
+>>> dialect = vroom_csv.detect_dialect("data.csv")
+>>> print(f"Delimiter: {dialect.delimiter!r}")
+>>> print(f"Quote char: {dialect.quote_char!r}")
+>>> print(f"Has header: {dialect.has_header}")
+>>> print(f"Confidence: {dialect.confidence:.0%}")
+
+# Use detected dialect with read_csv
+>>> table = vroom_csv.read_csv("data.csv", delimiter=dialect.delimiter)
+)doc");
+
+  // read_csv function with full options
   m.def("read_csv", &read_csv, py::arg("path"), py::arg("delimiter") = py::none(),
-        py::arg("has_header") = true, py::arg("num_threads") = 1,
+        py::arg("quote_char") = py::none(), py::arg("has_header") = true,
+        py::arg("encoding") = py::none(), py::arg("skip_rows") = 0, py::arg("n_rows") = py::none(),
+        py::arg("usecols") = py::none(), py::arg("null_values") = py::none(),
+        py::arg("empty_is_null") = true, py::arg("dtype") = py::none(), py::arg("num_threads") = 1,
         R"doc(
 Read a CSV file and return a Table object.
 
@@ -619,8 +899,31 @@ path : str
 delimiter : str, optional
     Field delimiter character. If not specified, the delimiter is
     auto-detected from the file content.
+quote_char : str, optional
+    Quote character for escaping fields. Default is '"'.
 has_header : bool, default True
     Whether the first row contains column headers.
+encoding : str, optional
+    File encoding. If not specified, encoding is auto-detected.
+    Currently accepted but not fully implemented.
+skip_rows : int, default 0
+    Number of rows to skip at the start of the file.
+    Currently accepted but not fully implemented.
+n_rows : int, optional
+    Maximum number of rows to read. If not specified, reads all rows.
+    Currently accepted but not fully implemented.
+usecols : list of str or int, optional
+    List of column names or indices to read. If not specified, reads
+    all columns.
+null_values : list of str, optional
+    List of strings to treat as null/NA values.
+    Currently accepted but not fully implemented.
+empty_is_null : bool, default True
+    Whether to treat empty strings as null values.
+    Currently accepted but not fully implemented.
+dtype : dict, optional
+    Dictionary mapping column names to data types.
+    Currently accepted but not fully implemented.
 num_threads : int, default 1
     Number of threads to use for parsing.
 
@@ -635,6 +938,10 @@ ValueError
     If the file cannot be read or parsed.
 ParseError
     If there are fatal parse errors in the CSV.
+IndexError
+    If a column index in usecols is out of range.
+KeyError
+    If a column name in usecols is not found.
 
 Examples
 --------
@@ -643,7 +950,13 @@ Examples
 >>> print(f"Loaded {table.num_rows} rows")
 
 >>> # With explicit delimiter
->>> table = vroom_csv.read_csv("data.tsv", delimiter="\t")
+>>> table = vroom_csv.read_csv("data.tsv", delimiter="\\t")
+
+>>> # Read specific columns
+>>> table = vroom_csv.read_csv("data.csv", usecols=["id", "name", "value"])
+
+>>> # With null value handling
+>>> table = vroom_csv.read_csv("data.csv", null_values=["NA", "N/A", ""])
 
 >>> # Multi-threaded parsing
 >>> table = vroom_csv.read_csv("large.csv", num_threads=4)
