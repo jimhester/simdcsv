@@ -47,6 +47,11 @@ def compare_benchmarks(baseline, current):
     regressions = []
     improvements = []
     unchanged = []
+    skipped = []
+
+    # Minimum time threshold (1ms in nanoseconds) to avoid division by zero
+    # and unreliable comparisons for very fast benchmarks
+    MIN_TIME_THRESHOLD_NS = 1_000_000
 
     for name, curr_time in current.items():
         if name not in baseline:
@@ -54,6 +59,12 @@ def compare_benchmarks(baseline, current):
             continue
 
         base_time = baseline[name]
+
+        # Skip comparison if baseline time is zero or below threshold
+        if base_time <= 0 or base_time < MIN_TIME_THRESHOLD_NS:
+            skipped.append((name, base_time, curr_time))
+            continue
+
         # Positive ratio means regression (slower), negative means improvement
         ratio = (curr_time - base_time) / base_time
 
@@ -64,7 +75,7 @@ def compare_benchmarks(baseline, current):
         else:
             unchanged.append((name, base_time, curr_time, ratio))
 
-    return regressions, improvements, unchanged
+    return regressions, improvements, unchanged, skipped
 
 
 def main():
@@ -109,7 +120,15 @@ def main():
             print()
             print("Skipping baseline save (not a main branch push).")
     else:
-        regressions, improvements, unchanged = compare_benchmarks(baseline, current)
+        regressions, improvements, unchanged, skipped = compare_benchmarks(baseline, current)
+
+        if skipped:
+            print("SKIPPED (baseline time too small for reliable comparison):")
+            for name, base, curr in skipped:
+                print(f"  {name}")
+                print(f"    Baseline: {base:.2f} ns (below 1ms threshold)")
+                print(f"    Current:  {curr:.2f} ns")
+            print()
 
         if regressions:
             print("REGRESSIONS DETECTED:")
