@@ -267,6 +267,170 @@ class TestVersion:
         assert isinstance(vroom_csv.LIBVROOM_VERSION, str)
 
 
+class TestProgressCallback:
+    """Tests for progress callback functionality."""
+
+    @pytest.fixture
+    def simple_csv(self):
+        """Create a simple CSV file for testing."""
+        content = "name,age,city\nAlice,30,New York\nBob,25,Los Angeles\nCharlie,35,Chicago\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            return f.name
+
+    def test_progress_callback_is_called(self, simple_csv):
+        """Test that progress callback is invoked during parsing."""
+        import vroom_csv
+
+        call_count = [0]
+        progress_values = []
+
+        def progress_callback(bytes_read, total_bytes):
+            call_count[0] += 1
+            progress_values.append((bytes_read, total_bytes))
+
+        table = vroom_csv.read_csv(simple_csv, progress=progress_callback)
+
+        assert table.num_rows == 3
+        # Callback should have been called at least once
+        assert call_count[0] >= 1
+        # All progress values should have consistent total_bytes
+        if progress_values:
+            total = progress_values[0][1]
+            for bytes_read, total_bytes in progress_values:
+                assert total_bytes == total
+                assert bytes_read >= 0
+                assert bytes_read <= total_bytes
+
+    def test_progress_callback_total_bytes_matches_file_size(self, simple_csv):
+        """Test that total_bytes in callback matches actual file size."""
+        import os
+
+        import vroom_csv
+
+        file_size = os.path.getsize(simple_csv)
+        reported_total = [None]
+
+        def progress_callback(bytes_read, total_bytes):
+            reported_total[0] = total_bytes
+
+        vroom_csv.read_csv(simple_csv, progress=progress_callback)
+
+        assert reported_total[0] == file_size
+
+    def test_progress_callback_reaches_100_percent(self, simple_csv):
+        """Test that progress callback reaches 100% at the end."""
+        import vroom_csv
+
+        final_progress = [None]
+
+        def progress_callback(bytes_read, total_bytes):
+            final_progress[0] = (bytes_read, total_bytes)
+
+        table = vroom_csv.read_csv(simple_csv, progress=progress_callback)
+
+        # Final call should report bytes_read == total_bytes (100%)
+        assert final_progress[0] is not None
+        bytes_read, total_bytes = final_progress[0]
+        assert bytes_read == total_bytes
+
+    def test_progress_callback_monotonically_increasing(self, simple_csv):
+        """Test that bytes_read values are monotonically non-decreasing."""
+        import vroom_csv
+
+        bytes_values = []
+
+        def progress_callback(bytes_read, total_bytes):
+            bytes_values.append(bytes_read)
+
+        vroom_csv.read_csv(simple_csv, progress=progress_callback)
+
+        # Values should be non-decreasing
+        for i in range(1, len(bytes_values)):
+            assert bytes_values[i] >= bytes_values[i - 1]
+
+    def test_progress_callback_with_none(self, simple_csv):
+        """Test that None progress callback works (no callback)."""
+        import vroom_csv
+
+        # Should not raise any errors
+        table = vroom_csv.read_csv(simple_csv, progress=None)
+        assert table.num_rows == 3
+
+    def test_progress_callback_with_multi_threading(self, simple_csv):
+        """Test that progress callback works with multi-threaded parsing."""
+        import vroom_csv
+
+        call_count = [0]
+
+        def progress_callback(bytes_read, total_bytes):
+            call_count[0] += 1
+
+        table = vroom_csv.read_csv(simple_csv, num_threads=4, progress=progress_callback)
+
+        assert table.num_rows == 3
+        assert call_count[0] >= 1
+
+    def test_progress_callback_exception_handling(self, simple_csv):
+        """Test that exceptions in progress callback are handled properly."""
+        import vroom_csv
+
+        def bad_callback(bytes_read, total_bytes):
+            raise ValueError("Callback error")
+
+        # Exception in callback should propagate to caller
+        with pytest.raises(ValueError, match="Callback error"):
+            vroom_csv.read_csv(simple_csv, progress=bad_callback)
+
+    @pytest.fixture
+    def larger_csv(self):
+        """Create a larger CSV file for progress testing."""
+        lines = ["id,value,description"]
+        # Create ~100KB of data to ensure multiple progress callbacks
+        for i in range(5000):
+            lines.append(f"{i},{i * 10},description for row {i}")
+        content = "\n".join(lines) + "\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            return f.name
+
+    def test_progress_callback_with_larger_file(self, larger_csv):
+        """Test progress callback with a larger file."""
+        import vroom_csv
+
+        progress_values = []
+
+        def progress_callback(bytes_read, total_bytes):
+            progress_values.append((bytes_read, total_bytes))
+
+        table = vroom_csv.read_csv(larger_csv, progress=progress_callback)
+
+        assert table.num_rows == 5000
+        assert len(progress_values) >= 1
+        # First should start at 0 or low value, last should reach total
+        assert progress_values[-1][0] == progress_values[-1][1]
+
+    def test_progress_callback_preserves_data_integrity(self, simple_csv):
+        """Test that using progress callback doesn't affect parsed data."""
+        import vroom_csv
+
+        # Parse without callback
+        table_without = vroom_csv.read_csv(simple_csv)
+
+        # Parse with callback
+        def progress_callback(bytes_read, total_bytes):
+            pass
+
+        table_with = vroom_csv.read_csv(simple_csv, progress=progress_callback)
+
+        # Data should be identical
+        assert table_without.num_rows == table_with.num_rows
+        assert table_without.num_columns == table_with.num_columns
+        assert table_without.column_names == table_with.column_names
+        for i in range(table_without.num_rows):
+            assert table_without.row(i) == table_with.row(i)
+
+
 class TestExceptions:
     """Tests for exception types."""
 

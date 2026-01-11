@@ -1,5 +1,6 @@
 """Type stubs for vroom_csv._core module."""
 
+from collections.abc import Callable
 from typing import Any, Sequence, overload
 
 __version__: str
@@ -179,6 +180,7 @@ def read_csv(
     dtype: dict[str, str] | None = None,
     num_threads: int = 1,
     memory_map: bool | None = None,
+    progress: Callable[[int, int], None] | None = None,
 ) -> Table:
     """Read a CSV file and return a Table object.
 
@@ -216,6 +218,11 @@ def read_csv(
         file into memory. This can reduce memory usage for large files.
         If False, read the entire file into memory (traditional approach).
         If None (default), automatically use memory mapping for files >= 100MB.
+    progress : callable, optional
+        A callback function for progress reporting during parsing.
+        The callback receives two arguments: (bytes_read: int, total_bytes: int).
+        It is called periodically during parsing at chunk boundaries (typically
+        every 1-4MB). Use this to display progress bars or update UIs.
 
     Returns
     -------

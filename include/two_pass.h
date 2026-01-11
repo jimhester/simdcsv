@@ -58,6 +58,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring> // for memcpy
+#include <functional>
 #include <future>
 #include <limits>
 #include <sstream>
@@ -66,6 +67,17 @@
 #include <vector>
 
 namespace libvroom {
+
+/**
+ * @brief Progress callback for second-pass field indexing.
+ *
+ * Called periodically during parsing to report progress. The callback receives
+ * the number of bytes just processed. Return true to continue, false to cancel.
+ *
+ * This is used internally by the TwoPass parser to report chunk completion
+ * to the ProgressTracker in libvroom.h.
+ */
+using SecondPassProgressCallback = std::function<bool(size_t bytes_processed)>;
 
 /// Sentinel value indicating an invalid or unset position.
 constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
@@ -742,21 +754,45 @@ public:
 
   /**
    * @brief Parse using speculative multi-threading with dialect support.
+   *
+   * @param buf Input buffer
+   * @param out Output index to populate
+   * @param len Buffer length
+   * @param dialect CSV dialect settings
+   * @param progress Optional progress callback (called after each chunk completes)
+   * @return true if parsing succeeded
    */
   bool parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
-                       const Dialect& dialect = Dialect::csv());
+                       const Dialect& dialect = Dialect::csv(),
+                       const SecondPassProgressCallback& progress = nullptr);
 
   /**
    * @brief Parse using two-pass algorithm with dialect support.
+   *
+   * @param buf Input buffer
+   * @param out Output index to populate
+   * @param len Buffer length
+   * @param dialect CSV dialect settings
+   * @param progress Optional progress callback (called after each chunk completes)
+   * @return true if parsing succeeded
    */
   bool parse_two_pass(const uint8_t* buf, ParseIndex& out, size_t len,
-                      const Dialect& dialect = Dialect::csv());
+                      const Dialect& dialect = Dialect::csv(),
+                      const SecondPassProgressCallback& progress = nullptr);
 
   /**
    * @brief Parse a CSV buffer and build the field index.
+   *
+   * @param buf Input buffer
+   * @param out Output index to populate
+   * @param len Buffer length
+   * @param dialect CSV dialect settings
+   * @param progress Optional progress callback (called after each chunk completes)
+   * @return true if parsing succeeded
    */
   bool parse(const uint8_t* buf, ParseIndex& out, size_t len,
-             const Dialect& dialect = Dialect::csv());
+             const Dialect& dialect = Dialect::csv(),
+             const SecondPassProgressCallback& progress = nullptr);
 
   // Result from multi-threaded branchless parsing with error collection
   struct branchless_chunk_result {

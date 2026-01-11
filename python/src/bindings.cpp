@@ -20,9 +20,11 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <set>
@@ -1090,6 +1092,9 @@ constexpr size_t MMAP_AUTO_THRESHOLD = 100ULL * 1024 * 1024;
 // read_csv function with full options
 // =============================================================================
 
+// Type alias for Python progress callback: (bytes_read: int, total_bytes: int) -> None
+using PyProgressCallback = std::function<void(size_t, size_t)>;
+
 Table read_csv(const std::string& path, std::optional<std::string> delimiter = std::nullopt,
                std::optional<std::string> quote_char = std::nullopt, bool has_header = true,
                std::optional<std::string> encoding = std::nullopt, size_t skip_rows = 0,
@@ -1098,7 +1103,8 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
                std::optional<std::vector<std::string>> null_values = std::nullopt,
                bool empty_is_null = true,
                std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt,
-               size_t num_threads = 1, std::optional<bool> memory_map = std::nullopt) {
+               size_t num_threads = 1, std::optional<bool> memory_map = std::nullopt,
+               std::optional<PyProgressCallback> progress = std::nullopt) {
   auto data = std::make_shared<TableData>();
 
   // Configure null value handling
@@ -1167,6 +1173,31 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
   // If any dialect option was specified, ensure we use explicit dialect
   if (delimiter || quote_char) {
     options.dialect = dialect;
+  }
+
+  // Set up progress callback if provided
+  // The Python callback has signature (bytes_read: int, total_bytes: int) -> None
+  // The C++ callback expects (bytes_processed: size_t, total_bytes: size_t) -> bool
+  // We wrap the Python callback to handle:
+  // 1. GIL acquisition for thread safety
+  // 2. Python exception handling
+  // 3. Return value (Python returns None, C++ expects bool for cancellation)
+  if (progress) {
+    options.progress_callback = [py_callback = *progress](size_t bytes_processed,
+                                                          size_t total_bytes) -> bool {
+      // Acquire GIL before calling Python code
+      py::gil_scoped_acquire acquire;
+      try {
+        py_callback(bytes_processed, total_bytes);
+        return true; // Continue parsing
+      } catch (py::error_already_set& e) {
+        // Re-throw Python exceptions to be handled by pybind11
+        throw;
+      } catch (...) {
+        // For any other exception, abort parsing
+        return false;
+      }
+    };
   }
 
   // Parse
@@ -1447,7 +1478,7 @@ Examples
         py::arg("encoding") = py::none(), py::arg("skip_rows") = 0, py::arg("n_rows") = py::none(),
         py::arg("usecols") = py::none(), py::arg("null_values") = py::none(),
         py::arg("empty_is_null") = true, py::arg("dtype") = py::none(), py::arg("num_threads") = 1,
-        py::arg("memory_map") = py::none(),
+        py::arg("memory_map") = py::none(), py::arg("progress") = py::none(),
         R"doc(
 Read a CSV file and return a Table object.
 
@@ -1502,6 +1533,11 @@ memory_map : bool, optional
     - Large files that might not fit in available RAM
     - Repeated reads of the same file (benefits from OS page caching)
     - Scenarios where only a portion of the file will be accessed
+progress : callable, optional
+    A callback function for progress reporting during parsing.
+    The callback receives two arguments: (bytes_read: int, total_bytes: int).
+    It is called periodically during parsing at chunk boundaries (typically
+    every 1-4MB). Use this to display progress bars or update UIs.
 
 Returns
 -------
@@ -1558,6 +1594,13 @@ Examples
 
 >>> # Disable memory mapping (always read into memory)
 >>> table = vroom_csv.read_csv("data.csv", memory_map=False)
+
+>>> # With progress callback
+>>> def show_progress(bytes_read, total_bytes):
+...     pct = bytes_read / total_bytes * 100 if total_bytes > 0 else 0
+...     print(f"\r{pct:.1f}%", end="", flush=True)
+>>> table = vroom_csv.read_csv("huge.csv", progress=show_progress)
+>>> print()  # newline after progress
 
 >>> # Convert to Polars
 >>> import polars as pl
