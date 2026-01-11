@@ -6,6 +6,7 @@ from typing import Any, Sequence, overload
 __version__: str
 LIBVROOM_VERSION: str
 
+
 class VroomError(RuntimeError):
     """Base exception for vroom-csv errors."""
 
