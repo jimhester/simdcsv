@@ -89,15 +89,31 @@ To manually format a file: `clang-format -i <file>`
 - **Update branches via merge**: When a branch needs updates from main, use `git merge main` instead of rebasing
 - **Squash on final merge**: Use squash merge when merging PRs into main to keep history clean
 - **Check for merge conflicts**: When opening a branch, check for merge conflicts with main. If CI status checks aren't appearing on a PR, merge conflicts are often the cause
-- **Use auto-merge**: Enable auto-merge on PRs when there are no outstanding review comments. The PR will merge automatically once CI passes
+- **Use auto-merge carefully**: Only enable auto-merge on PRs AFTER:
+  1. The remote code review workflow has posted its review (check with `gh pr reviews <PR>`)
+  2. Any review feedback has been addressed
+  3. No outstanding review comments remain
 
-### Roborev Code Review
+  This prevents the race condition where auto-merge triggers before reviews are posted.
 
-This repo has automated code review via roborev (`~/p/roborev`). Agents should check for roborev reviews at these points:
+### Code Review
 
-1. **Before opening a PR**: Run roborev to catch issues early
-2. **After incremental commits**: Check for new review comments on open PRs
-3. **Before final merge**: Ensure all roborev feedback has been addressed
+This repo has two code review mechanisms:
+
+**1. Remote Review Workflow (GitHub Actions)**
+- Automatically runs on PRs and posts review comments
+- Wait for this review before enabling auto-merge
+- Check status with `gh pr reviews <PR>`
+
+**2. Local Roborev (`~/p/roborev`)**
+- Can be run locally before opening PRs to catch issues early
+- Also useful to check after incremental commits
+
+Agents should:
+1. **Before opening a PR**: Optionally run local roborev to catch issues early
+2. **After creating PR**: Wait for remote review workflow to post its review
+3. **Address all feedback**: Fix any issues raised by either review mechanism
+4. **Before enabling auto-merge**: Ensure all review comments have been addressed
 
 ```bash
 # Check for conflicts before creating PR
