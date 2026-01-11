@@ -430,6 +430,79 @@ class TestProgressCallback:
         for i in range(table_without.num_rows):
             assert table_without.row(i) == table_with.row(i)
 
+    def test_default_progress_is_exported(self):
+        """Test that default_progress is exported from vroom_csv."""
+        import vroom_csv
+
+        assert hasattr(vroom_csv, "default_progress")
+        assert callable(vroom_csv.default_progress)
+
+    def test_default_progress_with_read_csv(self, simple_csv):
+        """Test that default_progress can be used with read_csv."""
+        import io
+        import sys
+
+        import vroom_csv
+
+        # Capture stderr
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+
+        try:
+            table = vroom_csv.read_csv(simple_csv, progress=vroom_csv.default_progress)
+            output = sys.stderr.getvalue()
+        finally:
+            sys.stderr = old_stderr
+
+        assert table.num_rows == 3
+        # Progress bar should have been printed
+        assert "%" in output
+        # Should show completion
+        assert "100" in output
+
+    def test_default_progress_format(self):
+        """Test default_progress output format."""
+        import io
+        import sys
+
+        import vroom_csv
+
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+
+        try:
+            # Simulate 50% progress
+            vroom_csv.default_progress(512, 1024)
+            output = sys.stderr.getvalue()
+        finally:
+            sys.stderr = old_stderr
+
+        # Should contain progress bar, percentage, and bytes
+        assert "[" in output
+        assert "]" in output
+        assert "50" in output
+        assert "%" in output
+
+    def test_default_progress_zero_total(self):
+        """Test default_progress handles zero total gracefully."""
+        import io
+        import sys
+
+        import vroom_csv
+
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+
+        try:
+            # Should not crash with zero total
+            vroom_csv.default_progress(0, 0)
+            output = sys.stderr.getvalue()
+        finally:
+            sys.stderr = old_stderr
+
+        # Should produce no output (early return)
+        assert output == ""
+
 
 class TestExceptions:
     """Tests for exception types."""
