@@ -35,15 +35,19 @@ jobs:
     - name: Run quick benchmark
       timeout-minutes: 5
       run: |
-        # Run only specific benchmarks with limited iterations for speed
-        # Filter to run essential benchmarks only, with JSON output for comparison
-        # Benchmark names defined in benchmark/basic_benchmarks.cpp
-        cd build
-        ./libvroom_benchmark \
-          --benchmark_filter="BM_ParseSimple_Threads/1|BM_ParseManyRows_Threads/1|BM_ParseQuoted/1" \
+        # Run benchmarks from parser_overhead_benchmarks.cpp which use generated data
+        # (100K rows x 10 cols) - avoids file path issues and provides meaningful sizes
+        #
+        # Selected benchmarks:
+        # - BM_RawFirstPass: Raw SIMD scanning performance
+        # - BM_ParserWithExplicitDialect: Full parser overhead
+        # - BM_ParserMultiThread/1: Single-threaded parser
+        # - BM_ParserMultiThread/4: Multi-threaded parser
+        ./build/libvroom_benchmark \
+          --benchmark_filter="BM_RawFirstPass|BM_ParserWithExplicitDialect|BM_ParserMultiThread/1$|BM_ParserMultiThread/4$" \
           --benchmark_repetitions=3 \
-          --benchmark_min_time=0.1s \
-          --benchmark_out=benchmark_results.json \
+          --benchmark_min_time=0.5s \
+          --benchmark_out=build/benchmark_results.json \
           --benchmark_out_format=json
 
     - name: Download previous benchmark results

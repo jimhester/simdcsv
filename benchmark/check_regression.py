@@ -11,11 +11,19 @@ import os
 import shutil
 
 REGRESSION_THRESHOLD = 0.10  # 10% regression threshold
-EXPECTED_BENCHMARK_COUNT = 3  # Number of benchmarks we expect to run
+EXPECTED_BENCHMARK_COUNT = 4  # Number of benchmarks we expect to run
 
 
-def load_benchmark(filepath):
-    """Load benchmark results from JSON file."""
+def load_benchmark(filepath, check_errors=False):
+    """Load benchmark results from JSON file.
+
+    Args:
+        filepath: Path to benchmark JSON file
+        check_errors: If True, fail on benchmark errors
+
+    Returns:
+        Dict of benchmark name -> average time in nanoseconds, or None on error
+    """
     if not os.path.exists(filepath):
         return None
     try:
@@ -25,12 +33,28 @@ def load_benchmark(filepath):
         print(f"ERROR: Failed to parse JSON from {filepath}: {e}")
         return None
 
+    # Check for benchmark errors
+    errors = []
+    for bench in data.get('benchmarks', []):
+        if bench.get('error_occurred') or bench.get('error_message'):
+            error_msg = bench.get('error_message', 'Unknown error')
+            errors.append(f"  {bench.get('name', 'unknown')}: {error_msg}")
+
+    if errors and check_errors:
+        print("ERROR: Benchmark execution errors detected:")
+        for err in errors:
+            print(err)
+        return None
+
     # Extract benchmark results, keyed by name
     results = {}
     for bench in data.get('benchmarks', []):
         name = bench.get('name', '')
         # Skip aggregate results (mean, median, stddev)
         if bench.get('aggregate_name'):
+            continue
+        # Skip benchmarks that had errors
+        if bench.get('error_occurred') or bench.get('error_message'):
             continue
         # Use real_time as the primary metric (nanoseconds)
         if 'real_time' in bench:
@@ -83,8 +107,8 @@ def main():
     is_main_push = os.environ.get('GITHUB_EVENT_NAME') == 'push' and \
                    os.environ.get('GITHUB_REF') in ('refs/heads/main', 'refs/heads/master')
 
-    # Load results
-    current = load_benchmark('build/benchmark_results.json')
+    # Load results (check for errors in current results)
+    current = load_benchmark('build/benchmark_results.json', check_errors=True)
     baseline = load_benchmark('baseline_benchmark.json')
 
     if current is None:
