@@ -683,8 +683,9 @@ class TestSkipRowsNRowsWithPyArrow:
         arrow_table = pa.table(table)
 
         assert arrow_table.num_rows == 7
+        # With auto-inference, numeric columns are detected as int64
         ids = arrow_table.column("id").to_pylist()
-        assert ids == ["3", "4", "5", "6", "7", "8", "9"]
+        assert ids == [3, 4, 5, 6, 7, 8, 9]
 
     def test_n_rows_arrow_table(self, larger_csv_for_arrow):
         """Test n_rows works correctly when converting to PyArrow."""
@@ -696,8 +697,9 @@ class TestSkipRowsNRowsWithPyArrow:
         arrow_table = pa.table(table)
 
         assert arrow_table.num_rows == 3
+        # With auto-inference, numeric columns are detected as int64
         ids = arrow_table.column("id").to_pylist()
-        assert ids == ["0", "1", "2"]
+        assert ids == [0, 1, 2]
 
     def test_skip_rows_and_n_rows_combined_arrow(self, larger_csv_for_arrow):
         """Test skip_rows and n_rows combined with PyArrow."""
@@ -709,10 +711,11 @@ class TestSkipRowsNRowsWithPyArrow:
         arrow_table = pa.table(table)
 
         assert arrow_table.num_rows == 4
+        # With auto-inference, numeric columns are detected as int64
         ids = arrow_table.column("id").to_pylist()
-        assert ids == ["2", "3", "4", "5"]
+        assert ids == [2, 3, 4, 5]
         values = arrow_table.column("value").to_pylist()
-        assert values == ["20", "30", "40", "50"]
+        assert values == [20, 30, 40, 50]
 
     def test_skip_rows_with_dtype_arrow(self, larger_csv_for_arrow):
         """Test skip_rows works with dtype parameter for Arrow."""
@@ -763,8 +766,9 @@ class TestSkipRowsNRowsWithPolars:
         df = pl.from_arrow(table)
 
         assert df.shape[0] == 7
+        # With auto-inference, numeric columns are detected as int64
         ids = df["id"].to_list()
-        assert ids == ["3", "4", "5", "6", "7", "8", "9"]
+        assert ids == [3, 4, 5, 6, 7, 8, 9]
 
     def test_n_rows_polars_dataframe(self, larger_csv_for_arrow):
         """Test n_rows works correctly when converting to Polars."""
@@ -776,8 +780,9 @@ class TestSkipRowsNRowsWithPolars:
         df = pl.from_arrow(table)
 
         assert df.shape[0] == 3
+        # With auto-inference, numeric columns are detected as int64
         ids = df["id"].to_list()
-        assert ids == ["0", "1", "2"]
+        assert ids == [0, 1, 2]
 
     def test_skip_rows_and_n_rows_combined_polars(self, larger_csv_for_arrow):
         """Test skip_rows and n_rows combined with Polars."""
@@ -789,5 +794,6 @@ class TestSkipRowsNRowsWithPolars:
         df = pl.from_arrow(table)
 
         assert df.shape[0] == 4
+        # With auto-inference, numeric columns are detected as int64
         ids = df["id"].to_list()
-        assert ids == ["2", "3", "4", "5"]
+        assert ids == [2, 3, 4, 5]

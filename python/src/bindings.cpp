@@ -1137,18 +1137,21 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
   (void)encoding; // Encoding is handled automatically by libvroom
 
   // Automatic type inference: detect column types from data
+  // Use effective_num_rows() to respect skip_rows and n_rows parameters
   size_t n_cols = data->column_names.size();
   data->column_types.resize(n_cols, ColumnType::STRING);
 
-  // Run type inference on sampled rows
+  // Run type inference on sampled rows (from the filtered dataset)
   constexpr size_t TYPE_INFERENCE_ROWS = 1000;
-  size_t n_rows_to_sample = std::min(data->result.num_rows(), TYPE_INFERENCE_ROWS);
+  size_t effective_rows = data->effective_num_rows();
+  size_t n_rows_to_sample = std::min(effective_rows, TYPE_INFERENCE_ROWS);
 
   if (n_rows_to_sample > 0) {
     libvroom::ColumnTypeInference inference(n_cols);
 
     for (size_t row = 0; row < n_rows_to_sample; ++row) {
-      auto r = data->result.row(row);
+      // Use translate_row_index to account for skip_rows
+      auto r = data->result.row(data->translate_row_index(row));
       for (size_t col = 0; col < n_cols; ++col) {
         // Map to underlying column if using usecols
         size_t underlying_col = data->selected_columns.empty() ? col : data->selected_columns[col];
