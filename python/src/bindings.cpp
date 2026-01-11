@@ -198,7 +198,9 @@ struct TableData {
   std::vector<std::vector<std::string>> columns_data; // Materialized column data
   std::vector<ColumnType> column_types;               // Type for each column
   bool columns_materialized = false;
-  NullValueConfig null_config; // Null value configuration for Arrow export
+  size_t skip_rows_ = 0;         // Number of data rows to skip
+  std::optional<size_t> n_rows_; // Maximum rows to return (nullopt = all)
+  NullValueConfig null_config;   // Null value configuration for Arrow export
 
   // Get effective number of columns (considering selection)
   size_t effective_num_columns() const {
@@ -221,20 +223,36 @@ struct TableData {
     return ColumnType::STRING;
   }
 
+  // Get the effective number of rows after applying skip_rows and n_rows
+  size_t effective_num_rows() const {
+    size_t total = result.num_rows();
+    if (skip_rows_ >= total) {
+      return 0;
+    }
+    size_t available = total - skip_rows_;
+    if (n_rows_ && *n_rows_ < available) {
+      return *n_rows_;
+    }
+    return available;
+  }
+
+  // Convert a filtered row index to the underlying result row index
+  size_t translate_row_index(size_t filtered_index) const { return filtered_index + skip_rows_; }
+
   // Materialize all columns as strings for Arrow export
   void materialize_columns() {
     if (columns_materialized)
       return;
 
     size_t n_cols = effective_num_columns();
-    size_t n_rows = result.num_rows();
+    size_t n_rows = effective_num_rows();
     columns_data.resize(n_cols);
 
     for (size_t col = 0; col < n_cols; ++col) {
       size_t underlying_col = map_column_index(col);
       columns_data[col].reserve(n_rows);
       for (size_t row = 0; row < n_rows; ++row) {
-        auto r = result.row(row);
+        auto r = result.row(translate_row_index(row));
         columns_data[col].push_back(r.get_string(underlying_col));
       }
     }
@@ -845,8 +863,8 @@ class Table {
 public:
   Table(std::shared_ptr<TableData> data) : data_(std::move(data)) {}
 
-  // Number of rows (excluding header)
-  size_t num_rows() const { return data_->result.num_rows(); }
+  // Number of rows (excluding header, after applying skip_rows/n_rows)
+  size_t num_rows() const { return data_->effective_num_rows(); }
 
   // Number of columns (respects column selection)
   size_t num_columns() const { return data_->effective_num_columns(); }
@@ -854,16 +872,24 @@ public:
   // Column names
   std::vector<std::string> column_names() const { return data_->column_names; }
 
-  // Get a single column as list of strings
+  // Get a single column as list of strings (respects skip_rows/n_rows and column selection)
   std::vector<std::string> column(size_t index) const {
     if (index >= data_->effective_num_columns()) {
       throw py::index_error("Column index out of range");
     }
+    // Extract only the filtered rows with column mapping
     size_t underlying_idx = data_->map_column_index(index);
-    return data_->result.column_string(underlying_idx);
+    std::vector<std::string> result;
+    size_t n = data_->effective_num_rows();
+    result.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+      auto r = data_->result.row(data_->translate_row_index(i));
+      result.push_back(r.get_string(underlying_idx));
+    }
+    return result;
   }
 
-  // Get a column by name
+  // Get a column by name (respects skip_rows/n_rows and column selection)
   std::vector<std::string> column_by_name(const std::string& name) const {
     // Find the name in our selected column names
     auto it = std::find(data_->column_names.begin(), data_->column_names.end(), name);
@@ -871,16 +897,15 @@ public:
       throw py::key_error("Column not found: " + name);
     }
     size_t logical_idx = static_cast<size_t>(std::distance(data_->column_names.begin(), it));
-    size_t underlying_idx = data_->map_column_index(logical_idx);
-    return data_->result.column_string(underlying_idx);
+    return column(logical_idx);
   }
 
-  // Get a single row as list of strings
+  // Get a single row as list of strings (respects skip_rows/n_rows and column selection)
   std::vector<std::string> row(size_t index) const {
-    if (index >= data_->result.num_rows()) {
+    if (index >= data_->effective_num_rows()) {
       throw py::index_error("Row index out of range");
     }
-    auto r = data_->result.row(index);
+    auto r = data_->result.row(data_->translate_row_index(index));
     std::vector<std::string> result;
     size_t n_cols = data_->effective_num_columns();
     result.reserve(n_cols);
@@ -1103,12 +1128,13 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
     data->column_names = std::move(all_column_names);
   }
 
-  // Note: skip_rows, n_rows, and encoding are accepted but not fully
-  // implemented in this phase. They are stored for future use or passed through
-  // where possible.
-  (void)encoding;  // Encoding is handled automatically by libvroom
-  (void)skip_rows; // TODO: Implement skip_rows in future phase
-  (void)n_rows;    // TODO: Implement n_rows in future phase
+  // Store row filtering parameters
+  data->skip_rows_ = skip_rows;
+  data->n_rows_ = n_rows;
+
+  // Note: encoding is accepted but not fully implemented in this phase.
+  // It is stored for future use or passed through where possible.
+  (void)encoding; // Encoding is handled automatically by libvroom
 
   // Automatic type inference: detect column types from data
   size_t n_cols = data->column_names.size();
@@ -1334,11 +1360,11 @@ encoding : str, optional
     File encoding. If not specified, encoding is auto-detected.
     Currently accepted but not fully implemented.
 skip_rows : int, default 0
-    Number of rows to skip at the start of the file.
-    Currently accepted but not fully implemented.
+    Number of data rows to skip after the header (if has_header=True)
+    or from the beginning of the file (if has_header=False).
 n_rows : int, optional
-    Maximum number of rows to read. If not specified, reads all rows.
-    Currently accepted but not fully implemented.
+    Maximum number of data rows to read. If not specified, all rows
+    are read.
 usecols : list of str or int, optional
     List of column names or indices to read. If not specified, reads
     all columns.
@@ -1395,6 +1421,9 @@ Examples
 >>> import pyarrow as pa
 >>> arrow_table = pa.table(table)  # NA, N/A, and - will be null
 
+>>> # Skip first 10 rows and read only 100 rows
+>>> table = vroom_csv.read_csv("data.csv", skip_rows=10, n_rows=100)
+
 >>> # Multi-threaded parsing
 >>> table = vroom_csv.read_csv("large.csv", num_threads=4)
 
@@ -1404,7 +1433,7 @@ Examples
 >>> arrow_table = pa.table(table)  # columns have inferred types
 
 >>> # Override inferred types with explicit dtype
->>> table = vroom_csv.read_csv("data.csv", dtype={"zip_code": "string"})
+>>> table = vroom_csv.read_csv("data.csv", dtype={"zip_code": "string", "age": "int64"})
 
 >>> # Treat empty strings as null (default behavior)
 >>> table = vroom_csv.read_csv("data.csv", empty_is_null=True)
