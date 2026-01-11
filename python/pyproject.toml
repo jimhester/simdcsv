@@ -1,0 +1,76 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "vroom-csv"
+version = "0.1.0"
+description = "High-performance CSV parser with SIMD acceleration"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Jim Hester", email = "james.f.hester@gmail.com"}
+]
+keywords = ["csv", "parser", "simd", "arrow", "data"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pyarrow>=14.0"]
+arrow = ["pyarrow>=14.0"]
+polars = ["polars>=0.20"]
+dev = ["pytest>=7.0", "pyarrow>=14.0", "polars>=0.20", "ruff", "mypy"]
+
+[project.urls]
+Homepage = "https://github.com/jimhester/libvroom"
+Repository = "https://github.com/jimhester/libvroom"
+Documentation = "https://github.com/jimhester/libvroom"
+Issues = "https://github.com/jimhester/libvroom/issues"
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+cmake.verbose = false
+wheel.packages = ["src/vroom_csv"]
+build-dir = "build/{wheel_tag}"
+install.components = ["python"]
+
+[tool.scikit-build.cmake.define]
+BUILD_TESTING = "OFF"
+BUILD_BENCHMARKS = "OFF"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
