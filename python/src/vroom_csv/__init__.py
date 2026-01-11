@@ -30,8 +30,10 @@ Arrow Interoperability
 from vroom_csv._core import (
     Dialect,
     Table,
+    RowIterator,
     detect_dialect,
     read_csv,
+    read_csv_rows,
     VroomError,
     ParseError,
     IOError,
@@ -42,8 +44,10 @@ from vroom_csv._core import (
 __all__ = [
     "Dialect",
     "Table",
+    "RowIterator",
     "detect_dialect",
     "read_csv",
+    "read_csv_rows",
     "VroomError",
     "ParseError",
     "IOError",

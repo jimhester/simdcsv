@@ -13,6 +13,7 @@
 #include "dialect.h"
 #include "error.h"
 #include "extraction_config.h"
+#include "streaming.h"
 #include "value_extraction.h"
 
 #include <algorithm>
@@ -1192,6 +1193,337 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
 }
 
 // =============================================================================
+// RowIterator class for streaming row-by-row iteration
+// =============================================================================
+
+/**
+ * @brief Configuration for the row iterator, storing options that affect streaming.
+ */
+struct RowIteratorConfig {
+  std::string path;
+  std::optional<std::string> delimiter;
+  std::optional<std::string> quote_char;
+  bool has_header = true;
+  size_t skip_rows = 0;
+  std::optional<size_t> n_rows;
+  std::optional<std::vector<size_t>> usecols_indices;
+  std::vector<std::string> column_names;
+  std::optional<std::unordered_map<std::string, std::string>> dtype;
+};
+
+/**
+ * @brief Python iterator for streaming CSV rows.
+ *
+ * This class provides memory-efficient row-by-row iteration over CSV files.
+ * Each row is yielded as a Python dictionary with column names as keys.
+ */
+class RowIterator {
+public:
+  explicit RowIterator(RowIteratorConfig config)
+      : config_(std::move(config)), rows_yielded_(0), finished_(false) {
+    // Configure streaming parser
+    libvroom::StreamConfig stream_config;
+    stream_config.parse_header = config_.has_header;
+
+    // Apply dialect settings
+    if (config_.delimiter) {
+      stream_config.dialect.delimiter = (*config_.delimiter)[0];
+    }
+    if (config_.quote_char) {
+      stream_config.dialect.quote_char = (*config_.quote_char)[0];
+    }
+
+    // Create the stream reader
+    try {
+      reader_ = std::make_unique<libvroom::StreamReader>(config_.path, stream_config);
+    } catch (const std::runtime_error& e) {
+      throw py::value_error(std::string("Failed to open file: ") + e.what());
+    }
+
+    // For header mode, we need to read the first data row to get the header
+    // and cache it for later delivery
+    if (config_.column_names.empty() && config_.has_header) {
+      // Read first data row - this also parses the header
+      if (reader_->next_row()) {
+        column_names_ = reader_->header();
+        // Cache this first row since we'll need to return it on the first next() call
+        // We'll store it as a pending row
+        const auto& first_row = reader_->row();
+        for (size_t i = 0; i < first_row.field_count(); ++i) {
+          cached_first_row_.push_back(first_row[i].unescaped());
+        }
+        has_cached_row_ = true;
+      } else {
+        finished_ = true;
+      }
+    } else if (!config_.column_names.empty()) {
+      column_names_ = config_.column_names;
+    }
+
+    // Skip initial rows if needed
+    for (size_t i = 0; i < config_.skip_rows && !finished_; ++i) {
+      if (has_cached_row_ && i == 0) {
+        // The cached row counts as a skipped row
+        has_cached_row_ = false;
+        cached_first_row_.clear();
+      } else {
+        if (!reader_->next_row()) {
+          finished_ = true;
+          break;
+        }
+      }
+    }
+  }
+
+  /// Python __iter__ protocol
+  RowIterator& iter() { return *this; }
+
+  /// Python __next__ protocol
+  py::dict next() {
+    if (finished_) {
+      throw py::stop_iteration();
+    }
+
+    // Check n_rows limit
+    if (config_.n_rows && rows_yielded_ >= *config_.n_rows) {
+      finished_ = true;
+      throw py::stop_iteration();
+    }
+
+    // Use cached row if available, otherwise get next row
+    std::vector<std::string> row_values;
+    size_t row_field_count = 0;
+
+    if (has_cached_row_) {
+      row_values = std::move(cached_first_row_);
+      row_field_count = row_values.size();
+      has_cached_row_ = false;
+      cached_first_row_.clear();
+    } else {
+      // Get next row from reader
+      if (!reader_->next_row()) {
+        finished_ = true;
+        throw py::stop_iteration();
+      }
+
+      const auto& row = reader_->row();
+      row_field_count = row.field_count();
+      row_values.reserve(row_field_count);
+      for (size_t i = 0; i < row_field_count; ++i) {
+        row_values.push_back(row[i].unescaped());
+      }
+    }
+
+    // If we don't have column names yet (no header mode), generate them
+    if (column_names_.empty()) {
+      size_t n_cols = config_.usecols_indices ? config_.usecols_indices->size() : row_field_count;
+      for (size_t i = 0; i < n_cols; ++i) {
+        size_t col_idx = config_.usecols_indices ? (*config_.usecols_indices)[i] : i;
+        column_names_.push_back("column_" + std::to_string(col_idx));
+      }
+    }
+
+    // Build the dictionary
+    py::dict result;
+
+    if (config_.usecols_indices) {
+      // Selected columns only
+      for (size_t i = 0; i < config_.usecols_indices->size(); ++i) {
+        size_t col_idx = (*config_.usecols_indices)[i];
+        if (col_idx < row_field_count) {
+          result[py::str(column_names_[i])] =
+              convert_field_value(column_names_[i], row_values[col_idx]);
+        } else {
+          result[py::str(column_names_[i])] = py::none();
+        }
+      }
+    } else {
+      // All columns
+      size_t n_cols = std::min(row_field_count, column_names_.size());
+      for (size_t i = 0; i < n_cols; ++i) {
+        result[py::str(column_names_[i])] = convert_field_value(column_names_[i], row_values[i]);
+      }
+      // Handle case where row has more fields than headers
+      for (size_t i = column_names_.size(); i < row_field_count; ++i) {
+        result[py::str("column_" + std::to_string(i))] = py::str(row_values[i]);
+      }
+    }
+
+    ++rows_yielded_;
+    return result;
+  }
+
+  /// Get column names
+  std::vector<std::string> column_names() const { return column_names_; }
+
+  /// Check if iteration is complete
+  bool is_finished() const { return finished_; }
+
+private:
+  /// Convert a field value based on dtype settings
+  py::object convert_field_value(const std::string& col_name, const std::string& value) {
+    // Check if dtype was specified for this column
+    if (config_.dtype) {
+      auto it = config_.dtype->find(col_name);
+      if (it != config_.dtype->end()) {
+        const std::string& type_str = it->second;
+        auto col_type = parse_dtype_string(type_str);
+        if (col_type) {
+          return convert_to_type(value, *col_type);
+        }
+      }
+    }
+    // Default: return as string
+    return py::str(value);
+  }
+
+  /// Convert a value to the specified type
+  py::object convert_to_type(const std::string& value, ColumnType type) {
+    libvroom::ExtractionConfig config;
+
+    switch (type) {
+    case ColumnType::INT64: {
+      auto result = libvroom::parse_integer<int64_t>(value.data(), value.size(), config);
+      if (result.ok()) {
+        return py::int_(result.get());
+      }
+      return py::none();
+    }
+    case ColumnType::FLOAT64: {
+      auto result = libvroom::parse_double(value.data(), value.size(), config);
+      if (result.ok()) {
+        return py::float_(result.get());
+      }
+      return py::none();
+    }
+    case ColumnType::BOOL: {
+      auto result = libvroom::parse_bool(value.data(), value.size(), config);
+      if (result.ok()) {
+        return py::bool_(result.get());
+      }
+      return py::none();
+    }
+    case ColumnType::STRING:
+    default:
+      return py::str(value);
+    }
+  }
+
+  RowIteratorConfig config_;
+  std::unique_ptr<libvroom::StreamReader> reader_;
+  std::vector<std::string> column_names_;
+  std::vector<std::string> cached_first_row_;
+  size_t rows_yielded_;
+  bool finished_;
+  bool has_cached_row_ = false;
+};
+
+// =============================================================================
+// read_csv_rows function for streaming row-by-row iteration
+// =============================================================================
+
+RowIterator
+read_csv_rows(const std::string& path, std::optional<std::string> delimiter = std::nullopt,
+              std::optional<std::string> quote_char = std::nullopt, bool has_header = true,
+              size_t skip_rows = 0, std::optional<size_t> n_rows = std::nullopt,
+              std::optional<std::vector<py::object>> usecols = std::nullopt,
+              std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt) {
+  // Validate delimiter
+  if (delimiter && delimiter->length() != 1) {
+    throw py::value_error("Delimiter must be a single character");
+  }
+
+  // Validate quote_char
+  if (quote_char && quote_char->length() != 1) {
+    throw py::value_error("quote_char must be a single character");
+  }
+
+  RowIteratorConfig config;
+  config.path = path;
+  config.delimiter = delimiter;
+  config.quote_char = quote_char;
+  config.has_header = has_header;
+  config.skip_rows = skip_rows;
+  config.n_rows = n_rows;
+  config.dtype = dtype;
+
+  // Handle usecols - we need to resolve column names/indices
+  // For now, we'll store indices and resolve names after we have the header
+  if (usecols) {
+    // First, we need to detect the dialect and read the header to resolve column names
+    libvroom::FileBuffer buffer;
+    try {
+      buffer = libvroom::load_file(path);
+    } catch (const std::runtime_error& e) {
+      throw py::value_error(std::string("Failed to load file: ") + e.what());
+    }
+
+    if (!buffer.valid()) {
+      throw py::value_error("Failed to load file: " + path);
+    }
+
+    // Detect dialect if not specified
+    libvroom::Dialect dialect;
+    if (delimiter) {
+      dialect.delimiter = (*delimiter)[0];
+    } else {
+      auto detection = libvroom::detect_dialect(buffer.data(), buffer.size());
+      if (detection.success()) {
+        dialect = detection.dialect;
+      }
+    }
+    if (quote_char) {
+      dialect.quote_char = (*quote_char)[0];
+    }
+
+    // Parse header to get column names
+    libvroom::ParseOptions options;
+    options.dialect = dialect;
+    libvroom::Parser parser(1);
+    auto result = parser.parse(buffer.data(), buffer.size(), options);
+    result.set_has_header(has_header);
+
+    std::vector<std::string> all_column_names;
+    if (has_header) {
+      all_column_names = result.header();
+    } else {
+      for (size_t i = 0; i < result.num_columns(); ++i) {
+        all_column_names.push_back("column_" + std::to_string(i));
+      }
+    }
+
+    // Resolve usecols to indices
+    std::vector<size_t> selected_indices;
+    std::vector<std::string> selected_names;
+    for (const auto& col : *usecols) {
+      if (py::isinstance<py::int_>(col)) {
+        size_t idx = col.cast<size_t>();
+        if (idx >= all_column_names.size()) {
+          throw py::index_error("Column index " + std::to_string(idx) + " out of range");
+        }
+        selected_indices.push_back(idx);
+        selected_names.push_back(all_column_names[idx]);
+      } else if (py::isinstance<py::str>(col)) {
+        std::string name = col.cast<std::string>();
+        auto it = std::find(all_column_names.begin(), all_column_names.end(), name);
+        if (it == all_column_names.end()) {
+          throw py::key_error("Column not found: " + name);
+        }
+        size_t idx = static_cast<size_t>(std::distance(all_column_names.begin(), it));
+        selected_indices.push_back(idx);
+        selected_names.push_back(name);
+      } else {
+        throw py::type_error("usecols elements must be int or str");
+      }
+    }
+    config.usecols_indices = selected_indices;
+    config.column_names = selected_names;
+  }
+
+  return RowIterator(std::move(config));
+}
+
+// =============================================================================
 // Module definition
 // =============================================================================
 
@@ -1302,6 +1634,28 @@ Examples
       .def("has_errors", &Table::has_errors, "Check if any parse errors occurred")
       .def("error_summary", &Table::error_summary, "Get summary of parse errors")
       .def("errors", &Table::errors, "Get list of all parse error messages");
+
+  // RowIterator class for streaming row-by-row iteration
+  py::class_<RowIterator>(m, "RowIterator", R"doc(
+Iterator for streaming row-by-row CSV parsing.
+
+This class provides memory-efficient row-by-row iteration over CSV files.
+Each row is yielded as a Python dictionary with column names as keys.
+This is ideal for processing large files without loading the entire
+dataset into memory.
+
+Note: This class is typically not instantiated directly. Use
+read_csv_rows() to create an iterator.
+
+Examples
+--------
+>>> import vroom_csv
+>>> for row in vroom_csv.read_csv_rows("data.csv"):
+...     print(row["name"], row["age"])
+)doc")
+      .def("__iter__", &RowIterator::iter, py::return_value_policy::reference_internal)
+      .def("__next__", &RowIterator::next)
+      .def_property_readonly("column_names", &RowIterator::column_names, "List of column names");
 
   // detect_dialect function
   m.def("detect_dialect", &detect_dialect, py::arg("path"),
@@ -1444,6 +1798,93 @@ Examples
 >>> # Convert to Polars
 >>> import polars as pl
 >>> df = pl.from_arrow(table)
+)doc");
+
+  // read_csv_rows function for streaming row-by-row iteration
+  m.def("read_csv_rows", &read_csv_rows, py::arg("path"), py::arg("delimiter") = py::none(),
+        py::arg("quote_char") = py::none(), py::arg("has_header") = true, py::arg("skip_rows") = 0,
+        py::arg("n_rows") = py::none(), py::arg("usecols") = py::none(),
+        py::arg("dtype") = py::none(),
+        R"doc(
+Read a CSV file and return an iterator for row-by-row streaming.
+
+This function provides memory-efficient CSV processing by yielding
+one row at a time as a Python dictionary, rather than loading the
+entire file into memory. This is ideal for processing large CSV files
+that would not fit in memory.
+
+Parameters
+----------
+path : str
+    Path to the CSV file to read.
+delimiter : str, optional
+    Field delimiter character. If not specified, the delimiter is
+    auto-detected from the file content.
+quote_char : str, optional
+    Quote character for escaping fields. Default is '"'.
+has_header : bool, default True
+    Whether the first row contains column headers.
+skip_rows : int, default 0
+    Number of data rows to skip after the header (if has_header=True)
+    or from the beginning of the file (if has_header=False).
+n_rows : int, optional
+    Maximum number of data rows to read. If not specified, all rows
+    are read.
+usecols : list of str or int, optional
+    List of column names or indices to include in the output dictionaries.
+    If not specified, all columns are included.
+dtype : dict[str, str], optional
+    Dictionary mapping column names to data types.
+    Supported types: 'str', 'string', 'object' (string), 'int', 'int64'
+    (64-bit integer), 'float', 'float64', 'double' (64-bit float),
+    'bool', 'boolean' (boolean).
+    Values that cannot be converted to the specified type become None.
+    If not specified, all values are returned as strings.
+
+Returns
+-------
+RowIterator
+    An iterator that yields dictionaries, one per row. Each dictionary
+    has column names as keys and field values as values.
+
+Raises
+------
+ValueError
+    If the file cannot be read or parsed, or if an unknown dtype is specified.
+IndexError
+    If a column index in usecols is out of range.
+KeyError
+    If a column name in usecols is not found.
+
+Examples
+--------
+>>> import vroom_csv
+
+>>> # Basic usage - iterate over all rows
+>>> for row in vroom_csv.read_csv_rows("data.csv"):
+...     print(row["name"], row["age"])
+
+>>> # Process specific columns with type conversion
+>>> for row in vroom_csv.read_csv_rows("data.csv",
+...                                     usecols=["name", "age"],
+...                                     dtype={"age": "int64"}):
+...     if row["age"] and row["age"] > 30:
+...         print(row["name"])
+
+>>> # Skip header rows and limit number of rows
+>>> for row in vroom_csv.read_csv_rows("data.csv", skip_rows=10, n_rows=100):
+...     process(row)
+
+>>> # Filter and collect matching rows
+>>> adults = [row for row in vroom_csv.read_csv_rows("people.csv",
+...                                                   dtype={"age": "int64"})
+...           if row["age"] and row["age"] >= 18]
+
+>>> # Memory-efficient processing of huge files
+>>> with open("output.txt", "w") as out:
+...     for row in vroom_csv.read_csv_rows("huge.csv"):
+...         if row["status"] == "active":
+...             out.write(row["id"] + "\n")
 )doc");
 
   // Version info
