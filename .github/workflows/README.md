@@ -4,6 +4,33 @@ This directory contains GitHub Actions workflows for libvroom continuous integra
 
 ## Workflows
 
+### python.yml - Python Bindings Tests
+
+Tests Python bindings for vroom-csv across multiple Python versions and platforms.
+
+**Triggers:**
+- Push to main/master branches
+- Pull requests to main/master branches
+
+**Test Matrix:**
+- **Platforms**: Ubuntu (latest), macOS (latest)
+- **Python Versions**: 3.9, 3.10, 3.11, 3.12
+- **Total Jobs**: 8 combinations
+
+**Build Steps:**
+1. Checkout code
+2. Set up Python with specified version
+3. Install build dependencies (CMake, build tools)
+4. Install Python package with test dependencies via `pip install .[test]`
+5. Run pytest on Python tests
+
+**Tests Covered:**
+- `read_csv()` function (basic parsing, delimiters, headers)
+- `Table` class functionality (column/row access, properties)
+- Arrow PyCapsule interface (`__arrow_c_schema__`, `__arrow_c_stream__`)
+- PyArrow interoperability (conversion to PyArrow Table)
+- Polars interoperability (conversion to Polars DataFrame)
+
 ### ci.yml - Main CI Pipeline
 
 Runs on every push and pull request to main/master branches.
