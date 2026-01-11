@@ -20,6 +20,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: C++",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
@@ -36,6 +37,7 @@ classifiers = [
 test = ["pytest>=7.0", "pyarrow>=14.0"]
 arrow = ["pyarrow>=14.0"]
 polars = ["polars>=0.20"]
+benchmark = ["pandas>=2.0", "polars>=0.20", "pyarrow>=14.0", "duckdb>=0.9"]
 dev = ["pytest>=7.0", "pyarrow>=14.0", "polars>=0.20", "ruff", "mypy"]
 
 [project.urls]
