@@ -77,7 +77,7 @@ class TestPyArrowInterop:
         assert arrow_table.column_names == ["name", "age", "city"]
 
     def test_pyarrow_column_types(self, simple_csv):
-        """Test that columns are string type in PyArrow."""
+        """Test that column types are automatically inferred in PyArrow."""
         import pyarrow as pa
 
         import vroom_csv
@@ -85,12 +85,15 @@ class TestPyArrowInterop:
         table = vroom_csv.read_csv(simple_csv)
         arrow_table = pa.table(table)
 
-        # All columns should be string type (initial implementation)
-        for col in arrow_table.columns:
-            assert pa.types.is_string(col.type) or pa.types.is_large_string(col.type)
+        # name column should be string (detected as string)
+        assert pa.types.is_string(arrow_table.column("name").type)
+        # age column should be int64 (detected as integer)
+        assert pa.types.is_int64(arrow_table.column("age").type)
+        # city column should be string (detected as string)
+        assert pa.types.is_string(arrow_table.column("city").type)
 
     def test_pyarrow_data_values(self, simple_csv):
-        """Test that data values are correctly transferred."""
+        """Test that data values are correctly transferred with inferred types."""
         import pyarrow as pa
 
         import vroom_csv
@@ -101,8 +104,9 @@ class TestPyArrowInterop:
         names = arrow_table.column("name").to_pylist()
         assert names == ["Alice", "Bob", "Charlie"]
 
+        # ages are now integers (auto-inferred)
         ages = arrow_table.column("age").to_pylist()
-        assert ages == ["30", "25", "35"]
+        assert ages == [30, 25, 35]
 
         cities = arrow_table.column("city").to_pylist()
         assert cities == ["New York", "Los Angeles", "Chicago"]
@@ -133,7 +137,7 @@ class TestPolarsInterop:
         assert df.columns == ["name", "age", "city"]
 
     def test_polars_data_values(self, simple_csv):
-        """Test that data values are correctly transferred to Polars."""
+        """Test that data values are correctly transferred to Polars with inferred types."""
         import polars as pl
 
         import vroom_csv
@@ -144,8 +148,9 @@ class TestPolarsInterop:
         names = df["name"].to_list()
         assert names == ["Alice", "Bob", "Charlie"]
 
+        # ages are now integers (auto-inferred)
         ages = df["age"].to_list()
-        assert ages == ["30", "25", "35"]
+        assert ages == [30, 25, 35]
 
 
 # =============================================================================
@@ -578,22 +583,45 @@ class TestDtypeWithPyArrow:
         assert arrow_table.column("active").to_pylist() == [True, False, True]
         assert arrow_table.column("name").to_pylist() == ["Alice", "Bob", "Charlie"]
 
-    def test_dtype_unspecified_columns_remain_string(self, typed_csv):
-        """Test that columns not in dtype dict remain as strings."""
+    def test_dtype_override_to_string(self, typed_csv):
+        """Test that dtype can override inferred types back to string."""
         import pyarrow as pa
 
         import vroom_csv
 
-        table = vroom_csv.read_csv(typed_csv, dtype={"age": "int64"})
+        # Force age to string even though it would be inferred as int64
+        table = vroom_csv.read_csv(typed_csv, dtype={"age": "string"})
         arrow_table = pa.table(table)
 
-        # age should be int64
-        assert pa.types.is_int64(arrow_table.column("age").type)
+        # age should be string (overridden)
+        assert pa.types.is_string(arrow_table.column("age").type)
+        ages = arrow_table.column("age").to_pylist()
+        assert ages == ["30", "25", "35"]
 
-        # Other columns should remain as string
+    def test_auto_inference_types(self, typed_csv):
+        """Test that types are automatically inferred without dtype parameter."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        # No dtype - let inference happen
+        table = vroom_csv.read_csv(typed_csv)
+        arrow_table = pa.table(table)
+
+        # name should be string (inferred)
         assert pa.types.is_string(arrow_table.column("name").type)
-        assert pa.types.is_string(arrow_table.column("score").type)
-        assert pa.types.is_string(arrow_table.column("active").type)
+        # age should be int64 (inferred from numeric values)
+        assert pa.types.is_int64(arrow_table.column("age").type)
+        # score should be float64 (inferred from decimal values)
+        assert pa.types.is_float64(arrow_table.column("score").type)
+        # active should be bool (inferred from true/false/yes values)
+        assert pa.types.is_boolean(arrow_table.column("active").type)
+
+        # Check values
+        assert arrow_table.column("name").to_pylist() == ["Alice", "Bob", "Charlie"]
+        assert arrow_table.column("age").to_pylist() == [30, 25, 35]
+        assert arrow_table.column("score").to_pylist() == pytest.approx([95.5, 87.3, 92.1])
+        assert arrow_table.column("active").to_pylist() == [True, False, True]
 
 
 @pytest.mark.skipif(not HAS_POLARS, reason="polars not installed")

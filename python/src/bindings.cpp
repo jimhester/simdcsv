@@ -8,6 +8,7 @@
  */
 
 #include "libvroom.h"
+#include "libvroom_types.h"
 
 #include "dialect.h"
 #include "error.h"
@@ -118,6 +119,25 @@ static const char* column_type_to_arrow_format(ColumnType type) {
     return "b"; // bool
   }
   return "u"; // default to string
+}
+
+// Convert libvroom::FieldType to ColumnType
+static ColumnType field_type_to_column_type(libvroom::FieldType type) {
+  switch (type) {
+  case libvroom::FieldType::BOOLEAN:
+    return ColumnType::BOOL;
+  case libvroom::FieldType::INTEGER:
+    return ColumnType::INT64;
+  case libvroom::FieldType::FLOAT:
+    return ColumnType::FLOAT64;
+  case libvroom::FieldType::DATE:
+    // DATE not yet supported in Arrow export, fall back to string
+    return ColumnType::STRING;
+  case libvroom::FieldType::STRING:
+  case libvroom::FieldType::EMPTY:
+  default:
+    return ColumnType::STRING;
+  }
 }
 
 // =============================================================================
@@ -1116,10 +1136,35 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
   // It is stored for future use or passed through where possible.
   (void)encoding; // Encoding is handled automatically by libvroom
 
-  // Set up column types from dtype parameter
+  // Automatic type inference: detect column types from data
   size_t n_cols = data->column_names.size();
-  data->column_types.resize(n_cols, ColumnType::STRING); // Default all to string
+  data->column_types.resize(n_cols, ColumnType::STRING);
 
+  // Run type inference on sampled rows
+  constexpr size_t TYPE_INFERENCE_ROWS = 1000;
+  size_t n_rows_to_sample = std::min(data->result.num_rows(), TYPE_INFERENCE_ROWS);
+
+  if (n_rows_to_sample > 0) {
+    libvroom::ColumnTypeInference inference(n_cols);
+
+    for (size_t row = 0; row < n_rows_to_sample; ++row) {
+      auto r = data->result.row(row);
+      for (size_t col = 0; col < n_cols; ++col) {
+        // Map to underlying column if using usecols
+        size_t underlying_col = data->selected_columns.empty() ? col : data->selected_columns[col];
+        std::string value = r.get_string(underlying_col);
+        inference.add_field(col, reinterpret_cast<const uint8_t*>(value.data()), value.size());
+      }
+    }
+
+    // Get inferred types and convert to ColumnType
+    std::vector<libvroom::FieldType> inferred = inference.infer_types();
+    for (size_t col = 0; col < n_cols; ++col) {
+      data->column_types[col] = field_type_to_column_type(inferred[col]);
+    }
+  }
+
+  // Apply explicit dtype overrides (these take precedence over inferred types)
   if (dtype) {
     for (const auto& [col_name, type_str] : *dtype) {
       // Find column index by name
@@ -1331,17 +1376,17 @@ null_values : list[str], optional
 empty_is_null : bool, default True
     If True, empty strings are treated as null values during Arrow export,
     in addition to any values in null_values.
-dtype : dict, optional
-    Dictionary mapping column names to data types.
-    Currently accepted but not fully implemented.
-num_threads : int, default 1
-    Number of threads to use for parsing.
 dtype : dict[str, str], optional
     Dictionary mapping column names to data types for Arrow export.
+    By default, column types are automatically inferred from the data
+    (integers, floats, booleans, strings). Use this parameter to override
+    inferred types for specific columns.
     Supported types: 'str', 'string', 'object' (string), 'int', 'int64'
     (64-bit integer), 'float', 'float64', 'double' (64-bit float),
-    'bool', 'boolean' (boolean). Columns not specified default to string.
+    'bool', 'boolean' (boolean).
     Values that cannot be converted to the specified type become null.
+num_threads : int, default 1
+    Number of threads to use for parsing.
 
 Returns
 -------
@@ -1382,12 +1427,13 @@ Examples
 >>> # Multi-threaded parsing
 >>> table = vroom_csv.read_csv("large.csv", num_threads=4)
 
->>> # With dtype specification for type conversion
->>> table = vroom_csv.read_csv("data.csv", dtype={"age": "int64", "score": "float64"})
-
->>> # Convert to PyArrow with typed columns
+>>> # Types are automatically inferred (integers, floats, bools detected)
+>>> table = vroom_csv.read_csv("data.csv")
 >>> import pyarrow as pa
->>> arrow_table = pa.table(table)
+>>> arrow_table = pa.table(table)  # columns have inferred types
+
+>>> # Override inferred types with explicit dtype
+>>> table = vroom_csv.read_csv("data.csv", dtype={"zip_code": "string", "age": "int64"})
 
 >>> # Treat empty strings as null (default behavior)
 >>> table = vroom_csv.read_csv("data.csv", empty_is_null=True)
