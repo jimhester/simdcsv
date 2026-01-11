@@ -13,6 +13,7 @@
 #include "dialect.h"
 #include "error.h"
 #include "extraction_config.h"
+#include "mmap_util.h"
 #include "value_extraction.h"
 
 #include <algorithm>
@@ -30,6 +31,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 namespace py = pybind11;
@@ -189,9 +191,62 @@ struct NullValueConfig {
   }
 };
 
+// =============================================================================
+// MmapFileBuffer - wrapper for memory-mapped file with FileBuffer-like interface
+// =============================================================================
+
+/**
+ * @brief Wrapper around MmapBuffer that provides a FileBuffer-like interface.
+ *
+ * This class allows memory-mapped files to be used interchangeably with
+ * regular FileBuffers in the Python binding code. It holds the MmapBuffer
+ * and provides the same data() and size() interface.
+ */
+class MmapFileBuffer {
+public:
+  MmapFileBuffer() = default;
+
+  /**
+   * @brief Open and memory-map a file.
+   * @param path Path to the file to map.
+   * @return true if successful, false on failure.
+   */
+  bool open(const std::string& path) { return mmap_buffer_.open(path); }
+
+  /**
+   * @brief Get pointer to the mapped data.
+   * @return Const pointer to the data, or nullptr if invalid.
+   */
+  const uint8_t* data() const { return mmap_buffer_.data(); }
+
+  /**
+   * @brief Get the size of the mapped data.
+   * @return Size in bytes.
+   */
+  size_t size() const { return mmap_buffer_.size(); }
+
+  /**
+   * @brief Check if the buffer is valid.
+   * @return true if a file is currently mapped.
+   */
+  bool valid() const { return mmap_buffer_.valid(); }
+
+  // Non-copyable, movable
+  MmapFileBuffer(const MmapFileBuffer&) = delete;
+  MmapFileBuffer& operator=(const MmapFileBuffer&) = delete;
+  MmapFileBuffer(MmapFileBuffer&&) = default;
+  MmapFileBuffer& operator=(MmapFileBuffer&&) = default;
+
+private:
+  libvroom::MmapBuffer mmap_buffer_;
+};
+
+// Type alias for buffer storage - either standard FileBuffer or memory-mapped
+using BufferStorage = std::variant<libvroom::FileBuffer, MmapFileBuffer>;
+
 // Holds parsed CSV data and manages memory for Arrow export
 struct TableData {
-  libvroom::FileBuffer buffer;
+  BufferStorage buffer_storage;
   libvroom::Parser::Result result;
   std::vector<std::string> column_names;
   std::vector<size_t> selected_columns;               // Indices of selected columns (empty = all)
@@ -201,6 +256,22 @@ struct TableData {
   size_t skip_rows_ = 0;         // Number of data rows to skip
   std::optional<size_t> n_rows_; // Maximum rows to return (nullopt = all)
   NullValueConfig null_config;   // Null value configuration for Arrow export
+  bool using_mmap_ = false;      // True if using memory-mapped file
+
+  // Get pointer to buffer data (works with either FileBuffer or MmapFileBuffer)
+  const uint8_t* buffer_data() const {
+    return std::visit([](const auto& buf) -> const uint8_t* { return buf.data(); }, buffer_storage);
+  }
+
+  // Get buffer size (works with either FileBuffer or MmapFileBuffer)
+  size_t buffer_size() const {
+    return std::visit([](const auto& buf) -> size_t { return buf.size(); }, buffer_storage);
+  }
+
+  // Check if buffer is valid (works with either FileBuffer or MmapFileBuffer)
+  bool buffer_valid() const {
+    return std::visit([](const auto& buf) -> bool { return buf.valid(); }, buffer_storage);
+  }
 
   // Get effective number of columns (considering selection)
   size_t effective_num_columns() const {
@@ -1011,6 +1082,11 @@ Dialect detect_dialect(const std::string& path) {
 }
 
 // =============================================================================
+// Default threshold for auto memory-mapping (100MB)
+// =============================================================================
+constexpr size_t MMAP_AUTO_THRESHOLD = 100ULL * 1024 * 1024;
+
+// =============================================================================
 // read_csv function with full options
 // =============================================================================
 
@@ -1022,7 +1098,7 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
                std::optional<std::vector<std::string>> null_values = std::nullopt,
                bool empty_is_null = true,
                std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt,
-               size_t num_threads = 1) {
+               size_t num_threads = 1, std::optional<bool> memory_map = std::nullopt) {
   auto data = std::make_shared<TableData>();
 
   // Configure null value handling
@@ -1031,14 +1107,40 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
   }
   data->null_config.empty_is_null = empty_is_null;
 
-  // Load file
-  try {
-    data->buffer = libvroom::load_file(path);
-  } catch (const std::runtime_error& e) {
-    throw py::value_error(std::string("Failed to load file: ") + e.what());
+  // Determine if we should use memory mapping
+  // If memory_map is nullopt (auto mode), check file size against threshold
+  bool use_mmap = false;
+  if (memory_map.has_value()) {
+    use_mmap = *memory_map;
+  } else {
+    // Auto-detect: use mmap for files >= 100MB
+    auto meta = libvroom::SourceMetadata::from_file(path);
+    if (meta.valid && meta.size >= MMAP_AUTO_THRESHOLD) {
+      use_mmap = true;
+    }
   }
 
-  if (!data->buffer.valid()) {
+  // Load file using either memory-mapping or standard loading
+  if (use_mmap) {
+    MmapFileBuffer mmap_buf;
+    if (!mmap_buf.open(path)) {
+      throw py::value_error("Failed to memory-map file: " + path);
+    }
+    data->buffer_storage = std::move(mmap_buf);
+    data->using_mmap_ = true;
+  } else {
+    try {
+      libvroom::FileBuffer file_buf = libvroom::load_file(path);
+      if (!file_buf.valid()) {
+        throw py::value_error("Failed to load file: " + path);
+      }
+      data->buffer_storage = std::move(file_buf);
+    } catch (const std::runtime_error& e) {
+      throw py::value_error(std::string("Failed to load file: ") + e.what());
+    }
+  }
+
+  if (!data->buffer_valid()) {
     throw py::value_error("Failed to load file: " + path);
   }
 
@@ -1069,7 +1171,7 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
 
   // Parse
   libvroom::Parser parser(num_threads);
-  data->result = parser.parse(data->buffer.data(), data->buffer.size(), options);
+  data->result = parser.parse(data->buffer_data(), data->buffer_size(), options);
 
   if (!data->result.success()) {
     std::ostringstream ss;
@@ -1345,6 +1447,7 @@ Examples
         py::arg("encoding") = py::none(), py::arg("skip_rows") = 0, py::arg("n_rows") = py::none(),
         py::arg("usecols") = py::none(), py::arg("null_values") = py::none(),
         py::arg("empty_is_null") = true, py::arg("dtype") = py::none(), py::arg("num_threads") = 1,
+        py::arg("memory_map") = py::none(),
         R"doc(
 Read a CSV file and return a Table object.
 
@@ -1390,6 +1493,15 @@ dtype : dict[str, str], optional
     Values that cannot be converted to the specified type become null.
 num_threads : int, default 1
     Number of threads to use for parsing.
+memory_map : bool, optional
+    If True, use memory-mapped file access instead of reading the entire
+    file into memory. This can reduce memory usage for large files.
+    If False, read the entire file into memory (traditional approach).
+    If None (default), automatically use memory mapping for files >= 100MB.
+    Memory mapping is particularly beneficial for:
+    - Large files that might not fit in available RAM
+    - Repeated reads of the same file (benefits from OS page caching)
+    - Scenarios where only a portion of the file will be accessed
 
 Returns
 -------
@@ -1440,6 +1552,12 @@ Examples
 
 >>> # Treat empty strings as null (default behavior)
 >>> table = vroom_csv.read_csv("data.csv", empty_is_null=True)
+
+>>> # Use memory mapping for large files
+>>> table = vroom_csv.read_csv("huge.csv", memory_map=True)
+
+>>> # Disable memory mapping (always read into memory)
+>>> table = vroom_csv.read_csv("data.csv", memory_map=False)
 
 >>> # Convert to Polars
 >>> import polars as pl

@@ -178,6 +178,7 @@ def read_csv(
     empty_is_null: bool = True,
     dtype: dict[str, str] | None = None,
     num_threads: int = 1,
+    memory_map: bool | None = None,
 ) -> Table:
     """Read a CSV file and return a Table object.
 
@@ -197,24 +198,24 @@ def read_csv(
         Currently accepted but not fully implemented.
     skip_rows : int, default 0
         Number of rows to skip at the start of the file.
-        Currently accepted but not fully implemented.
     n_rows : int, optional
         Maximum number of rows to read. If not specified, reads all rows.
-        Currently accepted but not fully implemented.
     usecols : sequence of str or int, optional
         List of column names or indices to read. If not specified, reads
         all columns.
     null_values : sequence of str, optional
         List of strings to treat as null/NA values.
-        Currently accepted but not fully implemented.
     empty_is_null : bool, default True
         Whether to treat empty strings as null values.
-        Currently accepted but not fully implemented.
     dtype : dict, optional
         Dictionary mapping column names to data types.
-        Currently accepted but not fully implemented.
     num_threads : int, default 1
         Number of threads to use for parsing.
+    memory_map : bool, optional
+        If True, use memory-mapped file access instead of reading the entire
+        file into memory. This can reduce memory usage for large files.
+        If False, read the entire file into memory (traditional approach).
+        If None (default), automatically use memory mapping for files >= 100MB.
 
     Returns
     -------

@@ -287,3 +287,113 @@ class TestExceptions:
         import vroom_csv
 
         assert hasattr(vroom_csv, "IOError")
+
+
+class TestMemoryMap:
+    """Tests for memory_map parameter."""
+
+    def test_memory_map_true_works(self, simple_csv):
+        """Test reading with memory_map=True."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(simple_csv, memory_map=True)
+
+        assert table.num_rows == 3
+        assert table.num_columns == 3
+        assert table.column_names == ["name", "age", "city"]
+        assert table.column("name") == ["Alice", "Bob", "Charlie"]
+
+    def test_memory_map_false_works(self, simple_csv):
+        """Test reading with memory_map=False (traditional loading)."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(simple_csv, memory_map=False)
+
+        assert table.num_rows == 3
+        assert table.num_columns == 3
+        assert table.column_names == ["name", "age", "city"]
+
+    def test_memory_map_none_default(self, simple_csv):
+        """Test that memory_map=None (default) auto-detects based on file size."""
+        import vroom_csv
+
+        # Small file should not use mmap automatically
+        table = vroom_csv.read_csv(simple_csv, memory_map=None)
+
+        assert table.num_rows == 3
+        assert table.num_columns == 3
+
+    def test_memory_map_with_other_options(self, simple_csv):
+        """Test memory_map works with other parameters."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(
+            simple_csv,
+            memory_map=True,
+            skip_rows=1,
+            n_rows=1,
+        )
+
+        assert table.num_rows == 1
+        # After skipping first data row, second row is Bob
+        assert table.row(0) == ["Bob", "25", "Los Angeles"]
+
+    def test_memory_map_with_usecols(self, simple_csv):
+        """Test memory_map works with column selection."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(
+            simple_csv,
+            memory_map=True,
+            usecols=["name", "city"],
+        )
+
+        assert table.num_columns == 2
+        assert table.column_names == ["name", "city"]
+        assert table.column("name") == ["Alice", "Bob", "Charlie"]
+        assert table.column("city") == ["New York", "Los Angeles", "Chicago"]
+
+    def test_memory_map_nonexistent_file(self):
+        """Test error handling for non-existent file with memory_map=True."""
+        import vroom_csv
+
+        with pytest.raises((ValueError, vroom_csv.VroomError)):
+            vroom_csv.read_csv("/nonexistent/path/to/file.csv", memory_map=True)
+
+    def test_memory_map_with_no_header(self, no_header_csv):
+        """Test memory_map works with has_header=False."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(no_header_csv, memory_map=True, has_header=False)
+
+        assert table.num_rows == 3
+        assert table.num_columns == 3
+        assert table.column_names == ["column_0", "column_1", "column_2"]
+
+    def test_memory_map_with_delimiter(self, tsv_file):
+        """Test memory_map works with explicit delimiter."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(tsv_file, memory_map=True, delimiter="\t")
+
+        assert table.num_rows == 3
+        assert table.num_columns == 3
+        assert table.column_names == ["name", "age", "city"]
+
+    def test_memory_map_preserves_table_interface(self, simple_csv):
+        """Test that Table interface is consistent with memory_map enabled."""
+        import vroom_csv
+
+        table_mmap = vroom_csv.read_csv(simple_csv, memory_map=True)
+        table_regular = vroom_csv.read_csv(simple_csv, memory_map=False)
+
+        # Both should have same data
+        assert table_mmap.num_rows == table_regular.num_rows
+        assert table_mmap.num_columns == table_regular.num_columns
+        assert table_mmap.column_names == table_regular.column_names
+
+        for col in table_mmap.column_names:
+            assert table_mmap.column(col) == table_regular.column(col)
+
+        for row_idx in range(table_mmap.num_rows):
+            assert table_mmap.row(row_idx) == table_regular.row(row_idx)
