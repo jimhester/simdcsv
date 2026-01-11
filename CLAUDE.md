@@ -89,31 +89,24 @@ To manually format a file: `clang-format -i <file>`
 - **Update branches via merge**: When a branch needs updates from main, use `git merge main` instead of rebasing
 - **Squash on final merge**: Use squash merge when merging PRs into main to keep history clean
 - **Check for merge conflicts**: When opening a branch, check for merge conflicts with main. If CI status checks aren't appearing on a PR, merge conflicts are often the cause
-- **Use auto-merge carefully**: Only enable auto-merge on PRs AFTER:
-  1. The remote code review workflow has posted its review (check with `gh pr reviews <PR>`)
-  2. Any review feedback has been addressed
-  3. No outstanding review comments remain
+- **Use auto-merge**: Enable auto-merge on PRs when CI is passing and there are no outstanding issues
 
-  This prevents the race condition where auto-merge triggers before reviews are posted.
+### Code Review (Roborev)
 
-### Code Review
+This repo uses roborev for automated code review. Reviews run automatically via post-commit hook.
 
-This repo has two code review mechanisms:
+**How it works:**
+- Commits are automatically queued for review after each commit
+- Reviews use a two-phase approach: aggressive investigation → verification with confidence scoring
+- Issues scoring 40+ are reported (letting humans decide on uncertain cases)
+- View reviews with `roborev tui` or `roborev show <sha>`
 
-**1. Remote Review Workflow (GitHub Actions)**
-- Automatically runs on PRs and posts review comments
-- Wait for this review before enabling auto-merge
-- Check status with `gh pr reviews <PR>`
+**Agents should:**
+1. Check roborev reviews after commits with `roborev show <sha>` or `roborev tui`
+2. Address any HIGH/MEDIUM issues before merging
+3. For uncertain issues (40-70 confidence), use judgment - these may be false positives
 
-**2. Local Roborev (`~/p/roborev`)**
-- Can be run locally before opening PRs to catch issues early
-- Also useful to check after incremental commits
-
-Agents should:
-1. **Before opening a PR**: Optionally run local roborev to catch issues early
-2. **After creating PR**: Wait for remote review workflow to post its review
-3. **Address all feedback**: Fix any issues raised by either review mechanism
-4. **Before enabling auto-merge**: Ensure all review comments have been addressed
+**Configuration:** See `.roborev.toml` for project-specific review guidelines.
 
 ```bash
 # Check for conflicts before creating PR
