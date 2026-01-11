@@ -179,6 +179,7 @@ def read_csv(
     empty_is_null: bool = True,
     dtype: dict[str, str] | None = None,
     num_threads: int = 1,
+    memory_map: bool | None = None,
     progress: Callable[[int, int], None] | None = None,
 ) -> Table:
     """Read a CSV file and return a Table object.
@@ -212,6 +213,11 @@ def read_csv(
         Dictionary mapping column names to data types.
     num_threads : int, default 1
         Number of threads to use for parsing.
+    memory_map : bool, optional
+        If True, use memory-mapped file access instead of reading the entire
+        file into memory. This can reduce memory usage for large files.
+        If False, read the entire file into memory (traditional approach).
+        If None (default), automatically use memory mapping for files >= 100MB.
     progress : callable, optional
         A callback function for progress reporting during parsing.
         The callback receives two arguments: (bytes_read: int, total_bytes: int).
