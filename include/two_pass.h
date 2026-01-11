@@ -461,25 +461,55 @@ public:
                                     char delimiter = ',', char quote_char = '"');
 
   /**
+   * @brief Result structure from second pass SIMD scan.
+   *
+   * Contains both the number of indexes found and whether parsing ended
+   * at a record boundary. This is used for speculation validation in
+   * Algorithm 1 from Chang et al. - if a chunk doesn't end at a record
+   * boundary, the speculation was incorrect.
+   */
+  struct SecondPassResult {
+    uint64_t n_indexes;      ///< Number of field separators found
+    bool at_record_boundary; ///< True if parsing ended at a record boundary
+  };
+
+  /**
    * @brief Second pass SIMD scan with dialect-aware delimiter and quote
    * character.
    */
   static uint64_t second_pass_simd(const uint8_t* buf, size_t start, size_t end, ParseIndex* out,
                                    size_t thread_id, char delimiter = ',', char quote_char = '"') {
-    bool is_quoted = false;
+    return second_pass_simd_with_state(buf, start, end, out, thread_id, delimiter, quote_char)
+        .n_indexes;
+  }
+
+  /**
+   * @brief Second pass SIMD scan that also returns ending state.
+   *
+   * This version returns both the index count and whether parsing ended at
+   * a record boundary. Used for speculation validation per Chang et al.
+   * Algorithm 1 - chunks must end at record boundaries for speculation
+   * to be valid.
+   *
+   * A chunk ends at a record boundary if the final quote parity is even
+   * (not inside a quoted field). If we end inside a quote, the speculation
+   * was definitely wrong and we need to fall back to two-pass parsing.
+   */
+  static SecondPassResult second_pass_simd_with_state(const uint8_t* buf, size_t start, size_t end,
+                                                      ParseIndex* out, size_t thread_id,
+                                                      char delimiter = ',', char quote_char = '"') {
     assert(end >= start && "Invalid range: end must be >= start");
     size_t len = end - start;
     uint64_t idx = 0;
     size_t n_indexes = 0;
-    size_t i = thread_id;
     uint64_t prev_iter_inside_quote = 0ULL; // either all zeros or all ones
     uint64_t base = 0;
-    buf += start;
+    const uint8_t* data = buf + start;
 
     for (; idx < len; idx += 64) {
-      __builtin_prefetch(buf + idx + 128);
+      __builtin_prefetch(data + idx + 128);
       size_t remaining = len - idx;
-      simd_input in = fill_input_safe(buf + idx, remaining);
+      simd_input in = fill_input_safe(data + idx, remaining);
 
       uint64_t mask = ~0ULL;
 
@@ -494,9 +524,21 @@ public:
       // Support LF, CRLF, and CR-only line endings
       uint64_t end_mask = compute_line_ending_mask_simple(in, mask);
       uint64_t field_sep = (end_mask | sep) & ~quote_mask;
+
       n_indexes += write(out->indexes + thread_id, base, start + idx, out->n_threads, field_sep);
     }
-    return n_indexes;
+
+    // Check if we ended at a record boundary:
+    // Not inside a quoted field (prev_iter_inside_quote == 0)
+    //
+    // The key insight from Chang et al. Algorithm 1: if speculative chunk
+    // boundary detection was wrong, parsing this chunk will end inside a
+    // quoted field. The next chunk would then start mid-quote, leading to
+    // incorrect parsing. By checking the ending state, we can detect this
+    // misprediction and fall back to reliable two-pass parsing.
+    bool at_record_boundary = (prev_iter_inside_quote == 0);
+
+    return {n_indexes, at_record_boundary};
   }
 
   /**

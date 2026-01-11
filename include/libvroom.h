@@ -1709,6 +1709,13 @@ public:
     // 2. A source file path is provided (!source_path.empty())
     bool can_use_cache = options.cache.has_value() && !options.source_path.empty();
 
+    // Helper to emit cache warnings (captures warning callback from config)
+    auto cache_warn = [&options]([[maybe_unused]] const std::string& message) {
+      if (options.cache.has_value() && options.cache->warning_callback) {
+        options.cache->warning_callback(message);
+      }
+    };
+
     if (can_use_cache) {
       const CacheConfig& cache_config = *options.cache;
       auto [cache_path, writable] =
@@ -1717,31 +1724,35 @@ public:
 
       // Try to load from cache (unless force_cache_refresh is set)
       if (!options.force_cache_refresh && !cache_path.empty()) {
-        SourceMetadata source_meta = SourceMetadata::from_file(options.source_path);
-        if (source_meta.valid) {
-          ParseIndex cached_idx = ParseIndex::from_mmap(cache_path, source_meta);
-          if (cached_idx.is_valid()) {
-            // Cache hit! Use the cached index
-            result.idx = std::move(cached_idx);
-            result.used_cache = true;
-            result.successful = true;
+        // Use IndexCache::load() for automatic corruption detection and cleanup
+        auto load_result = IndexCache::load(cache_path, options.source_path);
 
-            // Determine dialect for cached result
-            if (options.dialect.has_value()) {
-              result.dialect = options.dialect.value();
-            } else {
-              // Auto-detect dialect even for cached indexes
-              DialectDetector detector(options.detection_options);
-              result.detection = detector.detect(buf, len);
-              result.dialect =
-                  result.detection.success() ? result.detection.dialect : Dialect::csv();
-            }
+        if (load_result.success()) {
+          // Cache hit! Use the cached index
+          result.idx = std::move(load_result.index);
+          result.used_cache = true;
+          result.successful = true;
 
-            // Store buffer reference to enable row/column iteration
-            result.set_buffer(buf, len);
-
-            return result;
+          // Determine dialect for cached result
+          if (options.dialect.has_value()) {
+            result.dialect = options.dialect.value();
+          } else {
+            // Auto-detect dialect even for cached indexes
+            DialectDetector detector(options.detection_options);
+            result.detection = detector.detect(buf, len);
+            result.dialect = result.detection.success() ? result.detection.dialect : Dialect::csv();
           }
+
+          // Store buffer reference to enable row/column iteration
+          result.set_buffer(buf, len);
+
+          return result;
+        }
+
+        // Cache miss or corruption
+        // Log corruption as a warning (non-fatal) so callers are aware
+        if (load_result.was_corrupted) {
+          cache_warn("Cache corruption detected and file deleted: " + load_result.error_message);
         }
       }
 
@@ -1833,8 +1844,13 @@ public:
       // Store column count in idx for caching (idx.columns may be 0 because
       // num_columns() typically uses the ValueExtractor)
       result.idx.columns = result.num_columns();
-      // Write cache file (failures are silent - caching is best-effort)
-      IndexCache::write_atomic(result.cache_path, result.idx, options.source_path);
+      // Write cache file - emit warning on failure
+      bool write_success =
+          IndexCache::write_atomic(result.cache_path, result.idx, options.source_path);
+      if (!write_success) {
+        cache_warn("Failed to write cache file '" + result.cache_path +
+                   "'; caching disabled for this parse");
+      }
     }
 
     // Store buffer reference to enable row/column iteration
