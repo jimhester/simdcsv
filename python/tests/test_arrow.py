@@ -622,3 +622,144 @@ class TestDtypeWithPolars:
         assert df["score"].to_list() == pytest.approx([95.5, 87.3, 92.1])
         assert df["active"].to_list() == [True, False, True]
         assert df["name"].to_list() == ["Alice", "Bob", "Charlie"]
+
+
+# =============================================================================
+# skip_rows and n_rows parameter tests with Arrow
+# =============================================================================
+
+
+@pytest.fixture
+def larger_csv_for_arrow():
+    """Create a larger CSV file for skip/limit testing with Arrow."""
+    lines = ["id,value"]
+    for i in range(10):
+        lines.append(f"{i},{i * 10}")
+    content = "\n".join(lines) + "\n"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write(content)
+        return f.name
+
+
+@pytest.mark.skipif(not HAS_PYARROW, reason="pyarrow not installed")
+class TestSkipRowsNRowsWithPyArrow:
+    """Tests for skip_rows and n_rows parameters with PyArrow conversion."""
+
+    def test_skip_rows_arrow_table(self, larger_csv_for_arrow):
+        """Test skip_rows works correctly when converting to PyArrow."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(larger_csv_for_arrow, skip_rows=3)
+        arrow_table = pa.table(table)
+
+        assert arrow_table.num_rows == 7
+        ids = arrow_table.column("id").to_pylist()
+        assert ids == ["3", "4", "5", "6", "7", "8", "9"]
+
+    def test_n_rows_arrow_table(self, larger_csv_for_arrow):
+        """Test n_rows works correctly when converting to PyArrow."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(larger_csv_for_arrow, n_rows=3)
+        arrow_table = pa.table(table)
+
+        assert arrow_table.num_rows == 3
+        ids = arrow_table.column("id").to_pylist()
+        assert ids == ["0", "1", "2"]
+
+    def test_skip_rows_and_n_rows_combined_arrow(self, larger_csv_for_arrow):
+        """Test skip_rows and n_rows combined with PyArrow."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(larger_csv_for_arrow, skip_rows=2, n_rows=4)
+        arrow_table = pa.table(table)
+
+        assert arrow_table.num_rows == 4
+        ids = arrow_table.column("id").to_pylist()
+        assert ids == ["2", "3", "4", "5"]
+        values = arrow_table.column("value").to_pylist()
+        assert values == ["20", "30", "40", "50"]
+
+    def test_skip_rows_with_dtype_arrow(self, larger_csv_for_arrow):
+        """Test skip_rows works with dtype parameter for Arrow."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(
+            larger_csv_for_arrow, skip_rows=5, dtype={"id": "int64", "value": "int64"}
+        )
+        arrow_table = pa.table(table)
+
+        assert arrow_table.num_rows == 5
+        assert pa.types.is_int64(arrow_table.column("id").type)
+        ids = arrow_table.column("id").to_pylist()
+        assert ids == [5, 6, 7, 8, 9]
+        values = arrow_table.column("value").to_pylist()
+        assert values == [50, 60, 70, 80, 90]
+
+    def test_n_rows_with_dtype_arrow(self, larger_csv_for_arrow):
+        """Test n_rows works with dtype parameter for Arrow."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(
+            larger_csv_for_arrow, n_rows=3, dtype={"id": "int64", "value": "int64"}
+        )
+        arrow_table = pa.table(table)
+
+        assert arrow_table.num_rows == 3
+        assert pa.types.is_int64(arrow_table.column("id").type)
+        ids = arrow_table.column("id").to_pylist()
+        assert ids == [0, 1, 2]
+
+
+@pytest.mark.skipif(not HAS_POLARS, reason="polars not installed")
+class TestSkipRowsNRowsWithPolars:
+    """Tests for skip_rows and n_rows parameters with Polars conversion."""
+
+    def test_skip_rows_polars_dataframe(self, larger_csv_for_arrow):
+        """Test skip_rows works correctly when converting to Polars."""
+        import polars as pl
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(larger_csv_for_arrow, skip_rows=3)
+        df = pl.from_arrow(table)
+
+        assert df.shape[0] == 7
+        ids = df["id"].to_list()
+        assert ids == ["3", "4", "5", "6", "7", "8", "9"]
+
+    def test_n_rows_polars_dataframe(self, larger_csv_for_arrow):
+        """Test n_rows works correctly when converting to Polars."""
+        import polars as pl
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(larger_csv_for_arrow, n_rows=3)
+        df = pl.from_arrow(table)
+
+        assert df.shape[0] == 3
+        ids = df["id"].to_list()
+        assert ids == ["0", "1", "2"]
+
+    def test_skip_rows_and_n_rows_combined_polars(self, larger_csv_for_arrow):
+        """Test skip_rows and n_rows combined with Polars."""
+        import polars as pl
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(larger_csv_for_arrow, skip_rows=2, n_rows=4)
+        df = pl.from_arrow(table)
+
+        assert df.shape[0] == 4
+        ids = df["id"].to_list()
+        assert ids == ["2", "3", "4", "5"]

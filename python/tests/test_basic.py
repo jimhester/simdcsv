@@ -90,6 +90,83 @@ class TestReadCsv:
         assert table.num_columns == 3
 
 
+class TestSkipRowsAndNRows:
+    """Tests for skip_rows and n_rows parameters."""
+
+    @pytest.fixture
+    def larger_csv(self):
+        """Create a larger CSV file for skip/limit testing."""
+        lines = ["id,value"]
+        for i in range(10):
+            lines.append(f"{i},{i * 10}")
+        content = "\n".join(lines) + "\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            return f.name
+
+    def test_skip_rows_basic(self, larger_csv):
+        """Test skipping first N rows."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(larger_csv, skip_rows=3)
+
+        assert table.num_rows == 7
+        assert table.row(0) == ["3", "30"]
+        assert table.column("id") == ["3", "4", "5", "6", "7", "8", "9"]
+
+    def test_n_rows_basic(self, larger_csv):
+        """Test reading only first N rows."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(larger_csv, n_rows=3)
+
+        assert table.num_rows == 3
+        assert table.row(0) == ["0", "0"]
+        assert table.row(2) == ["2", "20"]
+        assert table.column("id") == ["0", "1", "2"]
+
+    def test_skip_rows_and_n_rows_combined(self, larger_csv):
+        """Test using skip_rows and n_rows together."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(larger_csv, skip_rows=2, n_rows=4)
+
+        assert table.num_rows == 4
+        assert table.row(0) == ["2", "20"]
+        assert table.row(3) == ["5", "50"]
+        assert table.column("id") == ["2", "3", "4", "5"]
+
+    def test_skip_rows_exceeds_total(self, larger_csv):
+        """Test skip_rows larger than total rows returns empty table."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(larger_csv, skip_rows=100)
+
+        assert table.num_rows == 0
+
+    def test_skip_rows_with_no_header(self):
+        """Test skip_rows works correctly without header."""
+        content = "0,a\n1,b\n2,c\n3,d\n4,e\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            path = f.name
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(path, has_header=False, skip_rows=2)
+
+        assert table.num_rows == 3
+        assert table.row(0) == ["2", "c"]
+
+    def test_repr_shows_filtered_count(self, larger_csv):
+        """Test __repr__ shows filtered row count."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(larger_csv, skip_rows=5, n_rows=3)
+
+        assert "3 rows" in repr(table)
+
+
 class TestTable:
     """Tests for Table class."""
 
