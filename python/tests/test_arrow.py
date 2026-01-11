@@ -146,3 +146,298 @@ class TestPolarsInterop:
 
         ages = df["age"].to_list()
         assert ages == ["30", "25", "35"]
+
+
+# =============================================================================
+# dtype parameter tests
+# =============================================================================
+
+
+@pytest.fixture
+def typed_csv():
+    """Create a CSV file with various data types for testing."""
+    content = "name,age,score,active\nAlice,30,95.5,true\nBob,25,87.3,false\nCharlie,35,92.1,yes\n"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write(content)
+        return f.name
+
+
+@pytest.fixture
+def csv_with_nulls():
+    """Create a CSV file with missing/null values."""
+    content = "name,age,score,active\nAlice,30,95.5,true\nBob,,87.3,\nCharlie,invalid,NA,yes\n"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write(content)
+        return f.name
+
+
+class TestDtypeParameter:
+    """Tests for the dtype parameter in read_csv."""
+
+    def test_dtype_int64(self, typed_csv):
+        """Test that int64 dtype converts age column correctly."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(typed_csv, dtype={"age": "int64"})
+
+        # Verify table was parsed
+        assert table.num_rows == 3
+        assert table.num_columns == 4
+
+    def test_dtype_float64(self, typed_csv):
+        """Test that float64 dtype converts score column correctly."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(typed_csv, dtype={"score": "float64"})
+
+        # Verify table was parsed
+        assert table.num_rows == 3
+        assert table.num_columns == 4
+
+    def test_dtype_bool(self, typed_csv):
+        """Test that bool dtype converts active column correctly."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(typed_csv, dtype={"active": "bool"})
+
+        # Verify table was parsed
+        assert table.num_rows == 3
+        assert table.num_columns == 4
+
+    def test_dtype_multiple_columns(self, typed_csv):
+        """Test that multiple dtypes can be specified."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(
+            typed_csv, dtype={"age": "int64", "score": "float64", "active": "bool"}
+        )
+
+        # Verify table was parsed
+        assert table.num_rows == 3
+        assert table.num_columns == 4
+
+    def test_dtype_unknown_raises(self, typed_csv):
+        """Test that unknown dtype raises ValueError."""
+        import vroom_csv
+
+        with pytest.raises(ValueError, match="Unknown dtype"):
+            vroom_csv.read_csv(typed_csv, dtype={"age": "unknown_type"})
+
+    def test_dtype_unknown_column_raises(self, typed_csv):
+        """Test that unknown column name raises ValueError."""
+        import vroom_csv
+
+        with pytest.raises(ValueError, match="Column not found"):
+            vroom_csv.read_csv(typed_csv, dtype={"nonexistent": "int64"})
+
+    def test_dtype_string_synonyms(self, typed_csv):
+        """Test that various string type names are accepted."""
+        import vroom_csv
+
+        for dtype_name in ["str", "string", "object"]:
+            table = vroom_csv.read_csv(typed_csv, dtype={"name": dtype_name})
+            assert table.num_rows == 3
+
+    def test_dtype_int_synonyms(self, typed_csv):
+        """Test that various int type names are accepted."""
+        import vroom_csv
+
+        for dtype_name in ["int", "int64", "Int64"]:
+            table = vroom_csv.read_csv(typed_csv, dtype={"age": dtype_name})
+            assert table.num_rows == 3
+
+    def test_dtype_float_synonyms(self, typed_csv):
+        """Test that various float type names are accepted."""
+        import vroom_csv
+
+        for dtype_name in ["float", "float64", "Float64", "double"]:
+            table = vroom_csv.read_csv(typed_csv, dtype={"score": dtype_name})
+            assert table.num_rows == 3
+
+    def test_dtype_bool_synonyms(self, typed_csv):
+        """Test that various bool type names are accepted."""
+        import vroom_csv
+
+        for dtype_name in ["bool", "boolean"]:
+            table = vroom_csv.read_csv(typed_csv, dtype={"active": dtype_name})
+            assert table.num_rows == 3
+
+
+@pytest.mark.skipif(not HAS_PYARROW, reason="pyarrow not installed")
+class TestDtypeWithPyArrow:
+    """Tests for dtype parameter with PyArrow conversion."""
+
+    def test_dtype_int64_arrow_type(self, typed_csv):
+        """Test that int64 dtype produces correct Arrow type."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(typed_csv, dtype={"age": "int64"})
+        arrow_table = pa.table(table)
+
+        assert pa.types.is_int64(arrow_table.column("age").type)
+
+    def test_dtype_float64_arrow_type(self, typed_csv):
+        """Test that float64 dtype produces correct Arrow type."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(typed_csv, dtype={"score": "float64"})
+        arrow_table = pa.table(table)
+
+        assert pa.types.is_float64(arrow_table.column("score").type)
+
+    def test_dtype_bool_arrow_type(self, typed_csv):
+        """Test that bool dtype produces correct Arrow type."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(typed_csv, dtype={"active": "bool"})
+        arrow_table = pa.table(table)
+
+        assert pa.types.is_boolean(arrow_table.column("active").type)
+
+    def test_dtype_int64_values(self, typed_csv):
+        """Test that int64 values are correctly converted."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(typed_csv, dtype={"age": "int64"})
+        arrow_table = pa.table(table)
+
+        ages = arrow_table.column("age").to_pylist()
+        assert ages == [30, 25, 35]
+
+    def test_dtype_float64_values(self, typed_csv):
+        """Test that float64 values are correctly converted."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(typed_csv, dtype={"score": "float64"})
+        arrow_table = pa.table(table)
+
+        scores = arrow_table.column("score").to_pylist()
+        assert scores == pytest.approx([95.5, 87.3, 92.1])
+
+    def test_dtype_bool_values(self, typed_csv):
+        """Test that bool values are correctly converted."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(typed_csv, dtype={"active": "bool"})
+        arrow_table = pa.table(table)
+
+        active = arrow_table.column("active").to_pylist()
+        assert active == [True, False, True]  # yes is truthy
+
+    def test_dtype_null_handling_int64(self, csv_with_nulls):
+        """Test that invalid int64 values become null."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(csv_with_nulls, dtype={"age": "int64"})
+        arrow_table = pa.table(table)
+
+        ages = arrow_table.column("age").to_pylist()
+        assert ages == [30, None, None]  # empty and "invalid" both become null
+
+    def test_dtype_null_handling_float64(self, csv_with_nulls):
+        """Test that NA values in float column become null."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(csv_with_nulls, dtype={"score": "float64"})
+        arrow_table = pa.table(table)
+
+        scores = arrow_table.column("score").to_pylist()
+        assert scores[0] == pytest.approx(95.5)
+        assert scores[1] == pytest.approx(87.3)
+        assert scores[2] is None  # NA becomes null
+
+    def test_dtype_null_handling_bool(self, csv_with_nulls):
+        """Test that empty bool values become null."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(csv_with_nulls, dtype={"active": "bool"})
+        arrow_table = pa.table(table)
+
+        active = arrow_table.column("active").to_pylist()
+        assert active == [True, None, True]  # empty becomes null
+
+    def test_dtype_mixed_types(self, typed_csv):
+        """Test that multiple columns with different types work together."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(
+            typed_csv, dtype={"age": "int64", "score": "float64", "active": "bool"}
+        )
+        arrow_table = pa.table(table)
+
+        # Check types
+        assert pa.types.is_int64(arrow_table.column("age").type)
+        assert pa.types.is_float64(arrow_table.column("score").type)
+        assert pa.types.is_boolean(arrow_table.column("active").type)
+        assert pa.types.is_string(arrow_table.column("name").type)  # default to string
+
+        # Check values
+        assert arrow_table.column("age").to_pylist() == [30, 25, 35]
+        assert arrow_table.column("score").to_pylist() == pytest.approx([95.5, 87.3, 92.1])
+        assert arrow_table.column("active").to_pylist() == [True, False, True]
+        assert arrow_table.column("name").to_pylist() == ["Alice", "Bob", "Charlie"]
+
+    def test_dtype_unspecified_columns_remain_string(self, typed_csv):
+        """Test that columns not in dtype dict remain as strings."""
+        import pyarrow as pa
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(typed_csv, dtype={"age": "int64"})
+        arrow_table = pa.table(table)
+
+        # age should be int64
+        assert pa.types.is_int64(arrow_table.column("age").type)
+
+        # Other columns should remain as string
+        assert pa.types.is_string(arrow_table.column("name").type)
+        assert pa.types.is_string(arrow_table.column("score").type)
+        assert pa.types.is_string(arrow_table.column("active").type)
+
+
+@pytest.mark.skipif(not HAS_POLARS, reason="polars not installed")
+class TestDtypeWithPolars:
+    """Tests for dtype parameter with Polars conversion."""
+
+    def test_dtype_with_polars(self, typed_csv):
+        """Test that dtype works with Polars conversion."""
+        import polars as pl
+
+        import vroom_csv
+
+        table = vroom_csv.read_csv(
+            typed_csv, dtype={"age": "int64", "score": "float64", "active": "bool"}
+        )
+        df = pl.from_arrow(table)
+
+        # Check types
+        assert df["age"].dtype == pl.Int64
+        assert df["score"].dtype == pl.Float64
+        assert df["active"].dtype == pl.Boolean
+        assert df["name"].dtype == pl.String
+
+        # Check values
+        assert df["age"].to_list() == [30, 25, 35]
+        assert df["score"].to_list() == pytest.approx([95.5, 87.3, 92.1])
+        assert df["active"].to_list() == [True, False, True]
+        assert df["name"].to_list() == ["Alice", "Bob", "Charlie"]

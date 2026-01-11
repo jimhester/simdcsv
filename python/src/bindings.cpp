@@ -11,9 +11,14 @@
 
 #include "dialect.h"
 #include "error.h"
+#include "extraction_config.h"
+#include "value_extraction.h"
 
+#include <algorithm>
 #include <climits>
+#include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <pybind11/pybind11.h>
@@ -21,6 +26,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace py = pybind11;
@@ -72,6 +78,47 @@ struct ArrowArrayStream {
 };
 
 // =============================================================================
+// Column type enum for dtype support
+// =============================================================================
+
+enum class ColumnType { STRING, INT64, FLOAT64, BOOL };
+
+// Map Python dtype strings to ColumnType enum
+static std::optional<ColumnType> parse_dtype_string(const std::string& dtype) {
+  // Support various common dtype string formats
+  if (dtype == "str" || dtype == "string" || dtype == "object" || dtype == "U" || dtype == "<U" ||
+      dtype == "utf8") {
+    return ColumnType::STRING;
+  }
+  if (dtype == "int" || dtype == "int64" || dtype == "Int64" || dtype == "i8" || dtype == "<i8") {
+    return ColumnType::INT64;
+  }
+  if (dtype == "float" || dtype == "float64" || dtype == "Float64" || dtype == "f8" ||
+      dtype == "<f8" || dtype == "double") {
+    return ColumnType::FLOAT64;
+  }
+  if (dtype == "bool" || dtype == "boolean") {
+    return ColumnType::BOOL;
+  }
+  return std::nullopt;
+}
+
+// Get Arrow format string for a column type
+static const char* column_type_to_arrow_format(ColumnType type) {
+  switch (type) {
+  case ColumnType::STRING:
+    return "u"; // utf8 string
+  case ColumnType::INT64:
+    return "l"; // int64
+  case ColumnType::FLOAT64:
+    return "g"; // float64
+  case ColumnType::BOOL:
+    return "b"; // bool
+  }
+  return "u"; // default to string
+}
+
+// =============================================================================
 // Custom Python exceptions
 // =============================================================================
 
@@ -105,7 +152,16 @@ struct TableData {
   libvroom::Parser::Result result;
   std::vector<std::string> column_names;
   std::vector<std::vector<std::string>> columns_data; // Materialized column data
+  std::vector<ColumnType> column_types;               // Type for each column
   bool columns_materialized = false;
+
+  // Get the type for a column (STRING by default if not specified)
+  ColumnType get_column_type(size_t col) const {
+    if (col < column_types.size()) {
+      return column_types[col];
+    }
+    return ColumnType::STRING;
+  }
 
   // Materialize all columns as strings for Arrow export
   void materialize_columns() {
@@ -204,10 +260,12 @@ static void release_stream(ArrowArrayStream* stream) {
   stream->release = nullptr;
 }
 
-// Build schema for a string column
-static void build_string_column_schema(ArrowSchema* schema, const char* name) {
-  schema->format = new char[2];
-  std::strcpy(const_cast<char*>(schema->format), "u"); // utf8 string
+// Build schema for a column with specified type
+static void build_column_schema(ArrowSchema* schema, const char* name, ColumnType type) {
+  const char* format = column_type_to_arrow_format(type);
+  size_t format_len = std::strlen(format);
+  schema->format = new char[format_len + 1];
+  std::strcpy(const_cast<char*>(schema->format), format);
   schema->name = new char[std::strlen(name) + 1];
   std::strcpy(const_cast<char*>(schema->name), name);
   schema->metadata = nullptr;
@@ -219,8 +277,14 @@ static void build_string_column_schema(ArrowSchema* schema, const char* name) {
   schema->private_data = nullptr;
 }
 
-// Build schema for struct (table)
-static void build_struct_schema(ArrowSchema* schema, const std::vector<std::string>& column_names) {
+// Build schema for a string column (convenience wrapper)
+static void build_string_column_schema(ArrowSchema* schema, const char* name) {
+  build_column_schema(schema, name, ColumnType::STRING);
+}
+
+// Build schema for struct (table) with column types
+static void build_struct_schema(ArrowSchema* schema, const std::vector<std::string>& column_names,
+                                const std::vector<ColumnType>& column_types) {
   // Struct format
   schema->format = new char[3];
   std::strcpy(const_cast<char*>(schema->format), "+s"); // struct
@@ -235,7 +299,8 @@ static void build_struct_schema(ArrowSchema* schema, const std::vector<std::stri
 
   for (size_t i = 0; i < column_names.size(); ++i) {
     schema->children[i] = new ArrowSchema();
-    build_string_column_schema(schema->children[i], column_names[i].c_str());
+    ColumnType type = (i < column_types.size()) ? column_types[i] : ColumnType::STRING;
+    build_column_schema(schema->children[i], column_names[i].c_str(), type);
   }
 }
 
@@ -299,6 +364,221 @@ static void build_string_column_array(ArrowArray* array, const std::vector<std::
   array->private_data = buffer_holder;
 }
 
+// Build Arrow array for an int64 column with type conversion
+static void build_int64_column_array(ArrowArray* array, const std::vector<std::string>& data) {
+  size_t n_rows = data.size();
+
+  // Allocate buffer for int64 values
+  auto* buffer_holder = new std::vector<char>();
+  buffer_holder->resize(n_rows * sizeof(int64_t));
+  int64_t* values = reinterpret_cast<int64_t*>(buffer_holder->data());
+
+  // Allocate validity bitmap (1 bit per value, rounded up to bytes)
+  size_t validity_bytes = (n_rows + 7) / 8;
+  auto* validity = new std::vector<uint8_t>(validity_bytes, 0xFF); // All valid initially
+
+  int64_t null_count = 0;
+  libvroom::ExtractionConfig config;
+
+  for (size_t i = 0; i < n_rows; ++i) {
+    const std::string& s = data[i];
+    auto result = libvroom::parse_integer<int64_t>(s.data(), s.size(), config);
+    if (result.ok()) {
+      values[i] = result.get();
+    } else {
+      // Set null in validity bitmap (clear the bit)
+      (*validity)[i / 8] &= ~(1 << (i % 8));
+      values[i] = 0; // Arrow convention for null values
+      ++null_count;
+    }
+  }
+
+  // Set up array
+  array->length = static_cast<int64_t>(n_rows);
+  array->null_count = null_count;
+  array->offset = 0;
+  array->n_buffers = 2; // validity, data
+  array->n_children = 0;
+  array->buffers = new const void*[2];
+  array->buffers[0] = null_count > 0 ? validity->data() : nullptr;
+  array->buffers[1] = buffer_holder->data();
+  array->children = nullptr;
+  array->dictionary = nullptr;
+  array->release = release_array;
+
+  // Store both buffers in private_data for cleanup
+  // We'll use a pair to hold both vectors
+  struct BufferPair {
+    std::vector<char>* values;
+    std::vector<uint8_t>* validity;
+  };
+  auto* pair = new BufferPair{buffer_holder, validity};
+  array->private_data = pair;
+
+  // Custom release for int64 with validity buffer
+  array->release = [](ArrowArray* arr) {
+    if (arr->release == nullptr)
+      return;
+    if (arr->private_data) {
+      auto* p = static_cast<BufferPair*>(arr->private_data);
+      delete p->values;
+      delete p->validity;
+      delete p;
+    }
+    if (arr->buffers) {
+      delete[] arr->buffers;
+    }
+    arr->release = nullptr;
+  };
+}
+
+// Build Arrow array for a float64 column with type conversion
+static void build_float64_column_array(ArrowArray* array, const std::vector<std::string>& data) {
+  size_t n_rows = data.size();
+
+  // Allocate buffer for float64 values
+  auto* buffer_holder = new std::vector<char>();
+  buffer_holder->resize(n_rows * sizeof(double));
+  double* values = reinterpret_cast<double*>(buffer_holder->data());
+
+  // Allocate validity bitmap
+  size_t validity_bytes = (n_rows + 7) / 8;
+  auto* validity = new std::vector<uint8_t>(validity_bytes, 0xFF);
+
+  int64_t null_count = 0;
+  libvroom::ExtractionConfig config;
+
+  for (size_t i = 0; i < n_rows; ++i) {
+    const std::string& s = data[i];
+    auto result = libvroom::parse_double(s.data(), s.size(), config);
+    if (result.ok()) {
+      values[i] = result.get();
+    } else {
+      (*validity)[i / 8] &= ~(1 << (i % 8));
+      values[i] = 0.0;
+      ++null_count;
+    }
+  }
+
+  // Set up array
+  array->length = static_cast<int64_t>(n_rows);
+  array->null_count = null_count;
+  array->offset = 0;
+  array->n_buffers = 2;
+  array->n_children = 0;
+  array->buffers = new const void*[2];
+  array->buffers[0] = null_count > 0 ? validity->data() : nullptr;
+  array->buffers[1] = buffer_holder->data();
+  array->children = nullptr;
+  array->dictionary = nullptr;
+
+  struct BufferPair {
+    std::vector<char>* values;
+    std::vector<uint8_t>* validity;
+  };
+  auto* pair = new BufferPair{buffer_holder, validity};
+  array->private_data = pair;
+
+  array->release = [](ArrowArray* arr) {
+    if (arr->release == nullptr)
+      return;
+    if (arr->private_data) {
+      auto* p = static_cast<BufferPair*>(arr->private_data);
+      delete p->values;
+      delete p->validity;
+      delete p;
+    }
+    if (arr->buffers) {
+      delete[] arr->buffers;
+    }
+    arr->release = nullptr;
+  };
+}
+
+// Build Arrow array for a boolean column with type conversion
+static void build_bool_column_array(ArrowArray* array, const std::vector<std::string>& data) {
+  size_t n_rows = data.size();
+
+  // Allocate buffer for boolean values (1 bit per value)
+  size_t data_bytes = (n_rows + 7) / 8;
+  auto* data_buffer = new std::vector<uint8_t>(data_bytes, 0);
+
+  // Allocate validity bitmap
+  size_t validity_bytes = (n_rows + 7) / 8;
+  auto* validity = new std::vector<uint8_t>(validity_bytes, 0xFF);
+
+  int64_t null_count = 0;
+  libvroom::ExtractionConfig config;
+
+  for (size_t i = 0; i < n_rows; ++i) {
+    const std::string& s = data[i];
+    auto result = libvroom::parse_bool(s.data(), s.size(), config);
+    if (result.ok()) {
+      if (result.get()) {
+        (*data_buffer)[i / 8] |= (1 << (i % 8));
+      }
+      // false is already 0 (default)
+    } else {
+      (*validity)[i / 8] &= ~(1 << (i % 8));
+      ++null_count;
+    }
+  }
+
+  // Set up array
+  array->length = static_cast<int64_t>(n_rows);
+  array->null_count = null_count;
+  array->offset = 0;
+  array->n_buffers = 2;
+  array->n_children = 0;
+  array->buffers = new const void*[2];
+  array->buffers[0] = null_count > 0 ? validity->data() : nullptr;
+  array->buffers[1] = data_buffer->data();
+  array->children = nullptr;
+  array->dictionary = nullptr;
+
+  struct BufferPair {
+    std::vector<uint8_t>* values;
+    std::vector<uint8_t>* validity;
+  };
+  auto* pair = new BufferPair{data_buffer, validity};
+  array->private_data = pair;
+
+  array->release = [](ArrowArray* arr) {
+    if (arr->release == nullptr)
+      return;
+    if (arr->private_data) {
+      auto* p = static_cast<BufferPair*>(arr->private_data);
+      delete p->values;
+      delete p->validity;
+      delete p;
+    }
+    if (arr->buffers) {
+      delete[] arr->buffers;
+    }
+    arr->release = nullptr;
+  };
+}
+
+// Build Arrow array for a column with specified type
+static void build_column_array(ArrowArray* array, const std::vector<std::string>& data,
+                               ColumnType type) {
+  switch (type) {
+  case ColumnType::INT64:
+    build_int64_column_array(array, data);
+    break;
+  case ColumnType::FLOAT64:
+    build_float64_column_array(array, data);
+    break;
+  case ColumnType::BOOL:
+    build_bool_column_array(array, data);
+    break;
+  case ColumnType::STRING:
+  default:
+    build_string_column_array(array, data);
+    break;
+  }
+}
+
 // Build Arrow array for struct (table)
 static void build_struct_array(ArrowArray* array, std::shared_ptr<TableData> table_data) {
   table_data->materialize_columns();
@@ -320,7 +600,8 @@ static void build_struct_array(ArrowArray* array, std::shared_ptr<TableData> tab
 
   for (size_t i = 0; i < n_cols; ++i) {
     array->children[i] = new ArrowArray();
-    build_string_column_array(array->children[i], table_data->columns_data[i]);
+    ColumnType type = table_data->get_column_type(i);
+    build_column_array(array->children[i], table_data->columns_data[i], type);
   }
 }
 
@@ -331,7 +612,7 @@ static int stream_get_schema(ArrowArrayStream* stream, ArrowSchema* out) {
     return -1;
   }
 
-  build_struct_schema(out, priv->table_data->column_names);
+  build_struct_schema(out, priv->table_data->column_names, priv->table_data->column_types);
   priv->schema_exported = true;
   return 0;
 }
@@ -412,7 +693,7 @@ public:
   // Arrow PyCapsule interface: __arrow_c_schema__
   py::object arrow_c_schema() const {
     auto* schema = new ArrowSchema();
-    build_struct_schema(schema, data_->column_names);
+    build_struct_schema(schema, data_->column_names, data_->column_types);
 
     // Create PyCapsule with destructor
     return py::capsule(schema, "arrow_schema", [](void* ptr) {
@@ -426,7 +707,7 @@ public:
 
   // Arrow PyCapsule interface: __arrow_c_stream__
   py::object arrow_c_stream(py::object requested_schema = py::none()) const {
-    // Note: requested_schema is currently ignored - we always export strings
+    // Note: requested_schema is currently ignored - we use column_types from parsing
     (void)requested_schema;
 
     auto* stream = new ArrowArrayStream();
@@ -481,7 +762,8 @@ private:
 // =============================================================================
 
 Table read_csv(const std::string& path, std::optional<std::string> delimiter = std::nullopt,
-               bool has_header = true, size_t num_threads = 1) {
+               bool has_header = true, size_t num_threads = 1,
+               std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt) {
   auto data = std::make_shared<TableData>();
 
   // Load file
@@ -531,6 +813,30 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
     data->column_names.reserve(n_cols);
     for (size_t i = 0; i < n_cols; ++i) {
       data->column_names.push_back("column_" + std::to_string(i));
+    }
+  }
+
+  // Set up column types from dtype parameter
+  size_t n_cols = data->column_names.size();
+  data->column_types.resize(n_cols, ColumnType::STRING); // Default all to string
+
+  if (dtype) {
+    for (const auto& [col_name, type_str] : *dtype) {
+      // Find column index by name
+      auto it = std::find(data->column_names.begin(), data->column_names.end(), col_name);
+      if (it == data->column_names.end()) {
+        throw py::value_error("Column not found for dtype: " + col_name);
+      }
+      size_t col_idx = std::distance(data->column_names.begin(), it);
+
+      // Parse the type string
+      auto col_type = parse_dtype_string(type_str);
+      if (!col_type) {
+        throw py::value_error("Unknown dtype '" + type_str + "' for column '" + col_name +
+                              "'. Supported types: str, string, object, int, int64, float, "
+                              "float64, double, bool, boolean");
+      }
+      data->column_types[col_idx] = *col_type;
     }
   }
 
@@ -608,7 +914,7 @@ Examples
 
   // read_csv function
   m.def("read_csv", &read_csv, py::arg("path"), py::arg("delimiter") = py::none(),
-        py::arg("has_header") = true, py::arg("num_threads") = 1,
+        py::arg("has_header") = true, py::arg("num_threads") = 1, py::arg("dtype") = py::none(),
         R"doc(
 Read a CSV file and return a Table object.
 
@@ -623,6 +929,12 @@ has_header : bool, default True
     Whether the first row contains column headers.
 num_threads : int, default 1
     Number of threads to use for parsing.
+dtype : dict[str, str], optional
+    Dictionary mapping column names to data types for Arrow export.
+    Supported types: 'str', 'string', 'object' (string), 'int', 'int64'
+    (64-bit integer), 'float', 'float64', 'double' (64-bit float),
+    'bool', 'boolean' (boolean). Columns not specified default to string.
+    Values that cannot be converted to the specified type become null.
 
 Returns
 -------
@@ -632,7 +944,7 @@ Table
 Raises
 ------
 ValueError
-    If the file cannot be read or parsed.
+    If the file cannot be read or parsed, or if an unknown dtype is specified.
 ParseError
     If there are fatal parse errors in the CSV.
 
@@ -648,7 +960,10 @@ Examples
 >>> # Multi-threaded parsing
 >>> table = vroom_csv.read_csv("large.csv", num_threads=4)
 
->>> # Convert to PyArrow
+>>> # With dtype specification for type conversion
+>>> table = vroom_csv.read_csv("data.csv", dtype={"age": "int64", "score": "float64"})
+
+>>> # Convert to PyArrow with typed columns
 >>> import pyarrow as pa
 >>> arrow_table = pa.table(table)
 
