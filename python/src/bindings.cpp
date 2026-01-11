@@ -102,6 +102,27 @@ void translate_libvroom_exception(const libvroom::ParseException& e) {
 // Internal data structures for Arrow export
 // =============================================================================
 
+// Null value configuration for Arrow export
+struct NullValueConfig {
+  std::vector<std::string> null_values = {"", "NA", "N/A", "null", "NULL", "None", "NaN"};
+  bool empty_is_null = false;
+
+  // Check if a value should be treated as null
+  bool is_null_value(const std::string& value) const {
+    // Check empty_is_null first
+    if (empty_is_null && value.empty()) {
+      return true;
+    }
+    // Check against null_values list
+    for (const auto& null_str : null_values) {
+      if (value == null_str) {
+        return true;
+      }
+    }
+    return false;
+  }
+};
+
 // Holds parsed CSV data and manages memory for Arrow export
 struct TableData {
   libvroom::FileBuffer buffer;
@@ -110,8 +131,7 @@ struct TableData {
   std::vector<size_t> selected_columns;               // Indices of selected columns (empty = all)
   std::vector<std::vector<std::string>> columns_data; // Materialized column data
   bool columns_materialized = false;
-  std::unordered_set<std::string> null_values; // Values to treat as null
-  bool empty_is_null = true;                   // Treat empty strings as null
+  NullValueConfig null_config; // Null value configuration for Arrow export
 
   // Get effective number of columns (considering selection)
   size_t effective_num_columns() const {
@@ -144,14 +164,6 @@ struct TableData {
       }
     }
     columns_materialized = true;
-  }
-
-  // Check if a value should be treated as null
-  bool is_null_value(const std::string& val) const {
-    if (empty_is_null && val.empty()) {
-      return true;
-    }
-    return null_values.count(val) > 0;
   }
 };
 
@@ -334,12 +346,27 @@ static void build_struct_schema(ArrowSchema* schema, const std::vector<std::stri
   }
 }
 
-// Build Arrow array for a string column
-static void build_string_column_array(ArrowArray* array, const std::vector<std::string>& data) {
-  // Calculate total data size
+// Helper to calculate the number of bytes needed for a validity bitmap
+static size_t validity_bitmap_bytes(size_t num_elements) {
+  return (num_elements + 7) / 8;
+}
+
+// Build Arrow array for a string column with null value handling
+static void build_string_column_array(ArrowArray* array, const std::vector<std::string>& data,
+                                      const NullValueConfig& null_config) {
+  // First pass: identify null values and calculate total data size
+  std::vector<bool> is_null(data.size());
   size_t total_size = 0;
-  for (const auto& s : data) {
-    total_size += s.size();
+  int64_t null_count = 0;
+
+  for (size_t i = 0; i < data.size(); ++i) {
+    if (null_config.is_null_value(data[i])) {
+      is_null[i] = true;
+      null_count++;
+    } else {
+      is_null[i] = false;
+      total_size += data[i].size();
+    }
   }
 
   // Arrow utf8 format uses int32 offsets, so total size must fit in int32_t
@@ -354,40 +381,70 @@ static void build_string_column_array(ArrowArray* array, const std::vector<std::
   // Allocate buffer holder (owns the data)
   auto* buffer_holder = new std::vector<char>();
 
+  // Calculate space needed for validity bitmap
+  size_t validity_size = validity_bitmap_bytes(data.size());
+
+  // Build validity bitmap (if there are any nulls)
+  // Arrow validity bitmaps: 1 = valid, 0 = null
+  // Bits are packed LSB-first within each byte
+  std::vector<uint8_t> validity_bitmap;
+  if (null_count > 0) {
+    validity_bitmap.resize(validity_size, 0xFF); // Start with all valid
+    for (size_t i = 0; i < data.size(); ++i) {
+      if (is_null[i]) {
+        // Clear the bit for null values
+        validity_bitmap[i / 8] &= ~(1 << (i % 8));
+      }
+    }
+  }
+
   // Build offsets buffer (int32 offsets for utf8 format)
   std::vector<int32_t> offsets;
   offsets.reserve(data.size() + 1);
   int32_t offset = 0;
   offsets.push_back(offset);
-  for (const auto& s : data) {
-    offset += static_cast<int32_t>(s.size());
+  for (size_t i = 0; i < data.size(); ++i) {
+    // For null values, we still need to advance the offset by 0 (no data stored)
+    if (!is_null[i]) {
+      offset += static_cast<int32_t>(data[i].size());
+    }
     offsets.push_back(offset);
   }
 
-  // Build data buffer
-  buffer_holder->reserve(offsets.size() * sizeof(int32_t) + total_size);
+  // Build data buffer: validity bitmap (if needed) + offsets + string data
+  size_t offsets_size = offsets.size() * sizeof(int32_t);
+  buffer_holder->reserve(validity_size + offsets_size + total_size);
+
+  // Copy validity bitmap (if there are nulls)
+  if (null_count > 0) {
+    const char* validity_ptr = reinterpret_cast<const char*>(validity_bitmap.data());
+    buffer_holder->insert(buffer_holder->end(), validity_ptr, validity_ptr + validity_size);
+  }
 
   // Copy offsets
+  size_t offsets_start = buffer_holder->size();
   const char* offsets_ptr = reinterpret_cast<const char*>(offsets.data());
-  buffer_holder->insert(buffer_holder->end(), offsets_ptr,
-                        offsets_ptr + offsets.size() * sizeof(int32_t));
+  buffer_holder->insert(buffer_holder->end(), offsets_ptr, offsets_ptr + offsets_size);
 
-  // Copy string data
+  // Copy string data (only for non-null values)
   size_t data_start = buffer_holder->size();
-  for (const auto& s : data) {
-    buffer_holder->insert(buffer_holder->end(), s.begin(), s.end());
+  for (size_t i = 0; i < data.size(); ++i) {
+    if (!is_null[i]) {
+      buffer_holder->insert(buffer_holder->end(), data[i].begin(), data[i].end());
+    }
   }
 
   // Set up array
   array->length = static_cast<int64_t>(data.size());
-  array->null_count = 0;
+  array->null_count = null_count;
   array->offset = 0;
-  array->n_buffers = 3; // validity (null), offsets, data
+  array->n_buffers = 3; // validity, offsets, data
   array->n_children = 0;
   array->buffers = new const void*[3];
-  array->buffers[0] = nullptr;                            // validity bitmap (all valid)
-  array->buffers[1] = buffer_holder->data();              // offsets
-  array->buffers[2] = buffer_holder->data() + data_start; // data
+  // Validity bitmap: nullptr means all valid, otherwise points to bitmap
+  array->buffers[0] = (null_count > 0) ? buffer_holder->data() : nullptr;
+  array->buffers[1] = buffer_holder->data() + offsets_start; // offsets
+  array->buffers[2] = buffer_holder->data() + data_start;    // data
   array->children = nullptr;
   array->dictionary = nullptr;
   array->release = release_array;
@@ -415,7 +472,8 @@ static void build_struct_array(ArrowArray* array, std::shared_ptr<TableData> tab
 
   for (size_t i = 0; i < n_cols; ++i) {
     array->children[i] = new ArrowArray();
-    build_string_column_array(array->children[i], table_data->columns_data[i]);
+    build_string_column_array(array->children[i], table_data->columns_data[i],
+                              table_data->null_config);
   }
 }
 
@@ -619,6 +677,12 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
                size_t num_threads = 1) {
   auto data = std::make_shared<TableData>();
 
+  // Configure null value handling
+  if (null_values) {
+    data->null_config.null_values = *null_values;
+  }
+  data->null_config.empty_is_null = empty_is_null;
+
   // Load file
   try {
     data->buffer = libvroom::load_file(path);
@@ -670,14 +734,6 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
 
   // Configure header handling
   data->result.set_has_header(has_header);
-
-  // Store null value settings
-  data->empty_is_null = empty_is_null;
-  if (null_values) {
-    for (const auto& val : *null_values) {
-      data->null_values.insert(val);
-    }
-  }
 
   // Get column names
   std::vector<std::string> all_column_names;
@@ -915,12 +971,14 @@ n_rows : int, optional
 usecols : list of str or int, optional
     List of column names or indices to read. If not specified, reads
     all columns.
-null_values : list of str, optional
-    List of strings to treat as null/NA values.
-    Currently accepted but not fully implemented.
+null_values : list[str], optional
+    List of strings to interpret as null/missing values during Arrow export.
+    If not specified, defaults to ["", "NA", "N/A", "null", "NULL", "None", "NaN"].
+    When converting to Arrow format (via PyArrow, Polars, etc.), values matching
+    this list will be represented as null in the resulting Arrow array.
 empty_is_null : bool, default True
-    Whether to treat empty strings as null values.
-    Currently accepted but not fully implemented.
+    If True, empty strings are treated as null values during Arrow export,
+    in addition to any values in null_values.
 dtype : dict, optional
     Dictionary mapping column names to data types.
     Currently accepted but not fully implemented.
@@ -955,15 +1013,16 @@ Examples
 >>> # Read specific columns
 >>> table = vroom_csv.read_csv("data.csv", usecols=["id", "name", "value"])
 
->>> # With null value handling
->>> table = vroom_csv.read_csv("data.csv", null_values=["NA", "N/A", ""])
+>>> # With null value handling for Arrow export
+>>> table = vroom_csv.read_csv("data.csv", null_values=["NA", "N/A", "-"])
+>>> import pyarrow as pa
+>>> arrow_table = pa.table(table)  # NA, N/A, and - will be null
 
 >>> # Multi-threaded parsing
 >>> table = vroom_csv.read_csv("large.csv", num_threads=4)
 
->>> # Convert to PyArrow
->>> import pyarrow as pa
->>> arrow_table = pa.table(table)
+>>> # Treat empty strings as null (default behavior)
+>>> table = vroom_csv.read_csv("data.csv", empty_is_null=True)
 
 >>> # Convert to Polars
 >>> import polars as pl
