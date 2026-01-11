@@ -43,9 +43,11 @@ jobs:
           CIBW_ARCHS_MACOS: x86_64 arm64
           # Windows x64 only
           CIBW_ARCHS_WINDOWS: AMD64
-          # Install test dependencies and run tests
-          CIBW_TEST_EXTRAS: test
-          CIBW_TEST_COMMAND: pytest {package}/tests -v --tb=short
+          # Test requirements - use pytest only, skip Arrow tests in wheel build
+          # Full Arrow tests run in the main Python CI workflow
+          CIBW_TEST_REQUIRES: pytest>=7.0
+          # Run only basic tests (exclude Arrow tests which require pyarrow)
+          CIBW_TEST_COMMAND: pytest {package}/tests/test_basic.py -v --tb=short
           # Skip testing on emulated architectures (slow)
           CIBW_TEST_SKIP: "*-*linux_aarch64"
           # Repair wheels to bundle dependencies
