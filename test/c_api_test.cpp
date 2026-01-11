@@ -31,8 +31,14 @@ protected:
     std::ostringstream filename;
     filename << "test_c_api_" << std::this_thread::get_id() << "_" << counter++ << ".csv";
     std::string fname = filename.str();
-    std::ofstream file(fname);
-    file << content;
+    // Use binary mode to avoid text mode translation issues across platforms
+    std::ofstream file(fname, std::ios::binary);
+    // Use write() with explicit size for deterministic behavior
+    file.write(content.data(), static_cast<std::streamsize>(content.size()));
+    // Explicit flush before close to ensure data is visible to subsequent readers.
+    // This is important on macOS where aggressive caching can cause race conditions
+    // between file writes and subsequent reads from a different file handle.
+    file.flush();
     file.close();
     temp_files_.push_back(fname);
     return fname;

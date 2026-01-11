@@ -282,6 +282,13 @@ struct ParseOptions {
    * If a pointer is provided, errors go to both the external collector and
    * the Result's internal collector.
    *
+   * **Performance note**: When an explicit dialect is provided and errors is
+   * nullptr, the parser uses a fast path that achieves ~370 MB/s vs ~205 MB/s
+   * with comprehensive validation. The fast path only detects fatal quote
+   * errors; it does NOT detect inconsistent field counts or duplicate column
+   * names. Provide an external error collector if you need comprehensive
+   * validation.
+   *
    * @note The ErrorCollector must remain valid for the duration of parsing.
    *
    * For most use cases, the Result's internal error collector is sufficient:
@@ -1793,15 +1800,32 @@ public:
     //
     // Design principle: The error-collecting variants (_with_errors) do
     // comprehensive validation (field counts, quote checking, etc.), while
-    // the fast-path variants only check for fatal quote errors. We prefer
-    // error-collecting variants for better error detection, and wrap
-    // fast-path variants in try-catch for backward compatibility.
+    // the fast-path variants only check for fatal quote errors.
+    //
+    // Performance optimization (issue #443): Use the fast path (parse_speculate)
+    // by default when:
+    // 1. Explicit dialect is provided (skips detection overhead)
+    // 2. No external error collector requested (options.errors == nullptr)
+    //
+    // When an external error collector is explicitly provided, we use the
+    // comprehensive validation path to detect issues like inconsistent field
+    // counts and duplicate column names.
+    bool use_fast_path = options.errors == nullptr && options.dialect.has_value() &&
+                         (options.algorithm == ParseAlgorithm::AUTO ||
+                          options.algorithm == ParseAlgorithm::SPECULATIVE);
+
     try {
       if (!options.dialect.has_value()) {
         // Auto-detect path - always uses error collection
         result.successful = parser_.parse_auto(buf, result.idx, len, *collector, &result.detection,
                                                options.detection_options);
         result.dialect = result.detection.dialect;
+      } else if (use_fast_path) {
+        // Fast path: speculative parsing without comprehensive validation
+        // This path achieves ~370 MB/s vs ~205 MB/s with validation (issue #443)
+        // Note: This path does NOT detect inconsistent field counts or
+        // duplicate column names - use an explicit error collector if needed
+        result.successful = parser_.parse_speculate(buf, result.idx, len, result.dialect);
       } else if (options.algorithm == ParseAlgorithm::BRANCHLESS) {
         // Branchless with comprehensive error collection
         result.successful =
@@ -1811,12 +1835,11 @@ public:
         result.successful =
             parser_.parse_two_pass_with_errors(buf, result.idx, len, *collector, result.dialect);
       } else if (options.algorithm == ParseAlgorithm::SPECULATIVE) {
-        // Speculative: fast path with try-catch (no _with_errors variant)
-        // Note: This path does NOT detect inconsistent field counts
-        result.successful = parser_.parse_speculate(buf, result.idx, len, result.dialect);
+        // Speculative with external error collector - use validation
+        result.successful =
+            parser_.parse_with_errors(buf, result.idx, len, *collector, result.dialect);
       } else {
-        // AUTO/default: Use error-collecting variant for comprehensive
-        // validation when errors are being collected, fast path otherwise
+        // AUTO with external error collector: Use comprehensive validation
         result.successful =
             parser_.parse_with_errors(buf, result.idx, len, *collector, result.dialect);
       }
