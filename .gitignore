@@ -39,3 +39,15 @@ Thumbs.db
 docs/_site/
 docs/api/
 docs/.quarto/
+
+# Python
+python/.venv/
+python/dist/
+python/build/
+python/src/vroom_csv/__pycache__/
+python/tests/__pycache__/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
