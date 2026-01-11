@@ -510,9 +510,11 @@ static void build_int64_column_array(ArrowArray* array, const std::vector<std::s
   size_t n_rows = data.size();
 
   // Create buffer to hold validity bitmap and data
-  // Validity bitmap: ceil(n_rows / 8) bytes
+  // Validity bitmap: ceil(n_rows / 8) bytes, rounded up to 8-byte alignment for int64
   // Data: n_rows * 8 bytes
-  size_t validity_bytes = (n_rows + 7) / 8;
+  size_t validity_bytes_raw = (n_rows + 7) / 8;
+  // Round up to 8-byte boundary for proper int64 alignment
+  size_t validity_bytes = (validity_bytes_raw + 7) & ~static_cast<size_t>(7);
   size_t data_bytes = n_rows * sizeof(int64_t);
   size_t total_bytes = validity_bytes + data_bytes;
 
@@ -552,7 +554,10 @@ static void build_int64_column_array(ArrowArray* array, const std::vector<std::s
 static void build_double_column_array(ArrowArray* array, const std::vector<std::string>& data) {
   size_t n_rows = data.size();
 
-  size_t validity_bytes = (n_rows + 7) / 8;
+  // Validity bitmap: ceil(n_rows / 8) bytes, rounded up to 8-byte alignment for double
+  size_t validity_bytes_raw = (n_rows + 7) / 8;
+  // Round up to 8-byte boundary for proper double alignment
+  size_t validity_bytes = (validity_bytes_raw + 7) & ~static_cast<size_t>(7);
   size_t data_bytes = n_rows * sizeof(double);
   size_t total_bytes = validity_bytes + data_bytes;
 
