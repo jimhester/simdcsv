@@ -115,12 +115,13 @@ struct ColumnTypeStats {
 
     // Check if integers dominate (integers can include booleans like 0/1)
     // But only if booleans don't already dominate
-    if (static_cast<double>(integer_count) / non_empty >= threshold)
+    // Include boolean count since 0/1 are valid integers
+    if (static_cast<double>(integer_count + boolean_count) / non_empty >= threshold)
       return FieldType::INTEGER;
 
     // Check if floats dominate (floats include integers which are valid floats)
-    // Use cumulative count: floats + integers (not booleans, as "true" is not a float)
-    if (static_cast<double>(float_count + integer_count) / non_empty >= threshold)
+    // Use cumulative count: floats + integers + booleans (0/1 are valid floats)
+    if (static_cast<double>(float_count + integer_count + boolean_count) / non_empty >= threshold)
       return FieldType::FLOAT;
 
     // Check if dates dominate
