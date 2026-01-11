@@ -12,11 +12,14 @@
 #include "dialect.h"
 #include "error.h"
 
+#include <climits>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -242,6 +245,15 @@ static void build_string_column_array(ArrowArray* array, const std::vector<std::
   size_t total_size = 0;
   for (const auto& s : data) {
     total_size += s.size();
+  }
+
+  // Arrow utf8 format uses int32 offsets, so total size must fit in int32_t
+  // INT32_MAX is 2,147,483,647 (~2GB)
+  constexpr size_t MAX_UTF8_SIZE = static_cast<size_t>(INT32_MAX);
+  if (total_size > MAX_UTF8_SIZE) {
+    throw std::overflow_error("Column data exceeds 2GB limit for Arrow utf8 format. "
+                              "Total size: " +
+                              std::to_string(total_size) + " bytes.");
   }
 
   // Allocate buffer holder (owns the data)
