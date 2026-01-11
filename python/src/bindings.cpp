@@ -12,7 +12,11 @@
 #include "dialect.h"
 #include "error.h"
 
+#include <algorithm>
+#include <cctype>
+#include <charconv>
 #include <climits>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -21,6 +25,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace py = pybind11;
@@ -72,6 +78,147 @@ struct ArrowArrayStream {
 };
 
 // =============================================================================
+// Column type enum and type inference
+// =============================================================================
+
+enum class ColumnType { STRING, INT64, DOUBLE, BOOLEAN };
+
+// Null value strings recognized during type inference
+static const std::unordered_set<std::string> NULL_VALUES = {"",     "NA",   "N/A", "null",
+                                                            "NULL", "None", "NaN"};
+// TRUE/FALSE values for parsing (includes 0/1 for compatibility)
+static const std::unordered_set<std::string> TRUE_VALUES = {"true", "True", "TRUE", "1",
+                                                            "yes",  "Yes",  "YES",  "T"};
+static const std::unordered_set<std::string> FALSE_VALUES = {"false", "False", "FALSE", "0",
+                                                             "no",    "No",    "NO",    "F"};
+// Strict boolean values for type inference (excludes 0/1 which are ambiguous with integers)
+static const std::unordered_set<std::string> TRUE_VALUES_STRICT = {"true", "True", "TRUE", "yes",
+                                                                   "Yes",  "YES",  "T"};
+static const std::unordered_set<std::string> FALSE_VALUES_STRICT = {"false", "False", "FALSE", "no",
+                                                                    "No",    "NO",    "F"};
+
+// Trim whitespace from string
+static std::string_view trim_whitespace(std::string_view sv) {
+  while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.front())))
+    sv.remove_prefix(1);
+  while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.back())))
+    sv.remove_suffix(1);
+  return sv;
+}
+
+// Check if a value is null
+static bool is_null_value(const std::string& value) {
+  return NULL_VALUES.count(value) > 0;
+}
+
+// Try to parse as boolean (permissive - includes 0/1)
+static std::optional<bool> try_parse_boolean(const std::string& value) {
+  if (TRUE_VALUES.count(value) > 0)
+    return true;
+  if (FALSE_VALUES.count(value) > 0)
+    return false;
+  return std::nullopt;
+}
+
+// Try to parse as boolean (strict - excludes 0/1 for type inference)
+static std::optional<bool> try_parse_boolean_strict(const std::string& value) {
+  if (TRUE_VALUES_STRICT.count(value) > 0)
+    return true;
+  if (FALSE_VALUES_STRICT.count(value) > 0)
+    return false;
+  return std::nullopt;
+}
+
+// Try to parse as int64
+static std::optional<int64_t> try_parse_int64(const std::string& value) {
+  if (value.empty())
+    return std::nullopt;
+  auto sv = trim_whitespace(value);
+  if (sv.empty())
+    return std::nullopt;
+  int64_t result;
+  auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), result);
+  if (ec == std::errc() && ptr == sv.data() + sv.size())
+    return result;
+  return std::nullopt;
+}
+
+// Try to parse as double
+static std::optional<double> try_parse_double(const std::string& value) {
+  if (value.empty())
+    return std::nullopt;
+  auto sv = trim_whitespace(value);
+  if (sv.empty())
+    return std::nullopt;
+  // Handle special values
+  if (sv == "inf" || sv == "Inf")
+    return std::numeric_limits<double>::infinity();
+  if (sv == "-inf" || sv == "-Inf")
+    return -std::numeric_limits<double>::infinity();
+  if (sv == "nan" || sv == "NaN")
+    return std::numeric_limits<double>::quiet_NaN();
+  // Try parsing
+  char* endptr;
+  std::string temp(sv);
+  errno = 0;
+  double result = std::strtod(temp.c_str(), &endptr);
+  if (endptr == temp.c_str() + temp.size() && errno != ERANGE)
+    return result;
+  return std::nullopt;
+}
+
+// Infer the type of a single cell
+// Uses strict boolean parsing to avoid treating 0/1 as booleans during inference
+static ColumnType infer_cell_type(const std::string& value) {
+  if (value.empty() || is_null_value(value))
+    return ColumnType::STRING; // Null values don't inform type
+  // Use strict boolean check - excludes "0" and "1" which are ambiguous with integers
+  if (try_parse_boolean_strict(value).has_value())
+    return ColumnType::BOOLEAN;
+  if (try_parse_int64(value).has_value())
+    return ColumnType::INT64;
+  if (try_parse_double(value).has_value())
+    return ColumnType::DOUBLE;
+  return ColumnType::STRING;
+}
+
+// Type promotion rules
+static ColumnType promote_type(ColumnType current, ColumnType candidate) {
+  if (current == ColumnType::STRING || candidate == ColumnType::STRING)
+    return ColumnType::STRING;
+  if (current == candidate)
+    return current;
+  // INT64 + DOUBLE -> DOUBLE
+  if ((current == ColumnType::INT64 && candidate == ColumnType::DOUBLE) ||
+      (current == ColumnType::DOUBLE && candidate == ColumnType::INT64))
+    return ColumnType::DOUBLE;
+  // BOOLEAN + INT64 -> INT64
+  if ((current == ColumnType::BOOLEAN && candidate == ColumnType::INT64) ||
+      (current == ColumnType::INT64 && candidate == ColumnType::BOOLEAN))
+    return ColumnType::INT64;
+  // BOOLEAN + DOUBLE -> DOUBLE
+  if ((current == ColumnType::BOOLEAN && candidate == ColumnType::DOUBLE) ||
+      (current == ColumnType::DOUBLE && candidate == ColumnType::BOOLEAN))
+    return ColumnType::DOUBLE;
+  // Any other mismatch -> STRING
+  return ColumnType::STRING;
+}
+
+// Convert ColumnType to Arrow format string
+static const char* column_type_to_arrow_format(ColumnType type) {
+  switch (type) {
+  case ColumnType::INT64:
+    return "l"; // int64
+  case ColumnType::DOUBLE:
+    return "g"; // float64
+  case ColumnType::BOOLEAN:
+    return "b"; // boolean
+  default:
+    return "u"; // utf8 string
+  }
+}
+
+// =============================================================================
 // Custom Python exceptions
 // =============================================================================
 
@@ -105,7 +252,10 @@ struct TableData {
   libvroom::Parser::Result result;
   std::vector<std::string> column_names;
   std::vector<std::vector<std::string>> columns_data; // Materialized column data
+  std::vector<ColumnType> column_types;               // Inferred or specified types
   bool columns_materialized = false;
+  bool infer_types = true;
+  size_t type_inference_rows = 1000;
 
   // Materialize all columns as strings for Arrow export
   void materialize_columns() {
@@ -124,6 +274,54 @@ struct TableData {
       }
     }
     columns_materialized = true;
+  }
+
+  // Infer column types from data
+  void infer_column_types() {
+    materialize_columns();
+    size_t n_cols = columns_data.size();
+    size_t n_rows = n_cols > 0 ? columns_data[0].size() : 0;
+
+    // Initialize column types
+    if (column_types.empty()) {
+      column_types.resize(n_cols, ColumnType::STRING);
+    }
+
+    // Infer types for columns that don't have an explicit type
+    for (size_t col = 0; col < n_cols; ++col) {
+      // Skip columns with explicit dtype (will be set before this is called)
+      // A column is considered unset if it's STRING (default) and we should infer
+      // We'll mark explicitly-set columns differently by calling set_column_type before
+      // inference
+
+      bool first_non_null = true;
+      ColumnType inferred = ColumnType::STRING;
+      size_t sample_rows = type_inference_rows > 0 ? std::min(type_inference_rows, n_rows) : n_rows;
+
+      for (size_t row = 0; row < sample_rows; ++row) {
+        const std::string& value = columns_data[col][row];
+        if (is_null_value(value))
+          continue;
+
+        ColumnType cell_type = infer_cell_type(value);
+        if (cell_type == ColumnType::STRING) {
+          // Non-null value that's a string means column is STRING
+          inferred = ColumnType::STRING;
+          break;
+        }
+
+        if (first_non_null) {
+          inferred = cell_type;
+          first_non_null = false;
+        } else {
+          inferred = promote_type(inferred, cell_type);
+          if (inferred == ColumnType::STRING)
+            break;
+        }
+      }
+
+      column_types[col] = inferred;
+    }
   }
 };
 
@@ -204,10 +402,11 @@ static void release_stream(ArrowArrayStream* stream) {
   stream->release = nullptr;
 }
 
-// Build schema for a string column
-static void build_string_column_schema(ArrowSchema* schema, const char* name) {
-  schema->format = new char[2];
-  std::strcpy(const_cast<char*>(schema->format), "u"); // utf8 string
+// Build schema for a column with the given type
+static void build_column_schema(ArrowSchema* schema, const char* name, ColumnType type) {
+  const char* format = column_type_to_arrow_format(type);
+  schema->format = new char[std::strlen(format) + 1];
+  std::strcpy(const_cast<char*>(schema->format), format);
   schema->name = new char[std::strlen(name) + 1];
   std::strcpy(const_cast<char*>(schema->name), name);
   schema->metadata = nullptr;
@@ -219,8 +418,14 @@ static void build_string_column_schema(ArrowSchema* schema, const char* name) {
   schema->private_data = nullptr;
 }
 
-// Build schema for struct (table)
-static void build_struct_schema(ArrowSchema* schema, const std::vector<std::string>& column_names) {
+// Build schema for a string column (legacy wrapper)
+static void build_string_column_schema(ArrowSchema* schema, const char* name) {
+  build_column_schema(schema, name, ColumnType::STRING);
+}
+
+// Build schema for struct (table) with type information
+static void build_struct_schema(ArrowSchema* schema, const std::vector<std::string>& column_names,
+                                const std::vector<ColumnType>& column_types) {
   // Struct format
   schema->format = new char[3];
   std::strcpy(const_cast<char*>(schema->format), "+s"); // struct
@@ -235,7 +440,8 @@ static void build_struct_schema(ArrowSchema* schema, const std::vector<std::stri
 
   for (size_t i = 0; i < column_names.size(); ++i) {
     schema->children[i] = new ArrowSchema();
-    build_string_column_schema(schema->children[i], column_names[i].c_str());
+    ColumnType type = i < column_types.size() ? column_types[i] : ColumnType::STRING;
+    build_column_schema(schema->children[i], column_names[i].c_str(), type);
   }
 }
 
@@ -299,9 +505,160 @@ static void build_string_column_array(ArrowArray* array, const std::vector<std::
   array->private_data = buffer_holder;
 }
 
+// Build Arrow array for int64 column
+static void build_int64_column_array(ArrowArray* array, const std::vector<std::string>& data) {
+  size_t n_rows = data.size();
+
+  // Create buffer to hold validity bitmap and data
+  // Validity bitmap: ceil(n_rows / 8) bytes
+  // Data: n_rows * 8 bytes
+  size_t validity_bytes = (n_rows + 7) / 8;
+  size_t data_bytes = n_rows * sizeof(int64_t);
+  size_t total_bytes = validity_bytes + data_bytes;
+
+  auto* buffer_holder = new std::vector<char>(total_bytes, 0);
+
+  uint8_t* validity = reinterpret_cast<uint8_t*>(buffer_holder->data());
+  int64_t* values = reinterpret_cast<int64_t*>(buffer_holder->data() + validity_bytes);
+
+  int64_t null_count = 0;
+  for (size_t i = 0; i < n_rows; ++i) {
+    const std::string& val = data[i];
+    auto parsed = try_parse_int64(val);
+    if (parsed.has_value()) {
+      values[i] = *parsed;
+      validity[i / 8] |= (1 << (i % 8)); // Set validity bit
+    } else {
+      values[i] = 0;
+      null_count++;
+    }
+  }
+
+  array->length = static_cast<int64_t>(n_rows);
+  array->null_count = null_count;
+  array->offset = 0;
+  array->n_buffers = 2; // validity, data
+  array->n_children = 0;
+  array->buffers = new const void*[2];
+  array->buffers[0] = validity;
+  array->buffers[1] = values;
+  array->children = nullptr;
+  array->dictionary = nullptr;
+  array->release = release_array;
+  array->private_data = buffer_holder;
+}
+
+// Build Arrow array for double column
+static void build_double_column_array(ArrowArray* array, const std::vector<std::string>& data) {
+  size_t n_rows = data.size();
+
+  size_t validity_bytes = (n_rows + 7) / 8;
+  size_t data_bytes = n_rows * sizeof(double);
+  size_t total_bytes = validity_bytes + data_bytes;
+
+  auto* buffer_holder = new std::vector<char>(total_bytes, 0);
+
+  uint8_t* validity = reinterpret_cast<uint8_t*>(buffer_holder->data());
+  double* values = reinterpret_cast<double*>(buffer_holder->data() + validity_bytes);
+
+  int64_t null_count = 0;
+  for (size_t i = 0; i < n_rows; ++i) {
+    const std::string& val = data[i];
+    auto parsed = try_parse_double(val);
+    if (parsed.has_value()) {
+      values[i] = *parsed;
+      validity[i / 8] |= (1 << (i % 8));
+    } else {
+      values[i] = std::numeric_limits<double>::quiet_NaN();
+      null_count++;
+    }
+  }
+
+  array->length = static_cast<int64_t>(n_rows);
+  array->null_count = null_count;
+  array->offset = 0;
+  array->n_buffers = 2;
+  array->n_children = 0;
+  array->buffers = new const void*[2];
+  array->buffers[0] = validity;
+  array->buffers[1] = values;
+  array->children = nullptr;
+  array->dictionary = nullptr;
+  array->release = release_array;
+  array->private_data = buffer_holder;
+}
+
+// Build Arrow array for boolean column
+static void build_boolean_column_array(ArrowArray* array, const std::vector<std::string>& data) {
+  size_t n_rows = data.size();
+
+  size_t validity_bytes = (n_rows + 7) / 8;
+  size_t data_bytes = (n_rows + 7) / 8; // booleans are bit-packed
+  size_t total_bytes = validity_bytes + data_bytes;
+
+  auto* buffer_holder = new std::vector<char>(total_bytes, 0);
+
+  uint8_t* validity = reinterpret_cast<uint8_t*>(buffer_holder->data());
+  uint8_t* values = reinterpret_cast<uint8_t*>(buffer_holder->data() + validity_bytes);
+
+  int64_t null_count = 0;
+  for (size_t i = 0; i < n_rows; ++i) {
+    const std::string& val = data[i];
+    auto parsed = try_parse_boolean(val);
+    if (parsed.has_value()) {
+      if (*parsed) {
+        values[i / 8] |= (1 << (i % 8));
+      }
+      validity[i / 8] |= (1 << (i % 8));
+    } else {
+      null_count++;
+    }
+  }
+
+  array->length = static_cast<int64_t>(n_rows);
+  array->null_count = null_count;
+  array->offset = 0;
+  array->n_buffers = 2;
+  array->n_children = 0;
+  array->buffers = new const void*[2];
+  array->buffers[0] = validity;
+  array->buffers[1] = values;
+  array->children = nullptr;
+  array->dictionary = nullptr;
+  array->release = release_array;
+  array->private_data = buffer_holder;
+}
+
+// Build Arrow array for a column with the given type
+static void build_column_array(ArrowArray* array, const std::vector<std::string>& data,
+                               ColumnType type) {
+  switch (type) {
+  case ColumnType::INT64:
+    build_int64_column_array(array, data);
+    break;
+  case ColumnType::DOUBLE:
+    build_double_column_array(array, data);
+    break;
+  case ColumnType::BOOLEAN:
+    build_boolean_column_array(array, data);
+    break;
+  default:
+    build_string_column_array(array, data);
+    break;
+  }
+}
+
 // Build Arrow array for struct (table)
 static void build_struct_array(ArrowArray* array, std::shared_ptr<TableData> table_data) {
   table_data->materialize_columns();
+
+  // Infer types if enabled
+  if (table_data->infer_types && table_data->column_types.empty()) {
+    table_data->infer_column_types();
+  } else if (table_data->column_types.empty()) {
+    // No inference, all strings
+    table_data->column_types.resize(table_data->columns_data.size(), ColumnType::STRING);
+  }
 
   size_t n_cols = table_data->columns_data.size();
   size_t n_rows = n_cols > 0 ? table_data->columns_data[0].size() : 0;
@@ -320,7 +677,23 @@ static void build_struct_array(ArrowArray* array, std::shared_ptr<TableData> tab
 
   for (size_t i = 0; i < n_cols; ++i) {
     array->children[i] = new ArrowArray();
-    build_string_column_array(array->children[i], table_data->columns_data[i]);
+    ColumnType type =
+        i < table_data->column_types.size() ? table_data->column_types[i] : ColumnType::STRING;
+    build_column_array(array->children[i], table_data->columns_data[i], type);
+  }
+}
+
+// Ensure column types are computed for a TableData
+static void ensure_column_types(std::shared_ptr<TableData> table_data) {
+  if (!table_data->column_types.empty())
+    return;
+
+  table_data->materialize_columns();
+
+  if (table_data->infer_types) {
+    table_data->infer_column_types();
+  } else {
+    table_data->column_types.resize(table_data->columns_data.size(), ColumnType::STRING);
   }
 }
 
@@ -331,7 +704,8 @@ static int stream_get_schema(ArrowArrayStream* stream, ArrowSchema* out) {
     return -1;
   }
 
-  build_struct_schema(out, priv->table_data->column_names);
+  ensure_column_types(priv->table_data);
+  build_struct_schema(out, priv->table_data->column_names, priv->table_data->column_types);
   priv->schema_exported = true;
   return 0;
 }
@@ -411,8 +785,9 @@ public:
 
   // Arrow PyCapsule interface: __arrow_c_schema__
   py::object arrow_c_schema() const {
+    ensure_column_types(data_);
     auto* schema = new ArrowSchema();
-    build_struct_schema(schema, data_->column_names);
+    build_struct_schema(schema, data_->column_names, data_->column_types);
 
     // Create PyCapsule with destructor
     return py::capsule(schema, "arrow_schema", [](void* ptr) {
@@ -480,9 +855,28 @@ private:
 // read_csv function
 // =============================================================================
 
+// Convert Python type string to ColumnType
+static ColumnType parse_dtype_string(const std::string& dtype) {
+  if (dtype == "int64" || dtype == "int" || dtype == "integer")
+    return ColumnType::INT64;
+  if (dtype == "float64" || dtype == "float" || dtype == "double")
+    return ColumnType::DOUBLE;
+  if (dtype == "bool" || dtype == "boolean")
+    return ColumnType::BOOLEAN;
+  if (dtype == "string" || dtype == "str" || dtype == "object")
+    return ColumnType::STRING;
+  throw py::value_error("Unknown dtype: " + dtype + ". Valid types: int64, float64, bool, string");
+}
+
 Table read_csv(const std::string& path, std::optional<std::string> delimiter = std::nullopt,
-               bool has_header = true, size_t num_threads = 1) {
+               bool has_header = true, size_t num_threads = 1,
+               std::optional<py::dict> dtype = std::nullopt, bool infer_types = true,
+               size_t type_inference_rows = 1000) {
   auto data = std::make_shared<TableData>();
+
+  // Store type inference settings
+  data->infer_types = infer_types;
+  data->type_inference_rows = type_inference_rows;
 
   // Load file
   try {
@@ -531,6 +925,75 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
     data->column_names.reserve(n_cols);
     for (size_t i = 0; i < n_cols; ++i) {
       data->column_names.push_back("column_" + std::to_string(i));
+    }
+  }
+
+  // Apply explicit dtype specifications if provided
+  if (dtype.has_value()) {
+    size_t n_cols = data->column_names.size();
+    data->column_types.resize(n_cols, ColumnType::STRING);
+
+    // Build a map from column name to index
+    std::unordered_map<std::string, size_t> name_to_idx;
+    for (size_t i = 0; i < n_cols; ++i) {
+      name_to_idx[data->column_names[i]] = i;
+    }
+
+    // Track which columns have explicit types
+    std::vector<bool> has_explicit_type(n_cols, false);
+
+    // Apply dtype dict
+    for (auto item : dtype.value()) {
+      std::string col_name = py::str(item.first);
+      std::string type_str = py::str(item.second);
+
+      auto it = name_to_idx.find(col_name);
+      if (it == name_to_idx.end()) {
+        throw py::value_error("Column not found: " + col_name);
+      }
+
+      data->column_types[it->second] = parse_dtype_string(type_str);
+      has_explicit_type[it->second] = true;
+    }
+
+    // If inference is enabled, infer types for columns without explicit dtype
+    if (infer_types) {
+      data->materialize_columns();
+
+      size_t n_rows = n_cols > 0 ? data->columns_data[0].size() : 0;
+
+      for (size_t col = 0; col < n_cols; ++col) {
+        if (has_explicit_type[col])
+          continue;
+
+        bool first_non_null = true;
+        ColumnType inferred = ColumnType::STRING;
+        size_t sample_rows =
+            type_inference_rows > 0 ? std::min(type_inference_rows, n_rows) : n_rows;
+
+        for (size_t row = 0; row < sample_rows; ++row) {
+          const std::string& value = data->columns_data[col][row];
+          if (is_null_value(value))
+            continue;
+
+          ColumnType cell_type = infer_cell_type(value);
+          if (cell_type == ColumnType::STRING) {
+            inferred = ColumnType::STRING;
+            break;
+          }
+
+          if (first_non_null) {
+            inferred = cell_type;
+            first_non_null = false;
+          } else {
+            inferred = promote_type(inferred, cell_type);
+            if (inferred == ColumnType::STRING)
+              break;
+          }
+        }
+
+        data->column_types[col] = inferred;
+      }
     }
   }
 
@@ -608,7 +1071,8 @@ Examples
 
   // read_csv function
   m.def("read_csv", &read_csv, py::arg("path"), py::arg("delimiter") = py::none(),
-        py::arg("has_header") = true, py::arg("num_threads") = 1,
+        py::arg("has_header") = true, py::arg("num_threads") = 1, py::arg("dtype") = py::none(),
+        py::arg("infer_types") = true, py::arg("type_inference_rows") = 1000,
         R"doc(
 Read a CSV file and return a Table object.
 
@@ -623,6 +1087,15 @@ has_header : bool, default True
     Whether the first row contains column headers.
 num_threads : int, default 1
     Number of threads to use for parsing.
+dtype : dict, optional
+    Dictionary mapping column names to type strings. Valid types are:
+    'int64', 'float64', 'bool', 'string'. Columns not specified will
+    be inferred if infer_types is True, otherwise they will be strings.
+infer_types : bool, default True
+    If True, automatically infer column types from the data for columns
+    not specified in dtype. Detection priority is: bool > int64 > float64 > string.
+type_inference_rows : int, default 1000
+    Number of rows to sample for type inference. Use 0 to sample all rows.
 
 Returns
 -------
@@ -647,6 +1120,16 @@ Examples
 
 >>> # Multi-threaded parsing
 >>> table = vroom_csv.read_csv("large.csv", num_threads=4)
+
+>>> # With type inference (default)
+>>> table = vroom_csv.read_csv("data.csv")
+>>> arrow_table = pa.table(table)  # Columns will be typed
+
+>>> # With explicit types for some columns
+>>> table = vroom_csv.read_csv("data.csv", dtype={"age": "int64", "active": "bool"})
+
+>>> # Disable type inference (all columns as strings)
+>>> table = vroom_csv.read_csv("data.csv", infer_types=False)
 
 >>> # Convert to PyArrow
 >>> import pyarrow as pa

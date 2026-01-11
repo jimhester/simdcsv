@@ -77,7 +77,7 @@ class TestPyArrowInterop:
         assert arrow_table.column_names == ["name", "age", "city"]
 
     def test_pyarrow_column_types(self, simple_csv):
-        """Test that columns are string type in PyArrow."""
+        """Test that columns have correct types in PyArrow with type inference."""
         import pyarrow as pa
 
         import vroom_csv
@@ -85,9 +85,11 @@ class TestPyArrowInterop:
         table = vroom_csv.read_csv(simple_csv)
         arrow_table = pa.table(table)
 
-        # All columns should be string type (initial implementation)
-        for col in arrow_table.columns:
-            assert pa.types.is_string(col.type) or pa.types.is_large_string(col.type)
+        # With type inference enabled (default), columns are typed appropriately
+        # name is a string, age is int64, city is string
+        assert pa.types.is_string(arrow_table.column("name").type)
+        assert pa.types.is_int64(arrow_table.column("age").type)
+        assert pa.types.is_string(arrow_table.column("city").type)
 
     def test_pyarrow_data_values(self, simple_csv):
         """Test that data values are correctly transferred."""
@@ -101,8 +103,9 @@ class TestPyArrowInterop:
         names = arrow_table.column("name").to_pylist()
         assert names == ["Alice", "Bob", "Charlie"]
 
+        # With type inference, age is now int64
         ages = arrow_table.column("age").to_pylist()
-        assert ages == ["30", "25", "35"]
+        assert ages == [30, 25, 35]
 
         cities = arrow_table.column("city").to_pylist()
         assert cities == ["New York", "Los Angeles", "Chicago"]
