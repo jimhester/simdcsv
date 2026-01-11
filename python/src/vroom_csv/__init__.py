@@ -28,11 +28,14 @@ Arrow Interoperability
 """
 
 from vroom_csv._core import (
+    BatchedReader,
     Dialect,
-    Table,
+    RecordBatch,
     RowIterator,
+    Table,
     detect_dialect,
     read_csv,
+    read_csv_batched,
     read_csv_rows,
     VroomError,
     ParseError,
@@ -42,11 +45,14 @@ from vroom_csv._core import (
 )
 
 __all__ = [
+    "BatchedReader",
     "Dialect",
-    "Table",
+    "RecordBatch",
     "RowIterator",
+    "Table",
     "detect_dialect",
     "read_csv",
+    "read_csv_batched",
     "read_csv_rows",
     "VroomError",
     "ParseError",

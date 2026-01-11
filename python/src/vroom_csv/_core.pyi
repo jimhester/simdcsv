@@ -1,5 +1,6 @@
 """Type stubs for vroom_csv._core module."""
 
+from collections.abc import Callable
 from typing import Any, Sequence, overload
 
 __version__: str
@@ -178,6 +179,7 @@ def read_csv(
     empty_is_null: bool = True,
     dtype: dict[str, str] | None = None,
     num_threads: int = 1,
+    progress: Callable[[int, int], None] | None = None,
 ) -> Table:
     """Read a CSV file and return a Table object.
 
@@ -197,24 +199,24 @@ def read_csv(
         Currently accepted but not fully implemented.
     skip_rows : int, default 0
         Number of rows to skip at the start of the file.
-        Currently accepted but not fully implemented.
     n_rows : int, optional
         Maximum number of rows to read. If not specified, reads all rows.
-        Currently accepted but not fully implemented.
     usecols : sequence of str or int, optional
         List of column names or indices to read. If not specified, reads
         all columns.
     null_values : sequence of str, optional
         List of strings to treat as null/NA values.
-        Currently accepted but not fully implemented.
     empty_is_null : bool, default True
         Whether to treat empty strings as null values.
-        Currently accepted but not fully implemented.
     dtype : dict, optional
         Dictionary mapping column names to data types.
-        Currently accepted but not fully implemented.
     num_threads : int, default 1
         Number of threads to use for parsing.
+    progress : callable, optional
+        A callback function for progress reporting during parsing.
+        The callback receives two arguments: (bytes_read: int, total_bytes: int).
+        It is called periodically during parsing at chunk boundaries (typically
+        every 1-4MB). Use this to display progress bars or update UIs.
 
     Returns
     -------

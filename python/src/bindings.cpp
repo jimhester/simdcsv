@@ -20,9 +20,11 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <set>
@@ -985,6 +987,418 @@ private:
 };
 
 // =============================================================================
+// BatchedReader class - iterator for memory-efficient batch processing
+// =============================================================================
+
+// Holds data for a single batch
+struct BatchData {
+  std::vector<std::string> column_names;
+  std::vector<std::vector<std::string>> columns_data;
+  std::vector<ColumnType> column_types;
+  NullValueConfig null_config;
+
+  size_t num_rows() const { return columns_data.empty() ? 0 : columns_data[0].size(); }
+
+  size_t num_columns() const { return column_names.size(); }
+
+  ColumnType get_column_type(size_t col) const {
+    if (col < column_types.size()) {
+      return column_types[col];
+    }
+    return ColumnType::STRING;
+  }
+};
+
+// Build schema for batch (struct with column types)
+static void build_batch_schema(ArrowSchema* schema, const std::vector<std::string>& column_names,
+                               const std::vector<ColumnType>& column_types) {
+  // Reuse the existing struct schema builder
+  build_struct_schema(schema, column_names, column_types);
+}
+
+// Build Arrow array for batch
+static void build_batch_array(ArrowArray* array, std::shared_ptr<BatchData> batch_data) {
+  size_t n_cols = batch_data->columns_data.size();
+  size_t n_rows = batch_data->num_rows();
+
+  array->length = static_cast<int64_t>(n_rows);
+  array->null_count = 0;
+  array->offset = 0;
+  array->n_buffers = 1; // Just validity bitmap for struct
+  array->n_children = static_cast<int64_t>(n_cols);
+  array->buffers = new const void*[1];
+  array->buffers[0] = nullptr; // validity bitmap (all valid)
+  array->children = new ArrowArray*[n_cols];
+  array->dictionary = nullptr;
+  array->release = release_array;
+  array->private_data = nullptr;
+
+  for (size_t i = 0; i < n_cols; ++i) {
+    array->children[i] = new ArrowArray();
+    ColumnType type = batch_data->get_column_type(i);
+    build_column_array(array->children[i], batch_data->columns_data[i], type,
+                       batch_data->null_config);
+  }
+}
+
+// Stream private data for batch
+struct BatchStreamPrivateData {
+  std::shared_ptr<BatchData> batch_data;
+  bool schema_exported = false;
+  bool data_exported = false;
+  std::string last_error;
+};
+
+// Batch stream callbacks
+static int batch_stream_get_schema(ArrowArrayStream* stream, ArrowSchema* out) {
+  auto* priv = static_cast<BatchStreamPrivateData*>(stream->private_data);
+  if (!priv || !priv->batch_data) {
+    return -1;
+  }
+
+  build_batch_schema(out, priv->batch_data->column_names, priv->batch_data->column_types);
+  priv->schema_exported = true;
+  return 0;
+}
+
+static int batch_stream_get_next(ArrowArrayStream* stream, ArrowArray* out) {
+  auto* priv = static_cast<BatchStreamPrivateData*>(stream->private_data);
+  if (!priv || !priv->batch_data) {
+    return -1;
+  }
+
+  if (priv->data_exported) {
+    // No more batches - signal end of stream
+    out->release = nullptr;
+    return 0;
+  }
+
+  build_batch_array(out, priv->batch_data);
+  priv->data_exported = true;
+  return 0;
+}
+
+static const char* batch_stream_get_last_error(ArrowArrayStream* stream) {
+  auto* priv = static_cast<BatchStreamPrivateData*>(stream->private_data);
+  if (!priv) {
+    return "Invalid stream";
+  }
+  return priv->last_error.empty() ? nullptr : priv->last_error.c_str();
+}
+
+static void release_batch_stream(ArrowArrayStream* stream) {
+  if (stream->release == nullptr)
+    return;
+  if (stream->private_data) {
+    auto* data = static_cast<BatchStreamPrivateData*>(stream->private_data);
+    delete data;
+  }
+  stream->release = nullptr;
+}
+
+// RecordBatch class - represents a single batch from the iterator
+class RecordBatch {
+public:
+  RecordBatch(std::shared_ptr<BatchData> data) : data_(std::move(data)) {}
+
+  // Number of rows in this batch
+  size_t num_rows() const { return data_->num_rows(); }
+
+  // Number of columns
+  size_t num_columns() const { return data_->num_columns(); }
+
+  // Column names
+  std::vector<std::string> column_names() const { return data_->column_names; }
+
+  // Get a single column as list of strings
+  std::vector<std::string> column(size_t index) const {
+    if (index >= data_->columns_data.size()) {
+      throw py::index_error("Column index out of range");
+    }
+    return data_->columns_data[index];
+  }
+
+  // Get a column by name
+  std::vector<std::string> column_by_name(const std::string& name) const {
+    auto it = std::find(data_->column_names.begin(), data_->column_names.end(), name);
+    if (it == data_->column_names.end()) {
+      throw py::key_error("Column not found: " + name);
+    }
+    size_t idx = static_cast<size_t>(std::distance(data_->column_names.begin(), it));
+    return column(idx);
+  }
+
+  // Get a single row as list of strings
+  std::vector<std::string> row(size_t index) const {
+    if (index >= data_->num_rows()) {
+      throw py::index_error("Row index out of range");
+    }
+    std::vector<std::string> result;
+    result.reserve(data_->columns_data.size());
+    for (const auto& col : data_->columns_data) {
+      result.push_back(col[index]);
+    }
+    return result;
+  }
+
+  // Arrow PyCapsule interface: __arrow_c_schema__
+  py::object arrow_c_schema() const {
+    auto* schema = new ArrowSchema();
+    build_batch_schema(schema, data_->column_names, data_->column_types);
+
+    return py::capsule(schema, "arrow_schema", [](void* ptr) {
+      auto* s = static_cast<ArrowSchema*>(ptr);
+      if (s->release) {
+        s->release(s);
+      }
+      delete s;
+    });
+  }
+
+  // Arrow PyCapsule interface: __arrow_c_stream__
+  py::object arrow_c_stream(py::object requested_schema = py::none()) const {
+    (void)requested_schema;
+
+    auto* stream = new ArrowArrayStream();
+    auto* priv = new BatchStreamPrivateData();
+    priv->batch_data = data_;
+    priv->schema_exported = false;
+    priv->data_exported = false;
+
+    stream->get_schema = batch_stream_get_schema;
+    stream->get_next = batch_stream_get_next;
+    stream->get_last_error = batch_stream_get_last_error;
+    stream->release = release_batch_stream;
+    stream->private_data = priv;
+
+    return py::capsule(stream, "arrow_array_stream", [](void* ptr) {
+      auto* s = static_cast<ArrowArrayStream*>(ptr);
+      if (s->release) {
+        s->release(s);
+      }
+      delete s;
+    });
+  }
+
+  // String representation
+  std::string repr() const {
+    std::ostringstream ss;
+    ss << "RecordBatch(" << num_rows() << " rows, " << num_columns() << " columns)";
+    return ss.str();
+  }
+
+private:
+  std::shared_ptr<BatchData> data_;
+};
+
+// BatchedReader class - Python iterator over CSV batches
+class BatchedReader {
+public:
+  BatchedReader(const std::string& path, size_t batch_size,
+                std::optional<std::string> delimiter = std::nullopt,
+                std::optional<std::string> quote_char = std::nullopt, bool has_header = true,
+                std::optional<std::vector<std::string>> null_values = std::nullopt,
+                bool empty_is_null = true,
+                std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt)
+      : path_(path), batch_size_(batch_size), has_header_(has_header), exhausted_(false) {
+    // Configure null value handling
+    if (null_values) {
+      null_config_.null_values = *null_values;
+    }
+    null_config_.empty_is_null = empty_is_null;
+
+    // Store dtype overrides for later
+    if (dtype) {
+      dtype_overrides_ = *dtype;
+    }
+
+    // Configure stream options
+    libvroom::StreamConfig config;
+    config.parse_header = has_header;
+
+    if (delimiter) {
+      if (delimiter->length() != 1) {
+        throw py::value_error("Delimiter must be a single character");
+      }
+      config.dialect.delimiter = (*delimiter)[0];
+    }
+
+    if (quote_char) {
+      if (quote_char->length() != 1) {
+        throw py::value_error("quote_char must be a single character");
+      }
+      config.dialect.quote_char = (*quote_char)[0];
+    }
+
+    // Create the stream reader
+    try {
+      reader_ = std::make_unique<libvroom::StreamReader>(path, config);
+    } catch (const std::runtime_error& e) {
+      throw py::value_error(std::string("Failed to open file: ") + e.what());
+    }
+
+    // Note: column names will be populated on first batch read
+    // The header is parsed lazily when the first row is read
+  }
+
+  // Return self for iterator protocol
+  BatchedReader& iter() { return *this; }
+
+  // Get next batch - returns RecordBatch or raises StopIteration
+  RecordBatch next() {
+    if (exhausted_) {
+      throw py::stop_iteration();
+    }
+
+    auto batch_data = std::make_shared<BatchData>();
+    batch_data->null_config = null_config_;
+
+    // Read rows into the batch
+    size_t rows_read = 0;
+    bool first_row_of_batch = true;
+    size_t n_cols = 0;
+
+    while (rows_read < batch_size_ && reader_->next_row()) {
+      const auto& row = reader_->row();
+
+      // On first row of first batch, get column names from header or generate them
+      if (first_row_of_batch && column_names_.empty()) {
+        // Try to get column names from the reader's header (if parse_header was enabled)
+        const auto& header = reader_->header();
+        if (!header.empty()) {
+          column_names_ = header;
+        } else {
+          // No header - generate column names from the first row's field count
+          size_t field_count = row.field_count();
+          column_names_.reserve(field_count);
+          for (size_t i = 0; i < field_count; ++i) {
+            column_names_.push_back("column_" + std::to_string(i));
+          }
+        }
+      }
+
+      // On first row of any batch, initialize column vectors
+      if (first_row_of_batch) {
+        n_cols = column_names_.size();
+        batch_data->columns_data.resize(n_cols);
+        for (auto& col : batch_data->columns_data) {
+          col.reserve(batch_size_);
+        }
+        first_row_of_batch = false;
+      }
+
+      // Extract field values
+      for (size_t i = 0; i < n_cols && i < row.field_count(); ++i) {
+        batch_data->columns_data[i].push_back(row[i].unescaped());
+      }
+      // Handle rows with fewer fields than expected
+      for (size_t i = row.field_count(); i < n_cols; ++i) {
+        batch_data->columns_data[i].push_back("");
+      }
+
+      ++rows_read;
+    }
+
+    // Check if we're done (no rows read means iterator is exhausted)
+    if (rows_read == 0) {
+      exhausted_ = true;
+      throw py::stop_iteration();
+    }
+
+    // Note: We don't check reader_->eof() here because the streaming reader
+    // might report eof while still having buffered rows. The only reliable
+    // way to know we're done is when next_row() returns false, which happens
+    // in the loop above and causes rows_read == 0 on the next call.
+
+    // Set column names
+    batch_data->column_names = column_names_;
+
+    // Perform type inference on the batch data
+    size_t num_cols = batch_data->columns_data.size();
+    batch_data->column_types.resize(num_cols, ColumnType::STRING);
+
+    if (rows_read > 0 && num_cols > 0) {
+      libvroom::ColumnTypeInference inference(num_cols);
+
+      // Sample rows for type inference (use all rows in small batches)
+      size_t rows_to_sample = std::min(rows_read, static_cast<size_t>(1000));
+      for (size_t row = 0; row < rows_to_sample; ++row) {
+        for (size_t col = 0; col < num_cols; ++col) {
+          const std::string& value = batch_data->columns_data[col][row];
+          inference.add_field(col, reinterpret_cast<const uint8_t*>(value.data()), value.size());
+        }
+      }
+
+      // Get inferred types
+      std::vector<libvroom::FieldType> inferred = inference.infer_types();
+      for (size_t col = 0; col < num_cols; ++col) {
+        batch_data->column_types[col] = field_type_to_column_type(inferred[col]);
+      }
+    }
+
+    // Apply dtype overrides
+    for (const auto& [col_name, type_str] : dtype_overrides_) {
+      auto it =
+          std::find(batch_data->column_names.begin(), batch_data->column_names.end(), col_name);
+      if (it == batch_data->column_names.end()) {
+        throw py::value_error("Column not found for dtype: " + col_name);
+      }
+      size_t col_idx = std::distance(batch_data->column_names.begin(), it);
+
+      auto col_type = parse_dtype_string(type_str);
+      if (!col_type) {
+        throw py::value_error("Unknown dtype '" + type_str + "' for column '" + col_name + "'");
+      }
+      batch_data->column_types[col_idx] = *col_type;
+    }
+
+    return RecordBatch(std::move(batch_data));
+  }
+
+  // Get column names (available after first batch or from header)
+  std::vector<std::string> column_names() const { return column_names_; }
+
+  // Get batch size
+  size_t batch_size() const { return batch_size_; }
+
+  // Get file path
+  std::string path() const { return path_; }
+
+  // Check if iterator is exhausted
+  bool is_exhausted() const { return exhausted_; }
+
+  // String representation
+  std::string repr() const {
+    std::ostringstream ss;
+    ss << "BatchedReader(path=" << py::repr(py::str(path_)).cast<std::string>()
+       << ", batch_size=" << batch_size_ << ")";
+    return ss.str();
+  }
+
+private:
+  std::string path_;
+  size_t batch_size_;
+  bool has_header_;
+  bool exhausted_;
+  std::unique_ptr<libvroom::StreamReader> reader_;
+  std::vector<std::string> column_names_;
+  NullValueConfig null_config_;
+  std::unordered_map<std::string, std::string> dtype_overrides_;
+};
+
+// Factory function for read_csv_batched
+BatchedReader
+read_csv_batched(const std::string& path, size_t batch_size = 10000,
+                 std::optional<std::string> delimiter = std::nullopt,
+                 std::optional<std::string> quote_char = std::nullopt, bool has_header = true,
+                 std::optional<std::vector<std::string>> null_values = std::nullopt,
+                 bool empty_is_null = true,
+                 std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt) {
+  return BatchedReader(path, batch_size, delimiter, quote_char, has_header, null_values,
+                       empty_is_null, dtype);
+}
+
+// =============================================================================
 // detect_dialect function
 // =============================================================================
 
@@ -1015,6 +1429,9 @@ Dialect detect_dialect(const std::string& path) {
 // read_csv function with full options
 // =============================================================================
 
+// Type alias for Python progress callback: (bytes_read: int, total_bytes: int) -> None
+using PyProgressCallback = std::function<void(size_t, size_t)>;
+
 Table read_csv(const std::string& path, std::optional<std::string> delimiter = std::nullopt,
                std::optional<std::string> quote_char = std::nullopt, bool has_header = true,
                std::optional<std::string> encoding = std::nullopt, size_t skip_rows = 0,
@@ -1023,7 +1440,7 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
                std::optional<std::vector<std::string>> null_values = std::nullopt,
                bool empty_is_null = true,
                std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt,
-               size_t num_threads = 1) {
+               size_t num_threads = 1, std::optional<PyProgressCallback> progress = std::nullopt) {
   auto data = std::make_shared<TableData>();
 
   // Configure null value handling
@@ -1066,6 +1483,31 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
   // If any dialect option was specified, ensure we use explicit dialect
   if (delimiter || quote_char) {
     options.dialect = dialect;
+  }
+
+  // Set up progress callback if provided
+  // The Python callback has signature (bytes_read: int, total_bytes: int) -> None
+  // The C++ callback expects (bytes_processed: size_t, total_bytes: size_t) -> bool
+  // We wrap the Python callback to handle:
+  // 1. GIL acquisition for thread safety
+  // 2. Python exception handling
+  // 3. Return value (Python returns None, C++ expects bool for cancellation)
+  if (progress) {
+    options.progress_callback = [py_callback = *progress](size_t bytes_processed,
+                                                          size_t total_bytes) -> bool {
+      // Acquire GIL before calling Python code
+      py::gil_scoped_acquire acquire;
+      try {
+        py_callback(bytes_processed, total_bytes);
+        return true; // Continue parsing
+      } catch (py::error_already_set& e) {
+        // Re-throw Python exceptions to be handled by pybind11
+        throw;
+      } catch (...) {
+        // For any other exception, abort parsing
+        return false;
+      }
+    };
   }
 
   // Parse
@@ -1699,6 +2141,7 @@ Examples
         py::arg("encoding") = py::none(), py::arg("skip_rows") = 0, py::arg("n_rows") = py::none(),
         py::arg("usecols") = py::none(), py::arg("null_values") = py::none(),
         py::arg("empty_is_null") = true, py::arg("dtype") = py::none(), py::arg("num_threads") = 1,
+        py::arg("progress") = py::none(),
         R"doc(
 Read a CSV file and return a Table object.
 
@@ -1744,6 +2187,11 @@ dtype : dict[str, str], optional
     Values that cannot be converted to the specified type become null.
 num_threads : int, default 1
     Number of threads to use for parsing.
+progress : callable, optional
+    A callback function for progress reporting during parsing.
+    The callback receives two arguments: (bytes_read: int, total_bytes: int).
+    It is called periodically during parsing at chunk boundaries (typically
+    every 1-4MB). Use this to display progress bars or update UIs.
 
 Returns
 -------
@@ -1795,9 +2243,171 @@ Examples
 >>> # Treat empty strings as null (default behavior)
 >>> table = vroom_csv.read_csv("data.csv", empty_is_null=True)
 
+>>> # With progress callback
+>>> def show_progress(bytes_read, total_bytes):
+...     pct = bytes_read / total_bytes * 100 if total_bytes > 0 else 0
+...     print(f"\r{pct:.1f}%", end="", flush=True)
+>>> table = vroom_csv.read_csv("huge.csv", progress=show_progress)
+>>> print()  # newline after progress
+
 >>> # Convert to Polars
 >>> import polars as pl
 >>> df = pl.from_arrow(table)
+)doc");
+
+  // RecordBatch class (for batched reading)
+  py::class_<RecordBatch>(m, "RecordBatch", R"doc(
+A single batch of rows from a batched CSV read operation.
+
+This class represents a single batch returned by BatchedReader iteration.
+It implements the Arrow PyCapsule interface for zero-copy interoperability
+with PyArrow, Polars, DuckDB, and other Arrow-compatible libraries.
+
+Examples
+--------
+>>> import vroom_csv
+>>> for batch in vroom_csv.read_csv_batched("data.csv", batch_size=1000):
+...     print(f"Batch has {batch.num_rows} rows")
+...     # Convert to Polars for processing
+...     import polars as pl
+...     df = pl.from_arrow(batch)
+...     # Process df...
+)doc")
+      .def_property_readonly("num_rows", &RecordBatch::num_rows, "Number of rows in this batch")
+      .def_property_readonly("num_columns", &RecordBatch::num_columns, "Number of columns")
+      .def_property_readonly("column_names", &RecordBatch::column_names, "List of column names")
+      .def("column", &RecordBatch::column, py::arg("index"),
+           "Get column by index as list of strings")
+      .def("column", &RecordBatch::column_by_name, py::arg("name"),
+           "Get column by name as list of strings")
+      .def("row", &RecordBatch::row, py::arg("index"), "Get row by index as list of strings")
+      .def("__repr__", &RecordBatch::repr)
+      .def("__len__", &RecordBatch::num_rows)
+      // Arrow PyCapsule interface
+      .def("__arrow_c_schema__", &RecordBatch::arrow_c_schema,
+           "Export batch schema via Arrow C Data Interface")
+      .def("__arrow_c_stream__", &RecordBatch::arrow_c_stream,
+           py::arg("requested_schema") = py::none(),
+           "Export batch data via Arrow C Stream Interface");
+
+  // BatchedReader class
+  py::class_<BatchedReader>(m, "BatchedReader", R"doc(
+Iterator for memory-efficient batch processing of large CSV files.
+
+This class provides an iterator that reads CSV files in batches, keeping only
+one batch in memory at a time. Each batch is a RecordBatch object that
+implements the Arrow PyCapsule interface.
+
+Use read_csv_batched() to create a BatchedReader.
+
+Attributes
+----------
+path : str
+    Path to the CSV file being read.
+batch_size : int
+    Number of rows per batch.
+column_names : list[str]
+    Column names from the CSV header (or generated names if no header).
+
+Examples
+--------
+>>> import vroom_csv
+>>> import polars as pl
+>>>
+>>> # Process large file in batches
+>>> for batch in vroom_csv.read_csv_batched("large.csv", batch_size=10000):
+...     df = pl.from_arrow(batch)
+...     # Process each batch without loading entire file
+...     process(df)
+>>>
+>>> # Early termination is safe
+>>> reader = vroom_csv.read_csv_batched("large.csv")
+>>> for batch in reader:
+...     if should_stop(batch):
+...         break  # Resources cleaned up automatically
+)doc")
+      .def_property_readonly("path", &BatchedReader::path, "Path to the CSV file")
+      .def_property_readonly("batch_size", &BatchedReader::batch_size, "Number of rows per batch")
+      .def_property_readonly("column_names", &BatchedReader::column_names, "List of column names")
+      .def("__repr__", &BatchedReader::repr)
+      .def("__iter__", &BatchedReader::iter, py::return_value_policy::reference)
+      .def("__next__", &BatchedReader::next);
+
+  // read_csv_batched function
+  m.def("read_csv_batched", &read_csv_batched, py::arg("path"), py::arg("batch_size") = 10000,
+        py::arg("delimiter") = py::none(), py::arg("quote_char") = py::none(),
+        py::arg("has_header") = true, py::arg("null_values") = py::none(),
+        py::arg("empty_is_null") = true, py::arg("dtype") = py::none(),
+        R"doc(
+Read a CSV file in batches for memory-efficient processing.
+
+This function returns an iterator that yields RecordBatch objects,
+each containing batch_size rows (except possibly the last batch).
+Only one batch is kept in memory at a time, making this suitable
+for processing files larger than available memory.
+
+Parameters
+----------
+path : str
+    Path to the CSV file to read.
+batch_size : int, default 10000
+    Number of rows per batch.
+delimiter : str, optional
+    Field delimiter character. If not specified, defaults to comma (',').
+quote_char : str, optional
+    Quote character for escaping fields. Default is '"'.
+has_header : bool, default True
+    Whether the first row contains column headers.
+null_values : list[str], optional
+    List of strings to interpret as null/missing values during Arrow export.
+    If not specified, defaults to ["", "NA", "N/A", "null", "NULL", "None", "NaN"].
+empty_is_null : bool, default True
+    If True, empty strings are treated as null values during Arrow export.
+dtype : dict[str, str], optional
+    Dictionary mapping column names to data types for Arrow export.
+    By default, column types are automatically inferred from the data.
+    Supported types: 'str', 'string', 'int', 'int64', 'float', 'float64',
+    'bool', 'boolean'.
+
+Returns
+-------
+BatchedReader
+    An iterator yielding RecordBatch objects.
+
+Raises
+------
+ValueError
+    If the file cannot be opened, delimiter/quote_char is not a single
+    character, or an unknown dtype is specified.
+
+Examples
+--------
+>>> import vroom_csv
+>>> import polars as pl
+>>>
+>>> # Basic usage - process file in batches
+>>> for batch in vroom_csv.read_csv_batched("large.csv"):
+...     df = pl.from_arrow(batch)
+...     print(f"Processing {df.shape[0]} rows")
+>>>
+>>> # Custom batch size
+>>> for batch in vroom_csv.read_csv_batched("large.csv", batch_size=50000):
+...     process(batch)
+>>>
+>>> # With explicit delimiter (TSV)
+>>> for batch in vroom_csv.read_csv_batched("data.tsv", delimiter="\\t"):
+...     process(batch)
+>>>
+>>> # Aggregate results across batches
+>>> total_sum = 0
+>>> for batch in vroom_csv.read_csv_batched("data.csv", dtype={"value": "int64"}):
+...     import pyarrow as pa
+...     arrow_table = pa.table(batch)
+...     total_sum += sum(v for v in arrow_table.column("value").to_pylist() if v is not None)
+>>>
+>>> # File without header
+>>> for batch in vroom_csv.read_csv_batched("no_header.csv", has_header=False):
+...     print(batch.column_names)  # ['column_0', 'column_1', ...]
 )doc");
 
   // read_csv_rows function for streaming row-by-row iteration
