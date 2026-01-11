@@ -25,7 +25,9 @@
 #include "two_pass.h"
 #include "value_extraction.h"
 
+#include <atomic>
 #include <functional>
+#include <future>
 #include <optional>
 #include <unordered_map>
 
@@ -74,6 +76,125 @@ namespace libvroom {
  * @endcode
  */
 using ProgressCallback = std::function<bool(size_t bytes_processed, size_t total_bytes)>;
+
+/**
+ * @brief Thread-safe progress tracker for multi-threaded parsing.
+ *
+ * This class wraps a progress callback and provides thread-safe progress
+ * updates with automatic throttling to avoid excessive callback invocations.
+ *
+ * Design:
+ * - Uses atomic counter for thread-safe progress accumulation
+ * - Throttles callback to ~1% granularity (100 updates max)
+ * - Supports cancellation by checking callback return value
+ *
+ * @note This is an internal implementation detail; users interact via
+ *       ProgressCallback directly through ParseOptions.
+ */
+class ProgressTracker {
+public:
+  /**
+   * @brief Create a progress tracker.
+   *
+   * @param callback User's progress callback (may be null)
+   * @param total_bytes Total bytes to process
+   * @param first_pass_weight Weight of first pass (0.0-1.0), default 0.1 (10%)
+   */
+  explicit ProgressTracker(ProgressCallback callback, size_t total_bytes,
+                           double first_pass_weight = 0.1)
+      : callback_(std::move(callback)), total_bytes_(total_bytes),
+        first_pass_weight_(first_pass_weight), bytes_processed_(0), last_reported_percent_(-1),
+        cancelled_(false) {}
+
+  /**
+   * @brief Report progress from first pass (chunk boundary detection).
+   *
+   * Thread-safe. Progress is weighted by first_pass_weight.
+   *
+   * @param bytes Bytes processed in this update
+   * @return true to continue, false if cancelled
+   */
+  bool add_first_pass_progress(size_t bytes) {
+    if (!callback_ || cancelled_)
+      return !cancelled_;
+
+    // First pass contributes first_pass_weight_ of total progress
+    size_t weighted = static_cast<size_t>(bytes * first_pass_weight_);
+    return add_progress_internal(weighted);
+  }
+
+  /**
+   * @brief Report progress from second pass (field indexing).
+   *
+   * Thread-safe. Progress is weighted by (1 - first_pass_weight).
+   *
+   * @param bytes Bytes processed in this update
+   * @return true to continue, false if cancelled
+   */
+  bool add_second_pass_progress(size_t bytes) {
+    if (!callback_ || cancelled_)
+      return !cancelled_;
+
+    // Second pass contributes (1 - first_pass_weight_) of total progress
+    // First pass already added its weighted bytes to bytes_processed_,
+    // so we just add the second pass weighted bytes.
+    double second_weight = 1.0 - first_pass_weight_;
+    size_t weighted = static_cast<size_t>(bytes * second_weight);
+    return add_progress_internal(weighted);
+  }
+
+  /**
+   * @brief Report completion (100%).
+   */
+  void complete() {
+    if (callback_ && !cancelled_) {
+      callback_(total_bytes_, total_bytes_);
+    }
+  }
+
+  /**
+   * @brief Check if parsing was cancelled.
+   */
+  bool is_cancelled() const { return cancelled_.load(std::memory_order_acquire); }
+
+  /**
+   * @brief Check if a callback is registered.
+   */
+  bool has_callback() const { return static_cast<bool>(callback_); }
+
+private:
+  bool add_progress_internal(size_t weighted_bytes) {
+    size_t old_val = bytes_processed_.fetch_add(weighted_bytes, std::memory_order_relaxed);
+    size_t new_val = old_val + weighted_bytes;
+
+    // Calculate percentage (0-100)
+    int new_percent = total_bytes_ > 0 ? static_cast<int>((new_val * 100) / total_bytes_) : 0;
+    new_percent = std::min(new_percent, 100);
+
+    // Only call callback if percentage changed (throttling)
+    int last = last_reported_percent_.load(std::memory_order_relaxed);
+    if (new_percent > last) {
+      // Try to update last_reported_percent_ atomically
+      if (last_reported_percent_.compare_exchange_strong(last, new_percent,
+                                                         std::memory_order_relaxed)) {
+        // We won the race to report this percentage
+        bool should_continue = callback_(new_val, total_bytes_);
+        if (!should_continue) {
+          cancelled_.store(true, std::memory_order_release);
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  ProgressCallback callback_;
+  size_t total_bytes_;
+  double first_pass_weight_;
+  std::atomic<size_t> bytes_processed_;
+  std::atomic<int> last_reported_percent_;
+  std::atomic<bool> cancelled_;
+};
 
 /**
  * @brief Algorithm selection for parsing.
@@ -1857,31 +1978,66 @@ public:
     }
 
     // =======================================================================
-    // Progress Callback: Report start of parsing (0%)
+    // Progress Tracking Setup
     // =======================================================================
-    if (options.progress_callback) {
+    // Create progress tracker if callback is provided
+    // First pass (separator counting) is ~10% of work, second pass ~90%
+    ProgressTracker progress_tracker(options.progress_callback, len, 0.1);
+
+    // Report start of parsing (0%)
+    if (progress_tracker.has_callback()) {
       if (!options.progress_callback(0, len)) {
-        // User requested cancellation
         result.successful = false;
         return result;
       }
     }
 
-    // Optimized allocation: Count separators first to allocate right-sized index.
-    // This typically reduces memory usage by 2-10x for real-world CSV files.
-    // Pass n_quotes and len to handle error recovery scenarios safely.
-    auto count_stats =
-        TwoPass::first_pass_simd(buf, 0, len, result.dialect.quote_char, result.dialect.delimiter);
+    // =======================================================================
+    // First Pass: Count separators with granular progress
+    // =======================================================================
+    // For granular progress during first pass, split into chunks and report
+    // progress after each chunk completes.
+    TwoPass::Stats count_stats;
+    const size_t min_chunk_size = 1024 * 1024; // 1MB chunks for progress granularity
 
-    // =======================================================================
-    // Progress Callback: Report first pass complete (~25%)
-    // =======================================================================
-    if (options.progress_callback) {
-      // First pass is ~25% of total work (scanning for separators)
-      if (!options.progress_callback(len / 4, len)) {
-        // User requested cancellation
+    if (progress_tracker.has_callback() && len > min_chunk_size * 2) {
+      // Split first pass into chunks for progress reporting
+      size_t n_chunks = std::min(static_cast<size_t>(100), len / min_chunk_size);
+      n_chunks = std::max(n_chunks, static_cast<size_t>(1));
+      size_t chunk_size = len / n_chunks;
+
+      count_stats = {0, null_pos, null_pos, 0};
+
+      for (size_t i = 0; i < n_chunks && !progress_tracker.is_cancelled(); ++i) {
+        size_t start = i * chunk_size;
+        size_t end = (i == n_chunks - 1) ? len : (i + 1) * chunk_size;
+
+        auto chunk_stats = TwoPass::first_pass_simd(buf, start, end, result.dialect.quote_char,
+                                                    result.dialect.delimiter);
+        count_stats.n_separators += chunk_stats.n_separators;
+        count_stats.n_quotes += chunk_stats.n_quotes;
+        // Track first even/odd newlines from first chunk only
+        if (i == 0) {
+          count_stats.first_even_nl = chunk_stats.first_even_nl;
+          count_stats.first_odd_nl = chunk_stats.first_odd_nl;
+        }
+
+        // Report progress for this chunk
+        progress_tracker.add_first_pass_progress(end - start);
+      }
+
+      if (progress_tracker.is_cancelled()) {
         result.successful = false;
         return result;
+      }
+    } else {
+      // Single-pass for small files or no progress callback
+      count_stats = TwoPass::first_pass_simd(buf, 0, len, result.dialect.quote_char,
+                                             result.dialect.delimiter);
+
+      // Report first pass complete
+      if (progress_tracker.has_callback()) {
+        progress_tracker.add_first_pass_progress(len);
       }
     }
 
@@ -1914,9 +2070,18 @@ public:
                          (options.algorithm == ParseAlgorithm::AUTO ||
                           options.algorithm == ParseAlgorithm::SPECULATIVE);
 
+    // Create second-pass progress callback that wraps the progress tracker
+    SecondPassProgressCallback second_pass_progress = nullptr;
+    if (progress_tracker.has_callback()) {
+      second_pass_progress = [&progress_tracker](size_t bytes_processed) {
+        return progress_tracker.add_second_pass_progress(bytes_processed);
+      };
+    }
+
     try {
       if (!options.dialect.has_value()) {
         // Auto-detect path - always uses error collection
+        // Note: parse_auto doesn't support progress callback yet
         result.successful = parser_.parse_auto(buf, result.idx, len, *collector, &result.detection,
                                                options.detection_options);
         result.dialect = result.detection.dialect;
@@ -1925,7 +2090,8 @@ public:
         // This path achieves ~370 MB/s vs ~205 MB/s with validation (issue #443)
         // Note: This path does NOT detect inconsistent field counts or
         // duplicate column names - use an explicit error collector if needed
-        result.successful = parser_.parse_speculate(buf, result.idx, len, result.dialect);
+        result.successful =
+            parser_.parse_speculate(buf, result.idx, len, result.dialect, second_pass_progress);
       } else if (options.algorithm == ParseAlgorithm::BRANCHLESS) {
         // Branchless with comprehensive error collection
         result.successful =
