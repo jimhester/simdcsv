@@ -44,7 +44,11 @@ protected:
   std::string createTempFile(const std::string& filename, const std::string& content) {
     std::string path = temp_dir + "/" + filename;
     std::ofstream file(path, std::ios::binary);
-    file.write(content.data(), content.size());
+    file.write(content.data(), static_cast<std::streamsize>(content.size()));
+    // Explicit flush before close to ensure data is visible to subsequent readers.
+    // This is important on macOS where aggressive caching can cause race conditions
+    // between file writes and subsequent reads from a different file handle.
+    file.flush();
     file.close();
     return path;
   }
@@ -59,7 +63,8 @@ protected:
                                   const std::string& content) {
     std::string path = dir + "/" + filename;
     std::ofstream file(path, std::ios::binary);
-    file.write(content.data(), content.size());
+    file.write(content.data(), static_cast<std::streamsize>(content.size()));
+    file.flush();
     file.close();
     return path;
   }
@@ -392,9 +397,13 @@ TEST_F(IndexCacheTest, IsValid_InvalidAfterModification) {
 
   // Modify source file (change content and wait for different mtime)
   std::this_thread::sleep_for(std::chrono::seconds(1));
-  std::ofstream file(source_path, std::ios::binary);
-  file << "a,b,c\n1,2,3\n4,5,6\n";
-  file.close();
+  {
+    std::ofstream file(source_path, std::ios::binary);
+    const char* content = "a,b,c\n1,2,3\n4,5,6\n";
+    file.write(content, static_cast<std::streamsize>(strlen(content)));
+    file.flush();
+    file.close();
+  }
 
   // Cache should now be invalid
   EXPECT_FALSE(IndexCache::is_valid(source_path, cache_path));
@@ -566,9 +575,13 @@ TEST_F(IndexCacheTest, Integration_CacheOverwrite) {
 
   // Modify source and wait for mtime change
   std::this_thread::sleep_for(std::chrono::seconds(1));
-  std::ofstream file(source_path, std::ios::binary);
-  file << "a,b,c,d,e\n1,2,3,4,5\n6,7,8,9,10\n";
-  file.close();
+  {
+    std::ofstream file(source_path, std::ios::binary);
+    const char* content = "a,b,c,d,e\n1,2,3,4,5\n6,7,8,9,10\n";
+    file.write(content, static_cast<std::streamsize>(strlen(content)));
+    file.flush();
+    file.close();
+  }
 
   // Cache should be invalid now
   EXPECT_FALSE(IndexCache::is_valid(source_path, cache_path));
@@ -598,7 +611,9 @@ TEST_F(IndexCacheTest, EdgeCase_VeryLongPath) {
   if (!file.is_open()) {
     GTEST_SKIP() << "Filesystem doesn't support long filenames";
   }
-  file << "a,b\n1,2\n";
+  const char* content = "a,b\n1,2\n";
+  file.write(content, static_cast<std::streamsize>(strlen(content)));
+  file.flush();
   file.close();
 
   std::string cache_path = IndexCache::compute_path(source_path, CacheConfig::defaults());
@@ -827,9 +842,13 @@ TEST_F(IndexCacheTest, ParserApi_CacheInvalidAfterSourceChange) {
 
   // Modify source file and wait for mtime change
   std::this_thread::sleep_for(std::chrono::seconds(1));
-  std::ofstream file(source_path, std::ios::binary);
-  file << "a,b,c\n1,2,3\n4,5,6\n";
-  file.close();
+  {
+    std::ofstream file(source_path, std::ios::binary);
+    const char* content = "a,b,c\n1,2,3\n4,5,6\n";
+    file.write(content, static_cast<std::streamsize>(strlen(content)));
+    file.flush();
+    file.close();
+  }
 
   // Second parse - cache should be invalid
   {
@@ -931,9 +950,13 @@ TEST_F(IndexCacheTest, WarningCallback_FallbackToXdg) {
 
   // Create a file in read-only directory
   std::string source_path = ro_dir + "/data.csv";
-  std::ofstream file(source_path, std::ios::binary);
-  file << "a,b\n1,2\n";
-  file.close();
+  {
+    std::ofstream file(source_path, std::ios::binary);
+    const char* content = "a,b\n1,2\n";
+    file.write(content, static_cast<std::streamsize>(strlen(content)));
+    file.flush();
+    file.close();
+  }
 
   // Make directory read-only
   chmod(ro_dir.c_str(), 0555);
@@ -1049,9 +1072,13 @@ TEST_F(IndexCacheTest, WarningCallback_ParserApi_InvalidCache) {
   std::string cache_path = source_path + ".vidx";
 
   // Create an invalid cache file (wrong version or corrupted)
-  std::ofstream cache_file(cache_path, std::ios::binary);
-  cache_file << "invalid_cache_data";
-  cache_file.close();
+  {
+    std::ofstream cache_file(cache_path, std::ios::binary);
+    const char* content_data = "invalid_cache_data";
+    cache_file.write(content_data, static_cast<std::streamsize>(strlen(content_data)));
+    cache_file.flush();
+    cache_file.close();
+  }
 
   std::vector<std::string> warnings;
   libvroom::ParseOptions opts;
@@ -1234,9 +1261,13 @@ TEST_F(IndexCacheTest, ValidateAndLoad_SourceChanged) {
 
   // Modify source file
   std::this_thread::sleep_for(std::chrono::seconds(1));
-  std::ofstream file(source_path, std::ios::binary);
-  file << "a,b,c,d\n1,2,3,4\n";
-  file.close();
+  {
+    std::ofstream file(source_path, std::ios::binary);
+    const char* new_content = "a,b,c,d\n1,2,3,4\n";
+    file.write(new_content, static_cast<std::streamsize>(strlen(new_content)));
+    file.flush();
+    file.close();
+  }
 
   // Cache should report source changed
   auto result = IndexCache::validate_and_load(source_path, cache_path);
@@ -1456,9 +1487,13 @@ TEST_F(IndexCacheTest, Load_TruncatedHeader_DeletesFile) {
 
   // Create a cache file that's too small (less than 40-byte header)
   std::string cache_path = temp_dir + "/truncated.vidx";
-  std::ofstream file(cache_path, std::ios::binary);
-  file << "short"; // Only 5 bytes, need at least 40
-  file.close();
+  {
+    std::ofstream file(cache_path, std::ios::binary);
+    const char* content = "short"; // Only 5 bytes, need at least 40
+    file.write(content, static_cast<std::streamsize>(strlen(content)));
+    file.flush();
+    file.close();
+  }
 
   ASSERT_TRUE(fs::exists(cache_path));
 
@@ -1541,9 +1576,13 @@ TEST_F(IndexCacheTest, Load_StaleCache_DoesNotDelete) {
 
   // Modify source file to make cache stale
   std::this_thread::sleep_for(std::chrono::seconds(1));
-  std::ofstream file(source_path, std::ios::binary);
-  file << "a,b,c,d\n1,2,3,4\n5,6,7,8\n"; // Different content
-  file.close();
+  {
+    std::ofstream file(source_path, std::ios::binary);
+    const char* new_content = "a,b,c,d\n1,2,3,4\n5,6,7,8\n"; // Different content
+    file.write(new_content, static_cast<std::streamsize>(strlen(new_content)));
+    file.flush();
+    file.close();
+  }
 
   auto result = IndexCache::load(cache_path, source_path);
 
@@ -1630,7 +1669,10 @@ TEST_F(IndexCacheTest, ParserApi_CorruptedCacheRecreatedOnReparse) {
   // Create corrupted cache
   {
     std::ofstream file(cache_path, std::ios::binary);
-    file << "NOT A VALID CACHE FILE";
+    const char* corrupt_content = "NOT A VALID CACHE FILE";
+    file.write(corrupt_content, static_cast<std::streamsize>(strlen(corrupt_content)));
+    file.flush();
+    file.close();
   }
 
   libvroom::Parser parser;

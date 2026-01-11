@@ -43,7 +43,11 @@ protected:
   std::string createTempFile(const std::string& filename, const std::string& content) {
     std::string path = temp_dir + "/" + filename;
     std::ofstream file(path, std::ios::binary);
-    file.write(content.data(), content.size());
+    file.write(content.data(), static_cast<std::streamsize>(content.size()));
+    // Explicit flush before close to ensure data is visible to subsequent readers.
+    // This is important on macOS where aggressive caching can cause race conditions
+    // between file writes and subsequent reads from a different file handle.
+    file.flush();
     file.close();
     temp_files.push_back(path);
     return path;
@@ -52,7 +56,8 @@ protected:
   std::string createTempFile(const std::string& filename, const uint8_t* data, size_t size) {
     std::string path = temp_dir + "/" + filename;
     std::ofstream file(path, std::ios::binary);
-    file.write(reinterpret_cast<const char*>(data), size);
+    file.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
+    file.flush();
     file.close();
     temp_files.push_back(path);
     return path;
@@ -274,9 +279,13 @@ TEST_F(MmapUtilTest, ParseIndex_FromMmapStaleCache) {
 
   // Modify the source file (change mtime and size)
   std::this_thread::sleep_for(std::chrono::milliseconds(1100)); // Ensure mtime changes
-  std::ofstream file(csv_path, std::ios::binary);
-  file << "a,b,c,d\n1,2,3,4\n5,6,7,8\n"; // Different content
-  file.close();
+  {
+    std::ofstream file(csv_path, std::ios::binary);
+    const char* content = "a,b,c,d\n1,2,3,4\n5,6,7,8\n"; // Different content
+    file.write(content, static_cast<std::streamsize>(strlen(content)));
+    file.flush();
+    file.close();
+  }
 
   // Try to load with new metadata - should fail due to mtime/size mismatch
   auto new_meta = libvroom::SourceMetadata::from_file(csv_path);
