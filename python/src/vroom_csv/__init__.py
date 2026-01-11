@@ -13,6 +13,11 @@ Basic Usage
 >>> table = vroom_csv.read_csv("data.csv")
 >>> print(f"Loaded {table.num_rows} rows, {table.num_columns} columns")
 
+Dialect Detection
+-----------------
+>>> dialect = vroom_csv.detect_dialect("data.csv")
+>>> print(f"Delimiter: {dialect.delimiter!r}, Has header: {dialect.has_header}")
+
 Arrow Interoperability
 ----------------------
 >>> import pyarrow as pa
@@ -23,7 +28,9 @@ Arrow Interoperability
 """
 
 from vroom_csv._core import (
+    Dialect,
     Table,
+    detect_dialect,
     read_csv,
     VroomError,
     ParseError,
@@ -33,7 +40,9 @@ from vroom_csv._core import (
 )
 
 __all__ = [
+    "Dialect",
     "Table",
+    "detect_dialect",
     "read_csv",
     "VroomError",
     "ParseError",

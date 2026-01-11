@@ -362,7 +362,8 @@ class TestTypeInference:
 
         import vroom_csv
 
-        table = vroom_csv.read_csv(null_csv)
+        # Pass null_values to recognize "NA" and "NULL" as null
+        table = vroom_csv.read_csv(null_csv, null_values=["NA", "NULL"])
         arrow_table = pa.table(table)
 
         # value column should be int64 with nulls
