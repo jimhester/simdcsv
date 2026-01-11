@@ -41,6 +41,7 @@ component_management:
       - type: project
         informational: true
       - type: patch
+        informational: true
   individual_components:
     - component_id: library
       name: Library Code
