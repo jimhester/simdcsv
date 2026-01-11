@@ -712,7 +712,7 @@ uint64_t TwoPass::second_pass_chunk_throwing(const uint8_t* buf, size_t start, s
 //-----------------------------------------------------------------------------
 
 bool TwoPass::parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
-                              const Dialect& dialect) {
+                              const Dialect& dialect, const SecondPassProgressCallback& progress) {
   char delim = dialect.delimiter;
   char quote = dialect.quote_char;
   uint16_t n_threads = out.n_threads;
@@ -721,6 +721,10 @@ bool TwoPass::parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
     n_threads = 1;
   if (n_threads == 1) {
     out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+    // Report full progress for single-threaded case
+    if (progress && !progress(len)) {
+      return false; // Cancelled
+    }
     return true;
   }
   size_t chunk_size = len / n_threads;
@@ -731,6 +735,10 @@ bool TwoPass::parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
     // CRITICAL: Must update n_threads to 1 for correct stride in write()
     out.n_threads = 1;
     out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+    // Report full progress for single-threaded fallback
+    if (progress && !progress(len)) {
+      return false; // Cancelled
+    }
     return true;
   }
   std::vector<uint64_t> chunk_pos(n_threads + 1);
@@ -757,6 +765,10 @@ bool TwoPass::parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
       // CRITICAL: Must update n_threads to 1 for correct stride in write()
       out.n_threads = 1;
       out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+      // Report full progress for single-threaded fallback
+      if (progress && !progress(len)) {
+        return false; // Cancelled
+      }
       return true;
     }
   }
@@ -775,10 +787,20 @@ bool TwoPass::parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
   // and we must fall back to the reliable two-pass algorithm.
   std::vector<SecondPassResult> results(n_threads);
   bool speculation_valid = true;
+  bool cancelled = false;
 
   for (int i = 0; i < n_threads; ++i) {
     results[i] = second_pass_fut[i].get();
     out.n_indexes[i] = results[i].n_indexes;
+
+    // Report progress after each chunk completes
+    if (progress && !cancelled) {
+      size_t chunk_bytes = chunk_pos[i + 1] - chunk_pos[i];
+      if (!progress(chunk_bytes)) {
+        cancelled = true;
+        // Continue collecting futures to avoid dangling references
+      }
+    }
 
     // For all chunks except the last, verify they ended at a record boundary.
     // The last chunk (i == n_threads - 1) may end mid-record if the file
@@ -788,18 +810,24 @@ bool TwoPass::parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
     }
   }
 
+  if (cancelled) {
+    return false;
+  }
+
   // If speculation was invalid, fall back to reliable two-pass parsing.
   // This should be extremely rare (< 1 in 10 million chunks per the paper).
   if (!speculation_valid) {
     // Reset the index and re-parse using the two-pass algorithm
-    return parse_two_pass(buf, out, len, dialect);
+    // Note: Progress was already reported during speculation, so don't report
+    // again during fallback to avoid double-counting
+    return parse_two_pass(buf, out, len, dialect, nullptr);
   }
 
   return true;
 }
 
 bool TwoPass::parse_two_pass(const uint8_t* buf, ParseIndex& out, size_t len,
-                             const Dialect& dialect) {
+                             const Dialect& dialect, const SecondPassProgressCallback& progress) {
   char delim = dialect.delimiter;
   char quote = dialect.quote_char;
   uint16_t n_threads = out.n_threads;
@@ -808,6 +836,10 @@ bool TwoPass::parse_two_pass(const uint8_t* buf, ParseIndex& out, size_t len,
     n_threads = 1;
   if (n_threads == 1) {
     out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+    // Report full progress for single-threaded case
+    if (progress && !progress(len)) {
+      return false; // Cancelled
+    }
     return true;
   }
   size_t chunk_size = len / n_threads;
@@ -817,6 +849,10 @@ bool TwoPass::parse_two_pass(const uint8_t* buf, ParseIndex& out, size_t len,
     // CRITICAL: Must update n_threads to 1 for correct stride in write()
     out.n_threads = 1;
     out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+    // Report full progress for single-threaded fallback
+    if (progress && !progress(len)) {
+      return false; // Cancelled
+    }
     return true;
   }
   std::vector<uint64_t> chunk_pos(n_threads + 1);
@@ -845,6 +881,10 @@ bool TwoPass::parse_two_pass(const uint8_t* buf, ParseIndex& out, size_t len,
       // CRITICAL: Must update n_threads to 1 for correct stride in write()
       out.n_threads = 1;
       out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+      // Report full progress for single-threaded fallback
+      if (progress && !progress(len)) {
+        return false; // Cancelled
+      }
       return true;
     }
   }
@@ -855,15 +895,26 @@ bool TwoPass::parse_two_pass(const uint8_t* buf, ParseIndex& out, size_t len,
     });
   }
 
+  bool cancelled = false;
   for (int i = 0; i < n_threads; ++i) {
     out.n_indexes[i] = second_pass_fut[i].get();
+
+    // Report progress after each chunk completes
+    if (progress && !cancelled) {
+      size_t chunk_bytes = chunk_pos[i + 1] - chunk_pos[i];
+      if (!progress(chunk_bytes)) {
+        cancelled = true;
+        // Continue collecting futures to avoid dangling references
+      }
+    }
   }
 
-  return true;
+  return !cancelled;
 }
 
-bool TwoPass::parse(const uint8_t* buf, ParseIndex& out, size_t len, const Dialect& dialect) {
-  return parse_speculate(buf, out, len, dialect);
+bool TwoPass::parse(const uint8_t* buf, ParseIndex& out, size_t len, const Dialect& dialect,
+                    const SecondPassProgressCallback& progress) {
+  return parse_speculate(buf, out, len, dialect, progress);
 }
 
 TwoPass::branchless_chunk_result TwoPass::second_pass_branchless_chunk_with_errors(
