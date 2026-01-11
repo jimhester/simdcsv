@@ -213,6 +213,8 @@ const char* libvroom_error_string(libvroom_error_t error) {
     return "Out of memory";
   case LIBVROOM_ERROR_INVALID_HANDLE:
     return "Invalid handle";
+  case LIBVROOM_ERROR_CANCELLED:
+    return "Operation cancelled";
   default:
     return "Unknown error";
   }
@@ -636,6 +638,63 @@ libvroom_error_t libvroom_parse(libvroom_parser_t* parser, const libvroom_buffer
 
     // Move the index from the result
     index->idx = std::move(result.idx);
+
+    if (errors && errors->collector.has_fatal_errors()) {
+      const auto& errs = errors->collector.errors();
+      for (const auto& e : errs) {
+        if (e.severity == libvroom::ErrorSeverity::FATAL) {
+          return to_c_error(e.code);
+        }
+      }
+    }
+
+    return result.success() ? LIBVROOM_OK : LIBVROOM_ERROR_INTERNAL;
+  } catch (...) {
+    return LIBVROOM_ERROR_INTERNAL;
+  }
+}
+
+libvroom_error_t
+libvroom_parse_with_progress(libvroom_parser_t* parser, const libvroom_buffer_t* buffer,
+                             libvroom_index_t* index, libvroom_error_collector_t* errors,
+                             const libvroom_dialect_t* dialect,
+                             libvroom_progress_callback_t progress, void* user_data) {
+  if (!parser || !buffer || !index)
+    return LIBVROOM_ERROR_NULL_POINTER;
+
+  try {
+    libvroom::Dialect d = dialect ? dialect->dialect : libvroom::Dialect::csv();
+
+    // Configure parser with the number of threads from the index
+    parser->parser.set_num_threads(index->num_threads);
+
+    // Build parse options
+    libvroom::ParseOptions options;
+    options.dialect = d;
+    if (errors) {
+      options.errors = &errors->collector;
+    }
+
+    // Set up progress callback wrapper if provided
+    if (progress) {
+      options.progress_callback = [progress, user_data](size_t bytes_processed,
+                                                        size_t total_bytes) {
+        return progress(bytes_processed, total_bytes, user_data);
+      };
+    }
+
+    // Parse using the unified Parser API
+    // Use original_length (not padded data.size()) for correct parsing
+    auto result = parser->parser.parse(buffer->data.data(), buffer->original_length, options);
+
+    // Move the index from the result
+    index->idx = std::move(result.idx);
+
+    // Check if parsing was cancelled (result not successful but no fatal errors)
+    if (!result.success() && (!errors || !errors->collector.has_fatal_errors())) {
+      // Likely cancelled by progress callback
+      return LIBVROOM_ERROR_CANCELLED;
+    }
 
     if (errors && errors->collector.has_fatal_errors()) {
       const auto& errs = errors->collector.errors();

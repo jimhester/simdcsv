@@ -223,7 +223,10 @@ typedef enum libvroom_error {
   LIBVROOM_ERROR_OUT_OF_MEMORY = 102,
 
   /** @brief Invalid or already-destroyed handle passed to function. */
-  LIBVROOM_ERROR_INVALID_HANDLE = 103
+  LIBVROOM_ERROR_INVALID_HANDLE = 103,
+
+  /** @brief Operation was cancelled by user (e.g., progress callback returned false). */
+  LIBVROOM_ERROR_CANCELLED = 104
 } libvroom_error_t;
 
 /**
@@ -834,6 +837,46 @@ libvroom_index_t* libvroom_index_read(const char* filename);
 /** @} */ /* end of index group */
 
 /**
+ * @defgroup progress Progress Reporting
+ * @brief Functions for monitoring parsing progress.
+ *
+ * Progress callbacks allow monitoring of long-running parse operations.
+ * They can be used to display progress bars, update UIs, or implement
+ * cancellation.
+ * @{
+ */
+
+/**
+ * @brief Callback signature for progress reporting during parsing.
+ *
+ * This callback is invoked periodically during parsing to report progress.
+ * It can be used to display a progress bar, update a UI, or implement
+ * cancellation logic.
+ *
+ * @param bytes_processed Number of bytes processed so far.
+ * @param total_bytes Total number of bytes to process.
+ * @param user_data User-provided context pointer (passed to parse functions).
+ * @return true to continue parsing, false to abort.
+ *
+ * @note The callback should return quickly to avoid slowing down parsing.
+ *
+ * @example
+ * @code
+ * bool my_progress(size_t processed, size_t total, void* user_data) {
+ *     int* percent_ptr = (int*)user_data;
+ *     *percent_ptr = total > 0 ? (processed * 100 / total) : 0;
+ *     printf("\rProgress: %d%%", *percent_ptr);
+ *     fflush(stdout);
+ *     return true;  // continue parsing
+ * }
+ * @endcode
+ */
+typedef bool (*libvroom_progress_callback_t)(size_t bytes_processed, size_t total_bytes,
+                                             void* user_data);
+
+/** @} */ /* end of progress group */
+
+/**
  * @defgroup parser Parser
  * @brief Core parsing functions.
  * @{
@@ -874,6 +917,46 @@ libvroom_parser_t* libvroom_parser_create(void);
 libvroom_error_t libvroom_parse(libvroom_parser_t* parser, const libvroom_buffer_t* buffer,
                                 libvroom_index_t* index, libvroom_error_collector_t* errors,
                                 const libvroom_dialect_t* dialect);
+
+/**
+ * @brief Parse a CSV buffer with progress reporting.
+ *
+ * Same as libvroom_parse(), but additionally calls a progress callback
+ * periodically to report parsing progress. This can be used to display
+ * progress bars or implement cancellation.
+ *
+ * @param parser The parser to use. Must not be NULL.
+ * @param buffer The buffer containing CSV data. Must not be NULL.
+ * @param[in,out] index Index to store field positions. Must not be NULL.
+ * @param[in,out] errors Error collector for parse errors. Must not be NULL.
+ * @param dialect CSV dialect to use for parsing. Must not be NULL.
+ * @param progress Progress callback function. May be NULL (no progress reporting).
+ * @param user_data User data pointer passed to the progress callback.
+ * @return LIBVROOM_OK on success, or an error code if parsing failed.
+ *
+ * @note If the progress callback returns false, parsing is aborted and
+ *       LIBVROOM_ERROR_CANCELLED is returned.
+ *
+ * @example
+ * @code
+ * bool show_progress(size_t processed, size_t total, void* user_data) {
+ *     printf("\rProgress: %zu%%", total > 0 ? processed * 100 / total : 0);
+ *     fflush(stdout);
+ *     return true;
+ * }
+ *
+ * libvroom_error_t err = libvroom_parse_with_progress(
+ *     parser, buffer, index, errors, dialect, show_progress, NULL);
+ * printf("\n");
+ * @endcode
+ *
+ * @see libvroom_parse() for parsing without progress reporting.
+ */
+libvroom_error_t
+libvroom_parse_with_progress(libvroom_parser_t* parser, const libvroom_buffer_t* buffer,
+                             libvroom_index_t* index, libvroom_error_collector_t* errors,
+                             const libvroom_dialect_t* dialect,
+                             libvroom_progress_callback_t progress, void* user_data);
 
 /**
  * @brief Destroy a parser and free its resources.

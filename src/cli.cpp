@@ -42,6 +42,99 @@ constexpr size_t MAX_COLUMN_WIDTH = 40;
 constexpr size_t DEFAULT_NUM_ROWS = 10;
 constexpr const char* VERSION = "0.1.0";
 
+// =============================================================================
+// Progress Bar Support
+// =============================================================================
+
+/**
+ * @brief Simple text-based progress bar for terminal output.
+ *
+ * Displays a progress bar like: [====================] 100%
+ * Only outputs to stderr when connected to a TTY.
+ */
+class ProgressBar {
+public:
+  /**
+   * @brief Create a progress bar.
+   *
+   * @param enabled Whether to actually display progress (typically based on isatty)
+   * @param width Width of the progress bar in characters (default: 40)
+   */
+  explicit ProgressBar(bool enabled, size_t width = 40) : enabled_(enabled), width_(width) {}
+
+  /**
+   * @brief Update the progress bar display.
+   *
+   * @param bytes_processed Bytes processed so far
+   * @param total_bytes Total bytes to process
+   * @return true (always continues - for use as progress callback)
+   */
+  bool update(size_t bytes_processed, size_t total_bytes) {
+    if (!enabled_ || total_bytes == 0)
+      return true;
+
+    // Calculate percentage
+    int percent = static_cast<int>((bytes_processed * 100) / total_bytes);
+
+    // Only update if percentage changed (reduces flicker)
+    if (percent == last_percent_)
+      return true;
+    last_percent_ = percent;
+
+    // Calculate filled portion
+    size_t filled = (percent * width_) / 100;
+
+    // Build progress bar string
+    std::string bar(width_, ' ');
+    for (size_t i = 0; i < filled && i < width_; ++i) {
+      bar[i] = '=';
+    }
+    if (filled < width_) {
+      bar[filled] = '>';
+    }
+
+    // Output to stderr with carriage return (overwrites previous line)
+    std::cerr << "\r[" << bar << "] " << std::setw(3) << percent << "%" << std::flush;
+
+    return true;
+  }
+
+  /**
+   * @brief Complete the progress bar and move to next line.
+   */
+  void finish() {
+    if (enabled_) {
+      // Show 100% and newline
+      std::string bar(width_, '=');
+      std::cerr << "\r[" << bar << "] 100%" << std::endl;
+    }
+  }
+
+  /**
+   * @brief Clear the progress bar (e.g., on error or cancellation).
+   */
+  void clear() {
+    if (enabled_) {
+      // Overwrite with spaces and return to start of line
+      std::cerr << "\r" << std::string(width_ + 7, ' ') << "\r" << std::flush;
+    }
+  }
+
+  /**
+   * @brief Create a progress callback function for use with libvroom::Parser.
+   *
+   * @return A std::function suitable for ParseOptions::progress_callback
+   */
+  libvroom::ProgressCallback callback() {
+    return [this](size_t processed, size_t total) { return this->update(processed, total); };
+  }
+
+private:
+  bool enabled_;
+  size_t width_;
+  int last_percent_ = -1;
+};
+
 // Performance tuning constants
 constexpr size_t QUOTE_LOOKBACK_LIMIT = 64 * 1024; // 64KB lookback for quote state
 constexpr size_t MAX_BOUNDARY_SEARCH = 8192;       // Max search for row boundary
@@ -192,6 +285,8 @@ void printUsage(const char* prog) {
   cerr << "  --cache       Enable index caching for faster re-reads\n";
   cerr << "  --cache-dir <dir>  Store cache files in specified directory\n";
   cerr << "  --no-cache    Disable index caching (default)\n";
+  cerr << "  -p, --progress  Show progress bar during parsing (auto-enabled for TTY)\n";
+  cerr << "  --no-progress   Disable progress bar\n";
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
   cerr << "\nDialect Detection:\n";
@@ -252,13 +347,15 @@ struct CliCacheConfig {
 // If strict_mode is true, exits with error on any parse warning or error
 // If forced_encoding is not UNKNOWN, it overrides auto-detection
 // If cache_config is provided and enabled, enables index caching
+// If progress_callback is provided, it will be called during parsing
 ParseResult parseFile(const char* filename, int n_threads,
                       const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
                       bool auto_detect = false,
                       libvroom::EncodingResult* detected_encoding = nullptr,
                       bool strict_mode = false,
                       libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
-                      const CliCacheConfig* cache_config = nullptr) {
+                      const CliCacheConfig* cache_config = nullptr,
+                      libvroom::ProgressCallback progress_callback = nullptr) {
   ParseResult result;
 
   try {
@@ -321,6 +418,11 @@ ParseResult parseFile(const char* filename, int n_threads,
       options.cache = libvroom::CacheConfig::custom(cache_config->cache_dir);
     }
     options.source_path = filename;
+  }
+
+  // Set up progress callback if provided
+  if (progress_callback) {
+    options.progress_callback = progress_callback;
   }
 
   auto parse_result = parser.parse(result.load_result.data(), result.load_result.size, options);
@@ -625,9 +727,10 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
             bool strict_mode = false,
             libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
-            const CliCacheConfig* cache_config = nullptr) {
+            const CliCacheConfig* cache_config = nullptr,
+            libvroom::ProgressCallback progress_callback = nullptr) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config);
+                          forced_encoding, cache_config, progress_callback);
   if (!result.success)
     return 1;
 
@@ -817,9 +920,10 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               unsigned int seed = 0, bool strict_mode = false,
               libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
-              const CliCacheConfig* cache_config = nullptr) {
+              const CliCacheConfig* cache_config = nullptr,
+              libvroom::ProgressCallback progress_callback = nullptr) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config);
+                          forced_encoding, cache_config, progress_callback);
   if (!result.success)
     return 1;
 
@@ -885,9 +989,10 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               bool strict_mode = false,
               libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
-              const CliCacheConfig* cache_config = nullptr) {
+              const CliCacheConfig* cache_config = nullptr,
+              libvroom::ProgressCallback progress_callback = nullptr) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config);
+                          forced_encoding, cache_config, progress_callback);
   if (!result.success)
     return 1;
 
@@ -977,9 +1082,10 @@ int cmdInfo(const char* filename, int n_threads, bool has_header,
             const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
             bool strict_mode = false,
             libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
-            const CliCacheConfig* cache_config = nullptr) {
+            const CliCacheConfig* cache_config = nullptr,
+            libvroom::ProgressCallback progress_callback = nullptr) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config);
+                          forced_encoding, cache_config, progress_callback);
   if (!result.success)
     return 1;
 
@@ -1016,9 +1122,10 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
               const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
               bool strict_mode = false,
               libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
-              const CliCacheConfig* cache_config = nullptr) {
+              const CliCacheConfig* cache_config = nullptr,
+              libvroom::ProgressCallback progress_callback = nullptr) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config);
+                          forced_encoding, cache_config, progress_callback);
   if (!result.success)
     return 1;
 
@@ -1816,6 +1923,9 @@ int main(int argc, char* argv[]) {
   libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN; // User-specified encoding
   size_t sample_size = 0;      // Sample size for schema/stats (0 = all rows)
   CliCacheConfig cache_config; // Index caching configuration
+  // Progress bar: auto-enabled for TTY by default, can be overridden by --progress/--no-progress
+  bool progress_auto = true;     // Use automatic TTY detection
+  bool progress_enabled = false; // Explicit override value
   string columns;
   string delimiter_str = "comma";
   string encoding_str; // User-specified encoding string
@@ -1874,11 +1984,29 @@ int main(int argc, char* argv[]) {
       }
       argc -= 2;
       --i; // Recheck this position
+    } else if (strcmp(argv[i], "--progress") == 0) {
+      progress_auto = false;
+      progress_enabled = true;
+      // Remove --progress from argv by shifting remaining args
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i; // Recheck this position
+    } else if (strcmp(argv[i], "--no-progress") == 0) {
+      progress_auto = false;
+      progress_enabled = false;
+      // Remove --no-progress from argv by shifting remaining args
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i; // Recheck this position
     }
   }
 
   int c;
-  while ((c = getopt(argc, argv, "n:c:Ht:d:q:e:s:m:jfShv")) != -1) {
+  while ((c = getopt(argc, argv, "n:c:Ht:d:q:e:s:m:jfpShv")) != -1) {
     switch (c) {
     case 'n': {
       char* endptr;
@@ -1946,6 +2074,10 @@ int main(int argc, char* argv[]) {
     case 'f':
       force_output = true;
       break;
+    case 'p':
+      progress_auto = false;
+      progress_enabled = true;
+      break;
     case 'm': {
       char* endptr;
       long val = strtol(optarg, &endptr, 10);
@@ -1978,35 +2110,51 @@ int main(int argc, char* argv[]) {
   }
   libvroom::Dialect dialect = parseDialect(delimiter_str, quote_char);
 
+  // Set up progress bar based on flags and TTY detection
+  // Progress is enabled if:
+  // 1. Explicitly requested via -p/--progress, OR
+  // 2. Auto mode AND stderr is a TTY AND not reading from stdin
+  bool show_progress =
+      progress_auto ? (isatty(STDERR_FILENO) && !isStdinInput(filename)) : progress_enabled;
+  ProgressBar progress_bar(show_progress);
+
+  // Create progress callback that updates progress bar
+  auto progress_cb = progress_bar.callback();
+
   // Dispatch to command handlers
   int result = 0;
   if (command == "count") {
     // Note: count uses optimized row counting that doesn't do full parse validation,
-    // so strict_mode, forced_encoding, and caching are not applicable
+    // so strict_mode, forced_encoding, caching, and progress are not applicable
     result = cmdCount(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "head") {
     result = cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
-                     forced_encoding, &cache_config);
+                     forced_encoding, &cache_config, progress_cb);
+    progress_bar.finish();
   } else if (command == "tail") {
-    // Note: tail uses streaming API which doesn't support caching yet
+    // Note: tail uses streaming API which doesn't support caching or progress yet
     result = cmdTail(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
                      forced_encoding);
   } else if (command == "sample") {
     result = cmdSample(filename, n_threads, num_rows, has_header, dialect, auto_detect, random_seed,
-                       strict_mode, forced_encoding, &cache_config);
+                       strict_mode, forced_encoding, &cache_config, progress_cb);
+    progress_bar.finish();
   } else if (command == "select") {
     if (columns.empty()) {
       cerr << "Error: -c option required for select command\n";
       return 1;
     }
     result = cmdSelect(filename, n_threads, columns, has_header, dialect, auto_detect, strict_mode,
-                       forced_encoding, &cache_config);
+                       forced_encoding, &cache_config, progress_cb);
+    progress_bar.finish();
   } else if (command == "info") {
     result = cmdInfo(filename, n_threads, has_header, dialect, auto_detect, strict_mode,
-                     forced_encoding, &cache_config);
+                     forced_encoding, &cache_config, progress_cb);
+    progress_bar.finish();
   } else if (command == "pretty") {
     result = cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
-                       forced_encoding, &cache_config);
+                       forced_encoding, &cache_config, progress_cb);
+    progress_bar.finish();
   } else if (command == "dialect") {
     // Note: dialect command ignores -d, --strict, and -e flags since it's for detection
     (void)delimiter_specified; // Suppress unused warning
