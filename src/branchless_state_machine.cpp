@@ -234,7 +234,7 @@ uint64_t second_pass_simd_branchless_with_errors(const BranchlessStateMachine& s
 
   // Process 64-byte blocks with SIMD
   for (; pos + 64 <= len; pos += 64) {
-    __builtin_prefetch(data + pos + 128);
+    libvroom_prefetch(data + pos + 128);
 
     simd_input in = fill_input(data + pos);
 

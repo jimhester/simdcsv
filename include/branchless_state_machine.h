@@ -584,7 +584,7 @@ inline uint64_t second_pass_simd_branchless(const BranchlessStateMachine& sm, co
   // thread 0 -> indexes[0], indexes[n_threads], indexes[2*n_threads], ...
   // thread 1 -> indexes[1], indexes[n_threads+1], indexes[2*n_threads+1], ...
   for (; pos + 64 <= len; pos += 64) {
-    __builtin_prefetch(data + pos + 128);
+    libvroom_prefetch(data + pos + 128);
 
     simd_input in = fill_input(data + pos);
     count += process_block_simd_branchless(sm, in, 64, prev_quote_state, prev_escape_carry,

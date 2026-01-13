@@ -6,17 +6,17 @@
 // The input buffer must be readable up to buf + LIBVROOM_PADDING.
 // This must be at least 64 bytes since SIMD operations load 64-byte blocks
 // and may read past the logical end of the data (masked results are discarded).
-#define LIBVROOM_PADDING  64
-
+#define LIBVROOM_PADDING 64
 
 // Align to N-byte boundary
-#define ROUNDUP_N(a, n) (((a) + ((n)-1)) & ~((n)-1))
-#define ROUNDDOWN_N(a, n) ((a) & ~((n)-1))
+#define ROUNDUP_N(a, n) (((a) + ((n) - 1)) & ~((n) - 1))
+#define ROUNDDOWN_N(a, n) ((a) & ~((n) - 1))
 
-#define ISALIGNED_N(ptr, n) (((uintptr_t)(ptr) & ((n)-1)) == 0)
+#define ISALIGNED_N(ptr, n) (((uintptr_t)(ptr) & ((n) - 1)) == 0)
 
 #ifdef _MSC_VER
 
+#include <intrin.h>
 
 #define really_inline inline
 #define never_inline __declspec(noinline)
@@ -30,6 +30,10 @@
 #ifndef unlikely
 #define unlikely(x) x
 #endif
+
+// MSVC uses _mm_prefetch with _MM_HINT_T0 for prefetch
+// Note: This requires SSE, which is available on all x64 Windows
+#define libvroom_prefetch(addr) _mm_prefetch(reinterpret_cast<const char*>(addr), _MM_HINT_T0)
 
 #else
 
@@ -46,6 +50,9 @@
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #endif
 
-#endif  // MSC_VER
+// GCC/Clang prefetch intrinsic
+#define libvroom_prefetch(addr) __builtin_prefetch(addr)
+
+#endif // MSC_VER
 
 #endif // SIMDJSON_COMMON_DEFS_H
