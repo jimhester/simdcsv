@@ -431,27 +431,6 @@ private:
 };
 
 /**
- * @brief Process a 64-byte block using branchless state machine.
- *
- * This function processes characters sequentially but uses table lookups
- * instead of switch statements for state transitions. The SIMD operations
- * create bitmasks that can be used for field position extraction.
- *
- * @param sm The branchless state machine
- * @param buf Input buffer (64 bytes)
- * @param len Actual length to process (may be < 64 for final block)
- * @param state Current state (updated in-place)
- * @param indexes Output array for field separator positions
- * @param base Base position in the full buffer
- * @param idx Current index in indexes array
- * @param stride Stride for multi-threaded index storage
- * @return Number of field separators found
- */
-size_t process_block_branchless(const BranchlessStateMachine& sm, const uint8_t* buf, size_t len,
-                                BranchlessState& state, uint64_t* indexes, uint64_t base,
-                                size_t& idx, size_t stride);
-
-/**
  * @brief SIMD-accelerated block processing with branchless state extraction.
  *
  * This function uses SIMD to find potential separator positions, then
@@ -529,25 +508,6 @@ really_inline size_t process_block_simd_branchless(const BranchlessStateMachine&
   // Write separator positions
   return write(indexes, idx, base, stride, field_seps);
 }
-
-/**
- * @brief Second pass using branchless state machine (scalar fallback).
- *
- * This function processes the buffer using the branchless state machine
- * for character classification and state transitions. It's used when
- * error collection is needed or for debugging.
- *
- * @param sm The branchless state machine
- * @param buf Input buffer
- * @param start Start position
- * @param end End position
- * @param indexes Output array
- * @param thread_id Thread ID for interleaved storage
- * @param n_threads Total number of threads
- * @return Number of field separators found
- */
-uint64_t second_pass_branchless(const BranchlessStateMachine& sm, const uint8_t* buf, size_t start,
-                                size_t end, uint64_t* indexes, size_t thread_id, size_t n_threads);
 
 /**
  * @brief Second pass using SIMD-accelerated branchless processing.
@@ -739,12 +699,8 @@ really_inline size_t process_block_simd_branchless_with_errors(
 /**
  * @brief SIMD-accelerated second pass with error collection.
  *
- * This function provides the same functionality as second_pass_branchless_with_errors
- * but uses SIMD for the main processing loop. Errors are detected using SIMD
+ * Uses SIMD for the main processing loop. Errors are detected using SIMD
  * bitmasks, and only error positions are processed with scalar code.
- *
- * Performance: ~2x faster than the scalar version on clean data, with minimal
- * overhead when errors are present (only error positions are processed slowly).
  *
  * @param sm The branchless state machine
  * @param buf Input buffer
@@ -783,29 +739,6 @@ std::string get_error_context(const uint8_t* buf, size_t len, size_t pos, size_t
  */
 void get_error_line_column(const uint8_t* buf, size_t buf_len, size_t offset, size_t& line,
                            size_t& column);
-
-/**
- * @brief Second pass using branchless state machine with error collection.
- *
- * This function processes the buffer using the branchless state machine
- * for character classification and state transitions, while collecting
- * errors in the provided ErrorCollector.
- *
- * @param sm The branchless state machine
- * @param buf Input buffer
- * @param start Start position
- * @param end End position
- * @param indexes Output array
- * @param thread_id Thread ID for interleaved storage
- * @param n_threads Total number of threads
- * @param errors ErrorCollector to accumulate errors (may be nullptr)
- * @param total_len Total buffer length for bounds checking
- * @return Number of field separators found
- */
-uint64_t second_pass_branchless_with_errors(const BranchlessStateMachine& sm, const uint8_t* buf,
-                                            size_t start, size_t end, uint64_t* indexes,
-                                            size_t thread_id, size_t n_threads,
-                                            ErrorCollector* errors, size_t total_len);
 
 } // namespace libvroom
 
