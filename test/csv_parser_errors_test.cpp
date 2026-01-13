@@ -335,11 +335,11 @@ TEST_F(CSVParserErrorTest, MultiThreadedErrorCollectionMerge) {
   ErrorCollector collector2(ErrorMode::PERMISSIVE);
 
   // Add errors with different byte offsets
-  collector1.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::ERROR, 1, 5, 100,
+  collector1.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::RECOVERABLE, 1, 5, 100,
                        "Error at offset 100");
-  collector2.add_error(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::ERROR, 2, 3, 50,
+  collector2.add_error(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::RECOVERABLE, 2, 3, 50,
                        "Error at offset 50");
-  collector1.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, 3, 1, 200,
+  collector1.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 3, 1, 200,
                        "Error at offset 200");
 
   // Merge and sort

@@ -157,7 +157,7 @@ static libvroom_severity_t to_c_severity(libvroom::ErrorSeverity severity) {
   switch (severity) {
   case libvroom::ErrorSeverity::WARNING:
     return LIBVROOM_SEVERITY_WARNING;
-  case libvroom::ErrorSeverity::ERROR:
+  case libvroom::ErrorSeverity::RECOVERABLE:
     return LIBVROOM_SEVERITY_ERROR;
   case libvroom::ErrorSeverity::FATAL:
     return LIBVROOM_SEVERITY_FATAL;

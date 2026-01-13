@@ -553,7 +553,7 @@ uint64_t TwoPass::second_pass_chunk(const uint8_t* buf, size_t start, size_t end
     if (value == '\0' && errors) {
       size_t line, col;
       get_line_column(buf, buf_len, pos, line, col);
-      errors->add_error(ErrorCode::NULL_BYTE, ErrorSeverity::ERROR, line, col, pos,
+      errors->add_error(ErrorCode::NULL_BYTE, ErrorSeverity::RECOVERABLE, line, col, pos,
                         "Null byte in data", get_context(buf, buf_len, pos));
       if (errors->should_stop())
         return n_indexes;
@@ -570,7 +570,7 @@ uint64_t TwoPass::second_pass_chunk(const uint8_t* buf, size_t start, size_t end
         std::string msg = "Quote character '";
         msg += quote_char;
         msg += "' in unquoted field";
-        errors->add_error(result.error, ErrorSeverity::ERROR, line, col, pos, msg,
+        errors->add_error(result.error, ErrorSeverity::RECOVERABLE, line, col, pos, msg,
                           get_context(buf, buf_len, pos));
         if (errors->should_stop())
           return n_indexes;
@@ -612,7 +612,7 @@ uint64_t TwoPass::second_pass_chunk(const uint8_t* buf, size_t start, size_t end
         std::string msg = "Invalid character after closing quote '";
         msg += quote_char;
         msg += "'";
-        errors->add_error(result.error, ErrorSeverity::ERROR, line, col, pos, msg,
+        errors->add_error(result.error, ErrorSeverity::RECOVERABLE, line, col, pos, msg,
                           get_context(buf, buf_len, pos));
         if (errors->should_stop())
           return n_indexes;
@@ -1337,8 +1337,8 @@ bool TwoPass::check_empty_header(const uint8_t* buf, size_t len, ErrorCollector&
 
   // Check if we've consumed everything or hit an empty line
   if (pos >= len || buf[pos] == '\n' || buf[pos] == '\r') {
-    errors.add_error(ErrorCode::EMPTY_HEADER, ErrorSeverity::ERROR, 1, 1, 0, "Header row is empty",
-                     "");
+    errors.add_error(ErrorCode::EMPTY_HEADER, ErrorSeverity::RECOVERABLE, 1, 1, 0,
+                     "Header row is empty", "");
     return false;
   }
   return true;
@@ -1432,8 +1432,9 @@ void TwoPass::check_field_counts(const uint8_t* buf, size_t len, ErrorCollector&
         } else if (current_fields != expected_fields) {
           std::ostringstream msg;
           msg << "Expected " << expected_fields << " fields but found " << current_fields;
-          errors.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, current_line,
-                           1, line_start, msg.str(), get_context(buf, len, line_start, 40));
+          errors.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE,
+                           current_line, 1, line_start, msg.str(),
+                           get_context(buf, len, line_start, 40));
           if (errors.should_stop())
             return;
         }
@@ -1451,7 +1452,7 @@ void TwoPass::check_field_counts(const uint8_t* buf, size_t len, ErrorCollector&
           } else if (current_fields != expected_fields) {
             std::ostringstream msg;
             msg << "Expected " << expected_fields << " fields but found " << current_fields;
-            errors.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR,
+            errors.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE,
                              current_line, 1, line_start, msg.str(),
                              get_context(buf, len, line_start, 40));
             if (errors.should_stop())
@@ -1471,8 +1472,8 @@ void TwoPass::check_field_counts(const uint8_t* buf, size_t len, ErrorCollector&
   if (header_done && current_fields != expected_fields && line_start < len) {
     std::ostringstream msg;
     msg << "Expected " << expected_fields << " fields but found " << current_fields;
-    errors.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, current_line, 1,
-                     line_start, msg.str(), get_context(buf, len, line_start, 40));
+    errors.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, current_line,
+                     1, line_start, msg.str(), get_context(buf, len, line_start, 40));
   }
 }
 

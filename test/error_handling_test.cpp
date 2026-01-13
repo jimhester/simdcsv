@@ -39,7 +39,7 @@ TEST(ErrorHandlingTest, ErrorCodeToString) {
 
 TEST(ErrorHandlingTest, ErrorSeverityToString) {
   EXPECT_STREQ(error_severity_to_string(ErrorSeverity::WARNING), "WARNING");
-  EXPECT_STREQ(error_severity_to_string(ErrorSeverity::ERROR), "ERROR");
+  EXPECT_STREQ(error_severity_to_string(ErrorSeverity::RECOVERABLE), "ERROR");
   EXPECT_STREQ(error_severity_to_string(ErrorSeverity::FATAL), "FATAL");
 
   // Test default case with an invalid severity
@@ -64,7 +64,7 @@ TEST(ParseErrorTest, Construction) {
 }
 
 TEST(ParseErrorTest, ToString) {
-  ParseError error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, 3, 1, 50,
+  ParseError error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 3, 1, 50,
                    "Expected 3 fields but found 2", "1,2");
 
   std::string str = error.to_string();
@@ -92,7 +92,7 @@ TEST(ErrorCollectorTest, DefaultMode) {
 TEST(ErrorCollectorTest, AddError) {
   ErrorCollector collector(ErrorMode::PERMISSIVE);
 
-  ParseError error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, 2, 1, 20,
+  ParseError error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
                    "Field count mismatch");
 
   collector.add_error(error);
@@ -105,7 +105,7 @@ TEST(ErrorCollectorTest, AddError) {
 TEST(ErrorCollectorTest, AddErrorConvenience) {
   ErrorCollector collector(ErrorMode::PERMISSIVE);
 
-  collector.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::ERROR, 3, 5, 45,
+  collector.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::RECOVERABLE, 3, 5, 45,
                       "Invalid quote", "bad\"quote");
 
   EXPECT_TRUE(collector.has_errors());
@@ -120,7 +120,7 @@ TEST(ErrorCollectorTest, AddErrorConvenience) {
 TEST(ErrorCollectorTest, StrictModeStopsOnFirstError) {
   ErrorCollector collector(ErrorMode::STRICT);
 
-  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, 1, 1, 10,
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10,
                       "Error 1");
 
   EXPECT_TRUE(collector.should_stop());
@@ -129,9 +129,9 @@ TEST(ErrorCollectorTest, StrictModeStopsOnFirstError) {
 TEST(ErrorCollectorTest, PermissiveModeAllowsNonFatalErrors) {
   ErrorCollector collector(ErrorMode::PERMISSIVE);
 
-  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, 1, 1, 10,
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10,
                       "Error 1");
-  collector.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::ERROR, 2, 1, 20,
+  collector.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::RECOVERABLE, 2, 1, 20,
                       "Error 2");
 
   EXPECT_FALSE(collector.should_stop());
@@ -170,7 +170,8 @@ TEST(ErrorCollectorTest, MultipleErrors) {
   ErrorCollector collector(ErrorMode::PERMISSIVE);
 
   collector.add_error(ErrorCode::MIXED_LINE_ENDINGS, ErrorSeverity::WARNING, 1, 1, 10, "Warning");
-  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, 2, 1, 20, "Error");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
+                      "Error");
   collector.add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL, 3, 1, 30, "Fatal");
 
   EXPECT_EQ(collector.error_count(), 3);
@@ -181,7 +182,8 @@ TEST(ErrorCollectorTest, MultipleErrors) {
 TEST(ErrorCollectorTest, Clear) {
   ErrorCollector collector(ErrorMode::PERMISSIVE);
 
-  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, 1, 1, 10, "Error");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10,
+                      "Error");
 
   EXPECT_TRUE(collector.has_errors());
 
@@ -197,7 +199,7 @@ TEST(ErrorCollectorTest, Summary) {
 
   collector.add_error(ErrorCode::MIXED_LINE_ENDINGS, ErrorSeverity::WARNING, 1, 1, 10,
                       "Warning message");
-  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, 2, 1, 20,
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
                       "Error message");
 
   std::string summary = collector.summary();
@@ -214,7 +216,7 @@ TEST(ErrorCollectorTest, SummaryWithFatal) {
 
   collector.add_error(ErrorCode::MIXED_LINE_ENDINGS, ErrorSeverity::WARNING, 1, 1, 10,
                       "Warning message");
-  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, 2, 1, 20,
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
                       "Error message");
   collector.add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL, 3, 1, 30, "Fatal message");
 
@@ -248,9 +250,9 @@ TEST(ParseExceptionTest, SingleError) {
 
 TEST(ParseExceptionTest, MultipleErrors) {
   std::vector<ParseError> errors;
-  errors.emplace_back(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::ERROR, 1, 1, 10,
+  errors.emplace_back(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10,
                       "Error 1");
-  errors.emplace_back(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::ERROR, 2, 1, 20,
+  errors.emplace_back(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::RECOVERABLE, 2, 1, 20,
                       "Error 2");
 
   ParseException ex(errors);
