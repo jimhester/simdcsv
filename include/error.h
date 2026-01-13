@@ -91,6 +91,11 @@ constexpr size_t DEFAULT_MAX_FILE_SIZE = 4ULL * 1024 * 1024 * 1024; // 4 GB
  * Severity levels indicate how serious an error is and whether the parser
  * can continue after encountering it.
  */
+// Windows defines ERROR as a macro (value 0) in WinGDI.h
+// Undefine it here to ensure the enum compiles correctly
+#ifdef ERROR
+#undef ERROR
+#endif
 enum class ErrorSeverity {
   WARNING, ///< Non-fatal issue, parser continues (e.g., mixed line endings)
   ERROR,   ///< Recoverable error, can skip affected row (e.g., inconsistent field count)
