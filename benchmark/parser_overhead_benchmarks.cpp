@@ -25,6 +25,13 @@ extern std::map<std::string, libvroom::AlignedBuffer> test_data;
 
 namespace {
 
+// Default dataset size for benchmarks
+// These parameters are chosen to give stable benchmark times (>10ms per iteration)
+// for reliable regression detection in CI. The generated data is ~32MB.
+// See GitHub issue #508 for context on why smaller sizes give unstable results.
+constexpr size_t kDefaultRows = 500000; // 500K rows
+constexpr size_t kDefaultCols = 10;
+
 // Generate a large CSV file for benchmarking
 std::string generate_large_csv(size_t rows, size_t cols) {
   std::ostringstream ss;
@@ -109,7 +116,7 @@ private:
  * safe split points. This is the pure index-building throughput.
  */
 static void BM_RawFirstPass(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", 100000, 10);
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
 
   for (auto _ : state) {
     auto stats = libvroom::TwoPass::first_pass_simd(buffer.data(), 0, buffer.size, '"', ',');
@@ -127,7 +134,7 @@ BENCHMARK(BM_RawFirstPass)->Unit(benchmark::kMillisecond);
  * Measures first pass plus the memory allocation for the index structure.
  */
 static void BM_FirstPassPlusAllocation(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", 100000, 10);
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
   libvroom::TwoPass parser;
 
   for (auto _ : state) {
@@ -148,7 +155,7 @@ BENCHMARK(BM_FirstPassPlusAllocation)->Unit(benchmark::kMillisecond);
  * Parser operations. This represents the theoretical maximum throughput.
  */
 static void BM_RawTwoPassComplete(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", 100000, 10);
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
   libvroom::TwoPass parser;
 
   for (auto _ : state) {
@@ -178,7 +185,7 @@ BENCHMARK(BM_RawTwoPassComplete)->Unit(benchmark::kMillisecond);
  * to determine delimiter, quote char, and line endings.
  */
 static void BM_DialectDetectionOnly(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", 100000, 10);
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
 
   for (auto _ : state) {
     auto result = libvroom::detect_dialect(buffer.data(), buffer.size);
@@ -196,7 +203,7 @@ BENCHMARK(BM_DialectDetectionOnly)->Unit(benchmark::kMillisecond);
  * Parser::parse() with an explicit dialect should skip detection overhead.
  */
 static void BM_ParserWithExplicitDialect(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", 100000, 10);
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
   libvroom::Parser parser(1);
 
   for (auto _ : state) {
@@ -215,7 +222,7 @@ BENCHMARK(BM_ParserWithExplicitDialect)->Unit(benchmark::kMillisecond);
  * Full Parser::parse() with dialect auto-detection enabled.
  */
 static void BM_ParserWithAutoDetect(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", 100000, 10);
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
   libvroom::Parser parser(1);
 
   for (auto _ : state) {
@@ -234,7 +241,7 @@ BENCHMARK(BM_ParserWithAutoDetect)->Unit(benchmark::kMillisecond);
  * Using the branchless algorithm which should be faster for some patterns.
  */
 static void BM_ParserBranchless(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", 100000, 10);
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
   libvroom::Parser parser(1);
 
   for (auto _ : state) {
@@ -252,7 +259,7 @@ BENCHMARK(BM_ParserBranchless)->Unit(benchmark::kMillisecond);
  * @brief Benchmark 8: Parser::parse() with TWO_PASS algorithm explicitly
  */
 static void BM_ParserTwoPassAlgo(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", 100000, 10);
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
   libvroom::Parser parser(1);
 
   libvroom::ParseOptions opts;
@@ -273,7 +280,7 @@ BENCHMARK(BM_ParserTwoPassAlgo)->Unit(benchmark::kMillisecond);
  * @brief Benchmark 9: Parser::parse() with SPECULATIVE algorithm
  */
 static void BM_ParserSpeculative(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", 100000, 10);
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
   libvroom::Parser parser(1);
 
   libvroom::ParseOptions opts;
@@ -298,7 +305,7 @@ BENCHMARK(BM_ParserSpeculative)->Unit(benchmark::kMillisecond);
  * @brief Benchmark 10: Raw TwoPass with multiple threads
  */
 static void BM_RawTwoPassMultiThread(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", 100000, 10);
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
   int n_threads = static_cast<int>(state.range(0));
   libvroom::TwoPass parser;
 
@@ -320,7 +327,7 @@ BENCHMARK(BM_RawTwoPassMultiThread)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Unit(benchm
  * @brief Benchmark 11: Parser::parse() with multiple threads
  */
 static void BM_ParserMultiThread(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", 100000, 10);
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
   int n_threads = static_cast<int>(state.range(0));
   libvroom::Parser parser(n_threads);
 

@@ -36,7 +36,7 @@ jobs:
       timeout-minutes: 5
       run: |
         # Run benchmarks from parser_overhead_benchmarks.cpp which use generated data
-        # (100K rows x 10 cols) - avoids file path issues and provides meaningful sizes
+        # (500K rows x 10 cols, ~32MB) - larger size for stable timing (see issue #508)
         #
         # Selected benchmarks:
         # - BM_RawFirstPass: Raw SIMD scanning performance

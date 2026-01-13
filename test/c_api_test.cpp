@@ -3,14 +3,19 @@
  * @brief Tests for the libvroom C API wrapper.
  */
 
-#include <atomic>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <sstream>
 #include <string>
-#include <thread>
+
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#endif
 
 extern "C" {
 #include "libvroom_c.h"
@@ -20,16 +25,21 @@ namespace fs = std::filesystem;
 
 class CAPITest : public ::testing::Test {
 protected:
-  void SetUp() override { temp_files_.clear(); }
+  void SetUp() override {
+    // Create a unique temp directory per process to avoid collisions when
+    // CTest runs multiple test binaries in parallel
+    temp_dir_ = (fs::temp_directory_path() / ("c_api_test_" + std::to_string(getpid()))).string();
+    fs::create_directories(temp_dir_);
+    file_counter_ = 0;
+  }
   void TearDown() override {
-    for (const auto& f : temp_files_)
-      fs::remove(f);
+    // Clean up the entire temp directory
+    std::error_code ec;
+    fs::remove_all(temp_dir_, ec);
   }
   std::string createTestFile(const std::string& content) {
-    // Use atomic counter and thread ID for unique filenames across parallel tests
-    static std::atomic<int> counter{0};
     std::ostringstream filename;
-    filename << "test_c_api_" << std::this_thread::get_id() << "_" << counter++ << ".csv";
+    filename << temp_dir_ << "/test_" << file_counter_++ << ".csv";
     std::string fname = filename.str();
     // Use binary mode to avoid text mode translation issues across platforms
     std::ofstream file(fname, std::ios::binary);
@@ -40,10 +50,10 @@ protected:
     // between file writes and subsequent reads from a different file handle.
     file.flush();
     file.close();
-    temp_files_.push_back(fname);
     return fname;
   }
-  std::vector<std::string> temp_files_;
+  std::string temp_dir_;
+  int file_counter_ = 0;
 
   // Helper to check if an error collector contains a specific error code.
   // Similar to hasErrorCode in csv_parser_errors_test.cpp but for C API.
@@ -1709,8 +1719,7 @@ TEST_F(CAPITest, IndexWriteAndRead) {
   EXPECT_GT(original_count, 0u);
 
   // Write the index to a file
-  std::string index_file = "test_index_serialize.idx";
-  temp_files_.push_back(index_file);
+  std::string index_file = temp_dir_ + "/test_index_serialize.idx";
   err = libvroom_index_write(index, index_file.c_str());
   EXPECT_EQ(err, LIBVROOM_OK);
 
@@ -1785,8 +1794,7 @@ TEST_F(CAPITest, IndexWriteToInvalidPath) {
 
 TEST_F(CAPITest, IndexReadCorruptedFile) {
   // Create a file with invalid content
-  std::string filename = "test_corrupted_index.idx";
-  temp_files_.push_back(filename);
+  std::string filename = temp_dir_ + "/test_corrupted_index.idx";
   std::ofstream file(filename, std::ios::binary);
   // Write garbage data
   uint8_t garbage[] = {0x00, 0x01, 0x02};
@@ -1801,8 +1809,7 @@ TEST_F(CAPITest, IndexSerializationRoundTripFromFile) {
   // Full integration test: load CSV from file, parse, save index, reload index
   std::string csv_content = "name,value,count\nalpha,1,100\nbeta,2,200\ngamma,3,300\n";
   std::string csv_file = createTestFile(csv_content);
-  std::string index_file = "test_index_roundtrip.idx";
-  temp_files_.push_back(index_file);
+  std::string index_file = temp_dir_ + "/test_index_roundtrip.idx";
 
   // Load and parse CSV
   libvroom_buffer_t* buffer = libvroom_buffer_load_file(csv_file.c_str());
@@ -1857,10 +1864,8 @@ TEST_F(CAPITest, IndexSerializationMultipleWriteRead) {
   uint64_t original_count = libvroom_index_total_count(index);
 
   // Write to two different files
-  std::string file1 = "test_index_multi1.idx";
-  std::string file2 = "test_index_multi2.idx";
-  temp_files_.push_back(file1);
-  temp_files_.push_back(file2);
+  std::string file1 = temp_dir_ + "/test_index_multi1.idx";
+  std::string file2 = temp_dir_ + "/test_index_multi2.idx";
 
   EXPECT_EQ(libvroom_index_write(index, file1.c_str()), LIBVROOM_OK);
   EXPECT_EQ(libvroom_index_write(index, file2.c_str()), LIBVROOM_OK);
