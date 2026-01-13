@@ -16,6 +16,11 @@
 
 #ifdef _MSC_VER
 
+// Prevent Windows.h from defining min/max macros that conflict with std::numeric_limits
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <intrin.h>
 
 #define really_inline inline
