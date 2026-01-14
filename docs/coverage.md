@@ -168,14 +168,16 @@ If you see a large discrepancy between gcov and llvm coverage for a header file:
 
 ## CI Jobs
 
-Four coverage jobs run in CI:
+Three coverage jobs run in CI:
 
-| Job | Workflow | Flag | What It Measures |
-|-----|----------|------|------------------|
+| Job | Workflow | Flag(s) | What It Measures |
+|-----|----------|---------|------------------|
 | **Code Coverage (GCC/lcov)** | ci.yml | `gcov` | Core library (traditional) |
 | **Code Coverage (Clang/llvm-cov)** | ci.yml | `llvm` | Core library (accurate headers) |
-| **Python Coverage** | python.yml | `python` | Python source code |
-| **Python Bindings Coverage (C++)** | python.yml | `python-bindings` | C++ bindings (bindings.cpp) |
+| **Python Coverage** | python.yml | `python`, `python-bindings` | Python source + C++ bindings |
+
+The Python Coverage job is a combined job that builds with LLVM coverage instrumentation
+and runs pytest with pytest-cov, collecting both Python and C++ coverage in a single run.
 
 All jobs are informational and won't fail the build if coverage thresholds aren't met.
 

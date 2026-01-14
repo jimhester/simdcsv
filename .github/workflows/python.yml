@@ -68,51 +68,10 @@ jobs:
       run: |
         python -m pytest tests/ -v --tb=short
 
-  # Python source coverage job - measures Python code with pytest-cov
+  # Combined coverage job - measures both Python code and C++ bindings
+  # Uses Clang with LLVM coverage for bindings.cpp, pytest-cov for Python
   python-coverage:
     name: Python Coverage
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-
-    - name: Install build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y cmake build-essential
-
-    - name: Install Python package with test dependencies
-      working-directory: python
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install .[test]
-
-    - name: Run tests with coverage
-      working-directory: python
-      run: |
-        python -m pytest tests/ -v --tb=short --cov=vroom_csv --cov-report=xml --cov-report=term
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      if: github.repository == 'jimhester/libvroom'
-      continue-on-error: true
-      with:
-        files: ./python/coverage.xml
-        flags: python
-        fail_ci_if_error: false
-        verbose: true
-        token: ${{ secrets.CODECOV_TOKEN }}
-
-  # C++ bindings coverage job - measures bindings.cpp with LLVM coverage
-  # This provides coverage for the C++ code in the Python extension module
-  python-bindings-coverage:
-    name: Python Bindings Coverage (C++)
     runs-on: ubuntu-latest
 
     steps:
@@ -134,7 +93,7 @@ jobs:
     - name: Install Python build tools
       run: |
         python -m pip install --upgrade pip
-        python -m pip install build scikit-build-core pybind11 pytest pyarrow
+        python -m pip install build scikit-build-core pybind11 setuptools-scm
 
     - name: Build Python package with coverage instrumentation
       working-directory: python
@@ -142,18 +101,17 @@ jobs:
         CC: clang
         CXX: clang++
         CMAKE_ARGS: "-DENABLE_LLVM_COVERAGE=ON"
-        LLVM_PROFILE_FILE: "coverage-%p.profraw"
       run: |
         python -m pip install --no-build-isolation -v -e .[test]
 
-    - name: Run tests to collect coverage
+    - name: Run tests with coverage
       working-directory: python
       env:
         LLVM_PROFILE_FILE: "coverage-%p.profraw"
       run: |
-        python -m pytest tests/ -v --tb=short
+        python -m pytest tests/ -v --tb=short --cov=vroom_csv --cov-report=xml --cov-report=term
 
-    - name: Generate coverage report
+    - name: Generate C++ bindings coverage report
       working-directory: python
       run: |
         # Find llvm-profdata and llvm-cov
@@ -184,7 +142,18 @@ jobs:
           -ignore-filename-regex='(_deps/|/usr/|pybind11)' \
           --show-region-summary=false
 
-    - name: Upload bindings coverage to Codecov
+    - name: Upload Python coverage to Codecov
+      uses: codecov/codecov-action@v4
+      if: github.repository == 'jimhester/libvroom'
+      continue-on-error: true
+      with:
+        files: ./python/coverage.xml
+        flags: python
+        fail_ci_if_error: false
+        verbose: true
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+    - name: Upload C++ bindings coverage to Codecov
       uses: codecov/codecov-action@v4
       if: github.repository == 'jimhester/libvroom'
       continue-on-error: true
