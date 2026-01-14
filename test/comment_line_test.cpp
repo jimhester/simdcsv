@@ -626,7 +626,7 @@ TEST_F(CommentLineTest, StrictModeWithComments) {
   auto buf = makeBuffer(csv);
   libvroom::TwoPass parser;
   libvroom::ParseIndex idx = parser.init(buf.size(), 1);
-  libvroom::ErrorCollector errors(libvroom::ErrorMode::STRICT);
+  libvroom::ErrorCollector errors(libvroom::ErrorMode::FAIL_FAST);
 
   libvroom::Dialect dialect = libvroom::Dialect::csv_with_comments();
   bool success = parser.parse_with_errors(buf.data(), idx, csv.size(), errors, dialect);
@@ -732,7 +732,7 @@ TEST_F(CommentLineTest, ParseValidateWithComments) {
   auto buf = makeBuffer(csv);
   libvroom::TwoPass parser;
   libvroom::ParseIndex idx = parser.init(buf.size(), 1);
-  libvroom::ErrorCollector errors(libvroom::ErrorMode::STRICT);
+  libvroom::ErrorCollector errors(libvroom::ErrorMode::FAIL_FAST);
 
   libvroom::Dialect dialect = libvroom::Dialect::csv_with_comments();
   bool success = parser.parse_validate(buf.data(), idx, csv.size(), errors, dialect);

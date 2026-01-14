@@ -9,6 +9,13 @@
 #include <sys/stat.h>
 #include <vector>
 
+// Windows compatibility for S_ISREG macro
+#ifdef _WIN32
+#ifndef S_ISREG
+#define S_ISREG(m) (((m) & _S_IFMT) == _S_IFREG)
+#endif
+#endif
+
 uint8_t* allocate_padded_buffer(size_t length, size_t padding) {
   // Check for integer overflow before addition
   if (length > SIZE_MAX - padding) {

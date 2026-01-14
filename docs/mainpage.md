@@ -151,7 +151,7 @@ libvroom supports three error handling modes:
 
 | Mode | Behavior |
 |------|----------|
-| @ref libvroom::ErrorMode::STRICT "STRICT" | Stop on first error |
+| @ref libvroom::ErrorMode::FAIL_FAST "FAIL_FAST" | Stop on first error |
 | @ref libvroom::ErrorMode::PERMISSIVE "PERMISSIVE" | Collect all errors, try to recover |
 | @ref libvroom::ErrorMode::BEST_EFFORT "BEST_EFFORT" | Ignore errors, parse what's possible |
 

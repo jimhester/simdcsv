@@ -98,9 +98,25 @@ private:
     size_t end;
   };
 
-  std::vector<std::vector<FieldRange>> extract_field_ranges(const uint8_t* buf, size_t len,
-                                                            const ParseIndex& idx,
-                                                            const Dialect& dialect);
+  /**
+   * @brief Result of field extraction containing both column data and headers.
+   *
+   * This struct enables single-pass extraction of all field information needed
+   * for Arrow conversion, avoiding redundant sorting and traversal operations.
+   */
+  struct FieldExtractionResult {
+    std::vector<std::vector<FieldRange>> columns;
+    std::vector<std::string> header_names;
+  };
+
+  FieldExtractionResult extract_field_ranges_with_headers(const uint8_t* buf, size_t len,
+                                                          const ParseIndex& idx,
+                                                          const Dialect& dialect);
+
+  std::vector<ColumnType>
+  infer_types_from_ranges(const uint8_t* buf,
+                          const std::vector<std::vector<FieldRange>>& field_ranges,
+                          const Dialect& dialect);
 
   /**
    * @brief Extract a field from the buffer as a string_view.

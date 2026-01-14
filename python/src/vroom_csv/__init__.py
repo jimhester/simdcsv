@@ -46,9 +46,14 @@ from vroom_csv._core import (
     VroomError,
     ParseError,
     IOError,
-    __version__,
     LIBVROOM_VERSION,
 )
+
+# Version from setuptools-scm, with fallback to _core for editable installs
+try:
+    from vroom_csv._version import version as __version__
+except ImportError:
+    from vroom_csv._core import __version__
 
 
 def _format_bytes(num_bytes: int) -> str:

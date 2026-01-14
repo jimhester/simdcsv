@@ -22,6 +22,13 @@
 #define access _access
 #define W_OK 2
 #define getpid _getpid
+// Windows compatibility for POSIX stat macros
+#ifndef S_ISREG
+#define S_ISREG(m) (((m) & _S_IFMT) == _S_IFREG)
+#endif
+#ifndef S_ISDIR
+#define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+#endif
 #else
 #include <unistd.h>
 #endif

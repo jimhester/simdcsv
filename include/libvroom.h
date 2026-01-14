@@ -1019,7 +1019,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
     } else if ((byte & 0xE0) == 0xC0) {
       // Two-byte sequence (110xxxxx 10xxxxxx)
       if (i + 1 >= len || (buf[i + 1] & 0xC0) != 0x80) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: truncated 2-byte sequence");
         if (errors.should_stop())
           return;
@@ -1029,7 +1029,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
       }
       // Check for overlong encoding (code points < 0x80 encoded as 2 bytes)
       if ((byte & 0x1E) == 0) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: overlong 2-byte encoding");
         if (errors.should_stop())
           return;
@@ -1039,7 +1039,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
     } else if ((byte & 0xF0) == 0xE0) {
       // Three-byte sequence (1110xxxx 10xxxxxx 10xxxxxx)
       if (i + 2 >= len || (buf[i + 1] & 0xC0) != 0x80 || (buf[i + 2] & 0xC0) != 0x80) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: truncated 3-byte sequence");
         if (errors.should_stop())
           return;
@@ -1050,12 +1050,12 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
       // Check for overlong encoding and surrogate code points
       uint32_t cp = ((byte & 0x0F) << 12) | ((buf[i + 1] & 0x3F) << 6) | (buf[i + 2] & 0x3F);
       if (cp < 0x800) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: overlong 3-byte encoding");
         if (errors.should_stop())
           return;
       } else if (cp >= 0xD800 && cp <= 0xDFFF) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: surrogate code point");
         if (errors.should_stop())
           return;
@@ -1066,7 +1066,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
       // Four-byte sequence (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
       if (i + 3 >= len || (buf[i + 1] & 0xC0) != 0x80 || (buf[i + 2] & 0xC0) != 0x80 ||
           (buf[i + 3] & 0xC0) != 0x80) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: truncated 4-byte sequence");
         if (errors.should_stop())
           return;
@@ -1078,12 +1078,12 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
       uint32_t cp = ((byte & 0x07) << 18) | ((buf[i + 1] & 0x3F) << 12) |
                     ((buf[i + 2] & 0x3F) << 6) | (buf[i + 3] & 0x3F);
       if (cp < 0x10000) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: overlong 4-byte encoding");
         if (errors.should_stop())
           return;
       } else if (cp > 0x10FFFF) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: code point exceeds U+10FFFF");
         if (errors.should_stop())
           return;
@@ -1093,7 +1093,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
     } else {
       // Invalid leading byte (10xxxxxx continuation byte without leading byte,
       // or invalid 5/6-byte sequence starts 111110xx/1111110x)
-      errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+      errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                        "Invalid UTF-8 sequence: invalid leading byte");
       if (errors.should_stop())
         return;

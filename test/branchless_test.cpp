@@ -679,6 +679,83 @@ TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsNullByte) {
   EXPECT_TRUE(found_null_error) << "Should detect NULL_BYTE error";
 }
 
+TEST_F(BranchlessErrorCollectionTest, ErrorInSIMDBlock) {
+  // Test detection of errors within a 64-byte SIMD block.
+  // This specifically tests the error handling code path at line 112 in
+  // branchless_state_machine.cpp which only executes when errors occur
+  // within a full 64-byte block (not in the partial block at the end).
+  // The content must be >= 64 bytes with an error in the first 64 bytes.
+  std::vector<uint8_t> data;
+  std::string content;
+
+  // Build content: header + padding + null byte + more content
+  // Total needs to be >= 64 bytes with error in first 64 bytes
+  content = "A,B,C\n";             // 6 bytes
+  content += std::string(20, 'x'); // 20 bytes padding (total: 26)
+  content.push_back('\0');         // null byte at position 26
+  content += std::string(40, 'y'); // 40 more bytes (total: 67)
+  content += "\n";                 // newline (total: 68)
+
+  data.resize(content.size() + LIBVROOM_PADDING);
+  std::memcpy(data.data(), content.data(), content.size());
+
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+
+  parser.parse_branchless_with_errors(data.data(), idx, content.size(), errors);
+
+  // Should find the null byte error in the SIMD block
+  bool found_null_error = false;
+  for (const auto& err : errors.errors()) {
+    if (err.code == libvroom::ErrorCode::NULL_BYTE) {
+      found_null_error = true;
+      // Verify error position is within first 64 bytes (SIMD block)
+      EXPECT_LT(err.byte_offset, 64u) << "Error should be detected within first 64-byte SIMD block";
+      break;
+    }
+  }
+  EXPECT_TRUE(found_null_error) << "Should detect NULL_BYTE error in SIMD block";
+}
+
+TEST_F(BranchlessErrorCollectionTest, QuoteErrorInSIMDBlock) {
+  // Test detection of quote-in-unquoted-field within a 64-byte SIMD block.
+  // Similar to ErrorInSIMDBlock but tests the quote error detection path.
+  std::vector<uint8_t> data;
+  std::string content;
+
+  // Build content: header + unquoted field with embedded quote
+  // Total needs to be >= 64 bytes with error in first 64 bytes
+  content = "A,B,C\n";             // 6 bytes
+  content += "value";              // 5 bytes (total: 11)
+  content += "\"";                 // quote in unquoted field at position 11
+  content += "more";               // 4 bytes (total: 16)
+  content += ",2,3\n";             // 5 bytes (total: 21)
+  content += std::string(50, 'x'); // padding to exceed 64 bytes (total: 71)
+  content += "\n";
+
+  data.resize(content.size() + LIBVROOM_PADDING);
+  std::memcpy(data.data(), content.data(), content.size());
+
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(data.size(), 1);
+  libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+
+  parser.parse_branchless_with_errors(data.data(), idx, content.size(), errors);
+
+  // Should find the quote error in the SIMD block
+  bool found_quote_error = false;
+  for (const auto& err : errors.errors()) {
+    if (err.code == libvroom::ErrorCode::QUOTE_IN_UNQUOTED_FIELD) {
+      found_quote_error = true;
+      // Verify error position is within first 64 bytes (SIMD block)
+      EXPECT_LT(err.byte_offset, 64u) << "Error should be detected within first 64-byte SIMD block";
+      break;
+    }
+  }
+  EXPECT_TRUE(found_quote_error) << "Should detect QUOTE_IN_UNQUOTED_FIELD error in SIMD block";
+}
+
 TEST_F(BranchlessErrorCollectionTest, BranchlessWithErrorsMultiThreaded) {
   // Test multi-threaded branchless parsing with error collection
   std::vector<uint8_t> data;

@@ -789,7 +789,8 @@ int cmdTail(const char* filename, int n_threads, size_t num_rows, bool has_heade
     config.dialect = dialect;
   }
   config.parse_header = has_header;
-  config.error_mode = strict_mode ? libvroom::ErrorMode::STRICT : libvroom::ErrorMode::PERMISSIVE;
+  config.error_mode =
+      strict_mode ? libvroom::ErrorMode::FAIL_FAST : libvroom::ErrorMode::PERMISSIVE;
 
   // Use a deque as a circular buffer to hold the last N rows
   // Each row is stored as a vector of strings (field values)
