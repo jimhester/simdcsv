@@ -540,7 +540,8 @@ bool ColumnTypeInference::is_column_type_confirmed(size_t column, size_t min_sam
     return false;
 
   const auto& s = stats_[column];
-  size_t non_empty = s.total_count - s.empty_count;
+  // Exclude both empty and NA values from the denominator (consistent with dominant_type())
+  size_t non_empty = s.total_count - s.empty_count - s.na_count;
 
   // Need enough samples to be confident
   if (non_empty < min_samples)
