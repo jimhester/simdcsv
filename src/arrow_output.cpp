@@ -297,7 +297,14 @@ std::vector<size_t> ArrowConverter::compute_sample_indices(size_t num_rows) cons
     }
   } else {
     // Distributed sampling: sample from equally-spaced locations
-    size_t total_samples = options_.num_sample_locations * options_.rows_per_location;
+    size_t num_locations = options_.num_sample_locations;
+    size_t rows_per_loc = options_.rows_per_location;
+
+    if (num_locations == 0) {
+      return indices;
+    }
+
+    size_t total_samples = num_locations * rows_per_loc;
 
     if (num_rows <= total_samples) {
       // File smaller than total sample size: sample all rows
@@ -306,41 +313,47 @@ std::vector<size_t> ArrowConverter::compute_sample_indices(size_t num_rows) cons
         indices.push_back(i);
       }
     } else {
-      // Calculate equally-spaced sample locations
-      // We use num_sample_locations - 1 intervals to ensure last row is included
-      indices.reserve(total_samples);
+      // Distribute sample locations evenly across the file.
+      // - Location 0 starts at row 0
+      // - Location N-1 ends at row num_rows-1 (starts at num_rows - rows_per_loc)
+      // - Intermediate locations are evenly distributed between these endpoints
+      //
+      // To avoid duplicates, we cap actual_rows_per_loc to the step size between locations.
+      // This ensures non-overlapping sample blocks.
 
-      // Special case: ensure we always sample the first location (row 0)
-      // and the last location (including rows near the end)
-      size_t num_locations = options_.num_sample_locations;
-      if (num_locations == 0) {
-        return indices;
-      }
-
-      // For num_locations locations, we divide the file into num_locations-1 intervals
-      // Location 0 starts at row 0
-      // Location num_locations-1 starts at a position that allows sampling rows_per_location
-      // rows before reaching the end
-      for (size_t loc = 0; loc < num_locations; ++loc) {
-        size_t start;
-        if (loc == 0) {
-          start = 0;
-        } else if (loc == num_locations - 1) {
-          // Last location: ensure we can sample rows_per_location rows ending at num_rows
-          // Start at num_rows - rows_per_location, but not before any previous sample
-          start = num_rows > options_.rows_per_location ? num_rows - options_.rows_per_location : 0;
-        } else {
-          // Evenly distribute intermediate locations
-          // loc ranges from 1 to num_locations-2
-          // Map to positions between 0 and (num_rows - rows_per_location)
-          size_t max_start =
-              num_rows > options_.rows_per_location ? num_rows - options_.rows_per_location : 0;
-          start = (loc * max_start) / (num_locations - 1);
+      if (num_locations == 1) {
+        // Single location: sample first rows_per_loc rows
+        indices.reserve(rows_per_loc);
+        for (size_t i = 0; i < rows_per_loc && i < num_rows; ++i) {
+          indices.push_back(i);
         }
+      } else {
+        // Multiple locations: calculate step and cap rows per location to avoid overlap
+        // step = (num_rows - rows_per_loc) / (num_locations - 1)
+        // But if rows_per_loc > step, blocks would overlap, so we cap it
+        size_t last_start = num_rows - rows_per_loc;
+        size_t step = last_start / (num_locations - 1);
 
-        // Sample rows_per_location contiguous rows starting at this location
-        for (size_t i = 0; i < options_.rows_per_location && (start + i) < num_rows; ++i) {
-          indices.push_back(start + i);
+        // Cap actual rows per location to avoid overlap between consecutive blocks
+        // Each block can take at most 'step' rows (except the last block)
+        size_t actual_rows_per_loc = std::min(rows_per_loc, step > 0 ? step : rows_per_loc);
+
+        // For the last location, we can always sample the full rows_per_loc
+        // since there's no next block to overlap with
+        indices.reserve(num_locations * actual_rows_per_loc);
+
+        for (size_t loc = 0; loc < num_locations; ++loc) {
+          // Calculate start position for this location
+          // Linear interpolation: start = loc * last_start / (num_locations - 1)
+          size_t start = (loc * last_start) / (num_locations - 1);
+
+          // For the last location, sample full rows_per_loc; otherwise use capped value
+          size_t rows_this_loc = (loc == num_locations - 1) ? rows_per_loc : actual_rows_per_loc;
+
+          // Sample contiguous rows starting at this location
+          for (size_t i = 0; i < rows_this_loc; ++i) {
+            indices.push_back(start + i);
+          }
         }
       }
     }
