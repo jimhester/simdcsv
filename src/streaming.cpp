@@ -436,7 +436,7 @@ struct StreamParser::Impl {
       if (errors.should_stop()) {
         partial_buffer.clear();
         current_field_bounds.clear();
-        return StreamStatus::ERROR;
+        return StreamStatus::STREAM_ERROR;
       }
 
       // Check if error callback requested stop
@@ -514,7 +514,7 @@ struct StreamParser::Impl {
       partial_buffer.clear();
     }
 
-    return errors.has_fatal_errors() ? StreamStatus::ERROR : StreamStatus::END_OF_DATA;
+    return errors.has_fatal_errors() ? StreamStatus::STREAM_ERROR : StreamStatus::END_OF_DATA;
   }
 
   // Pull model: get next row from pending queue
@@ -746,7 +746,7 @@ bool StreamReader::next_row() {
       break;
 
     case StreamStatus::END_OF_DATA:
-    case StreamStatus::ERROR:
+    case StreamStatus::STREAM_ERROR:
       return false;
 
     default:

@@ -1173,7 +1173,7 @@ TEST(StreamingTest, UnclosedQuoteStrict) {
   parser.parse_chunk(csv);
   StreamStatus status = parser.finish();
 
-  EXPECT_EQ(status, StreamStatus::ERROR);
+  EXPECT_EQ(status, StreamStatus::STREAM_ERROR);
   EXPECT_TRUE(parser.error_collector().has_fatal_errors());
 }
 
@@ -1844,7 +1844,7 @@ TEST(StreamingTest, StrictErrorModeStopsOnError) {
   StreamStatus status = parser.parse_chunk(csv);
 
   // Strict mode should stop on first error (quote in unquoted field)
-  EXPECT_EQ(status, StreamStatus::ERROR);
+  EXPECT_EQ(status, StreamStatus::STREAM_ERROR);
   EXPECT_TRUE(parser.error_collector().has_errors());
 }
 
