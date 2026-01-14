@@ -84,6 +84,35 @@ Also check:
 - Offset array overflow (Arrow uses int32 offsets)
 - Memory alignment requirements
 
+## CROSS-CUTTING CONCERNS
+
+When reviewing changes to core functionality, check for impacts across API surfaces:
+
+### Enum/Type Changes
+If the change adds or modifies enums (e.g., FieldType, ErrorCode):
+- Search for switch statements: `grep -r "switch.*EnumName" --include="*.cpp"`
+- Check C API mappings in `src/libvroom_c.cpp`
+- Check Python bindings in `python/src/bindings.cpp`
+- Verify all cases are handled (no silent fallthrough to default)
+
+### Configuration/Options Changes
+If the change adds new options or configuration:
+- Is it exposed in the C API?
+- Is it exposed in Python bindings?
+- Is it documented?
+
+### Behavioral Changes
+If the change modifies how data is processed or interpreted:
+- Are there duplicate implementations elsewhere? (e.g., null value lists in both C++ and Python)
+- Do all API surfaces behave consistently?
+- Search for related patterns: `grep -rn "pattern" python/ src/libvroom_c.cpp`
+
+### CI Test Failures
+If CI tests fail in other languages (Python, etc.):
+- Don't assume "pre-existing" - investigate the root cause
+- Check if failures are related to the changes in this PR
+- Determine if bindings need updates to support new functionality
+
 ## HISTORICAL CONTEXT
 
 Consider if the change:
