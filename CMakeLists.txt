@@ -1005,6 +1005,11 @@ if(HAVE_ZSV OR HAVE_DUCKDB OR HAVE_ARROW)
     list(APPEND BENCHMARK_SOURCES benchmark/external_parser_benchmarks.cpp)
 endif()
 
+# Add Arrow convert benchmarks when Arrow is enabled
+if(LIBVROOM_ENABLE_ARROW)
+    list(APPEND BENCHMARK_SOURCES benchmark/arrow_convert_benchmarks.cpp)
+endif()
+
 add_executable(libvroom_benchmark ${BENCHMARK_SOURCES})
 
 target_link_libraries(libvroom_benchmark PRIVATE

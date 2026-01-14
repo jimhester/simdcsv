@@ -165,6 +165,124 @@ csv_to_arrow_from_memory(const uint8_t* data, size_t len,
                          const ArrowConvertOptions& options = ArrowConvertOptions(),
                          const Dialect& dialect = Dialect::csv());
 
+// =============================================================================
+// Columnar Format Export (Parquet/Feather)
+// =============================================================================
+
+/// Output format for columnar file export
+enum class ColumnarFormat {
+  PARQUET, ///< Apache Parquet format (compressed columnar)
+  FEATHER, ///< Arrow IPC/Feather format (fast serialization)
+  AUTO     ///< Auto-detect from file extension (.parquet, .feather, .arrow)
+};
+
+/// Options for Parquet export
+struct ParquetWriteOptions {
+  /// Compression codec for Parquet files
+  /// Default is SNAPPY for good balance of speed and compression
+  enum class Compression {
+    UNCOMPRESSED,
+    SNAPPY, ///< Default - fast with moderate compression
+    GZIP,   ///< Better compression, slower
+    ZSTD,   ///< Best compression/speed tradeoff
+    LZ4     ///< Fastest compression
+  };
+  Compression compression = Compression::SNAPPY;
+
+  /// Row group size (number of rows per row group)
+  /// Smaller values use less memory during write, larger values may compress better
+  int64_t row_group_size = 1024 * 1024; // 1M rows default
+};
+
+/// Result of a columnar file write operation
+struct WriteResult {
+  bool success = false;
+  std::string error_message;
+  int64_t bytes_written = 0;
+
+  bool ok() const { return success; }
+};
+
+/**
+ * @brief Write an Arrow table to a Parquet file.
+ *
+ * @param table The Arrow table to write
+ * @param output_path Path to the output Parquet file
+ * @param options Write options (compression, row group size)
+ * @return WriteResult indicating success or failure
+ */
+WriteResult write_parquet(const std::shared_ptr<arrow::Table>& table,
+                          const std::string& output_path,
+                          const ParquetWriteOptions& options = ParquetWriteOptions());
+
+/**
+ * @brief Write an Arrow table to a Feather (Arrow IPC) file.
+ *
+ * Feather is a fast binary columnar format optimized for reading/writing
+ * rather than storage efficiency. It's ideal for temporary files or
+ * inter-process communication.
+ *
+ * @param table The Arrow table to write
+ * @param output_path Path to the output Feather file
+ * @return WriteResult indicating success or failure
+ */
+WriteResult write_feather(const std::shared_ptr<arrow::Table>& table,
+                          const std::string& output_path);
+
+/**
+ * @brief Detect output format from file extension.
+ *
+ * @param path File path to examine
+ * @return Detected format, or AUTO if extension not recognized
+ */
+ColumnarFormat detect_format_from_extension(const std::string& path);
+
+/**
+ * @brief Write an Arrow table to a columnar file with format auto-detection.
+ *
+ * @param table The Arrow table to write
+ * @param output_path Path to the output file (extension determines format)
+ * @param format Explicit format, or AUTO to detect from extension
+ * @param parquet_options Options for Parquet output (ignored for Feather)
+ * @return WriteResult indicating success or failure
+ */
+WriteResult write_columnar(const std::shared_ptr<arrow::Table>& table,
+                           const std::string& output_path,
+                           ColumnarFormat format = ColumnarFormat::AUTO,
+                           const ParquetWriteOptions& parquet_options = ParquetWriteOptions());
+
+/**
+ * @brief Convert a CSV file directly to Parquet format.
+ *
+ * Convenience function that combines csv_to_arrow() and write_parquet().
+ *
+ * @param csv_path Path to input CSV file
+ * @param parquet_path Path to output Parquet file
+ * @param arrow_options Options for CSV to Arrow conversion
+ * @param parquet_options Options for Parquet output
+ * @param dialect CSV dialect (default: auto-detect)
+ * @return WriteResult indicating success or failure
+ */
+WriteResult csv_to_parquet(const std::string& csv_path, const std::string& parquet_path,
+                           const ArrowConvertOptions& arrow_options = ArrowConvertOptions(),
+                           const ParquetWriteOptions& parquet_options = ParquetWriteOptions(),
+                           const Dialect& dialect = Dialect::csv());
+
+/**
+ * @brief Convert a CSV file directly to Feather format.
+ *
+ * Convenience function that combines csv_to_arrow() and write_feather().
+ *
+ * @param csv_path Path to input CSV file
+ * @param feather_path Path to output Feather file
+ * @param arrow_options Options for CSV to Arrow conversion
+ * @param dialect CSV dialect (default: auto-detect)
+ * @return WriteResult indicating success or failure
+ */
+WriteResult csv_to_feather(const std::string& csv_path, const std::string& feather_path,
+                           const ArrowConvertOptions& arrow_options = ArrowConvertOptions(),
+                           const Dialect& dialect = Dialect::csv());
+
 } // namespace libvroom
 
 #endif // LIBVROOM_ENABLE_ARROW

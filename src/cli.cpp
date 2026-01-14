@@ -14,6 +14,10 @@
 #include "streaming.h"
 #include "utf8.h"
 
+#ifdef LIBVROOM_ENABLE_ARROW
+#include "arrow_output.h"
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cfloat>
@@ -263,6 +267,9 @@ void printUsage(const char* prog) {
   cerr << "  stats         Display statistical summary for each column\n";
   cerr << "  pretty        Pretty-print the CSV with aligned columns\n";
   cerr << "  dialect       Detect and output the CSV dialect\n";
+#ifdef LIBVROOM_ENABLE_ARROW
+  cerr << "  convert       Convert CSV to columnar format (Parquet/Feather)\n";
+#endif
   cerr << "\nArguments:\n";
   cerr << "  csvfile       Path to CSV file, or '-' to read from stdin.\n";
   cerr << "                If omitted, reads from stdin.\n";
@@ -280,6 +287,9 @@ void printUsage(const char* prog) {
   cerr << "                        latin1, windows-1252\n";
   cerr << "  -j            Output in JSON format (for dialect/schema/stats)\n";
   cerr << "  -m <size>     Sample size for schema/stats (0=all rows, default: 0)\n";
+  cerr << "  -o <file>     Output file path (for convert command)\n";
+  cerr << "  -F <format>   Output format: parquet, feather, auto (default: auto)\n";
+  cerr << "  -C <codec>    Compression codec for Parquet: snappy, gzip, zstd, lz4, none\n";
   cerr << "  -f, --force   Force output even with low confidence (for dialect command)\n";
   cerr << "  -S, --strict  Strict mode: exit with code 1 on any parse error\n";
   cerr << "  --cache       Enable index caching for faster re-reads\n";
@@ -320,6 +330,13 @@ void printUsage(const char* prog) {
   cerr << "  " << prog << " stats -m 1000 data.csv   # Sample 1000 rows\n";
   cerr << "  cat data.csv | " << prog << " count\n";
   cerr << "  " << prog << " head - < data.csv\n";
+#ifdef LIBVROOM_ENABLE_ARROW
+  cerr << "\nConvert Examples:\n";
+  cerr << "  " << prog << " convert data.csv -o data.parquet\n";
+  cerr << "  " << prog << " convert data.csv -o data.feather\n";
+  cerr << "  " << prog << " convert data.csv -o data.parquet -C zstd  # ZSTD compression\n";
+  cerr << "  " << prog << " convert -d tab data.tsv -o data.parquet   # TSV input\n";
+#endif
 }
 
 // Helper to check if reading from stdin
@@ -1678,6 +1695,133 @@ int cmdSchema(const char* filename, int n_threads, bool has_header,
   return 0;
 }
 
+#ifdef LIBVROOM_ENABLE_ARROW
+// Command: convert - convert CSV to Parquet or Feather format
+int cmdConvert(const char* filename, const std::string& output_path, int n_threads,
+               const libvroom::Dialect& dialect, bool auto_detect, const std::string& format_str,
+               const std::string& compression_str, libvroom::Encoding forced_encoding,
+               libvroom::ProgressCallback progress_callback) {
+  // Validate output path
+  if (output_path.empty()) {
+    cerr << "Error: Output path required (-o <file>)" << endl;
+    return 1;
+  }
+
+  // Cannot read from stdin for convert (need seekable file for Arrow)
+  if (isStdinInput(filename)) {
+    cerr << "Error: Cannot convert from stdin. Please specify an input file." << endl;
+    return 1;
+  }
+
+  // Determine output format
+  libvroom::ColumnarFormat format = libvroom::ColumnarFormat::AUTO;
+  if (!format_str.empty()) {
+    std::string fmt_lower = format_str;
+    std::transform(fmt_lower.begin(), fmt_lower.end(), fmt_lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    if (fmt_lower == "parquet" || fmt_lower == "pq") {
+      format = libvroom::ColumnarFormat::PARQUET;
+    } else if (fmt_lower == "feather" || fmt_lower == "arrow" || fmt_lower == "ipc") {
+      format = libvroom::ColumnarFormat::FEATHER;
+    } else if (fmt_lower != "auto") {
+      cerr << "Error: Unknown output format '" << format_str << "'" << endl;
+      cerr << "Valid formats: parquet, feather, auto" << endl;
+      return 1;
+    }
+  }
+
+  // If still auto, detect from extension
+  if (format == libvroom::ColumnarFormat::AUTO) {
+    format = libvroom::detect_format_from_extension(output_path);
+    if (format == libvroom::ColumnarFormat::AUTO) {
+      cerr << "Error: Cannot determine output format from extension." << endl;
+      cerr << "Use -F to specify format, or use .parquet/.feather extension." << endl;
+      return 1;
+    }
+  }
+
+  // Set up Parquet options
+  libvroom::ParquetWriteOptions parquet_opts;
+  if (!compression_str.empty()) {
+    std::string comp_lower = compression_str;
+    std::transform(comp_lower.begin(), comp_lower.end(), comp_lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    if (comp_lower == "snappy") {
+      parquet_opts.compression = libvroom::ParquetWriteOptions::Compression::SNAPPY;
+    } else if (comp_lower == "gzip" || comp_lower == "gz") {
+      parquet_opts.compression = libvroom::ParquetWriteOptions::Compression::GZIP;
+    } else if (comp_lower == "zstd") {
+      parquet_opts.compression = libvroom::ParquetWriteOptions::Compression::ZSTD;
+    } else if (comp_lower == "lz4") {
+      parquet_opts.compression = libvroom::ParquetWriteOptions::Compression::LZ4;
+    } else if (comp_lower == "none" || comp_lower == "uncompressed") {
+      parquet_opts.compression = libvroom::ParquetWriteOptions::Compression::UNCOMPRESSED;
+    } else {
+      cerr << "Error: Unknown compression codec '" << compression_str << "'" << endl;
+      cerr << "Valid codecs: snappy (default), gzip, zstd, lz4, none" << endl;
+      return 1;
+    }
+  }
+
+  // Load file and convert to Arrow
+  cerr << "Reading CSV file: " << filename << endl;
+
+  libvroom::ArrowConvertOptions arrow_opts;
+  libvroom::Dialect effective_dialect = dialect;
+
+  // If auto-detect is enabled, detect dialect first
+  if (auto_detect) {
+    LoadResult load_result;
+    try {
+      if (forced_encoding != libvroom::Encoding::UNKNOWN) {
+        load_result = read_file_with_encoding(filename, LIBVROOM_PADDING, forced_encoding);
+      } else {
+        load_result = read_file_with_encoding(filename, LIBVROOM_PADDING);
+      }
+    } catch (const std::exception& e) {
+      cerr << "Error: Could not load file '" << filename << "': " << e.what() << endl;
+      return 1;
+    }
+
+    libvroom::DialectDetector detector;
+    auto detection = detector.detect(load_result.data(), load_result.size);
+    if (detection.success()) {
+      effective_dialect = detection.dialect;
+      cerr << "Auto-detected dialect: " << effective_dialect.to_string() << endl;
+    }
+  }
+
+  auto arrow_result = libvroom::csv_to_arrow(filename, arrow_opts, effective_dialect);
+  if (!arrow_result.ok()) {
+    cerr << "Error: Failed to convert CSV to Arrow: " << arrow_result.error_message << endl;
+    return 1;
+  }
+
+  cerr << "Converted " << arrow_result.num_rows << " rows x " << arrow_result.num_columns
+       << " columns" << endl;
+
+  // Write to output format
+  const char* format_name = (format == libvroom::ColumnarFormat::PARQUET) ? "Parquet" : "Feather";
+  cerr << "Writing " << format_name << " file: " << output_path << endl;
+
+  libvroom::WriteResult write_result;
+  if (format == libvroom::ColumnarFormat::PARQUET) {
+    write_result = libvroom::write_parquet(arrow_result.table, output_path, parquet_opts);
+  } else {
+    write_result = libvroom::write_feather(arrow_result.table, output_path);
+  }
+
+  if (!write_result.ok()) {
+    cerr << "Error: Failed to write output file: " << write_result.error_message << endl;
+    return 1;
+  }
+
+  cerr << "Successfully wrote " << write_result.bytes_written << " bytes to " << output_path
+       << endl;
+  return 0;
+}
+#endif // LIBVROOM_ENABLE_ARROW
+
 // Command: stats - display statistical summary for each column
 int cmdStats(const char* filename, int n_threads, bool has_header, const libvroom::Dialect& dialect,
              bool auto_detect, bool json_output, bool strict_mode, size_t sample_size = 0) {
@@ -1931,6 +2075,9 @@ int main(int argc, char* argv[]) {
   string delimiter_str = "comma";
   string encoding_str; // User-specified encoding string
   char quote_char = '"';
+  string output_path;     // Output file for convert command
+  string output_format;   // Output format for convert command (parquet, feather, auto)
+  string compression_str; // Compression codec for Parquet (snappy, gzip, zstd, lz4, none)
 
   // Pre-scan for long options (since we're not using getopt_long)
   for (int i = 2; i < argc; ++i) {
@@ -2007,7 +2154,7 @@ int main(int argc, char* argv[]) {
   }
 
   int c;
-  while ((c = getopt(argc, argv, "n:c:Ht:d:q:e:s:m:jfpShv")) != -1) {
+  while ((c = getopt(argc, argv, "n:c:Ht:d:q:e:s:m:o:F:C:jfpShv")) != -1) {
     switch (c) {
     case 'n': {
       char* endptr;
@@ -2092,6 +2239,15 @@ int main(int argc, char* argv[]) {
     case 'S':
       strict_mode = true;
       break;
+    case 'o':
+      output_path = optarg;
+      break;
+    case 'F':
+      output_format = optarg;
+      break;
+    case 'C':
+      compression_str = optarg;
+      break;
     case 'h':
       printUsage(argv[0]);
       return 0;
@@ -2166,6 +2322,11 @@ int main(int argc, char* argv[]) {
   } else if (command == "stats") {
     result = cmdStats(filename, n_threads, has_header, dialect, auto_detect, json_output,
                       strict_mode, sample_size);
+#ifdef LIBVROOM_ENABLE_ARROW
+  } else if (command == "convert") {
+    result = cmdConvert(filename, output_path, n_threads, dialect, auto_detect, output_format,
+                        compression_str, forced_encoding, progress_cb);
+#endif
   } else {
     cerr << "Error: Unknown command '" << command << "'\n";
     printUsage(argv[0]);
