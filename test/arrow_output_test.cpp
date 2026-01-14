@@ -794,6 +794,173 @@ TEST_F(ArrowOutputTest, RoundTripFeatherWithNulls) {
   std::remove(tmp_path.c_str());
 }
 
+// =============================================================================
+// Distributed Sampling Tests (Issue #490)
+// =============================================================================
+
+TEST_F(ArrowOutputTest, DistributedSamplingDefaultEnabled) {
+  // Verify that default options use distributed sampling
+  ArrowConvertOptions opts;
+  EXPECT_EQ(opts.sampling_strategy, SamplingStrategy::DISTRIBUTED);
+  EXPECT_EQ(opts.num_sample_locations, 100U);
+  EXPECT_EQ(opts.rows_per_location, 100U);
+}
+
+TEST_F(ArrowOutputTest, SequentialSamplingBackwardCompatible) {
+  // Verify that sequential sampling still works as before
+  ArrowConvertOptions opts;
+  opts.sampling_strategy = SamplingStrategy::SEQUENTIAL;
+  opts.type_inference_rows = 5;
+  auto result = parseAndConvert("value\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  // All values are integers, so type should be INT64
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
+TEST_F(ArrowOutputTest, DistributedSamplingSmallFile) {
+  // For files smaller than total sample size, all rows should be sampled
+  ArrowConvertOptions opts;
+  opts.sampling_strategy = SamplingStrategy::DISTRIBUTED;
+  opts.num_sample_locations = 100;
+  opts.rows_per_location = 100;
+  // Only 5 data rows - should sample all
+  auto result = parseAndConvert("value\n1\n2\n3\n4\n5\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
+TEST_F(ArrowOutputTest, DistributedSamplingDetectsLateTypeChange) {
+  // Create CSV where first 100 rows are integers but later rows are floats
+  // Sequential sampling would miss the float type, distributed should catch it
+  std::string csv = "value\n";
+  // First 100 rows: integers
+  for (int i = 0; i < 100; ++i) {
+    csv += std::to_string(i) + "\n";
+  }
+  // Next 100 rows: floats (these should be sampled by distributed strategy)
+  for (int i = 0; i < 100; ++i) {
+    csv += std::to_string(i) + ".5\n";
+  }
+
+  // Test with distributed sampling - should detect DOUBLE
+  ArrowConvertOptions opts_distributed;
+  opts_distributed.sampling_strategy = SamplingStrategy::DISTRIBUTED;
+  opts_distributed.num_sample_locations = 10; // Sample from 10 locations
+  opts_distributed.rows_per_location = 5;     // 5 rows each = 50 samples
+  auto result_distributed = parseAndConvert(csv, opts_distributed);
+  ASSERT_TRUE(result_distributed.ok()) << result_distributed.error_message;
+  EXPECT_EQ(result_distributed.schema->field(0)->type()->id(), arrow::Type::DOUBLE);
+
+  // Test with sequential sampling of only first 50 rows - would miss floats
+  ArrowConvertOptions opts_sequential;
+  opts_sequential.sampling_strategy = SamplingStrategy::SEQUENTIAL;
+  opts_sequential.type_inference_rows = 50; // Only sample first 50 rows
+  auto result_sequential = parseAndConvert(csv, opts_sequential);
+  ASSERT_TRUE(result_sequential.ok()) << result_sequential.error_message;
+  // Sequential only saw integers
+  EXPECT_EQ(result_sequential.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
+TEST_F(ArrowOutputTest, DistributedSamplingSamplesLastRows) {
+  // Verify that distributed sampling includes the last rows of the file
+  // Create CSV where only the last few rows have a different type
+  std::string csv = "value\n";
+  // First 195 rows: integers
+  for (int i = 0; i < 195; ++i) {
+    csv += std::to_string(i) + "\n";
+  }
+  // Last 5 rows: text (forces STRING type)
+  csv += "hello\nworld\nfoo\nbar\nbaz\n";
+
+  // With distributed sampling, last rows should be sampled
+  ArrowConvertOptions opts;
+  opts.sampling_strategy = SamplingStrategy::DISTRIBUTED;
+  opts.num_sample_locations = 10;
+  opts.rows_per_location = 5;
+  auto result = parseAndConvert(csv, opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  // Should detect STRING because last rows are text
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::STRING);
+}
+
+TEST_F(ArrowOutputTest, DistributedSamplingMultipleColumns) {
+  // Test distributed sampling works correctly with multiple columns
+  std::string csv = "col1,col2,col3\n";
+  // 50 rows: col1=int, col2=float, col3=string
+  for (int i = 0; i < 50; ++i) {
+    csv += std::to_string(i) + "," + std::to_string(i) + ".5,text" + std::to_string(i) + "\n";
+  }
+
+  ArrowConvertOptions opts;
+  opts.sampling_strategy = SamplingStrategy::DISTRIBUTED;
+  opts.num_sample_locations = 5;
+  opts.rows_per_location = 5;
+  auto result = parseAndConvert(csv, opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+  EXPECT_EQ(result.schema->field(1)->type()->id(), arrow::Type::DOUBLE);
+  EXPECT_EQ(result.schema->field(2)->type()->id(), arrow::Type::STRING);
+}
+
+TEST_F(ArrowOutputTest, DistributedSamplingWithNulls) {
+  // Test that distributed sampling handles null values correctly
+  std::string csv = "value\n";
+  for (int i = 0; i < 100; ++i) {
+    if (i % 10 == 0) {
+      csv += "NA\n"; // Null every 10th row
+    } else {
+      csv += std::to_string(i) + "\n";
+    }
+  }
+
+  ArrowConvertOptions opts;
+  opts.sampling_strategy = SamplingStrategy::DISTRIBUTED;
+  opts.num_sample_locations = 10;
+  opts.rows_per_location = 5;
+  auto result = parseAndConvert(csv, opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  // Should still detect INT64 despite null values
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
+TEST_F(ArrowOutputTest, DistributedSamplingEmptyFile) {
+  // Test edge case of header-only file
+  ArrowConvertOptions opts;
+  opts.sampling_strategy = SamplingStrategy::DISTRIBUTED;
+  auto result = parseAndConvert("col1,col2\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.num_rows, 0);
+  EXPECT_EQ(result.num_columns, 2);
+}
+
+TEST_F(ArrowOutputTest, DistributedSamplingSingleRow) {
+  // Test edge case of single data row
+  ArrowConvertOptions opts;
+  opts.sampling_strategy = SamplingStrategy::DISTRIBUTED;
+  opts.num_sample_locations = 100;
+  opts.rows_per_location = 100;
+  auto result = parseAndConvert("value\n42\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
+TEST_F(ArrowOutputTest, DistributedSamplingConfigurable) {
+  // Test that sampling parameters are configurable
+  ArrowConvertOptions opts;
+  opts.sampling_strategy = SamplingStrategy::DISTRIBUTED;
+  opts.num_sample_locations = 5;
+  opts.rows_per_location = 2;
+
+  std::string csv = "value\n";
+  for (int i = 0; i < 100; ++i) {
+    csv += std::to_string(i) + "\n";
+  }
+
+  auto result = parseAndConvert(csv, opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
 #ifdef LIBVROOM_ENABLE_PARQUET
 TEST_F(ArrowOutputTest, RoundTripParquet) {
   // Parse CSV to Arrow table
