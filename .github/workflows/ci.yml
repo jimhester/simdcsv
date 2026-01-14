@@ -29,12 +29,28 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake build-essential
+        sudo apt-get install -y cmake build-essential ccache
 
     - name: Install dependencies (macOS)
       if: runner.os == 'macOS'
       run: |
-        brew install cmake
+        brew install cmake ccache
+
+    - name: Cache ccache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/ccache
+          ~/Library/Caches/ccache
+        key: ccache-${{ runner.os }}-${{ matrix.build_type }}-${{ github.sha }}
+        restore-keys: |
+          ccache-${{ runner.os }}-${{ matrix.build_type }}-
+
+    - name: Configure ccache
+      run: |
+        ccache --set-config=max_size=500M
+        ccache --set-config=compression=true
+        ccache -z
 
     - name: Cache FetchContent dependencies
       uses: actions/cache@v4
@@ -51,6 +67,10 @@ jobs:
     - name: Build
       run: |
         cmake --build build --config ${{ matrix.build_type }} -j
+
+    - name: Show ccache stats
+      run: |
+        ccache -s
 
     - name: Run well-formed CSV tests
       run: |
