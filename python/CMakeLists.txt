@@ -9,6 +9,17 @@ project(vroom_csv_python LANGUAGES CXX)
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 
+# LLVM source-based coverage (for bindings.cpp coverage)
+option(ENABLE_LLVM_COVERAGE "Enable LLVM source-based code coverage (requires Clang)" OFF)
+if(ENABLE_LLVM_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "LLVM source-based coverage requires Clang compiler")
+    endif()
+    message(STATUS "LLVM source-based coverage enabled for Python bindings")
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate)
+endif()
+
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

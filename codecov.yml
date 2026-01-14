@@ -71,7 +71,17 @@ flags:
     carryforward: true
 
   python:
-    # Python bindings test coverage (pytest-cov)
+    # Python source coverage (pytest-cov)
+    # Note: Only measures Python code (__init__.py). Type stub files (.pyi)
+    # contain no executable code and cannot be measured by coverage tools.
+    paths:
+      - python/src/vroom_csv/
+    carryforward: true
+
+  python-bindings:
+    # C++ bindings coverage (llvm-cov)
+    # Measures bindings.cpp - the pybind11 extension module code.
+    # Uses LLVM source-based coverage for accurate attribution.
     paths:
       - python/src/
     carryforward: true
