@@ -45,6 +45,7 @@ python/.venv/
 python/dist/
 python/build/
 python/src/vroom_csv/__pycache__/
+python/src/vroom_csv/_version.py
 python/tests/__pycache__/
 __pycache__/
 *.pyc
