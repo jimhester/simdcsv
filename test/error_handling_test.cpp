@@ -235,6 +235,217 @@ TEST(ErrorCollectorTest, EmptySummary) {
 }
 
 // ============================================================================
+// ERROR LIMIT AND SUPPRESSION TESTS
+// ============================================================================
+
+TEST(ErrorCollectorTest, ErrorLimitBasic) {
+  // Create collector with small limit to test suppression
+  ErrorCollector collector(ErrorMode::PERMISSIVE, 3);
+
+  EXPECT_EQ(collector.max_errors(), 3);
+  EXPECT_EQ(collector.suppressed_count(), 0);
+  EXPECT_FALSE(collector.at_error_limit());
+
+  // Add errors up to the limit
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10,
+                      "Error 1");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
+                      "Error 2");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 3, 1, 30,
+                      "Error 3");
+
+  EXPECT_EQ(collector.error_count(), 3);
+  EXPECT_TRUE(collector.at_error_limit());
+  EXPECT_EQ(collector.suppressed_count(), 0);
+}
+
+TEST(ErrorCollectorTest, ErrorLimitSuppression) {
+  // Create collector with small limit
+  ErrorCollector collector(ErrorMode::PERMISSIVE, 2);
+
+  // Add errors beyond the limit
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10,
+                      "Error 1");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
+                      "Error 2");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 3, 1, 30,
+                      "Error 3");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 4, 1, 40,
+                      "Error 4");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 5, 1, 50,
+                      "Error 5");
+
+  EXPECT_EQ(collector.error_count(), 2);
+  EXPECT_TRUE(collector.at_error_limit());
+  EXPECT_EQ(collector.suppressed_count(), 3);
+}
+
+TEST(ErrorCollectorTest, ErrorLimitSummary) {
+  // Create collector with small limit
+  ErrorCollector collector(ErrorMode::PERMISSIVE, 2);
+
+  // Add errors beyond the limit
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10,
+                      "Error 1");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
+                      "Error 2");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 3, 1, 30,
+                      "Error 3");
+
+  std::string summary = collector.summary();
+
+  // Should show error count and suppression message
+  EXPECT_NE(summary.find("Total errors: 2"), std::string::npos);
+  EXPECT_NE(summary.find("Error limit reached"), std::string::npos);
+  EXPECT_NE(summary.find("1 additional error suppressed"), std::string::npos);
+}
+
+TEST(ErrorCollectorTest, ErrorLimitSummaryPlural) {
+  // Create collector with small limit
+  ErrorCollector collector(ErrorMode::PERMISSIVE, 1);
+
+  // Add multiple errors beyond the limit
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10,
+                      "Error 1");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
+                      "Error 2");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 3, 1, 30,
+                      "Error 3");
+
+  std::string summary = collector.summary();
+
+  // Should show plural "errors"
+  EXPECT_NE(summary.find("2 additional errors suppressed"), std::string::npos);
+}
+
+TEST(ErrorCollectorTest, ClearResetsSuppressedCount) {
+  ErrorCollector collector(ErrorMode::PERMISSIVE, 2);
+
+  // Add errors beyond the limit
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10,
+                      "Error 1");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
+                      "Error 2");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 3, 1, 30,
+                      "Error 3");
+
+  EXPECT_EQ(collector.suppressed_count(), 1);
+
+  collector.clear();
+
+  EXPECT_EQ(collector.suppressed_count(), 0);
+  EXPECT_EQ(collector.error_count(), 0);
+  EXPECT_FALSE(collector.at_error_limit());
+}
+
+TEST(ErrorCollectorTest, MergeFromWithSuppression) {
+  // Main collector with small limit
+  ErrorCollector main_collector(ErrorMode::PERMISSIVE, 3);
+
+  // Add one error to main
+  main_collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1,
+                           10, "Main error");
+
+  // Other collector has errors including some suppressed
+  ErrorCollector other(ErrorMode::PERMISSIVE, 2);
+  other.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
+                  "Other error 1");
+  other.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 3, 1, 30,
+                  "Other error 2");
+  other.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 4, 1, 40,
+                  "Other error 3 (suppressed)");
+
+  EXPECT_EQ(other.suppressed_count(), 1);
+
+  // Merge other into main
+  main_collector.merge_from(other);
+
+  // Main should have 3 errors (1 + 2), and inherit other's suppressed count
+  EXPECT_EQ(main_collector.error_count(), 3);
+  EXPECT_EQ(main_collector.suppressed_count(), 1);
+}
+
+TEST(ErrorCollectorTest, MergeFromExceedsLimit) {
+  // Main collector with small limit, partially full
+  ErrorCollector main_collector(ErrorMode::PERMISSIVE, 3);
+  main_collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1,
+                           10, "Main error 1");
+  main_collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1,
+                           20, "Main error 2");
+
+  // Other collector has more errors than available space
+  ErrorCollector other(ErrorMode::PERMISSIVE, 10);
+  other.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 3, 1, 30,
+                  "Other error 1");
+  other.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 4, 1, 40,
+                  "Other error 2");
+  other.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 5, 1, 50,
+                  "Other error 3");
+
+  // Merge other into main (only 1 slot available)
+  main_collector.merge_from(other);
+
+  // Main should have 3 errors (full), with 2 suppressed (couldn't fit 2 from other)
+  EXPECT_EQ(main_collector.error_count(), 3);
+  EXPECT_EQ(main_collector.suppressed_count(), 2);
+  EXPECT_TRUE(main_collector.at_error_limit());
+}
+
+TEST(ErrorCollectorTest, MergeSortedWithSuppression) {
+  // Main collector with small limit
+  ErrorCollector main_collector(ErrorMode::PERMISSIVE, 4);
+
+  // Create several thread-local collectors with varying errors
+  std::vector<ErrorCollector> thread_collectors;
+
+  ErrorCollector c1(ErrorMode::PERMISSIVE, 2);
+  c1.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10, "T1 E1");
+  c1.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20, "T1 E2");
+  c1.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 3, 1, 30, "T1 E3");
+  thread_collectors.push_back(c1);
+
+  ErrorCollector c2(ErrorMode::PERMISSIVE, 2);
+  c2.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 4, 1, 15, "T2 E1");
+  c2.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 5, 1, 25, "T2 E2");
+  thread_collectors.push_back(c2);
+
+  // Merge all
+  main_collector.merge_sorted(thread_collectors);
+
+  // c1 had 1 suppressed, main limited to 4 total
+  EXPECT_EQ(main_collector.error_count(), 4);
+  EXPECT_EQ(main_collector.suppressed_count(), 1); // c1's suppressed error
+}
+
+TEST(ErrorCollectorTest, MergeFromEmptyCollectorWithFatal) {
+  ErrorCollector main_collector(ErrorMode::PERMISSIVE, 10);
+
+  // Other collector has no errors but has fatal flag set (from a cleared error)
+  ErrorCollector other(ErrorMode::PERMISSIVE, 2);
+  other.add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL, 1, 1, 10, "Fatal error");
+  other.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
+                  "Suppressed");
+
+  EXPECT_TRUE(other.has_fatal_errors());
+  EXPECT_EQ(other.suppressed_count(), 0);
+
+  // Merge other into main - should inherit fatal flag
+  main_collector.merge_from(other);
+
+  EXPECT_TRUE(main_collector.has_fatal_errors());
+  EXPECT_EQ(main_collector.error_count(), 2);
+}
+
+TEST(ErrorCollectorTest, DefaultMaxErrors) {
+  // Verify the default constant value
+  EXPECT_EQ(ErrorCollector::DEFAULT_MAX_ERRORS, 10000);
+
+  // Verify default constructor uses it
+  ErrorCollector collector;
+  EXPECT_EQ(collector.max_errors(), 10000);
+}
+
+// ============================================================================
 // PARSE EXCEPTION TESTS
 // ============================================================================
 

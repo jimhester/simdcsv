@@ -266,6 +266,12 @@ size_t count = errors.error_count();
 // Check if error limit was reached
 bool atLimit = errors.at_error_limit();
 
+// Get count of errors suppressed after hitting the limit
+size_t suppressed = errors.suppressed_count();
+
+// Get the configured maximum error limit
+size_t maxErrors = errors.max_errors();
+
 // Get current error mode
 ErrorMode mode = errors.mode();
 
@@ -287,12 +293,13 @@ for (const auto& err : errors.errors()) {
 // Get summary string
 std::string summary = errors.summary();
 // Output: "Total errors: 3 (Warnings: 1, Errors: 2)"
+// If limit was reached: "Error limit reached: 500 additional errors suppressed"
 ```
 
 ### Managing State
 
 ```cpp
-// Clear all errors and reset fatal flag
+// Clear all errors, reset fatal flag, and reset suppressed count
 errors.clear();
 
 // Change error mode dynamically
@@ -317,12 +324,14 @@ main_errors.merge_sorted(thread_errors);
 Individual merge operations:
 
 ```cpp
-// Merge from another collector (respects max_errors limit)
+// Merge from another collector (respects max_errors limit, combines suppressed counts)
 main_errors.merge_from(other_collector);
 
 // Sort errors by byte offset (for logical file order)
 main_errors.sort_by_offset();
 ```
+
+When merging, suppressed counts from all collectors are combined. If errors cannot be merged due to the limit, they are added to the suppressed count.
 
 > **Thread Safety Note**: `ErrorCollector` is NOT thread-safe. Each thread must use its own collector instance during parsing.
 
