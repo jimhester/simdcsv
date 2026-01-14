@@ -32,6 +32,15 @@ option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 
+# SIMD dispatch option (issue #455)
+option(HWY_COMPILE_ONLY_STATIC "Disable dynamic SIMD dispatch, compile for build machine only" OFF)
+if(HWY_COMPILE_ONLY_STATIC)
+    message(STATUS "Static SIMD dispatch enabled (compile for build machine only)")
+    add_compile_definitions(HWY_COMPILE_ONLY_STATIC)
+else()
+    message(STATUS "Dynamic SIMD dispatch enabled (runtime CPU detection)")
+endif()
+
 # Compiler flags
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-O0 -g)
@@ -327,6 +336,11 @@ set(VROOM_SOURCES
     src/utf8.cpp
 )
 
+# Add SIMD dispatch source for dynamic dispatch (runtime CPU detection)
+if(NOT HWY_COMPILE_ONLY_STATIC)
+    list(APPEND VROOM_SOURCES src/simd_dispatch.cpp)
+endif()
+
 # Add type detection source if enabled
 if(LIBVROOM_ENABLE_TYPE_DETECTION)
     list(APPEND VROOM_SOURCES src/libvroom_types.cpp)
@@ -336,6 +350,11 @@ add_library(vroom ${VROOM_SOURCES})
 
 target_include_directories(vroom PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Add source directory for Highway's foreach_target.h self-inclusion pattern
+target_include_directories(vroom PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_link_libraries(vroom PUBLIC
@@ -592,7 +611,7 @@ add_executable(quote_mask_test
 )
 
 target_link_libraries(quote_mask_test PRIVATE
-    hwy
+    vroom
     GTest::gtest_main
     pthread
 )
