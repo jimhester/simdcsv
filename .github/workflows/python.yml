@@ -113,7 +113,7 @@ jobs:
     - name: Build Python package with coverage instrumentation
       working-directory: python
       env:
-        CMAKE_ARGS: "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/coverage-toolchain.cmake"
+        CMAKE_ARGS: "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/coverage-toolchain.cmake -DCMAKE_VERBOSE_MAKEFILE=ON"
       run: |
         python -m pip install --no-build-isolation -v -e .[test]
 
