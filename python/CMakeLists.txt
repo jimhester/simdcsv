@@ -17,6 +17,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Build position-independent code for shared libraries
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# SIMD dispatch option - default to static for Python bindings to avoid
+# runtime initialization issues with dynamic loading
+option(HWY_COMPILE_ONLY_STATIC "Disable dynamic SIMD dispatch" ON)
+if(HWY_COMPILE_ONLY_STATIC)
+    message(STATUS "Static SIMD dispatch enabled for Python bindings")
+    add_compile_definitions(HWY_COMPILE_ONLY_STATIC)
+endif()
+
 # =============================================================================
 # Build libvroom as a static library (embedded in the Python extension)
 # =============================================================================
@@ -56,9 +64,17 @@ set(VROOM_SOURCES
     ${LIBVROOM_ROOT}/src/libvroom_types.cpp
 )
 
+# Add SIMD dispatch source for dynamic dispatch (when HWY_COMPILE_ONLY_STATIC is OFF)
+if(NOT HWY_COMPILE_ONLY_STATIC)
+    message(STATUS "Dynamic SIMD dispatch enabled for Python bindings")
+    list(APPEND VROOM_SOURCES ${LIBVROOM_ROOT}/src/simd_dispatch.cpp)
+endif()
+
 # Build libvroom as a static library for embedding
 add_library(vroom_static STATIC ${VROOM_SOURCES})
 target_include_directories(vroom_static PUBLIC ${LIBVROOM_ROOT}/include)
+# Add source directory for Highway's foreach_target.h self-inclusion pattern
+target_include_directories(vroom_static PRIVATE ${LIBVROOM_ROOT})
 target_link_libraries(vroom_static PUBLIC hwy)
 set_target_properties(vroom_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
