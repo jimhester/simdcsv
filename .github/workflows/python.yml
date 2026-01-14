@@ -100,9 +100,9 @@ jobs:
       env:
         CC: clang
         CXX: clang++
-        CMAKE_ARGS: "-DENABLE_LLVM_COVERAGE=ON"
       run: |
-        python -m pip install --no-build-isolation -v -e .[test]
+        python -m pip install --no-build-isolation -v -e .[test] \
+          --config-settings=cmake.define.ENABLE_LLVM_COVERAGE=ON
 
     - name: Run tests with coverage
       working-directory: python
