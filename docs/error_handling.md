@@ -40,6 +40,28 @@ Exceptions are reserved exclusively for truly exceptional conditions such as:
 This design ensures predictable, non-exceptional control flow for all parsing
 operations, making error handling simpler and more consistent.
 
+### Configuring Error Limits
+
+By default, the parser collects up to 10,000 errors to prevent memory exhaustion
+when parsing severely malformed files. You can configure this limit via:
+
+**Library API (ParseOptions):**
+```cpp
+libvroom::Parser parser;
+libvroom::ParseOptions options;
+options.max_errors = 100;  // Only collect first 100 errors
+
+auto result = parser.parse(data, size, options);
+
+// Check how many errors were suppressed
+size_t suppressed = result.error_collector().suppressed_count();
+```
+
+**CLI:**
+```bash
+vroom head --max-errors 100 data.csv
+```
+
 ## Error Modes
 
 libvroom supports three error handling modes via the `ErrorMode` enum. Choose the appropriate mode based on your use case:

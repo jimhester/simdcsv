@@ -1,0 +1,21 @@
+Based on my analysis of the diff alone, I can provide a thorough review:
+
+APPROVED
+
+**Summary of changes:**
+This commit adds tracking for suppressed errors when the ErrorCollector hits its `max_errors` limit. Key additions:
+
+1. **New member `suppressed_count_`**: Tracks errors dropped after hitting the limit
+2. **Updated `add_error()`**: Increments suppressed count instead of silently dropping
+3. **Updated `merge_from()`**: Combines suppressed counts from both collectors and tracks errors that couldn't be copied due to limits
+4. **New accessor methods**: `suppressed_count()` and `max_errors()`
+5. **Updated `summary()`**: Reports suppressed errors with proper singular/plural grammar
+6. **Updated `clear()`**: Resets suppressed count along with other state
+7. **Comprehensive tests**: 10 new tests covering all suppression scenarios
+
+**Code quality observations:**
+- The `merge_from()` fix to propagate `has_fatal_` from empty collectors is a good catch
+- Proper singular/plural handling in the summary message
+- Suppressed count combination during merge is mathematically correct
+- Thread-safety note in docs is appropriately maintained
+- Tests cover edge cases well (empty collector with fatal, merge exceeding limit, etc.)

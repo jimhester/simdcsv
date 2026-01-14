@@ -337,6 +337,17 @@ public:
   void set_mode(ErrorMode mode) { mode_ = mode; }
 
   /**
+   * @brief Change the maximum number of errors to collect.
+   *
+   * This can be called before parsing begins to configure the error limit.
+   * If called after errors have been collected, the new limit takes effect
+   * for subsequent add_error() calls.
+   *
+   * @param max_errors New maximum errors limit
+   */
+  void set_max_errors(size_t max_errors) { max_errors_ = max_errors; }
+
+  /**
    * @brief Merge errors from another collector.
    *
    * Used for multi-threaded parsing where each thread has its own collector.
