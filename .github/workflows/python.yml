@@ -101,10 +101,12 @@ jobs:
         message(STATUS "Coverage toolchain file loaded")
         set(CMAKE_C_COMPILER clang)
         set(CMAKE_CXX_COMPILER clang++)
-        set(CMAKE_CXX_FLAGS_INIT "-fprofile-instr-generate -fcoverage-mapping")
-        set(CMAKE_C_FLAGS_INIT "-fprofile-instr-generate -fcoverage-mapping")
-        set(CMAKE_MODULE_LINKER_FLAGS_INIT "-fprofile-instr-generate")
-        set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fprofile-instr-generate")
+        # Use CACHE FORCE to ensure flags are not overridden
+        set(CMAKE_CXX_FLAGS "-fprofile-instr-generate -fcoverage-mapping" CACHE STRING "" FORCE)
+        set(CMAKE_C_FLAGS "-fprofile-instr-generate -fcoverage-mapping" CACHE STRING "" FORCE)
+        set(CMAKE_MODULE_LINKER_FLAGS "-fprofile-instr-generate" CACHE STRING "" FORCE)
+        set(CMAKE_SHARED_LINKER_FLAGS "-fprofile-instr-generate" CACHE STRING "" FORCE)
+        message(STATUS "CMAKE_CXX_FLAGS = ${CMAKE_CXX_FLAGS}")
         EOF
         cat ${{ github.workspace }}/coverage-toolchain.cmake
 
