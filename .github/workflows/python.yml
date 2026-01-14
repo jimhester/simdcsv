@@ -100,11 +100,12 @@ jobs:
       env:
         CC: clang
         CXX: clang++
+        # scikit-build-core respects CMAKE_ARGS environment variable
+        CMAKE_ARGS: >-
+          -DCMAKE_CXX_FLAGS=-fprofile-instr-generate\ -fcoverage-mapping
+          -DCMAKE_MODULE_LINKER_FLAGS=-fprofile-instr-generate
       run: |
-        # Use the cmake.define option which properly handles the flag passing
-        python -m pip install --no-build-isolation -v -e .[test] \
-          --config-settings='cmake.define.CMAKE_CXX_FLAGS=-fprofile-instr-generate -fcoverage-mapping' \
-          --config-settings='cmake.define.CMAKE_MODULE_LINKER_FLAGS=-fprofile-instr-generate'
+        python -m pip install --no-build-isolation -v -e .[test]
 
     - name: Run tests with coverage
       working-directory: python
