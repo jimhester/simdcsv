@@ -31,6 +31,26 @@ Tests Python bindings for vroom-csv across multiple Python versions and platform
 - PyArrow interoperability (conversion to PyArrow Table)
 - Polars interoperability (conversion to Polars DataFrame)
 
+### python-wheels.yml - Python Wheel Distribution
+
+Builds Python wheels for distribution on PyPI.
+
+**Triggers:**
+- Push of release tags (`v*`)
+- Manual dispatch via workflow_dispatch
+
+**Note:** Wheels are NOT built on regular commits or PRs to save CI time (~20+ minutes per run). Regular Python testing is handled by `python.yml`.
+
+**Build Matrix:**
+- **Platforms**: Ubuntu (latest), macOS 14 (ARM)
+- **Python Versions**: 3.9, 3.10, 3.11, 3.12
+- **Architectures**: x86_64, ARM64 (via QEMU on Linux)
+
+**Jobs:**
+1. `build_wheels` - Build wheels using cibuildwheel
+2. `build_sdist` - Build source distribution
+3. `publish` - Publish to PyPI (only on release tags)
+
 ### ci.yml - Main CI Pipeline
 
 Runs on every push and pull request to main/master branches.
