@@ -195,19 +195,9 @@ uint64_t DispatchComputeEscapedMask(uint64_t escape_mask, uint64_t& prev_escape_
   return HWY_DYNAMIC_DISPATCH(ComputeEscapedMaskImpl)(escape_mask, prev_escape_carry);
 }
 
-// CPU detection initialization
-namespace {
-
-struct SimdDispatchInitializer {
-  SimdDispatchInitializer() {
-    // Pre-warm CPU detection to avoid overhead on first call
-    hwy::GetChosenTarget().Update(hwy::SupportedTargets());
-  }
-};
-
-static SimdDispatchInitializer g_simd_dispatch_init;
-
-} // namespace
+// Note: We don't use static initialization for CPU detection because it can
+// cause crashes when the library is loaded (e.g., in Python bindings).
+// Highway's HWY_DYNAMIC_DISPATCH handles lazy initialization automatically.
 
 int64_t GetSupportedTargets() {
   return hwy::SupportedTargets();
