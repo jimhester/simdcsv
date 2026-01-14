@@ -174,6 +174,8 @@ Use `gh issue create --label "label"` with the following labels:
 | `cli ⌨️` | vroom command line tool |
 | `simd ⚡` | SIMD implementation or optimization |
 | `arrow 🏹` | Apache Arrow integration |
+| `R 🏴‍☠️` | R language bindings or integration |
+| `python 🐍` | Python bindings or integration |
 | `security 🔒` | security vulnerability or hardening |
 | `critical ☠️` | must fix - security or correctness issue |
 | `up next 📌` | next items to address from code review |
