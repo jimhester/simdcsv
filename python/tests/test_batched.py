@@ -490,8 +490,9 @@ class TestBatchedReaderNullHandling:
         batch = next(reader)
         arrow_table = pa.table(batch)
 
+        # Note: "100" is inferred as int64 due to type inference
         values = arrow_table.column("value").to_pylist()
-        assert values[0] == "100"
+        assert values[0] == 100   # valid value (inferred as int64)
         assert values[1] is None  # NA
         assert values[2] is None  # empty
 
