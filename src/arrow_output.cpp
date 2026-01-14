@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <arrow/builder.h>
+#include <arrow/io/file.h>
+#include <arrow/ipc/writer.h>
 #include <arrow/table.h>
 #include <cassert>
 #include <cctype>
@@ -16,6 +18,11 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+
+#ifdef LIBVROOM_ENABLE_PARQUET
+#include <parquet/arrow/writer.h>
+#include <parquet/properties.h>
+#endif
 
 namespace libvroom {
 
@@ -527,6 +534,234 @@ ArrowConvertResult csv_to_arrow_from_memory(const uint8_t* data, size_t len,
     result.error_message = e.what();
   }
   return result;
+}
+
+// =============================================================================
+// Columnar Format Export Implementation
+// =============================================================================
+
+ColumnarFormat detect_format_from_extension(const std::string& path) {
+  // Find the last dot to extract extension
+  size_t dot_pos = path.rfind('.');
+  if (dot_pos == std::string::npos || dot_pos == path.length() - 1) {
+    return ColumnarFormat::AUTO; // No extension found
+  }
+
+  std::string ext = path.substr(dot_pos + 1);
+  // Convert to lowercase for comparison
+  std::transform(ext.begin(), ext.end(), ext.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+
+  if (ext == "parquet" || ext == "pq") {
+    return ColumnarFormat::PARQUET;
+  } else if (ext == "feather" || ext == "arrow" || ext == "ipc") {
+    return ColumnarFormat::FEATHER;
+  }
+
+  return ColumnarFormat::AUTO;
+}
+
+WriteResult write_feather(const std::shared_ptr<arrow::Table>& table,
+                          const std::string& output_path) {
+  WriteResult result;
+
+  if (!table) {
+    result.error_message = "Table is null";
+    return result;
+  }
+
+  // Open output file
+  auto file_result = arrow::io::FileOutputStream::Open(output_path);
+  if (!file_result.ok()) {
+    result.error_message = "Failed to open output file: " + file_result.status().ToString();
+    return result;
+  }
+  auto output_file = *file_result;
+
+  // Write table as Arrow IPC stream (Feather v2 format)
+  auto writer_result = arrow::ipc::MakeFileWriter(output_file, table->schema());
+  if (!writer_result.ok()) {
+    result.error_message = "Failed to create IPC writer: " + writer_result.status().ToString();
+    return result;
+  }
+  auto writer = *writer_result;
+
+  // Write table batches
+  auto batches_result = table->CombineChunksToBatch();
+  if (!batches_result.ok()) {
+    result.error_message = "Failed to combine table chunks: " + batches_result.status().ToString();
+    return result;
+  }
+  auto batch = *batches_result;
+
+  auto write_status = writer->WriteRecordBatch(*batch);
+  if (!write_status.ok()) {
+    result.error_message = "Failed to write record batch: " + write_status.ToString();
+    return result;
+  }
+
+  auto close_status = writer->Close();
+  if (!close_status.ok()) {
+    result.error_message = "Failed to close writer: " + close_status.ToString();
+    return result;
+  }
+
+  // Get bytes written
+  auto pos_result = output_file->Tell();
+  if (pos_result.ok()) {
+    result.bytes_written = *pos_result;
+  }
+
+  auto file_close_status = output_file->Close();
+  if (!file_close_status.ok()) {
+    result.error_message = "Failed to close file: " + file_close_status.ToString();
+    return result;
+  }
+
+  result.success = true;
+  return result;
+}
+
+#ifdef LIBVROOM_ENABLE_PARQUET
+
+WriteResult write_parquet(const std::shared_ptr<arrow::Table>& table,
+                          const std::string& output_path, const ParquetWriteOptions& options) {
+  WriteResult result;
+
+  if (!table) {
+    result.error_message = "Table is null";
+    return result;
+  }
+
+  // Open output file
+  auto file_result = arrow::io::FileOutputStream::Open(output_path);
+  if (!file_result.ok()) {
+    result.error_message = "Failed to open output file: " + file_result.status().ToString();
+    return result;
+  }
+  auto output_file = *file_result;
+
+  // Configure Parquet writer properties
+  auto builder = parquet::WriterProperties::Builder();
+
+  // Set compression codec
+  parquet::Compression::type compression;
+  switch (options.compression) {
+  case ParquetWriteOptions::Compression::UNCOMPRESSED:
+    compression = parquet::Compression::UNCOMPRESSED;
+    break;
+  case ParquetWriteOptions::Compression::SNAPPY:
+    compression = parquet::Compression::SNAPPY;
+    break;
+  case ParquetWriteOptions::Compression::GZIP:
+    compression = parquet::Compression::GZIP;
+    break;
+  case ParquetWriteOptions::Compression::ZSTD:
+    compression = parquet::Compression::ZSTD;
+    break;
+  case ParquetWriteOptions::Compression::LZ4:
+    compression = parquet::Compression::LZ4;
+    break;
+  default:
+    compression = parquet::Compression::SNAPPY;
+    break;
+  }
+  builder.compression(compression);
+
+  auto writer_properties = builder.build();
+
+  // Configure Arrow writer properties
+  auto arrow_properties = parquet::ArrowWriterProperties::Builder().store_schema()->build();
+
+  // Write the table
+  auto status =
+      parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), output_file,
+                                 options.row_group_size, writer_properties, arrow_properties);
+
+  if (!status.ok()) {
+    result.error_message = "Failed to write Parquet file: " + status.ToString();
+    return result;
+  }
+
+  // Get bytes written
+  auto pos_result = output_file->Tell();
+  if (pos_result.ok()) {
+    result.bytes_written = *pos_result;
+  }
+
+  auto close_status = output_file->Close();
+  if (!close_status.ok()) {
+    result.error_message = "Failed to close file: " + close_status.ToString();
+    return result;
+  }
+
+  result.success = true;
+  return result;
+}
+
+#else // !LIBVROOM_ENABLE_PARQUET
+
+WriteResult write_parquet(const std::shared_ptr<arrow::Table>& /*table*/,
+                          const std::string& /*output_path*/,
+                          const ParquetWriteOptions& /*options*/) {
+  WriteResult result;
+  result.error_message = "Parquet support not enabled. Rebuild with -DLIBVROOM_ENABLE_PARQUET=ON";
+  return result;
+}
+
+#endif // LIBVROOM_ENABLE_PARQUET
+
+WriteResult write_columnar(const std::shared_ptr<arrow::Table>& table,
+                           const std::string& output_path, ColumnarFormat format,
+                           const ParquetWriteOptions& parquet_options) {
+  // Auto-detect format from extension if needed
+  if (format == ColumnarFormat::AUTO) {
+    format = detect_format_from_extension(output_path);
+    if (format == ColumnarFormat::AUTO) {
+      // Default to Parquet if extension not recognized
+      format = ColumnarFormat::PARQUET;
+    }
+  }
+
+  switch (format) {
+  case ColumnarFormat::PARQUET:
+    return write_parquet(table, output_path, parquet_options);
+  case ColumnarFormat::FEATHER:
+    return write_feather(table, output_path);
+  default:
+    WriteResult result;
+    result.error_message = "Unknown output format";
+    return result;
+  }
+}
+
+WriteResult csv_to_parquet(const std::string& csv_path, const std::string& parquet_path,
+                           const ArrowConvertOptions& arrow_options,
+                           const ParquetWriteOptions& parquet_options, const Dialect& dialect) {
+  // First convert CSV to Arrow table
+  auto arrow_result = csv_to_arrow(csv_path, arrow_options, dialect);
+  if (!arrow_result.ok()) {
+    WriteResult result;
+    result.error_message = "CSV to Arrow conversion failed: " + arrow_result.error_message;
+    return result;
+  }
+
+  // Then write to Parquet
+  return write_parquet(arrow_result.table, parquet_path, parquet_options);
+}
+
+WriteResult csv_to_feather(const std::string& csv_path, const std::string& feather_path,
+                           const ArrowConvertOptions& arrow_options, const Dialect& dialect) {
+  // First convert CSV to Arrow table
+  auto arrow_result = csv_to_arrow(csv_path, arrow_options, dialect);
+  if (!arrow_result.ok()) {
+    WriteResult result;
+    result.error_message = "CSV to Arrow conversion failed: " + arrow_result.error_message;
+    return result;
+  }
+
+  // Then write to Feather
+  return write_feather(arrow_result.table, feather_path);
 }
 
 } // namespace libvroom
