@@ -11,14 +11,6 @@ find_package(pybind11 CONFIG REQUIRED)
 
 # LLVM source-based coverage (for bindings.cpp coverage)
 option(ENABLE_LLVM_COVERAGE "Enable LLVM source-based code coverage (requires Clang)" OFF)
-if(ENABLE_LLVM_COVERAGE)
-    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        message(FATAL_ERROR "LLVM source-based coverage requires Clang compiler")
-    endif()
-    message(STATUS "LLVM source-based coverage enabled for Python bindings")
-    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
-    add_link_options(-fprofile-instr-generate)
-endif()
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -105,6 +97,19 @@ target_include_directories(_core PRIVATE ${LIBVROOM_ROOT}/include)
 # Compiler warnings
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(_core PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# LLVM source-based coverage - apply to targets after they're defined
+if(ENABLE_LLVM_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "LLVM source-based coverage requires Clang compiler")
+    endif()
+    message(STATUS "LLVM source-based coverage enabled for Python bindings")
+    # Apply coverage flags to bindings.cpp (the _core module)
+    target_compile_options(_core PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(_core PRIVATE -fprofile-instr-generate)
+    # Also apply to vroom_static so we get coverage for the embedded library code
+    target_compile_options(vroom_static PRIVATE -fprofile-instr-generate -fcoverage-mapping)
 endif()
 
 # Install the extension module into vroom_csv package directory
