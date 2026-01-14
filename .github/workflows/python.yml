@@ -100,9 +100,11 @@ jobs:
       env:
         CC: clang
         CXX: clang++
+        # Force coverage flags via CXXFLAGS environment variable
+        CXXFLAGS: "-fprofile-instr-generate -fcoverage-mapping"
+        LDFLAGS: "-fprofile-instr-generate"
       run: |
-        python -m pip install --no-build-isolation -v -e .[test] \
-          --config-settings=cmake.define.ENABLE_LLVM_COVERAGE=ON
+        python -m pip install --no-build-isolation -v -e .[test]
 
     - name: Run tests with coverage
       working-directory: python
