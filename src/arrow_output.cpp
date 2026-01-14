@@ -703,7 +703,8 @@ WriteResult write_parquet(const std::shared_ptr<arrow::Table>& /*table*/,
                           const std::string& /*output_path*/,
                           const ParquetWriteOptions& /*options*/) {
   WriteResult result;
-  result.error_message = "Parquet support not enabled. Rebuild with -DLIBVROOM_ENABLE_PARQUET=ON";
+  result.error_message =
+      "Parquet support not available. This build was compiled without Parquet support.";
   return result;
 }
 

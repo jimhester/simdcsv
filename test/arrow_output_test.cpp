@@ -4,8 +4,14 @@
 #include "mem_util.h"
 
 #include <arrow/api.h>
+#include <arrow/io/file.h>
+#include <arrow/ipc/reader.h>
 #include <cstring>
 #include <gtest/gtest.h>
+
+#ifdef LIBVROOM_ENABLE_PARQUET
+#include <parquet/arrow/reader.h>
+#endif
 
 namespace libvroom {
 
@@ -684,7 +690,7 @@ TEST_F(ArrowOutputTest, WriteColumnarAutoDetectParquet) {
 #else
   // Without Parquet support, should fail with appropriate message
   EXPECT_FALSE(write_result.ok());
-  EXPECT_TRUE(write_result.error_message.find("not enabled") != std::string::npos);
+  EXPECT_TRUE(write_result.error_message.find("not available") != std::string::npos);
 #endif
 
   std::remove(tmp_path.c_str());
@@ -713,6 +719,119 @@ TEST_F(ArrowOutputTest, WriteColumnarExplicitFormat) {
 
   std::remove(tmp_path.c_str());
 }
+
+// =============================================================================
+// Round-Trip Tests - Write and Read Back
+// =============================================================================
+
+TEST_F(ArrowOutputTest, RoundTripFeather) {
+  // Parse CSV to Arrow table
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("name,age,score\nAlice,30,95.5\nBob,25,87.3\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  ASSERT_EQ(result.num_rows, 2);
+  ASSERT_EQ(result.num_columns, 3);
+
+  // Write to Feather
+  std::string tmp_path = "/tmp/test_roundtrip.feather";
+  auto write_result = write_feather(result.table, tmp_path);
+  ASSERT_TRUE(write_result.ok()) << write_result.error_message;
+
+  // Read back using Arrow IPC reader
+  auto input_result = arrow::io::ReadableFile::Open(tmp_path);
+  ASSERT_TRUE(input_result.ok()) << input_result.status().ToString();
+  auto input_file = *input_result;
+
+  auto reader_result = arrow::ipc::RecordBatchFileReader::Open(input_file);
+  ASSERT_TRUE(reader_result.ok()) << reader_result.status().ToString();
+  auto reader = *reader_result;
+
+  // Verify schema
+  auto read_schema = reader->schema();
+  EXPECT_EQ(read_schema->num_fields(), 3);
+  EXPECT_EQ(read_schema->field(0)->name(), "name");
+  EXPECT_EQ(read_schema->field(1)->name(), "age");
+  EXPECT_EQ(read_schema->field(2)->name(), "score");
+
+  // Verify row count
+  int64_t total_rows = 0;
+  for (int i = 0; i < reader->num_record_batches(); ++i) {
+    auto batch_result = reader->ReadRecordBatch(i);
+    ASSERT_TRUE(batch_result.ok());
+    total_rows += (*batch_result)->num_rows();
+  }
+  EXPECT_EQ(total_rows, 2);
+
+  std::remove(tmp_path.c_str());
+}
+
+TEST_F(ArrowOutputTest, RoundTripFeatherWithNulls) {
+  // Test round-trip with null values
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("id,value\n1,100\n2,NA\n3,\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+
+  std::string tmp_path = "/tmp/test_roundtrip_nulls.feather";
+  auto write_result = write_feather(result.table, tmp_path);
+  ASSERT_TRUE(write_result.ok()) << write_result.error_message;
+
+  // Read back
+  auto input_result = arrow::io::ReadableFile::Open(tmp_path);
+  ASSERT_TRUE(input_result.ok());
+  auto reader_result = arrow::ipc::RecordBatchFileReader::Open(*input_result);
+  ASSERT_TRUE(reader_result.ok());
+
+  // The value column should preserve null count
+  auto batch_result = (*reader_result)->ReadRecordBatch(0);
+  ASSERT_TRUE(batch_result.ok());
+  auto batch = *batch_result;
+  EXPECT_EQ(batch->num_rows(), 3);
+  // Value column (index 1) should have 2 nulls (NA and empty)
+  EXPECT_EQ(batch->column(1)->null_count(), 2);
+
+  std::remove(tmp_path.c_str());
+}
+
+#ifdef LIBVROOM_ENABLE_PARQUET
+TEST_F(ArrowOutputTest, RoundTripParquet) {
+  // Parse CSV to Arrow table
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("name,age,score\nAlice,30,95.5\nBob,25,87.3\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+
+  // Write to Parquet
+  std::string tmp_path = "/tmp/test_roundtrip.parquet";
+  auto write_result = write_parquet(result.table, tmp_path);
+  ASSERT_TRUE(write_result.ok()) << write_result.error_message;
+
+  // Read back using Parquet reader
+  auto input_result = arrow::io::ReadableFile::Open(tmp_path);
+  ASSERT_TRUE(input_result.ok()) << input_result.status().ToString();
+
+  std::unique_ptr<parquet::arrow::FileReader> parquet_reader;
+  auto status =
+      parquet::arrow::OpenFile(*input_result, arrow::default_memory_pool(), &parquet_reader);
+  ASSERT_TRUE(status.ok()) << status.ToString();
+
+  std::shared_ptr<arrow::Table> read_table;
+  status = parquet_reader->ReadTable(&read_table);
+  ASSERT_TRUE(status.ok()) << status.ToString();
+
+  // Verify dimensions
+  EXPECT_EQ(read_table->num_rows(), 2);
+  EXPECT_EQ(read_table->num_columns(), 3);
+
+  // Verify column names
+  EXPECT_EQ(read_table->schema()->field(0)->name(), "name");
+  EXPECT_EQ(read_table->schema()->field(1)->name(), "age");
+  EXPECT_EQ(read_table->schema()->field(2)->name(), "score");
+
+  std::remove(tmp_path.c_str());
+}
+#endif // LIBVROOM_ENABLE_PARQUET
 
 } // namespace libvroom
 

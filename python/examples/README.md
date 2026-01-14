@@ -8,6 +8,7 @@ Interactive Jupyter notebooks demonstrating vroom-csv usage.
 |----------|-------------|
 | [getting_started.ipynb](getting_started.ipynb) | Basic usage: reading CSV files, accessing data, dialect detection |
 | [arrow_interop.ipynb](arrow_interop.ipynb) | Arrow integration: PyArrow, Polars, DuckDB interoperability |
+| [csv_to_columnar.ipynb](csv_to_columnar.ipynb) | Converting CSV to Parquet and Feather formats |
 
 ## Running the Examples
 

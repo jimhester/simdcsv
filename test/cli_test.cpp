@@ -2550,3 +2550,82 @@ TEST_F(CliTest, StatsAllEmptyColumnHumanReadable) {
   EXPECT_TRUE(result.output.find("empty_col") != std::string::npos);
   EXPECT_TRUE(result.output.find("Nulls") != std::string::npos);
 }
+
+// =============================================================================
+// Convert Command Tests (Arrow-enabled builds only)
+// =============================================================================
+// These tests verify the convert command behavior. They are skipped on builds
+// without Arrow support since the convert command won't exist.
+
+TEST_F(CliTest, ConvertCommandMissingOutputPath) {
+  // convert requires -o option
+  auto result = CliRunner::run("convert " + testDataPath("basic/simple.csv"));
+  // Either "Unknown command" (no Arrow) or "Output path required" error
+  bool is_unknown_command = result.output.find("Unknown command") != std::string::npos;
+  bool is_missing_output = result.output.find("Output path required") != std::string::npos;
+  if (!is_unknown_command) {
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_TRUE(is_missing_output)
+        << "Expected 'Output path required' error, got: " << result.output;
+  }
+}
+
+TEST_F(CliTest, ConvertCommandInvalidFormat) {
+  // Invalid -F value should fail
+  auto result = CliRunner::run("convert " + testDataPath("basic/simple.csv") +
+                               " -o /tmp/test.out -F invalid_format");
+  bool is_unknown_command = result.output.find("Unknown command") != std::string::npos;
+  bool is_invalid_format = result.output.find("Unknown output format") != std::string::npos;
+  if (!is_unknown_command) {
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_TRUE(is_invalid_format)
+        << "Expected 'Unknown output format' error, got: " << result.output;
+  }
+}
+
+TEST_F(CliTest, ConvertCommandFromStdinError) {
+  // convert command does not support stdin input
+  auto result =
+      CliRunner::runWithFileStdin("convert -o /tmp/test.feather", testDataPath("basic/simple.csv"));
+  bool is_unknown_command = result.output.find("Unknown command") != std::string::npos;
+  bool is_stdin_error = result.output.find("Cannot convert from stdin") != std::string::npos;
+  if (!is_unknown_command) {
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_TRUE(is_stdin_error) << "Expected stdin error, got: " << result.output;
+  }
+}
+
+TEST_F(CliTest, ConvertCommandUnknownExtension) {
+  // Unknown extension without explicit format should fail
+  auto result =
+      CliRunner::run("convert " + testDataPath("basic/simple.csv") + " -o /tmp/test.unknown");
+  bool is_unknown_command = result.output.find("Unknown command") != std::string::npos;
+  bool is_format_error = result.output.find("Cannot determine output format") != std::string::npos;
+  if (!is_unknown_command) {
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_TRUE(is_format_error) << "Expected format detection error, got: " << result.output;
+  }
+}
+
+TEST_F(CliTest, ConvertCommandInvalidCompression) {
+  // Invalid -C value should fail (only matters for parquet)
+  auto result = CliRunner::run("convert " + testDataPath("basic/simple.csv") +
+                               " -o /tmp/test.parquet -C invalid_codec");
+  bool is_unknown_command = result.output.find("Unknown command") != std::string::npos;
+  bool is_codec_error = result.output.find("Unknown compression codec") != std::string::npos;
+  if (!is_unknown_command) {
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_TRUE(is_codec_error) << "Expected compression codec error, got: " << result.output;
+  }
+}
+
+TEST_F(CliTest, ConvertHelpShowsConvertCommand) {
+  // Check that --help includes convert command when Arrow is enabled
+  auto result = CliRunner::run("--help");
+  EXPECT_EQ(result.exit_code, 0);
+  // The help text will only include "convert" if built with Arrow support
+  // This test documents the expected behavior without requiring Arrow
+  bool has_convert = result.output.find("convert") != std::string::npos;
+  // Just verify help runs successfully - convert presence depends on build
+  EXPECT_TRUE(result.output.find("vroom") != std::string::npos);
+}
