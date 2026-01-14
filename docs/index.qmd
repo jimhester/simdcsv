@@ -36,6 +36,27 @@ The parser achieves **4+ GB/s throughput** on modern hardware using a speculativ
 
 ## Quick Start
 
+### Python
+
+```bash
+pip install vroom-csv
+```
+
+```python
+import vroom_csv
+
+table = vroom_csv.read_csv("data.csv")
+print(f"Loaded {table.num_rows} rows, {table.num_columns} columns")
+
+# Zero-copy export to PyArrow, Polars, DuckDB
+import polars as pl
+df = pl.from_arrow(table)
+```
+
+See the [Python Package](python.qmd) documentation for complete usage.
+
+### C++ / CLI
+
 ```bash
 # Clone and build
 git clone https://github.com/jimhester/libvroom.git
@@ -117,6 +138,7 @@ Learn more in the [Architecture](architecture.qmd) documentation.
 | [Streaming Parser](streaming.qmd) | Memory-efficient parsing for large files |
 | [Index Caching](caching.qmd) | Speed up repeated file reads |
 | [C API Reference](c-api.qmd) | C bindings for FFI integration |
+| [Python Package](python.qmd) | Python bindings with Arrow support |
 | [Architecture](architecture.qmd) | Two-pass algorithm details |
 | [Error Handling](error-handling.qmd) | Error modes and recovery |
 | [Integration Guide](integration-guide.qmd) | CMake integration and build options |
