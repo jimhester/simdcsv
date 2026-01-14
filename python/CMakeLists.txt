@@ -110,5 +110,17 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# LLVM coverage: explicitly add flags to _core target when coverage is requested
+# This ensures flags are applied even when CMAKE_CXX_FLAGS is set via toolchain file
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    if(ENABLE_LLVM_COVERAGE OR CMAKE_CXX_FLAGS MATCHES "fprofile-instr-generate")
+        message(STATUS "Adding LLVM coverage flags to _core target")
+        target_compile_options(_core PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+        target_link_options(_core PRIVATE -fprofile-instr-generate)
+        # Also add to vroom_static since _core links against it
+        target_compile_options(vroom_static PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    endif()
+endif()
+
 # Install the extension module into vroom_csv package directory
 install(TARGETS _core LIBRARY DESTINATION vroom_csv COMPONENT python)
