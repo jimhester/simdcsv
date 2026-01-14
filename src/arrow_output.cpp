@@ -210,17 +210,17 @@ std::string_view ArrowConverter::extract_field(const uint8_t* buf, size_t start,
   return std::string_view(field_start, len);
 }
 
-std::vector<std::vector<ArrowConverter::FieldRange>>
-ArrowConverter::extract_field_ranges(const uint8_t* buf, size_t len, const ParseIndex& idx,
-                                     const Dialect& dialect) {
-  std::vector<std::vector<FieldRange>> columns;
+ArrowConverter::FieldExtractionResult
+ArrowConverter::extract_field_ranges_with_headers(const uint8_t* buf, size_t len,
+                                                  const ParseIndex& idx, const Dialect& dialect) {
+  FieldExtractionResult result;
   if (idx.n_threads == 0)
-    return columns;
+    return result;
   size_t total_seps = 0;
   for (uint16_t t = 0; t < idx.n_threads; ++t)
     total_seps += idx.n_indexes[t];
   if (total_seps == 0)
-    return columns;
+    return result;
   std::vector<uint64_t> all_positions;
   all_positions.reserve(total_seps);
   for (uint16_t t = 0; t < idx.n_threads; ++t)
@@ -231,7 +231,7 @@ ArrowConverter::extract_field_ranges(const uint8_t* buf, size_t len, const Parse
     }
   std::sort(all_positions.begin(), all_positions.end());
   if (all_positions.empty())
-    return columns; // No valid positions after bounds filtering
+    return result; // No valid positions after bounds filtering
   size_t num_columns = 0;
   for (size_t i = 0; i < all_positions.size(); ++i) {
     num_columns++;
@@ -239,29 +239,43 @@ ArrowConverter::extract_field_ranges(const uint8_t* buf, size_t len, const Parse
       break;
   }
   if (num_columns == 0)
-    return columns;
-  columns.resize(num_columns);
+    return result;
+  result.columns.resize(num_columns);
+  result.header_names.reserve(num_columns);
+
   size_t field_start = 0, current_col = 0;
-  bool skip_header = true;
+  bool in_header = true;
   for (size_t i = 0; i < all_positions.size(); ++i) {
     size_t field_end = all_positions[i];
     char sep_char = static_cast<char>(buf[field_end]);
-    if (!skip_header && current_col < num_columns)
-      columns[current_col].push_back({field_start, field_end});
+    if (in_header) {
+      // Extract header name during first row
+      result.header_names.push_back(
+          std::string(extract_field(buf, field_start, field_end, dialect)));
+    } else if (current_col < num_columns) {
+      result.columns[current_col].push_back({field_start, field_end});
+    }
     if (sep_char == '\n') {
-      if (skip_header)
-        skip_header = false;
+      if (in_header)
+        in_header = false;
       current_col = 0;
-    } else
+    } else {
       current_col++;
+    }
     field_start = field_end + 1;
   }
-  return columns;
+
+  // Auto-generate names for any missing columns
+  while (result.header_names.size() < num_columns)
+    result.header_names.push_back("column_" + std::to_string(result.header_names.size()));
+
+  return result;
 }
 
-std::vector<ColumnType> ArrowConverter::infer_types(const uint8_t* buf, size_t len,
-                                                    const ParseIndex& idx, const Dialect& dialect) {
-  auto field_ranges = extract_field_ranges(buf, len, idx, dialect);
+std::vector<ColumnType>
+ArrowConverter::infer_types_from_ranges(const uint8_t* buf,
+                                        const std::vector<std::vector<FieldRange>>& field_ranges,
+                                        const Dialect& dialect) {
   std::vector<ColumnType> types(field_ranges.size(), ColumnType::NULL_TYPE);
   for (size_t col = 0; col < field_ranges.size(); ++col) {
     const auto& ranges = field_ranges[col];
@@ -300,6 +314,12 @@ std::vector<ColumnType> ArrowConverter::infer_types(const uint8_t* buf, size_t l
     types[col] = (strongest == ColumnType::NULL_TYPE) ? ColumnType::STRING : strongest;
   }
   return types;
+}
+
+std::vector<ColumnType> ArrowConverter::infer_types(const uint8_t* buf, size_t len,
+                                                    const ParseIndex& idx, const Dialect& dialect) {
+  auto extraction = extract_field_ranges_with_headers(buf, len, idx, dialect);
+  return infer_types_from_ranges(buf, extraction.columns, dialect);
 }
 
 std::shared_ptr<arrow::Schema> ArrowConverter::build_schema(const std::vector<std::string>& names,
@@ -399,12 +419,15 @@ ArrowConverter::build_column(const uint8_t* buf, const std::vector<FieldRange>& 
 ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const ParseIndex& idx,
                                            const Dialect& dialect) {
   ArrowConvertResult result;
-  auto field_ranges = extract_field_ranges(buf, len, idx, dialect);
-  if (field_ranges.empty()) {
+
+  // Single extraction of field ranges and header names to avoid redundant parsing
+  auto extraction = extract_field_ranges_with_headers(buf, len, idx, dialect);
+  if (extraction.columns.empty()) {
     result.error_message = "No data";
     return result;
   }
-  size_t num_columns = field_ranges.size(), num_rows = field_ranges[0].size();
+  size_t num_columns = extraction.columns.size();
+  size_t num_rows = extraction.columns[0].size();
 
   // Validate column count against security limit
   if (options_.max_columns > 0 && num_columns > options_.max_columns) {
@@ -438,41 +461,16 @@ ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const
     }
   }
 
-  // Extract column names from header
-  std::vector<std::string> column_names;
-  size_t total_seps = 0;
-  for (uint16_t t = 0; t < idx.n_threads; ++t)
-    total_seps += idx.n_indexes[t];
-  if (total_seps > 0) {
-    std::vector<uint64_t> all_positions;
-    for (uint16_t t = 0; t < idx.n_threads; ++t)
-      for (size_t i = 0; i < idx.n_indexes[t]; ++i) {
-        uint64_t pos = idx.indexes[t + i * idx.n_threads];
-        if (pos < len)
-          all_positions.push_back(pos); // Bounds check
-      }
-    std::sort(all_positions.begin(), all_positions.end());
-    size_t fs = 0;
-    for (size_t i = 0; i < all_positions.size() && column_names.size() < num_columns; ++i) {
-      column_names.push_back(std::string(extract_field(buf, fs, all_positions[i], dialect)));
-      fs = all_positions[i] + 1;
-      if (buf[all_positions[i]] == '\n')
-        break;
-    }
-  }
-  while (column_names.size() < num_columns)
-    column_names.push_back("column_" + std::to_string(column_names.size()));
-
-  // Get column types
+  // Get column types using pre-extracted field ranges (avoids redundant extraction)
   auto column_types = options_.infer_types
-                          ? infer_types(buf, len, idx, dialect)
+                          ? infer_types_from_ranges(buf, extraction.columns, dialect)
                           : std::vector<ColumnType>(num_columns, ColumnType::STRING);
-  result.schema = build_schema(column_names, column_types);
+  result.schema = build_schema(extraction.header_names, column_types);
 
   // Build columns
   std::vector<std::shared_ptr<arrow::Array>> arrays;
   for (size_t col = 0; col < num_columns; ++col) {
-    auto arr = build_column(buf, field_ranges[col], column_types[col], dialect);
+    auto arr = build_column(buf, extraction.columns[col], column_types[col], dialect);
     if (!arr.ok()) {
       result.error_message = arr.status().ToString();
       return result;
