@@ -44,7 +44,9 @@ jobs:
           # Build both Intel and ARM on macOS
           CIBW_ARCHS_MACOS: x86_64 arm64
           # macOS: require 10.15+ for std::filesystem support
-          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.15
+          # Use static SIMD dispatch for wheel builds to avoid runtime init issues
+          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.15 CMAKE_ARGS="-DHWY_COMPILE_ONLY_STATIC=ON"
+          CIBW_ENVIRONMENT_LINUX: CMAKE_ARGS="-DHWY_COMPILE_ONLY_STATIC=ON"
           # Test requirements - use pytest only, skip Arrow tests in wheel build
           # Full Arrow tests run in the main Python CI workflow
           CIBW_TEST_REQUIRES: pytest>=7.0
