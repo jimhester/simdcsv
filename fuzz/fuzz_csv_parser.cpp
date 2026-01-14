@@ -10,14 +10,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <memory>
-
-struct AlignedDeleter {
-  void operator()(uint8_t* ptr) const {
-    if (ptr)
-      aligned_free(ptr);
-  }
-};
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (size == 0)
@@ -29,8 +21,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     size = MAX_INPUT_SIZE;
 
   // Use immediate RAII to prevent leaks if an exception occurs
-  std::unique_ptr<uint8_t, AlignedDeleter> guard(
-      static_cast<uint8_t*>(aligned_malloc(64, size + 64)));
+  AlignedPtr guard = make_aligned_ptr(size, 64);
   if (!guard)
     return 0;
   uint8_t* buf = guard.get();

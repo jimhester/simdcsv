@@ -98,6 +98,7 @@ jobs:
 
     - name: Run benchmarks
       id: run_benchmarks
+      timeout-minutes: 60
       run: |
         # Create output directory
         mkdir -p benchmark_output

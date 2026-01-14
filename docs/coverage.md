@@ -100,13 +100,47 @@ llvm-cov show ./libvroom_test -instr-profile=coverage.profdata -name-regex='.*' 
 llvm-cov show ./libvroom_test -instr-profile=coverage.profdata -format=html -output-dir=coverage_html
 ```
 
+## Python Bindings Coverage
+
+The Python extension module (`python/src/bindings.cpp`) is covered separately from the core library:
+
+| Flag | Tool | What It Measures |
+|------|------|-----------------|
+| **python** | pytest-cov | Python source code (`__init__.py`) |
+| **python-bindings** | llvm-cov | C++ bindings code (`bindings.cpp`) |
+
+### What's Not Measured
+
+- **Type stub files (`.pyi`)**: These files contain type annotations only, no executable code. Coverage tools cannot and should not measure them.
+- **Third-party code**: pybind11 headers and other dependencies are excluded.
+
+### Running Python Bindings Coverage Locally
+
+```bash
+cd python
+
+# Build with coverage instrumentation
+CC=clang CXX=clang++ CMAKE_ARGS="-DENABLE_LLVM_COVERAGE=ON" \
+  pip install --no-build-isolation -v -e .[test]
+
+# Run tests with profiling
+LLVM_PROFILE_FILE="coverage-%p.profraw" pytest tests/ -v
+
+# Generate coverage report
+llvm-profdata merge -sparse coverage-*.profraw -o coverage.profdata
+EXTENSION=$(find . -name '_core*.so' -type f | head -1)
+llvm-cov report "$EXTENSION" -instr-profile=coverage.profdata
+```
+
 ## Interpreting Codecov Reports
 
 ### Using Flags
 
 In Codecov, you can filter coverage by flag:
-- **gcov**: Traditional GCC-based coverage
-- **llvm**: Clang source-based coverage (more accurate for headers)
+- **gcov**: Traditional GCC-based coverage (core library)
+- **llvm**: Clang source-based coverage (core library, more accurate for headers)
+- **python**: Python source code coverage
+- **python-bindings**: C++ bindings coverage (bindings.cpp)
 
 To see accurate header coverage, select the `llvm` flag in the Codecov UI.
 
@@ -134,11 +168,18 @@ If you see a large discrepancy between gcov and llvm coverage for a header file:
 
 ## CI Jobs
 
-Two coverage jobs run in CI:
-1. **Code Coverage (GCC/lcov)** - Traditional approach, uploads with `gcov` flag
-2. **Code Coverage (Clang/llvm-cov)** - Source-based approach, uploads with `llvm` flag
+Three coverage jobs run in CI:
 
-Both jobs are informational and won't fail the build if coverage thresholds aren't met.
+| Job | Workflow | Flag(s) | What It Measures |
+|-----|----------|---------|------------------|
+| **Code Coverage (GCC/lcov)** | ci.yml | `gcov` | Core library (traditional) |
+| **Code Coverage (Clang/llvm-cov)** | ci.yml | `llvm` | Core library (accurate headers) |
+| **Python Coverage** | python.yml | `python`, `python-bindings` | Python source + C++ bindings |
+
+The Python Coverage job is a combined job that builds with LLVM coverage instrumentation
+and runs pytest with pytest-cov, collecting both Python and C++ coverage in a single run.
+
+All jobs are informational and won't fail the build if coverage thresholds aren't met.
 
 ## References
 
