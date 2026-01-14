@@ -124,6 +124,23 @@ Two-pass speculative parsing algorithm (see `include/two_pass.h`):
 
 SIMD via Google Highway 1.3.0: x86-64 (SSE4.2, AVX2), ARM (NEON), scalar fallback.
 
+## API Surfaces
+
+The library exposes functionality through multiple interfaces that must be kept in sync:
+
+| API | Location | Description |
+|-----|----------|-------------|
+| C++ Core | `include/*.h` | Primary implementation, header-only where possible |
+| C API | `include/libvroom_c.h`, `src/libvroom_c.cpp` | C wrapper for FFI compatibility |
+| Python | `python/src/bindings.cpp` | pybind11 bindings, may have its own configuration |
+| CLI | `src/cli.cpp` | Command-line interface |
+
+**When adding features to the core library, check if these surfaces need updates:**
+- New enum values → update all switch statements and type mappings
+- New options/config → expose in C API and Python bindings
+- New public methods → consider C API wrapper and Python exposure
+- Behavioral changes → verify consistent behavior across all interfaces
+
 ## Documentation
 
 | Topic | Location |

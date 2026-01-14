@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build documentation: Doxygen -> doxybook2 -> Quarto
+# Build documentation: Doxygen -> doxybook2 -> quartodoc -> Quarto
 set -e
 
 cd "$(dirname "$0")"
@@ -16,10 +16,10 @@ doxybook2 --input api/xml --output api-reference --config .doxybook/config.json
 # Create index.qmd for API reference landing page
 cat > api-reference/index.qmd << 'EOF'
 ---
-title: "API Reference"
+title: "C++ API Reference"
 ---
 
-Complete API documentation for libvroom, generated from source code comments.
+Complete C++ API documentation for libvroom, generated from source code comments.
 
 ## Quick Links
 
@@ -46,6 +46,10 @@ Complete API documentation for libvroom, generated from source code comments.
 - [Namespaces](index_namespaces.qmd)
 - [Examples](index_examples.qmd)
 EOF
+
+echo "==> Running quartodoc (Python API)..."
+rm -rf python-reference
+quartodoc build
 
 echo "==> Running Quarto..."
 quarto render
