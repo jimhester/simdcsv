@@ -5,12 +5,8 @@ project(vroom_csv_python LANGUAGES CXX)
 # Python bindings for libvroom using pybind11
 # =============================================================================
 
-# Find Python and pybind11
-find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
-find_package(pybind11 CONFIG REQUIRED)
-
 # LLVM source-based coverage (for bindings.cpp coverage)
-# Must be set early, before targets are defined, using CMAKE_CXX_FLAGS
+# Must be set BEFORE find_package(pybind11) to ensure flags are properly inherited
 option(ENABLE_LLVM_COVERAGE "Enable LLVM source-based code coverage (requires Clang)" OFF)
 if(ENABLE_LLVM_COVERAGE)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -22,6 +18,10 @@ if(ENABLE_LLVM_COVERAGE)
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fprofile-instr-generate")
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fprofile-instr-generate")
 endif()
+
+# Find Python and pybind11
+find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+find_package(pybind11 CONFIG REQUIRED)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
