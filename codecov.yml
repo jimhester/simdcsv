@@ -69,3 +69,9 @@ flags:
       - src/
       - include/
     carryforward: true
+
+  python:
+    # Python bindings test coverage (pytest-cov)
+    paths:
+      - python/src/
+    carryforward: true
