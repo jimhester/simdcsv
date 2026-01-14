@@ -475,6 +475,208 @@ TEST_F(ParseBranchlessTest, CustomDialect) {
 }
 
 // ============================================================================
+// PARSE_BRANCHLESS SPECULATION VALIDATION TESTS
+// Tests that mispredictions in parse_branchless are detected and
+// properly fall back to single-threaded parsing.
+// ============================================================================
+
+class ParseBranchlessSpeculationTest : public ::testing::Test {
+protected:
+  std::vector<uint8_t> makeBuffer(const std::string& content) {
+    std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
+    if (!content.empty()) {
+      std::memcpy(buf.data(), content.data(), content.size());
+    }
+    return buf;
+  }
+};
+
+// Test that second_pass_simd_branchless_with_state returns correct boundary state
+TEST_F(ParseBranchlessSpeculationTest, SecondPassReturnsCorrectBoundaryState) {
+  // Simple case: ends at record boundary
+  std::string content = "a,b,c\n1,2,3\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
+  BranchlessStateMachine sm(',', '"', '"', true);
+
+  auto result =
+      TwoPass::second_pass_simd_branchless_with_state(sm, buf.data(), 0, content.size(), &idx, 0);
+
+  EXPECT_TRUE(result.at_record_boundary);
+  EXPECT_GT(result.n_indexes, 0u);
+}
+
+// Test that ending inside a quoted field is detected
+TEST_F(ParseBranchlessSpeculationTest, DetectsEndingInsideQuotedField) {
+  // This chunk ends inside a quoted field
+  std::string content = "a,\"incomplete";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
+  BranchlessStateMachine sm(',', '"', '"', true);
+
+  auto result =
+      TwoPass::second_pass_simd_branchless_with_state(sm, buf.data(), 0, content.size(), &idx, 0);
+
+  // Should detect we're NOT at a record boundary (inside quoted field)
+  EXPECT_FALSE(result.at_record_boundary);
+}
+
+// Test that ending after quote is correctly handled
+TEST_F(ParseBranchlessSpeculationTest, DetectsEndingAfterClosingQuote) {
+  // This chunk ends right after a closing quote
+  std::string content = "a,\"quoted\"";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 1);
+  BranchlessStateMachine sm(',', '"', '"', true);
+
+  auto result =
+      TwoPass::second_pass_simd_branchless_with_state(sm, buf.data(), 0, content.size(), &idx, 0);
+
+  // Should be at record boundary (quote is closed)
+  EXPECT_TRUE(result.at_record_boundary);
+}
+
+// Adversarial test: Create CSV that could fool speculative algorithm
+TEST_F(ParseBranchlessSpeculationTest, AdversarialMispredictionDetected) {
+  // Create a pathological CSV similar to the parse_speculate test
+  std::string content;
+
+  // Header
+  content += "col1,col2,col3\n";
+
+  // Row with a long quoted field containing tricky patterns
+  content += "value1,\"";
+
+  // Add enough content to push the next chunk boundary into interesting territory
+  for (int i = 0; i < 150; i++) {
+    content += "x";
+  }
+
+  // Tricky pattern: x""y looks like escaped quote inside the field
+  content += "x\"\"y";
+
+  // More content
+  for (int i = 0; i < 150; i++) {
+    content += "z";
+  }
+
+  // Close the quoted field and end the row
+  content += "\",value3\n";
+
+  // Add more rows
+  content += "a,b,c\n";
+  content += "1,2,3\n";
+
+  auto buf = makeBuffer(content);
+
+  // Use enough threads to trigger multi-threaded parsing
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
+
+  bool success = parser.parse_branchless(buf.data(), idx, content.size());
+
+  // The key assertion: parsing should succeed (with or without fallback)
+  EXPECT_TRUE(success);
+
+  // Verify we got the right number of separators
+  // Header: 2 commas + 1 newline = 3
+  // Row 1: 2 commas + 1 newline = 3
+  // Row 2: 2 commas + 1 newline = 3
+  // Row 3: 2 commas + 1 newline = 3
+  // Total: 12 separators
+  uint64_t total_separators = 0;
+  for (uint16_t i = 0; i < idx.n_threads; i++) {
+    total_separators += idx.n_indexes[i];
+  }
+  EXPECT_EQ(total_separators, 12u);
+}
+
+// Test: Quoted field that spans multiple chunks
+TEST_F(ParseBranchlessSpeculationTest, QuotedFieldSpanningChunkBoundary) {
+  std::string content;
+  content += "name,description\n";
+
+  // Quoted field with embedded newlines that might span chunk boundary
+  content += "item1,\"This is a long description\n";
+  content += "that spans multiple lines\n";
+  content += "and contains various patterns like \"\"quoted text\"\"\n";
+  content += "and more content to make it very long so that it might\n";
+  content += "cross a chunk boundary when parsed with multiple threads\"\n";
+
+  content += "item2,\"short\"\n";
+
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(content.size(), 4);
+
+  bool success = parser.parse_branchless(buf.data(), idx, content.size());
+
+  EXPECT_TRUE(success);
+
+  // Count total separators
+  // Header: 1 comma + 1 newline = 2
+  // Row 1: 1 comma + 1 newline at end = 2 (internal newlines in quote don't count)
+  // Row 2: 1 comma + 1 newline = 2
+  // Total: 6
+  uint64_t total_separators = 0;
+  for (uint16_t i = 0; i < idx.n_threads; i++) {
+    total_separators += idx.n_indexes[i];
+  }
+  EXPECT_EQ(total_separators, 6u);
+}
+
+// Test that parse_branchless produces same results as parse_speculate
+TEST_F(ParseBranchlessSpeculationTest, ConsistentWithParseSpeculate) {
+  std::string content;
+  content += "a,b,c\n";
+
+  // Add rows with varied quote patterns
+  for (int i = 0; i < 50; i++) {
+    content += "value" + std::to_string(i) + ",";
+    if (i % 3 == 0) {
+      content += "\"quoted\"";
+    } else {
+      content += "plain";
+    }
+    content += "," + std::to_string(i) + "\n";
+  }
+
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+
+  // Parse with branchless
+  libvroom::ParseIndex idx_branchless = parser.init(content.size(), 4);
+  bool success_branchless = parser.parse_branchless(buf.data(), idx_branchless, content.size());
+
+  // Parse with speculate
+  libvroom::ParseIndex idx_speculate = parser.init(content.size(), 4);
+  bool success_speculate = parser.parse_speculate(buf.data(), idx_speculate, content.size());
+
+  EXPECT_TRUE(success_branchless);
+  EXPECT_TRUE(success_speculate);
+
+  // Both should produce the same total number of separators
+  uint64_t total_branchless = 0;
+  uint64_t total_speculate = 0;
+  for (uint16_t i = 0; i < idx_branchless.n_threads; i++) {
+    total_branchless += idx_branchless.n_indexes[i];
+  }
+  for (uint16_t i = 0; i < idx_speculate.n_threads; i++) {
+    total_speculate += idx_speculate.n_indexes[i];
+  }
+
+  EXPECT_EQ(total_branchless, total_speculate);
+}
+
+// ============================================================================
 // PARSE_AUTO / DETECT_DIALECT TESTS
 // ============================================================================
 
