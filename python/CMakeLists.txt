@@ -17,12 +17,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Build position-independent code for shared libraries
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# SIMD dispatch option - default to static for Python bindings to avoid
-# runtime initialization issues with dynamic loading
-option(HWY_COMPILE_ONLY_STATIC "Disable dynamic SIMD dispatch" ON)
+# SIMD dispatch option - default to dynamic for runtime CPU detection
+# This allows wheels to work across different CPU generations
+option(HWY_COMPILE_ONLY_STATIC "Disable dynamic SIMD dispatch" OFF)
 if(HWY_COMPILE_ONLY_STATIC)
     message(STATUS "Static SIMD dispatch enabled for Python bindings")
     add_compile_definitions(HWY_COMPILE_ONLY_STATIC)
+else()
+    message(STATUS "Dynamic SIMD dispatch enabled for Python bindings")
 endif()
 
 # =============================================================================

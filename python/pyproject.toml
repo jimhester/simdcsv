@@ -55,10 +55,6 @@ install.components = ["python"]
 [tool.scikit-build.cmake.define]
 BUILD_TESTING = "OFF"
 BUILD_BENCHMARKS = "OFF"
-# Use static SIMD dispatch for Python wheels to avoid runtime initialization issues.
-# Dynamic dispatch can cause segfaults when loading the shared library in Python
-# contexts (e.g., ctypes/cffi) due to static initialization order.
-HWY_COMPILE_ONLY_STATIC = "ON"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
