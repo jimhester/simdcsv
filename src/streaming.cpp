@@ -492,7 +492,7 @@ struct StreamParser::Impl {
         errors.add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL, row_count + 1,
                          current_field_bounds.size() + 1, total_bytes,
                          "Unclosed quote at end of file");
-        if (errors.mode() != ErrorMode::STRICT) {
+        if (errors.mode() != ErrorMode::FAIL_FAST) {
           // Best effort: emit partial field
           emit_field(data, field_start, len);
           emit_row();

@@ -162,7 +162,7 @@ struct ParseError {
  * @example
  * @code
  * // For strict validation
- * ErrorCollector errors(ErrorMode::STRICT);
+ * ErrorCollector errors(ErrorMode::FAIL_FAST);
  *
  * // For collecting all issues in a file
  * ErrorCollector errors(ErrorMode::PERMISSIVE);
@@ -172,7 +172,8 @@ struct ParseError {
  * @endcode
  */
 enum class ErrorMode {
-  STRICT,     ///< Stop parsing on first error encountered
+  FAIL_FAST,  ///< Stop parsing on first error encountered (renamed from STRICT
+              ///< to avoid Windows macro conflict)
   PERMISSIVE, ///< Try to recover from errors, collect and report all
   BEST_EFFORT ///< Ignore errors completely, parse what we can
 };
@@ -219,7 +220,7 @@ public:
    * @param mode Error handling mode (STRICT, PERMISSIVE, or BEST_EFFORT)
    * @param max_errors Maximum errors to collect (default: 10000)
    */
-  explicit ErrorCollector(ErrorMode mode = ErrorMode::STRICT,
+  explicit ErrorCollector(ErrorMode mode = ErrorMode::FAIL_FAST,
                           size_t max_errors = DEFAULT_MAX_ERRORS)
       : mode_(mode), max_errors_(max_errors), has_fatal_(false) {}
 
@@ -273,7 +274,7 @@ public:
    * @return true if parsing should stop
    */
   bool should_stop() const {
-    if (mode_ == ErrorMode::STRICT && !errors_.empty())
+    if (mode_ == ErrorMode::FAIL_FAST && !errors_.empty())
       return true;
     if (has_fatal_)
       return true;

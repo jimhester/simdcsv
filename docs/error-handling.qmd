@@ -30,7 +30,7 @@ if (result.has_errors()) {
 }
 
 // Method 2: External error collector with specific mode
-libvroom::ErrorCollector strict(libvroom::ErrorMode::STRICT);
+libvroom::ErrorCollector strict(libvroom::ErrorMode::FAIL_FAST);
 auto result2 = parser.parse(buffer.data(), buffer.size(), {.errors = &strict});
 
 // Method 3: CLI with strict mode

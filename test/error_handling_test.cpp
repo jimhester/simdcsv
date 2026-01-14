@@ -84,7 +84,7 @@ TEST(ParseErrorTest, ToString) {
 
 TEST(ErrorCollectorTest, DefaultMode) {
   ErrorCollector collector;
-  EXPECT_EQ(collector.mode(), ErrorMode::STRICT);
+  EXPECT_EQ(collector.mode(), ErrorMode::FAIL_FAST);
   EXPECT_FALSE(collector.has_errors());
   EXPECT_EQ(collector.error_count(), 0);
 }
@@ -118,7 +118,7 @@ TEST(ErrorCollectorTest, AddErrorConvenience) {
 }
 
 TEST(ErrorCollectorTest, StrictModeStopsOnFirstError) {
-  ErrorCollector collector(ErrorMode::STRICT);
+  ErrorCollector collector(ErrorMode::FAIL_FAST);
 
   collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10,
                       "Error 1");
@@ -148,7 +148,7 @@ TEST(ErrorCollectorTest, FatalErrorStopsEvenInPermissiveMode) {
 }
 
 TEST(ErrorCollectorTest, WarningsDontStopParsing) {
-  ErrorCollector collector(ErrorMode::STRICT);
+  ErrorCollector collector(ErrorMode::FAIL_FAST);
 
   collector.add_error(ErrorCode::MIXED_LINE_ENDINGS, ErrorSeverity::WARNING, 1, 1, 10,
                       "Mixed line endings detected");
@@ -515,8 +515,8 @@ TEST_F(MalformedCSVTest, AllMalformedFilesPresent) {
 
 TEST(ErrorModeTest, StrictModeDefinition) {
   // Strict mode should stop on first error of any severity (except warnings)
-  ErrorCollector collector(ErrorMode::STRICT);
-  EXPECT_EQ(collector.mode(), ErrorMode::STRICT);
+  ErrorCollector collector(ErrorMode::FAIL_FAST);
+  EXPECT_EQ(collector.mode(), ErrorMode::FAIL_FAST);
 }
 
 TEST(ErrorModeTest, PermissiveModeDefinition) {

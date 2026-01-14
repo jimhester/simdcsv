@@ -284,7 +284,7 @@ TEST_F(CSVParserErrorTest, MultipleErrors) {
 
 TEST_F(CSVParserErrorTest, StrictModeStopsOnFirstError) {
   std::string content = readFile(getTestDataPath("inconsistent_columns_all_rows.csv"));
-  ErrorCollector errors(ErrorMode::STRICT);
+  ErrorCollector errors(ErrorMode::FAIL_FAST);
   parseWithErrors(content, errors);
 
   // In strict mode, should stop after first error

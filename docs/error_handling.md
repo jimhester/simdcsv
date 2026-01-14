@@ -47,7 +47,7 @@ libvroom supports three error handling modes via the `ErrorMode` enum. Choose th
 ### STRICT Mode
 
 ```cpp
-ErrorCollector errors(ErrorMode::STRICT);
+ErrorCollector errors(ErrorMode::FAIL_FAST);
 ```
 
 - **Behavior**: Stop parsing on the first error encountered (any severity)

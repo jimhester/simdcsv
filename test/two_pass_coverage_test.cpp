@@ -1899,7 +1899,7 @@ TEST_F(ErrorHandlingEdgeCaseTest, StrictModeStopsEarly) {
 
   TwoPass parser;
   libvroom::ParseIndex idx = parser.init(content.size(), 1);
-  ErrorCollector errors(ErrorMode::STRICT);
+  ErrorCollector errors(ErrorMode::FAIL_FAST);
 
   bool success = parser.parse_with_errors(buf.data(), idx, content.size(), errors);
 

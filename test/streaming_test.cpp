@@ -1166,7 +1166,7 @@ TEST(StreamingTest, UnclosedQuoteStrict) {
 
   StreamConfig config;
   config.parse_header = false;
-  config.error_mode = ErrorMode::STRICT;
+  config.error_mode = ErrorMode::FAIL_FAST;
 
   StreamParser parser(config);
 
@@ -1838,7 +1838,7 @@ TEST(StreamingTest, StrictErrorModeStopsOnError) {
 
   StreamConfig config;
   config.parse_header = false;
-  config.error_mode = ErrorMode::STRICT;
+  config.error_mode = ErrorMode::FAIL_FAST;
 
   StreamParser parser(config);
   StreamStatus status = parser.parse_chunk(csv);
