@@ -34,8 +34,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install Jupyter dependencies
-        run: pip install jupyter nbformat nbclient
+      - name: Install Jupyter and quartodoc dependencies
+        run: pip install jupyter nbformat nbclient quartodoc
 
       - name: Install Doxygen
         run: sudo apt-get update && sudo apt-get install -y doxygen
@@ -51,6 +51,9 @@ jobs:
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --target vroom-cli
+
+      - name: Install vroom-csv Python package
+        run: pip install ./python
 
       - name: Build documentation
         working-directory: docs
