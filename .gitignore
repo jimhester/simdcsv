@@ -38,6 +38,9 @@ Thumbs.db
 # Documentation build output
 docs/_site/
 docs/api/
+docs/api-reference/
+docs/python-reference/
+docs/objects.json
 docs/.quarto/
 
 # Python
