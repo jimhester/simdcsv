@@ -279,20 +279,100 @@ ArrowConverter::extract_field_ranges_with_headers(const uint8_t* buf, size_t len
   return result;
 }
 
+std::vector<size_t> ArrowConverter::compute_sample_indices(size_t num_rows) const {
+  std::vector<size_t> indices;
+
+  if (num_rows == 0) {
+    return indices;
+  }
+
+  if (options_.sampling_strategy == SamplingStrategy::SEQUENTIAL) {
+    // Legacy behavior: sample first N rows sequentially
+    size_t limit = options_.type_inference_rows > 0
+                       ? std::min(options_.type_inference_rows, num_rows)
+                       : num_rows;
+    indices.reserve(limit);
+    for (size_t i = 0; i < limit; ++i) {
+      indices.push_back(i);
+    }
+  } else {
+    // Distributed sampling: sample from equally-spaced locations
+    size_t total_samples = options_.num_sample_locations * options_.rows_per_location;
+
+    if (num_rows <= total_samples) {
+      // File smaller than total sample size: sample all rows
+      indices.reserve(num_rows);
+      for (size_t i = 0; i < num_rows; ++i) {
+        indices.push_back(i);
+      }
+    } else {
+      // Calculate equally-spaced sample locations
+      // We use num_sample_locations - 1 intervals to ensure last row is included
+      indices.reserve(total_samples);
+
+      // Special case: ensure we always sample the first location (row 0)
+      // and the last location (including rows near the end)
+      size_t num_locations = options_.num_sample_locations;
+      if (num_locations == 0) {
+        return indices;
+      }
+
+      // For num_locations locations, we divide the file into num_locations-1 intervals
+      // Location 0 starts at row 0
+      // Location num_locations-1 starts at a position that allows sampling rows_per_location
+      // rows before reaching the end
+      for (size_t loc = 0; loc < num_locations; ++loc) {
+        size_t start;
+        if (loc == 0) {
+          start = 0;
+        } else if (loc == num_locations - 1) {
+          // Last location: ensure we can sample rows_per_location rows ending at num_rows
+          // Start at num_rows - rows_per_location, but not before any previous sample
+          start = num_rows > options_.rows_per_location ? num_rows - options_.rows_per_location : 0;
+        } else {
+          // Evenly distribute intermediate locations
+          // loc ranges from 1 to num_locations-2
+          // Map to positions between 0 and (num_rows - rows_per_location)
+          size_t max_start =
+              num_rows > options_.rows_per_location ? num_rows - options_.rows_per_location : 0;
+          start = (loc * max_start) / (num_locations - 1);
+        }
+
+        // Sample rows_per_location contiguous rows starting at this location
+        for (size_t i = 0; i < options_.rows_per_location && (start + i) < num_rows; ++i) {
+          indices.push_back(start + i);
+        }
+      }
+    }
+  }
+
+  return indices;
+}
+
 std::vector<ColumnType>
 ArrowConverter::infer_types_from_ranges(const uint8_t* buf,
                                         const std::vector<std::vector<FieldRange>>& field_ranges,
                                         const Dialect& dialect) {
   std::vector<ColumnType> types(field_ranges.size(), ColumnType::NULL_TYPE);
+
+  if (field_ranges.empty()) {
+    return types;
+  }
+
+  // Compute which rows to sample based on the sampling strategy
+  size_t num_rows = field_ranges[0].size();
+  auto sample_indices = compute_sample_indices(num_rows);
+
   for (size_t col = 0; col < field_ranges.size(); ++col) {
     const auto& ranges = field_ranges[col];
-    size_t samples = options_.type_inference_rows > 0
-                         ? std::min(options_.type_inference_rows, ranges.size())
-                         : ranges.size();
     ColumnType strongest = ColumnType::NULL_TYPE;
-    for (size_t row = 0; row < samples; ++row) {
+
+    for (size_t idx : sample_indices) {
+      if (idx >= ranges.size())
+        continue;
+
       ColumnType ct =
-          infer_cell_type(extract_field(buf, ranges[row].start, ranges[row].end, dialect));
+          infer_cell_type(extract_field(buf, ranges[idx].start, ranges[idx].end, dialect));
       if (ct == ColumnType::NULL_TYPE)
         continue;
       if (strongest == ColumnType::NULL_TYPE)
