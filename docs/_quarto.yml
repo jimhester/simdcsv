@@ -16,38 +16,37 @@ website:
   repo-actions: [issue]
 
   navbar:
-    left:
-      - text: "Home"
-        href: index.qmd
-      - text: "Getting Started"
-        href: getting-started.qmd
-      - text: "Integration Guide"
-        href: integration-guide.qmd
-      - text: "CLI"
-        href: cli.qmd
-      - text: "Streaming Parser"
-        href: streaming.qmd
-      - text: "Caching"
-        href: caching.qmd
-      - text: "C API"
-        href: c-api.qmd
-      - text: "Python"
-        menu:
-          - text: "Python Package"
-            href: python.qmd
-          - text: "Python API Reference"
-            href: python-reference/index.qmd
-      - text: "Architecture"
-        href: architecture.qmd
-      - text: "Error Handling"
-        href: error-handling.qmd
-      - text: "Benchmarks"
-        href: benchmarks.qmd
-      - text: "C++ API Reference"
-        href: api-reference/index.qmd
     right:
       - icon: github
         href: https://github.com/jimhester/libvroom
+
+  sidebar:
+    style: docked
+    search: true
+    contents:
+      - section: "Getting Started"
+        contents:
+          - index.qmd
+          - getting-started.qmd
+          - integration-guide.qmd
+      - section: "User Guide"
+        contents:
+          - cli.qmd
+          - streaming.qmd
+          - caching.qmd
+          - error-handling.qmd
+      - section: "Python"
+        contents:
+          - python.qmd
+          - text: "Python API Reference"
+            href: python-reference/index.qmd
+      - section: "Reference"
+        contents:
+          - c-api.qmd
+          - architecture.qmd
+          - benchmarks.qmd
+          - text: "C++ API Reference"
+            href: api-reference/index.qmd
 
   page-footer:
     center: "Built with [Quarto](https://quarto.org/), [Doxygen](https://doxygen.nl/), and [quartodoc](https://machow.github.io/quartodoc/)"
@@ -56,6 +55,7 @@ format:
   html:
     theme: cosmo
     toc: true
+    toc-location: right
     code-copy: true
     code-overflow: wrap
 
