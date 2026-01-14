@@ -562,6 +562,82 @@ inline uint64_t second_pass_simd_branchless(const BranchlessStateMachine& sm, co
 }
 
 /**
+ * @brief Result structure from branchless second pass with state.
+ *
+ * Contains both the number of indexes found and whether parsing ended
+ * at a record boundary. Used for speculation validation per Chang et al.
+ * Algorithm 1 - if a chunk doesn't end at a record boundary, the
+ * speculation was incorrect.
+ */
+struct BranchlessSecondPassResult {
+  uint64_t n_indexes;      ///< Number of field separators found
+  bool at_record_boundary; ///< True if parsing ended at a record boundary
+};
+
+/**
+ * @brief SIMD-accelerated second pass that also returns ending state.
+ *
+ * This version returns both the index count and whether parsing ended at
+ * a record boundary. Used for speculation validation per Chang et al.
+ * Algorithm 1 - chunks must end at record boundaries for speculation
+ * to be valid.
+ *
+ * A chunk ends at a record boundary if the final quote parity is even
+ * (not inside a quoted field). If we end inside a quote, the speculation
+ * was definitely wrong and we need to fall back to two-pass parsing.
+ *
+ * @param sm The branchless state machine
+ * @param buf Input buffer
+ * @param start Start position
+ * @param end End position
+ * @param indexes Output array
+ * @param thread_id Thread ID for interleaved storage
+ * @param n_threads Total number of threads
+ * @return BranchlessSecondPassResult with count and boundary status
+ */
+inline BranchlessSecondPassResult
+second_pass_simd_branchless_with_state(const BranchlessStateMachine& sm, const uint8_t* buf,
+                                       size_t start, size_t end, uint64_t* indexes,
+                                       size_t thread_id, int n_threads) {
+  assert(end >= start && "Invalid range: end must be >= start");
+  size_t len = end - start;
+  size_t pos = 0;
+  uint64_t idx = 0; // Start at 0; thread offset handled by base pointer
+  uint64_t prev_quote_state = 0ULL;
+  uint64_t prev_escape_carry = 0ULL; // For escape char mode
+  uint64_t count = 0;
+  const uint8_t* data = buf + start;
+
+  // Process 64-byte blocks
+  for (; pos + 64 <= len; pos += 64) {
+    __builtin_prefetch(data + pos + 128);
+
+    simd_input in = fill_input(data + pos);
+    count += process_block_simd_branchless(sm, in, 64, prev_quote_state, prev_escape_carry,
+                                           indexes + thread_id, start + pos, idx, n_threads);
+  }
+
+  // Handle remaining bytes (< 64)
+  if (pos < len) {
+    simd_input in = fill_input_safe(data + pos, len - pos);
+    count += process_block_simd_branchless(sm, in, len - pos, prev_quote_state, prev_escape_carry,
+                                           indexes + thread_id, start + pos, idx, n_threads);
+  }
+
+  // Check if we ended at a record boundary:
+  // Not inside a quoted field (prev_quote_state == 0)
+  //
+  // The key insight from Chang et al. Algorithm 1: if speculative chunk
+  // boundary detection was wrong, parsing this chunk will end inside a
+  // quoted field. The next chunk would then start mid-quote, leading to
+  // incorrect parsing. By checking the ending state, we can detect this
+  // misprediction and fall back to reliable two-pass parsing.
+  bool at_record_boundary = (prev_quote_state == 0);
+
+  return {count, at_record_boundary};
+}
+
+/**
  * @brief SIMD-accelerated block processing with error detection.
  *
  * This is an optimized version of process_block_simd_branchless that also

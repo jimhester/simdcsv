@@ -581,6 +581,31 @@ public:
   }
 
   /**
+   * @brief Branchless SIMD second pass that also returns ending state.
+   *
+   * This version returns both the index count and whether parsing ended at
+   * a record boundary. Used for speculation validation per Chang et al.
+   * Algorithm 1 - chunks must end at record boundaries for speculation
+   * to be valid.
+   *
+   * @param sm Pre-initialized branchless state machine
+   * @param buf Input buffer
+   * @param start Start position in buffer
+   * @param end End position in buffer
+   * @param out Index structure to store results
+   * @param thread_id Thread ID for interleaved storage
+   * @return SecondPassResult with count and boundary status
+   */
+  static SecondPassResult second_pass_simd_branchless_with_state(const BranchlessStateMachine& sm,
+                                                                 const uint8_t* buf, size_t start,
+                                                                 size_t end, ParseIndex* out,
+                                                                 size_t thread_id) {
+    auto result = libvroom::second_pass_simd_branchless_with_state(
+        sm, buf, start, end, out->indexes, thread_id, out->n_threads);
+    return {result.n_indexes, result.at_record_boundary};
+  }
+
+  /**
    * @brief Parser state machine states for CSV field parsing.
    *
    * The CSV parser uses a finite state machine to track its position within
