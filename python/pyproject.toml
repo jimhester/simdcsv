@@ -61,6 +61,9 @@ BUILD_BENCHMARKS = "OFF"
 [tool.setuptools_scm]
 root = ".."
 write_to = "python/src/vroom_csv/_version.py"
+# PyPI/TestPyPI reject local version identifiers (e.g., +g252d43bb0)
+# Using no-local-version produces versions like 0.1.dev1 instead of 0.1.dev1+g252d43bb0
+local_scheme = "no-local-version"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
