@@ -113,10 +113,11 @@ jobs:
     - name: Build Python package with coverage instrumentation
       working-directory: python
       env:
-        # CMAKE_BUILD_TYPE=Debug prevents stripping which removes coverage data
-        CMAKE_ARGS: "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/coverage-toolchain.cmake -DCMAKE_BUILD_TYPE=Debug"
+        CMAKE_ARGS: "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/coverage-toolchain.cmake"
       run: |
-        python -m pip install --no-build-isolation -v -e .[test]
+        # Use --config-settings to set Debug build type (prevents stripping)
+        python -m pip install --no-build-isolation -v -e .[test] \
+          --config-settings=cmake.build-type=Debug
 
     - name: Run tests with coverage
       working-directory: python
