@@ -189,9 +189,10 @@ class TestNullValueHandling:
         table = vroom_csv.read_csv(csv_with_nulls)
         arrow_table = pa.table(table)
 
-        # Check values column: "100", NA (null), "" (null), N/A (null), null (null)
+        # Check values column: 100, NA (null), "" (null), N/A (null), null (null)
+        # Note: "100" is inferred as int64 due to type inference
         values = arrow_table.column("value").to_pylist()
-        assert values[0] == "100"  # valid value
+        assert values[0] == 100    # valid value (inferred as int64)
         assert values[1] is None   # NA -> null
         assert values[2] is None   # empty string -> null (in default null_values)
         assert values[3] is None   # N/A -> null
@@ -302,8 +303,9 @@ class TestNullValueHandling:
         table = vroom_csv.read_csv(csv_path)  # using defaults
         arrow_table = pa.table(table)
 
+        # Note: numeric values are inferred as int64 due to type inference
         values = arrow_table.column("val").to_pylist()
-        expected = ["10", None, "20", None, "30", None, "40", None]
+        expected = [10, None, 20, None, 30, None, 40, None]
         assert values == expected
 
     def test_null_handling_with_polars(self):
