@@ -242,3 +242,196 @@ def read_csv(
         If a column name in usecols is not found.
     """
     ...
+
+class RecordBatch:
+    """A batch of rows from batched CSV reading.
+
+    RecordBatch represents a subset of rows from a CSV file during batched
+    reading. It implements the Arrow PyCapsule interface for zero-copy
+    interoperability with PyArrow, Polars, DuckDB, and other Arrow-compatible
+    libraries.
+    """
+
+    @property
+    def num_rows(self) -> int:
+        """Number of rows in this batch."""
+        ...
+
+    @property
+    def num_columns(self) -> int:
+        """Number of columns."""
+        ...
+
+    @property
+    def column_names(self) -> list[str]:
+        """List of column names."""
+        ...
+
+    @overload
+    def column(self, index: int) -> list[str]:
+        """Get column by index as list of strings."""
+        ...
+
+    @overload
+    def column(self, name: str) -> list[str]:
+        """Get column by name as list of strings."""
+        ...
+
+    def column(self, index_or_name: int | str) -> list[str]:
+        """Get column by index or name as list of strings."""
+        ...
+
+    def row(self, index: int) -> list[str]:
+        """Get row by index as list of strings."""
+        ...
+
+    def __len__(self) -> int: ...
+    def __repr__(self) -> str: ...
+    def __arrow_c_schema__(self) -> Any:
+        """Export batch schema via Arrow C Data Interface."""
+        ...
+
+    def __arrow_c_stream__(self, requested_schema: Any = None) -> Any:
+        """Export batch data via Arrow C Stream Interface."""
+        ...
+
+class BatchedReader:
+    """Iterator for batched CSV reading.
+
+    Returned by read_csv_batched(), yields RecordBatch objects for
+    memory-efficient processing of large CSV files.
+    """
+
+    @property
+    def path(self) -> str:
+        """Path to the CSV file."""
+        ...
+
+    @property
+    def batch_size(self) -> int:
+        """Number of rows per batch."""
+        ...
+
+    @property
+    def column_names(self) -> list[str]:
+        """List of column names (available after first batch)."""
+        ...
+
+    def __iter__(self) -> "BatchedReader": ...
+    def __next__(self) -> RecordBatch: ...
+    def __repr__(self) -> str: ...
+
+class RowIterator:
+    """Iterator for row-by-row CSV streaming.
+
+    Returned by read_csv_rows(), yields dictionaries for each row
+    in the CSV file.
+    """
+
+    @property
+    def column_names(self) -> list[str]:
+        """List of column names."""
+        ...
+
+    def __iter__(self) -> "RowIterator": ...
+    def __next__(self) -> dict[str, Any]: ...
+
+def read_csv_batched(
+    path: str,
+    batch_size: int = 10000,
+    delimiter: str | None = None,
+    quote_char: str | None = None,
+    has_header: bool = True,
+    null_values: Sequence[str] | None = None,
+    empty_is_null: bool = True,
+    dtype: dict[str, str] | None = None,
+    progress: Callable[[int, int], None] | None = None,
+) -> BatchedReader:
+    """Read a CSV file in batches for memory-efficient processing.
+
+    Parameters
+    ----------
+    path : str
+        Path to the CSV file to read.
+    batch_size : int, default 10000
+        Number of rows per batch.
+    delimiter : str, optional
+        Field delimiter character. If not specified, defaults to comma (',').
+    quote_char : str, optional
+        Quote character for escaping fields. Default is '"'.
+    has_header : bool, default True
+        Whether the first row contains column headers.
+    null_values : sequence of str, optional
+        List of strings to interpret as null/missing values.
+    empty_is_null : bool, default True
+        If True, empty strings are treated as null values.
+    dtype : dict[str, str], optional
+        Dictionary mapping column names to data types.
+    progress : callable, optional
+        A callback function for progress reporting during parsing.
+        The callback receives two arguments: (bytes_read: int, total_bytes: int).
+        It is called after each batch is read.
+
+    Returns
+    -------
+    BatchedReader
+        An iterator yielding RecordBatch objects.
+
+    Raises
+    ------
+    ValueError
+        If the file cannot be opened or parameters are invalid.
+    """
+    ...
+
+def read_csv_rows(
+    path: str,
+    delimiter: str | None = None,
+    quote_char: str | None = None,
+    has_header: bool = True,
+    skip_rows: int = 0,
+    n_rows: int | None = None,
+    usecols: Sequence[str | int] | None = None,
+    dtype: dict[str, str] | None = None,
+    progress: Callable[[int, int], None] | None = None,
+) -> RowIterator:
+    """Read a CSV file and return an iterator for row-by-row streaming.
+
+    Parameters
+    ----------
+    path : str
+        Path to the CSV file to read.
+    delimiter : str, optional
+        Field delimiter character. If not specified, auto-detected.
+    quote_char : str, optional
+        Quote character for escaping fields. Default is '"'.
+    has_header : bool, default True
+        Whether the first row contains column headers.
+    skip_rows : int, default 0
+        Number of data rows to skip.
+    n_rows : int, optional
+        Maximum number of data rows to read.
+    usecols : sequence of str or int, optional
+        List of column names or indices to include.
+    dtype : dict[str, str], optional
+        Dictionary mapping column names to data types.
+    progress : callable, optional
+        A callback function for progress reporting during iteration.
+        The callback receives two arguments: (bytes_read: int, total_bytes: int).
+        It is called periodically (every 1000 rows) to minimize overhead.
+
+    Returns
+    -------
+    RowIterator
+        An iterator that yields dictionaries, one per row.
+
+    Raises
+    ------
+    ValueError
+        If the file cannot be read or parsed.
+    IndexError
+        If a column index in usecols is out of range.
+    KeyError
+        If a column name in usecols is not found.
+    """
+    ...
