@@ -96,9 +96,9 @@ jobs:
         python -m pip install build scikit-build-core pybind11 setuptools-scm
 
     - name: Create coverage toolchain file
-      working-directory: python
       run: |
-        cat > coverage-toolchain.cmake << 'EOF'
+        cat > ${{ github.workspace }}/coverage-toolchain.cmake << 'EOF'
+        message(STATUS "Coverage toolchain file loaded")
         set(CMAKE_C_COMPILER clang)
         set(CMAKE_CXX_COMPILER clang++)
         set(CMAKE_CXX_FLAGS_INIT "-fprofile-instr-generate -fcoverage-mapping")
@@ -106,12 +106,12 @@ jobs:
         set(CMAKE_MODULE_LINKER_FLAGS_INIT "-fprofile-instr-generate")
         set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fprofile-instr-generate")
         EOF
-        cat coverage-toolchain.cmake
+        cat ${{ github.workspace }}/coverage-toolchain.cmake
 
     - name: Build Python package with coverage instrumentation
       working-directory: python
       env:
-        CMAKE_ARGS: "-DCMAKE_TOOLCHAIN_FILE=coverage-toolchain.cmake"
+        CMAKE_ARGS: "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/coverage-toolchain.cmake"
       run: |
         python -m pip install --no-build-isolation -v -e .[test]
 
