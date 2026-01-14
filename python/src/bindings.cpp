@@ -1262,6 +1262,9 @@ private:
   std::shared_ptr<BatchData> data_;
 };
 
+// Type alias for Python progress callback: (bytes_read: int, total_bytes: int) -> None
+using PyProgressCallback = std::function<void(size_t, size_t)>;
+
 // BatchedReader class - Python iterator over CSV batches
 class BatchedReader {
 public:
@@ -1270,8 +1273,15 @@ public:
                 std::optional<std::string> quote_char = std::nullopt, bool has_header = true,
                 std::optional<std::vector<std::string>> null_values = std::nullopt,
                 bool empty_is_null = true,
-                std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt)
-      : path_(path), batch_size_(batch_size), has_header_(has_header), exhausted_(false) {
+                std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt,
+                std::optional<PyProgressCallback> progress = std::nullopt)
+      : path_(path), batch_size_(batch_size), has_header_(has_header), exhausted_(false),
+        progress_callback_(progress) {
+    // Get file size for progress reporting
+    auto meta = libvroom::SourceMetadata::from_file(path);
+    if (meta.valid) {
+      total_bytes_ = meta.size;
+    }
     // Configure null value handling
     if (null_values) {
       null_config_.null_values = *null_values;
@@ -1373,8 +1383,13 @@ public:
     // Check if we're done (no rows read means iterator is exhausted)
     if (rows_read == 0) {
       exhausted_ = true;
+      // Report 100% progress when done
+      invoke_final_progress_callback();
       throw py::stop_iteration();
     }
+
+    // Report progress after reading this batch
+    invoke_progress_callback();
 
     // Note: We don't check reader_->eof() here because the streaming reader
     // might report eof while still having buffered rows. The only reliable
@@ -1446,6 +1461,35 @@ public:
     return ss.str();
   }
 
+  /// Invoke the progress callback if set
+  void invoke_progress_callback() {
+    if (progress_callback_ && total_bytes_ > 0) {
+      py::gil_scoped_acquire acquire;
+      try {
+        size_t bytes_read = reader_ ? reader_->bytes_read() : 0;
+        (*progress_callback_)(bytes_read, total_bytes_);
+      } catch (py::error_already_set& e) {
+        throw;
+      } catch (...) {
+        // Ignore other exceptions in callback
+      }
+    }
+  }
+
+  /// Invoke the final progress callback (100% complete)
+  void invoke_final_progress_callback() {
+    if (progress_callback_ && total_bytes_ > 0) {
+      py::gil_scoped_acquire acquire;
+      try {
+        (*progress_callback_)(total_bytes_, total_bytes_);
+      } catch (py::error_already_set& e) {
+        throw;
+      } catch (...) {
+        // Ignore other exceptions in callback
+      }
+    }
+  }
+
 private:
   std::string path_;
   size_t batch_size_;
@@ -1455,6 +1499,8 @@ private:
   std::vector<std::string> column_names_;
   NullValueConfig null_config_;
   std::unordered_map<std::string, std::string> dtype_overrides_;
+  std::optional<PyProgressCallback> progress_callback_;
+  size_t total_bytes_ = 0;
 };
 
 // Factory function for read_csv_batched
@@ -1464,9 +1510,10 @@ read_csv_batched(const std::string& path, size_t batch_size = 10000,
                  std::optional<std::string> quote_char = std::nullopt, bool has_header = true,
                  std::optional<std::vector<std::string>> null_values = std::nullopt,
                  bool empty_is_null = true,
-                 std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt) {
+                 std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt,
+                 std::optional<PyProgressCallback> progress = std::nullopt) {
   return BatchedReader(path, batch_size, delimiter, quote_char, has_header, null_values,
-                       empty_is_null, dtype);
+                       empty_is_null, dtype, progress);
 }
 
 // =============================================================================
@@ -1504,9 +1551,6 @@ constexpr size_t MMAP_AUTO_THRESHOLD = 100ULL * 1024 * 1024;
 // =============================================================================
 // read_csv function with full options
 // =============================================================================
-
-// Type alias for Python progress callback: (bytes_read: int, total_bytes: int) -> None
-using PyProgressCallback = std::function<void(size_t, size_t)>;
 
 Table read_csv(const std::string& path, std::optional<std::string> delimiter = std::nullopt,
                std::optional<std::string> quote_char = std::nullopt, bool has_header = true,
@@ -1754,6 +1798,7 @@ struct RowIteratorConfig {
   std::optional<std::vector<size_t>> usecols_indices;
   std::vector<std::string> column_names;
   std::optional<std::unordered_map<std::string, std::string>> dtype;
+  std::optional<PyProgressCallback> progress;
 };
 
 /**
@@ -1766,6 +1811,12 @@ class RowIterator {
 public:
   explicit RowIterator(RowIteratorConfig config)
       : config_(std::move(config)), rows_yielded_(0), finished_(false) {
+    // Get file size for progress reporting
+    auto meta = libvroom::SourceMetadata::from_file(config_.path);
+    if (meta.valid) {
+      total_bytes_ = meta.size;
+    }
+
     // Configure streaming parser
     libvroom::StreamConfig stream_config;
     stream_config.parse_header = config_.has_header;
@@ -1832,6 +1883,8 @@ public:
     // Check n_rows limit
     if (config_.n_rows && rows_yielded_ >= *config_.n_rows) {
       finished_ = true;
+      // Report 100% progress when done
+      invoke_final_progress_callback();
       throw py::stop_iteration();
     }
 
@@ -1848,6 +1901,8 @@ public:
       // Get next row from reader
       if (!reader_->next_row()) {
         finished_ = true;
+        // Report 100% progress when done
+        invoke_final_progress_callback();
         throw py::stop_iteration();
       }
 
@@ -1895,6 +1950,12 @@ public:
     }
 
     ++rows_yielded_;
+
+    // Report progress periodically (every 1000 rows to minimize overhead)
+    if (config_.progress && (rows_yielded_ % 1000 == 0)) {
+      invoke_progress_callback();
+    }
+
     return result;
   }
 
@@ -1954,6 +2015,35 @@ private:
     }
   }
 
+  /// Invoke the progress callback if set
+  void invoke_progress_callback() {
+    if (config_.progress && total_bytes_ > 0) {
+      py::gil_scoped_acquire acquire;
+      try {
+        size_t bytes_read = reader_ ? reader_->bytes_read() : 0;
+        (*config_.progress)(bytes_read, total_bytes_);
+      } catch (py::error_already_set& e) {
+        throw;
+      } catch (...) {
+        // Ignore other exceptions in callback
+      }
+    }
+  }
+
+  /// Invoke the final progress callback (100% complete)
+  void invoke_final_progress_callback() {
+    if (config_.progress && total_bytes_ > 0) {
+      py::gil_scoped_acquire acquire;
+      try {
+        (*config_.progress)(total_bytes_, total_bytes_);
+      } catch (py::error_already_set& e) {
+        throw;
+      } catch (...) {
+        // Ignore other exceptions in callback
+      }
+    }
+  }
+
   RowIteratorConfig config_;
   std::unique_ptr<libvroom::StreamReader> reader_;
   std::vector<std::string> column_names_;
@@ -1961,6 +2051,7 @@ private:
   size_t rows_yielded_;
   bool finished_;
   bool has_cached_row_ = false;
+  size_t total_bytes_ = 0;
 };
 
 // =============================================================================
@@ -1972,7 +2063,8 @@ read_csv_rows(const std::string& path, std::optional<std::string> delimiter = st
               std::optional<std::string> quote_char = std::nullopt, bool has_header = true,
               size_t skip_rows = 0, std::optional<size_t> n_rows = std::nullopt,
               std::optional<std::vector<py::object>> usecols = std::nullopt,
-              std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt) {
+              std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt,
+              std::optional<PyProgressCallback> progress = std::nullopt) {
   // Validate delimiter
   if (delimiter && delimiter->length() != 1) {
     throw py::value_error("Delimiter must be a single character");
@@ -1991,6 +2083,7 @@ read_csv_rows(const std::string& path, std::optional<std::string> delimiter = st
   config.skip_rows = skip_rows;
   config.n_rows = n_rows;
   config.dtype = dtype;
+  config.progress = progress;
 
   // Handle usecols - we need to resolve column names/indices
   // For now, we'll store indices and resolve names after we have the header
@@ -2456,6 +2549,7 @@ Examples
         py::arg("delimiter") = py::none(), py::arg("quote_char") = py::none(),
         py::arg("has_header") = true, py::arg("null_values") = py::none(),
         py::arg("empty_is_null") = true, py::arg("dtype") = py::none(),
+        py::arg("progress") = py::none(),
         R"doc(
 Read a CSV file in batches for memory-efficient processing.
 
@@ -2486,6 +2580,10 @@ dtype : dict[str, str], optional
     By default, column types are automatically inferred from the data.
     Supported types: 'str', 'string', 'int', 'int64', 'float', 'float64',
     'bool', 'boolean'.
+progress : callable, optional
+    A callback function for progress reporting during parsing.
+    The callback receives two arguments: (bytes_read: int, total_bytes: int).
+    It is called after each batch is read. Use this to display progress bars.
 
 Returns
 -------
@@ -2532,7 +2630,7 @@ Examples
   m.def("read_csv_rows", &read_csv_rows, py::arg("path"), py::arg("delimiter") = py::none(),
         py::arg("quote_char") = py::none(), py::arg("has_header") = true, py::arg("skip_rows") = 0,
         py::arg("n_rows") = py::none(), py::arg("usecols") = py::none(),
-        py::arg("dtype") = py::none(),
+        py::arg("dtype") = py::none(), py::arg("progress") = py::none(),
         R"doc(
 Read a CSV file and return an iterator for row-by-row streaming.
 
@@ -2568,6 +2666,11 @@ dtype : dict[str, str], optional
     'bool', 'boolean' (boolean).
     Values that cannot be converted to the specified type become None.
     If not specified, all values are returned as strings.
+progress : callable, optional
+    A callback function for progress reporting during iteration.
+    The callback receives two arguments: (bytes_read: int, total_bytes: int).
+    It is called periodically (every 1000 rows) to minimize overhead.
+    Use this to display progress bars or update UIs.
 
 Returns
 -------
