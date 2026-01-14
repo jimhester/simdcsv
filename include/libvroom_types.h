@@ -9,6 +9,7 @@
  * Features:
  * - Field type enumeration (BOOLEAN, INTEGER, FLOAT, DATE, STRING, EMPTY, NA)
  * - Multi-format date detection (ISO, US, EU, compact formats)
+ * - Configurable date format preference for ambiguous dates
  * - Boolean variant recognition (true/false, yes/no, on/off, 0/1)
  * - NA/missing value detection (NA, N/A, null, NULL, None, -, .)
  * - SIMD-accelerated digit classification
@@ -16,7 +17,8 @@
  * - Type hint system for overriding auto-detected types
  *
  * @note Date format detection has inherent ambiguity between US (MM/DD/YYYY)
- * and EU (DD/MM/YYYY) formats. The implementation checks US format first.
+ * and EU (DD/MM/YYYY) formats. Use DateFormatPreference in TypeDetectionOptions
+ * to control how ambiguous dates are interpreted.
  */
 
 #ifndef LIBVROOM_TYPES_H
@@ -30,6 +32,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace libvroom {
@@ -64,6 +67,22 @@ inline const char* field_type_to_string(FieldType type) {
   return "unknown";
 }
 
+/**
+ * Preference for interpreting ambiguous date formats.
+ *
+ * Dates like "01/02/2024" can be interpreted as either:
+ * - US format: January 2nd, 2024 (MM/DD/YYYY)
+ * - EU format: February 1st, 2024 (DD/MM/YYYY)
+ *
+ * This enum controls which interpretation is preferred when both are valid.
+ */
+enum class DateFormatPreference : uint8_t {
+  AUTO = 0,     ///< Default behavior: check US format first, then EU
+  US_FIRST = 1, ///< Explicitly prefer MM/DD/YYYY for ambiguous dates
+  EU_FIRST = 2, ///< Prefer DD/MM/YYYY for ambiguous dates
+  ISO_ONLY = 3  ///< Accept only YYYY-MM-DD (or YYYY/MM/DD) and YYYYMMDD formats
+};
+
 struct TypeDetectionOptions {
   bool bool_as_int = true;
   bool trim_whitespace = true;
@@ -73,6 +92,7 @@ struct TypeDetectionOptions {
   char thousands_sep = ',';
   char decimal_point = '.';
   double confidence_threshold = 0.9;
+  DateFormatPreference date_format_preference = DateFormatPreference::AUTO;
 
   static TypeDetectionOptions defaults() { return TypeDetectionOptions(); }
 };
@@ -102,12 +122,13 @@ struct ColumnTypeStats {
 
     // Check if integers dominate (integers can include booleans like 0/1)
     // But only if booleans don't already dominate
-    if (static_cast<double>(integer_count) / non_empty >= threshold)
+    // Include boolean count since 0/1 are valid integers
+    if (static_cast<double>(integer_count + boolean_count) / non_empty >= threshold)
       return FieldType::INTEGER;
 
     // Check if floats dominate (floats include integers which are valid floats)
-    // Use cumulative count: floats + integers (not booleans, as "true" is not a float)
-    if (static_cast<double>(float_count + integer_count) / non_empty >= threshold)
+    // Use cumulative count: floats + integers + booleans (0/1 are valid floats)
+    if (static_cast<double>(float_count + integer_count + boolean_count) / non_empty >= threshold)
       return FieldType::FLOAT;
 
     // Check if dates dominate
@@ -177,13 +198,13 @@ public:
    * - EU: DD/MM/YYYY or DD-MM-YYYY
    * - Compact: YYYYMMDD
    *
-   * Note: For dates like "01/02/2024", there is ambiguity between US format
-   * (January 2nd) and EU format (February 1st). The current implementation
-   * checks US format first, so ambiguous dates will be interpreted as US format.
-   * If your data uses EU format exclusively, you may need to handle this at
-   * a higher level (e.g., by specifying locale preferences).
+   * The date_format_preference option controls ambiguity resolution:
+   * - AUTO/US_FIRST: Check US format before EU (default)
+   * - EU_FIRST: Check EU format before US
+   * - ISO_ONLY: Accept only ISO and compact formats
    */
-  static bool is_date(const uint8_t* data, size_t length);
+  static bool is_date(const uint8_t* data, size_t length,
+                      const TypeDetectionOptions& options = TypeDetectionOptions());
 
   /**
    * Detect if a field contains a common NA/missing value representation.
@@ -370,6 +391,27 @@ public:
   void reset();
   void merge(const ColumnTypeInference& other);
 
+  /**
+   * Check if all columns have confirmed types based on the confidence threshold.
+   *
+   * A column's type is "confirmed" when:
+   * 1. It has at least min_samples non-empty values
+   * 2. A single type dominates with >= confidence_threshold ratio
+   *
+   * @param min_samples Minimum samples per column before type can be confirmed (default: 100)
+   * @return true if all columns have confirmed types, enabling early termination
+   */
+  bool all_types_confirmed(size_t min_samples = 100) const;
+
+  /**
+   * Check if a specific column has a confirmed type.
+   *
+   * @param column Column index to check
+   * @param min_samples Minimum samples required for confirmation
+   * @return true if this column's type is confirmed
+   */
+  bool is_column_type_confirmed(size_t column, size_t min_samples = 100) const;
+
 private:
   std::vector<ColumnTypeStats> stats_;
   TypeDetectionOptions options_;
@@ -378,29 +420,21 @@ private:
 /**
  * TypeHints allows users to override auto-detected types for specific columns.
  *
- * Note: Uses linear search O(n) for column lookups. For CSVs with typical
- * column counts (<100), this is sufficient. For very wide CSVs, consider
- * using std::unordered_map instead.
+ * Uses std::unordered_map for O(1) average-case column lookups, which scales
+ * well for CSVs with many columns.
  */
 struct TypeHints {
-  std::vector<std::pair<std::string, FieldType>> column_types;
+  std::unordered_map<std::string, FieldType> column_types;
 
-  void add(const std::string& column, FieldType type) { column_types.emplace_back(column, type); }
+  void add(const std::string& column, FieldType type) { column_types[column] = type; }
 
   FieldType get(const std::string& column) const {
-    for (const auto& pair : column_types) {
-      if (pair.first == column)
-        return pair.second;
-    }
-    return FieldType::STRING;
+    auto it = column_types.find(column);
+    return it != column_types.end() ? it->second : FieldType::STRING;
   }
 
   bool has_hint(const std::string& column) const {
-    for (const auto& pair : column_types) {
-      if (pair.first == column)
-        return true;
-    }
-    return false;
+    return column_types.find(column) != column_types.end();
   }
 };
 

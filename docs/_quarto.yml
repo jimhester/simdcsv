@@ -4,6 +4,10 @@ project:
   render:
     - "*.qmd"
     - "api-reference/**/*.qmd"
+    - "python-reference/**/*.qmd"
+
+metadata-files:
+  - python-reference/_sidebar.yml
 
 website:
   title: "libvroom"
@@ -21,20 +25,32 @@ website:
         href: integration-guide.qmd
       - text: "CLI"
         href: cli.qmd
+      - text: "Streaming Parser"
+        href: streaming.qmd
+      - text: "Caching"
+        href: caching.qmd
+      - text: "C API"
+        href: c-api.qmd
+      - text: "Python"
+        menu:
+          - text: "Python Package"
+            href: python.qmd
+          - text: "Python API Reference"
+            href: python-reference/index.qmd
       - text: "Architecture"
         href: architecture.qmd
       - text: "Error Handling"
         href: error-handling.qmd
       - text: "Benchmarks"
         href: benchmarks.qmd
-      - text: "API Reference"
+      - text: "C++ API Reference"
         href: api-reference/index.qmd
     right:
       - icon: github
         href: https://github.com/jimhester/libvroom
 
   page-footer:
-    center: "Built with [Quarto](https://quarto.org/) and [Doxygen](https://doxygen.nl/)"
+    center: "Built with [Quarto](https://quarto.org/), [Doxygen](https://doxygen.nl/), and [quartodoc](https://machow.github.io/quartodoc/)"
 
 format:
   html:
@@ -42,3 +58,40 @@ format:
     toc: true
     code-copy: true
     code-overflow: wrap
+
+quartodoc:
+  package: vroom_csv
+  dir: python-reference
+  title: Python API Reference
+  style: pkgdown
+  parser: numpy
+  sidebar: python-reference/_sidebar.yml
+  sections:
+    - title: Reading CSV Files
+      desc: Functions for reading CSV files
+      contents:
+        - read_csv
+        - read_csv_batched
+        - read_csv_rows
+    - title: Dialect Detection
+      desc: Detect CSV format automatically
+      contents:
+        - detect_dialect
+    - title: Data Classes
+      desc: Classes representing parsed CSV data
+      contents:
+        - Table
+        - RecordBatch
+        - BatchedReader
+        - RowIterator
+        - Dialect
+    - title: Utilities
+      desc: Utility functions and classes
+      contents:
+        - default_progress
+    - title: Exceptions
+      desc: Exception classes for error handling
+      contents:
+        - VroomError
+        - ParseError
+        - IOError

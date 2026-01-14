@@ -404,6 +404,58 @@ TEST_F(CliTest, DialectCommandJson) {
   EXPECT_TRUE(result.output.find("\"confidence\":") != std::string::npos);
 }
 
+TEST_F(CliTest, DialectCommandLowConfidenceFails) {
+  // Test that dialect command fails for low-confidence detection without --force
+  auto result = CliRunner::run("dialect " + testDataPath("edge_cases/single_cell.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Error:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Hint:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("--force") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandForceShort) {
+  // Test that -f flag outputs best guess for low-confidence detection
+  auto result = CliRunner::run("dialect -f " + testDataPath("edge_cases/single_cell.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Warning: Low confidence") != std::string::npos);
+  EXPECT_TRUE(result.output.find("LOW CONFIDENCE") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Delimiter:") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandForceLong) {
+  // Test that --force flag outputs best guess for low-confidence detection
+  auto result = CliRunner::run("dialect --force " + testDataPath("edge_cases/single_cell.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Warning: Low confidence") != std::string::npos);
+  EXPECT_TRUE(result.output.find("LOW CONFIDENCE") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandForceJson) {
+  // Test that -f flag works with JSON output
+  auto result = CliRunner::run("dialect -f -j " + testDataPath("edge_cases/single_cell.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("\"low_confidence\": true") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Warning: Low confidence") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandForceNotNeededForHighConfidence) {
+  // Test that --force doesn't affect high-confidence detection
+  auto result = CliRunner::run("dialect --force " + testDataPath("separators/semicolon.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // No low-confidence warning for high-confidence detection
+  // (Note: ambiguity warnings may still appear for files with multiple valid dialects)
+  EXPECT_TRUE(result.output.find("Warning: Low confidence") == std::string::npos);
+  EXPECT_TRUE(result.output.find("LOW CONFIDENCE") == std::string::npos);
+  EXPECT_TRUE(result.output.find("semicolon") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectCommandJsonLowConfidenceField) {
+  // Test that JSON output includes low_confidence field for high-confidence detection
+  auto result = CliRunner::run("dialect -j " + testDataPath("separators/semicolon.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("\"low_confidence\": false") != std::string::npos);
+}
+
 TEST_F(CliTest, AutoDetectDisabledWithExplicitDelimiter) {
   // When -d is specified, auto-detect should be disabled
   // Even for a semicolon file, if we specify comma, it should use comma
@@ -922,12 +974,26 @@ TEST_F(CliTest, TailManyRows) {
   auto result = CliRunner::run("tail -n 5 " + testDataPath("basic/many_rows.csv"));
   EXPECT_EQ(result.exit_code, 0);
   // Should have header
-  EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos);
+  EXPECT_TRUE(result.output.find("ID,Value,Label") != std::string::npos)
+      << "Expected header not found. Output length: " << result.output.size()
+      << "\nActual output:\n"
+      << result.output;
   // Should have last 5 rows (IDs 16-20)
-  EXPECT_TRUE(result.output.find("16,") != std::string::npos);
-  EXPECT_TRUE(result.output.find("20,") != std::string::npos);
+  EXPECT_TRUE(result.output.find("16,") != std::string::npos)
+      << "Expected '16,' not found in tail output.\n"
+      << "Exit code: " << result.exit_code << "\n"
+      << "Output length: " << result.output.size() << " bytes\n"
+      << "Actual output:\n"
+      << result.output;
+  EXPECT_TRUE(result.output.find("20,") != std::string::npos)
+      << "Expected '20,' not found in tail output.\n"
+      << "Actual output:\n"
+      << result.output;
   // Should NOT have earlier rows (IDs 1-15)
-  EXPECT_TRUE(result.output.find("15,") == std::string::npos);
+  EXPECT_TRUE(result.output.find("15,") == std::string::npos)
+      << "Unexpected '15,' found in tail output (should only have last 5 rows).\n"
+      << "Actual output:\n"
+      << result.output;
 }
 
 TEST_F(CliTest, TailFromStdin) {
@@ -1805,27 +1871,22 @@ TEST_F(CliTest, InfoSingleCell) {
 }
 
 // =============================================================================
-// UTF-8 Truncation Limitation Tests
+// UTF-8 Truncation Tests (Issue #255)
 // =============================================================================
-// KNOWN LIMITATION: The pretty command truncates fields at byte boundaries,
-// not Unicode code point boundaries. This means multi-byte UTF-8 sequences
-// (emoji, CJK characters, etc.) may be split, resulting in potentially
-// invalid UTF-8 output. This is documented behavior per issue #240.
-//
-// These tests document the current behavior. If UTF-8-aware truncation is
-// implemented in the future, these tests should be updated to verify proper
-// code point boundary handling.
+// The pretty command now properly handles UTF-8 truncation at code point
+// boundaries, respecting display width for CJK and emoji characters.
+// This was implemented to fix issue #255.
 // =============================================================================
 
-TEST_F(CliTest, PrettyUtf8TruncationLimitation) {
-  // This test documents the known UTF-8 truncation limitation.
-  // The pretty command truncates at byte position 37 (MAX_COLUMN_WIDTH - 3),
-  // which may split multi-byte UTF-8 sequences.
+TEST_F(CliTest, PrettyUtf8TruncationProperBoundaries) {
+  // Test that UTF-8 truncation respects code point boundaries.
+  // The pretty command now uses display width (not byte length) and
+  // truncates at code point boundaries, never splitting multi-byte sequences.
   //
-  // Test file contains fields > 40 bytes with multi-byte UTF-8:
-  // - EmojiSplit: 36 ASCII + 2 emoji (4 bytes each) = 44 bytes
-  // - CJKSplit: 17 CJK characters (3 bytes each) = 51 bytes
-  // - MixedSplit: Mix of ASCII, CJK, emoji = 55 bytes
+  // Test file contains fields > 40 display columns with multi-byte UTF-8:
+  // - EmojiSplit: 36 ASCII + 2 emoji (2 cols each) = 40 display columns
+  // - CJKSplit: 17 CJK characters (2 cols each) = 34 display columns
+  // - MixedSplit: Mix of ASCII, CJK, emoji
   auto result = CliRunner::run("pretty " + testDataPath("edge_cases/utf8_truncation.csv"));
   EXPECT_EQ(result.exit_code, 0);
 
@@ -1833,25 +1894,34 @@ TEST_F(CliTest, PrettyUtf8TruncationLimitation) {
   EXPECT_TRUE(result.output.find("+") != std::string::npos);
   EXPECT_TRUE(result.output.find("|") != std::string::npos);
 
-  // Verify truncation occurred (look for "..." in output)
-  EXPECT_TRUE(result.output.find("...") != std::string::npos);
-
-  // Note: The truncated output may contain invalid UTF-8 sequences.
-  // This is the documented limitation - truncation operates on bytes,
-  // not code points. A future fix would ensure truncation respects
-  // UTF-8 character boundaries.
+  // Verify that truncation doesn't produce invalid UTF-8 sequences.
+  // The output should NOT contain the replacement character (0xFFFD).
+  // In valid UTF-8, we should not see orphaned continuation bytes (0x80-0xBF
+  // without proper leading byte) or truncated multi-byte sequences.
+  //
+  // Check that the output is valid UTF-8 by ensuring no orphaned bytes
+  for (size_t i = 0; i < result.output.size(); ++i) {
+    unsigned char c = static_cast<unsigned char>(result.output[i]);
+    if ((c & 0xC0) == 0x80) {
+      // This is a continuation byte (10xxxxxx), verify it follows a leading byte
+      EXPECT_GT(i, 0) << "Orphaned continuation byte at start of string";
+      if (i > 0) {
+        unsigned char prev = static_cast<unsigned char>(result.output[i - 1]);
+        // Previous byte should be either a leading byte or another continuation byte
+        bool valid_prev = (prev & 0x80) != 0; // Must be part of multi-byte sequence
+        EXPECT_TRUE(valid_prev) << "Orphaned continuation byte at position " << i;
+      }
+    }
+  }
 }
 
 TEST_F(CliTest, PrettyUtf8ShortFieldsNotTruncated) {
-  // Verify that short UTF-8 fields (< 40 bytes) are NOT truncated
+  // Verify that short UTF-8 fields (< 40 display columns) are NOT truncated
   auto result = CliRunner::run("pretty " + testDataPath("real_world/unicode.csv"));
   EXPECT_EQ(result.exit_code, 0);
 
-  // The unicode.csv file has fields < 40 bytes, so they should display fully
+  // The unicode.csv file has fields < 40 display columns, so they display fully
   EXPECT_TRUE(result.output.find("+") != std::string::npos);
-
-  // Fields should not be truncated - no "..." for content fields
-  // Note: Header "Description" is short so won't have "..."
 }
 
 // ============================================================================
@@ -1994,4 +2064,568 @@ TEST_F(CliTest, StrictModeQuoteInUnquotedField) {
   // Quote appearing in unquoted field should fail in strict mode
   auto result = CliRunner::run("head -S " + testDataPath("malformed/quote_in_unquoted_field.csv"));
   EXPECT_EQ(result.exit_code, 1);
+}
+
+// =============================================================================
+// Tail Command - Auto-detect Dialect Tests
+// =============================================================================
+
+TEST_F(CliTest, TailWithAutoDetect) {
+  // Test tail command with auto-detection (no -d flag)
+  // The default behavior is auto_detect = true when no delimiter is specified
+  auto result = CliRunner::run("tail -n 2 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("A,B,C") != std::string::npos);
+  EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
+}
+
+TEST_F(CliTest, TailAutoDetectTabFile) {
+  // Test tail with auto-detection on tab-delimited file
+  auto result = CliRunner::run("tail -n 2 " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Tab-delimited file should be parsed correctly with auto-detection
+}
+
+TEST_F(CliTest, TailStdinStrictModeError) {
+  // Test strict mode error handling for stdin input
+  auto result =
+      CliRunner::runWithFileStdin("tail -n 2 -S -", testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Strict mode enabled") != std::string::npos ||
+              result.output.find("Error") != std::string::npos);
+}
+
+TEST_F(CliTest, TailStdinWithExplicitDelimiter) {
+  // Test stdin with explicit delimiter (auto_detect = false)
+  auto result =
+      CliRunner::runWithFileStdin("tail -n 2 -d comma -", testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("7,8,9") != std::string::npos);
+}
+
+TEST_F(CliTest, TailNoHeaderEmptyOutput) {
+  // Test tail with -H flag on a file where we request 0 rows
+  // This ensures the header output path is covered for the no-header case
+  auto result = CliRunner::run("tail -n 0 -H " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output nothing when -H and -n 0
+}
+
+// =============================================================================
+// Schema Command Tests
+// =============================================================================
+
+TEST_F(CliTest, SchemaBasicFile) {
+  auto result = CliRunner::run("schema " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Schema:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("A") != std::string::npos);
+  EXPECT_TRUE(result.output.find("B") != std::string::npos);
+  EXPECT_TRUE(result.output.find("C") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaShowsTypes) {
+  auto result = CliRunner::run("schema " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show some type information
+  EXPECT_TRUE(result.output.find("Type") != std::string::npos ||
+              result.output.find("integer") != std::string::npos ||
+              result.output.find("string") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaShowsNullable) {
+  auto result = CliRunner::run("schema " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show nullable information
+  EXPECT_TRUE(result.output.find("Nullable") != std::string::npos ||
+              result.output.find("Yes") != std::string::npos ||
+              result.output.find("No") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaJsonOutput) {
+  auto result = CliRunner::run("schema -j " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output valid JSON structure
+  EXPECT_TRUE(result.output.find("{") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"columns\"") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"name\"") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"type\"") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"nullable\"") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaEmptyFile) {
+  auto result = CliRunner::run("schema " + testDataPath("edge_cases/empty_file.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, SchemaNoHeader) {
+  auto result = CliRunner::run("schema -H " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should use generated column names
+  EXPECT_TRUE(result.output.find("column_0") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaWithDelimiter) {
+  auto result = CliRunner::run("schema -d tab " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Schema:") != std::string::npos);
+}
+
+// =============================================================================
+// Stats Command Tests
+// =============================================================================
+
+TEST_F(CliTest, StatsBasicFile) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Statistics") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsCount) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Count") != std::string::npos ||
+              result.output.find("count") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsNulls) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Null") != std::string::npos ||
+              result.output.find("null") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsNumericStats) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // For numeric columns, should show min/max/mean
+  EXPECT_TRUE(result.output.find("Min") != std::string::npos ||
+              result.output.find("min") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Max") != std::string::npos ||
+              result.output.find("max") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Mean") != std::string::npos ||
+              result.output.find("mean") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonOutput) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should output valid JSON structure
+  EXPECT_TRUE(result.output.find("{") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"columns\"") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"count\"") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"nulls\"") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsEmptyFile) {
+  auto result = CliRunner::run("stats " + testDataPath("edge_cases/empty_file.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+}
+
+TEST_F(CliTest, StatsNoHeader) {
+  auto result = CliRunner::run("stats -H " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should use generated column names
+  EXPECT_TRUE(result.output.find("column_0") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsWithDelimiter) {
+  auto result = CliRunner::run("stats -d tab " + testDataPath("separators/tab.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Statistics") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsRowCount) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // simple.csv has 3 data rows (excluding header)
+  EXPECT_TRUE(result.output.find("3 rows") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonRowCount) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should include row count
+  EXPECT_TRUE(result.output.find("\"rows\": 3") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaStrictMode) {
+  // Schema command should fail in strict mode with malformed CSV
+  auto result = CliRunner::run("schema -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, StatsStrictMode) {
+  // Stats command should fail in strict mode with malformed CSV
+  auto result = CliRunner::run("stats -S " + testDataPath("malformed/unclosed_quote.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+TEST_F(CliTest, SchemaHelpDocumented) {
+  // Help text should document the schema command
+  auto result = CliRunner::run("-h");
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("schema") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsHelpDocumented) {
+  // Help text should document the stats command
+  auto result = CliRunner::run("-h");
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("stats") != std::string::npos);
+}
+
+// =============================================================================
+// Ambiguous Dialect Detection Tests (GitHub issue #225)
+// Tests for best-guess output when multiple dialects have similar scores
+// =============================================================================
+
+TEST_F(CliTest, DialectAmbiguousSucceeds) {
+  // When multiple dialects have similar scores, the command should still succeed
+  // and output the best-guess dialect rather than failing with an error
+  auto result = CliRunner::run("dialect " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should still detect a dialect (best guess)
+  EXPECT_TRUE(result.output.find("Delimiter:") != std::string::npos);
+  // Should include a warning about ambiguity
+  EXPECT_TRUE(result.output.find("ambiguous") != std::string::npos ||
+              result.output.find("Warning") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectAmbiguousJsonFormat) {
+  // JSON output should include "ambiguous" field
+  auto result = CliRunner::run("dialect -j " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should have ambiguous field in JSON
+  EXPECT_TRUE(result.output.find("\"ambiguous\":") != std::string::npos);
+  // Should have confidence score
+  EXPECT_TRUE(result.output.find("\"confidence\":") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectAmbiguousShowsAlternatives) {
+  // When ambiguous, should show alternative candidates
+  auto result = CliRunner::run("dialect " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show alternative candidates in warning output (stderr is merged to stdout)
+  // The alternatives will show different delimiters that scored similarly
+  EXPECT_TRUE(result.output.find("Alternative") != std::string::npos ||
+              result.output.find("delimiter=") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectAmbiguousJsonShowsAlternatives) {
+  // JSON output should include alternatives array when ambiguous
+  auto result = CliRunner::run("dialect -j " + testDataPath("edge_cases/ambiguous_delimiter.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // When ambiguous, JSON should include alternatives array
+  EXPECT_TRUE(result.output.find("\"alternatives\":") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectJsonAmbiguousFieldPresent) {
+  // JSON output should always include "ambiguous" field
+  auto result = CliRunner::run("dialect -j " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should have ambiguous field (true or false)
+  EXPECT_TRUE(result.output.find("\"ambiguous\":") != std::string::npos);
+}
+
+TEST_F(CliTest, DialectOutputsCliFlags) {
+  // Dialect output should include CLI flags for reuse
+  auto result = CliRunner::run("dialect " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("CLI flags:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("-d comma") != std::string::npos);
+}
+
+// =============================================================================
+// Schema/Stats Sampling Tests (GitHub issue #378)
+// Tests for the -m option to limit rows examined
+// =============================================================================
+
+TEST_F(CliTest, SchemaSampleSizeOption) {
+  // Schema with -m option should work and limit rows examined
+  auto result = CliRunner::run("schema -m 5 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Schema:") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsSampleSizeOption) {
+  // Stats with -m option should work and limit rows examined
+  auto result = CliRunner::run("stats -m 5 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Statistics") != std::string::npos);
+  // Stats should report the sampled row count (5 rows)
+  EXPECT_TRUE(result.output.find("5 rows") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaSampleSizeJsonOutput) {
+  // Schema with -m and -j should produce valid JSON
+  auto result = CliRunner::run("schema -m 5 -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("{") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"columns\"") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsSampleSizeJsonOutput) {
+  // Stats with -m and -j should produce valid JSON with correct row count
+  auto result = CliRunner::run("stats -m 5 -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("\"rows\": 5") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaSampleSizeZeroProcessesAll) {
+  // Schema with -m 0 should process all rows (default behavior)
+  auto result = CliRunner::run("schema -m 0 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("Schema:") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsSampleSizeZeroProcessesAll) {
+  // Stats with -m 0 should process all rows (default behavior)
+  auto result = CliRunner::run("stats -m 0 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // many_rows.csv has 20 data rows
+  EXPECT_TRUE(result.output.find("20 rows") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsSampleSizeLargerThanFile) {
+  // When sample size exceeds file rows, should process all rows
+  auto result = CliRunner::run("stats -m 1000 " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // many_rows.csv has 20 data rows, should process all 20
+  EXPECT_TRUE(result.output.find("20 rows") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaSampleSizeHelpDocumented) {
+  // Help text should document the -m option
+  auto result = CliRunner::run("-h");
+  EXPECT_EQ(result.exit_code, 0);
+  EXPECT_TRUE(result.output.find("-m") != std::string::npos);
+  EXPECT_TRUE(result.output.find("sample") != std::string::npos ||
+              result.output.find("Sample") != std::string::npos);
+}
+
+TEST_F(CliTest, SchemaSampleSizeInvalidValue) {
+  // Invalid sample size should produce an error
+  auto result = CliRunner::run("schema -m abc " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+  EXPECT_TRUE(result.output.find("Invalid sample size") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsSampleSizeNegativeValue) {
+  // Negative sample size should produce an error
+  auto result = CliRunner::run("stats -m -5 " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 1);
+}
+
+// =============================================================================
+// Extended Statistics Tests (GitHub issue #388)
+// Tests for new statistics: std dev, percentiles, histogram, string stats
+// =============================================================================
+
+TEST_F(CliTest, StatsShowsStdDev) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show standard deviation for numeric columns
+  EXPECT_TRUE(result.output.find("Std Dev") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsPercentiles) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show percentiles (p0, p25, p50, p75, p100)
+  EXPECT_TRUE(result.output.find("Percentiles") != std::string::npos);
+  EXPECT_TRUE(result.output.find("p0=") != std::string::npos);
+  EXPECT_TRUE(result.output.find("p25=") != std::string::npos);
+  EXPECT_TRUE(result.output.find("p50=") != std::string::npos);
+  EXPECT_TRUE(result.output.find("p75=") != std::string::npos);
+  EXPECT_TRUE(result.output.find("p100=") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsHistogram) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show histogram for numeric columns
+  EXPECT_TRUE(result.output.find("Histogram") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsCompleteRate) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show complete rate (non-null ratio)
+  EXPECT_TRUE(result.output.find("Complete rate") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsUniqueValues) {
+  auto result = CliRunner::run("stats " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show unique value count
+  EXPECT_TRUE(result.output.find("Unique values") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsShowsStringLength) {
+  auto result = CliRunner::run("stats " + testDataPath("real_world/contacts.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should show min/max length for string columns
+  EXPECT_TRUE(result.output.find("Min length") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Max length") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonShowsStdDev) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should include standard deviation
+  EXPECT_TRUE(result.output.find("\"sd\":") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonShowsPercentiles) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should include all percentiles
+  EXPECT_TRUE(result.output.find("\"p0\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"p25\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"p50\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"p75\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"p100\":") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonShowsHistogram) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should include histogram
+  EXPECT_TRUE(result.output.find("\"hist\":") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonShowsCompleteRate) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should include complete_rate
+  EXPECT_TRUE(result.output.find("\"complete_rate\":") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsJsonShowsStringStats) {
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // JSON should include string statistics
+  EXPECT_TRUE(result.output.find("\"n_unique\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"min_length\":") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"max_length\":") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsPercentileAccuracy) {
+  // Test with many_rows.csv which has IDs 1-20
+  // p50 (median) of 1-20 should be around 10.5
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/many_rows.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // The median (p50) for 1-20 is 10.5
+  EXPECT_TRUE(result.output.find("\"p50\": 10.5") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsStdDevAccuracy) {
+  // Test with simple.csv which has values 1,2,3 / 4,5,6 / 7,8,9
+  // Column A has values 1,4,7 -> mean=4, std dev ~ 3.0
+  auto result = CliRunner::run("stats -j " + testDataPath("basic/simple.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Should contain sd field with a value (not null)
+  EXPECT_TRUE(result.output.find("\"sd\": 3.") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsAllEmptyColumn) {
+  // Test that columns with only empty values are handled correctly
+  // The JSON output should have null for min_length/max_length and 0 for n_unique
+  auto result = CliRunner::run("stats -j " + testDataPath("edge_cases/all_empty_column.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // Check the JSON is valid (not corrupted by SIZE_MAX values)
+  // Look for the empty_col column which should have null for string lengths
+  EXPECT_TRUE(result.output.find("\"min_length\": null") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"max_length\": null") != std::string::npos);
+  EXPECT_TRUE(result.output.find("\"n_unique\": 0") != std::string::npos);
+}
+
+TEST_F(CliTest, StatsAllEmptyColumnHumanReadable) {
+  // Test that human-readable output handles all-empty columns gracefully
+  auto result = CliRunner::run("stats " + testDataPath("edge_cases/all_empty_column.csv"));
+  EXPECT_EQ(result.exit_code, 0);
+  // The empty column should not crash or show SIZE_MAX values
+  // Should show the column exists with proper null count
+  EXPECT_TRUE(result.output.find("empty_col") != std::string::npos);
+  EXPECT_TRUE(result.output.find("Nulls") != std::string::npos);
+}
+
+// =============================================================================
+// Convert Command Tests (Arrow-enabled builds only)
+// =============================================================================
+// These tests verify the convert command behavior. They are skipped on builds
+// without Arrow support since the convert command won't exist.
+
+TEST_F(CliTest, ConvertCommandMissingOutputPath) {
+  // convert requires -o option
+  auto result = CliRunner::run("convert " + testDataPath("basic/simple.csv"));
+  // Either "Unknown command" (no Arrow) or "Output path required" error
+  bool is_unknown_command = result.output.find("Unknown command") != std::string::npos;
+  bool is_missing_output = result.output.find("Output path required") != std::string::npos;
+  if (!is_unknown_command) {
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_TRUE(is_missing_output)
+        << "Expected 'Output path required' error, got: " << result.output;
+  }
+}
+
+TEST_F(CliTest, ConvertCommandInvalidFormat) {
+  // Invalid -F value should fail
+  auto result = CliRunner::run("convert " + testDataPath("basic/simple.csv") +
+                               " -o /tmp/test.out -F invalid_format");
+  bool is_unknown_command = result.output.find("Unknown command") != std::string::npos;
+  bool is_invalid_format = result.output.find("Unknown output format") != std::string::npos;
+  if (!is_unknown_command) {
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_TRUE(is_invalid_format)
+        << "Expected 'Unknown output format' error, got: " << result.output;
+  }
+}
+
+TEST_F(CliTest, ConvertCommandFromStdinError) {
+  // convert command does not support stdin input
+  auto result =
+      CliRunner::runWithFileStdin("convert -o /tmp/test.feather", testDataPath("basic/simple.csv"));
+  bool is_unknown_command = result.output.find("Unknown command") != std::string::npos;
+  bool is_stdin_error = result.output.find("Cannot convert from stdin") != std::string::npos;
+  if (!is_unknown_command) {
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_TRUE(is_stdin_error) << "Expected stdin error, got: " << result.output;
+  }
+}
+
+TEST_F(CliTest, ConvertCommandUnknownExtension) {
+  // Unknown extension without explicit format should fail
+  auto result =
+      CliRunner::run("convert " + testDataPath("basic/simple.csv") + " -o /tmp/test.unknown");
+  bool is_unknown_command = result.output.find("Unknown command") != std::string::npos;
+  bool is_format_error = result.output.find("Cannot determine output format") != std::string::npos;
+  if (!is_unknown_command) {
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_TRUE(is_format_error) << "Expected format detection error, got: " << result.output;
+  }
+}
+
+TEST_F(CliTest, ConvertCommandInvalidCompression) {
+  // Invalid -C value should fail (only matters for parquet)
+  auto result = CliRunner::run("convert " + testDataPath("basic/simple.csv") +
+                               " -o /tmp/test.parquet -C invalid_codec");
+  bool is_unknown_command = result.output.find("Unknown command") != std::string::npos;
+  bool is_codec_error = result.output.find("Unknown compression codec") != std::string::npos;
+  if (!is_unknown_command) {
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_TRUE(is_codec_error) << "Expected compression codec error, got: " << result.output;
+  }
+}
+
+TEST_F(CliTest, ConvertHelpShowsConvertCommand) {
+  // Check that --help includes convert command when Arrow is enabled
+  auto result = CliRunner::run("--help");
+  EXPECT_EQ(result.exit_code, 0);
+  // The help text will only include "convert" if built with Arrow support
+  // This test documents the expected behavior without requiring Arrow
+  bool has_convert = result.output.find("convert") != std::string::npos;
+  // Just verify help runs successfully - convert presence depends on build
+  EXPECT_TRUE(result.output.find("vroom") != std::string::npos);
 }

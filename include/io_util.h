@@ -251,6 +251,25 @@ struct LoadResult {
 LoadResult read_file_with_encoding(const std::string& filename, size_t padding);
 
 /**
+ * @brief Loads a file with explicit encoding (overrides auto-detection).
+ *
+ * Similar to read_file_with_encoding(), but uses the specified encoding
+ * instead of auto-detecting. This is useful when the user knows the
+ * encoding and auto-detection fails or gives incorrect results.
+ *
+ * @param filename The path to the file to load.
+ * @param padding The number of extra bytes to allocate beyond the data size.
+ * @param forced_encoding The encoding to use for transcoding.
+ *
+ * @return A LoadResult containing the transcoded data.
+ *         The encoding field in the result will have confidence = 1.0.
+ *
+ * @throws std::runtime_error If the file cannot be opened, read, or transcoded.
+ */
+LoadResult read_file_with_encoding(const std::string& filename, size_t padding,
+                                   libvroom::Encoding forced_encoding);
+
+/**
  * @brief Reads stdin with automatic encoding detection and transcoding.
  *
  * Similar to read_file_with_encoding(), but reads from stdin instead of
@@ -266,5 +285,20 @@ LoadResult read_file_with_encoding(const std::string& filename, size_t padding);
  * @throws std::runtime_error If reading fails or transcoding fails.
  */
 LoadResult read_stdin_with_encoding(size_t padding);
+
+/**
+ * @brief Reads stdin with explicit encoding (overrides auto-detection).
+ *
+ * Similar to read_stdin_with_encoding(), but uses the specified encoding
+ * instead of auto-detecting.
+ *
+ * @param padding The number of extra bytes to allocate beyond the data size.
+ * @param forced_encoding The encoding to use for transcoding.
+ *
+ * @return A LoadResult containing the transcoded data.
+ *
+ * @throws std::runtime_error If reading fails or transcoding fails.
+ */
+LoadResult read_stdin_with_encoding(size_t padding, libvroom::Encoding forced_encoding);
 
 #endif

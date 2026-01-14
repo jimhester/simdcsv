@@ -40,8 +40,14 @@ cd build && ctest --output-on-failure -j$(nproc)
 # Run benchmarks
 ./build/libvroom_benchmark
 
-# Build with code coverage
+# Build with code coverage (gcov)
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
+cmake --build build -j$(nproc)
+
+# Build with LLVM source-based coverage (requires Clang, better for headers)
+cmake -B build -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+  -DENABLE_LLVM_COVERAGE=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -83,7 +89,7 @@ To manually format a file: `clang-format -i <file>`
 - **Update branches via merge**: When a branch needs updates from main, use `git merge main` instead of rebasing
 - **Squash on final merge**: Use squash merge when merging PRs into main to keep history clean
 - **Check for merge conflicts**: When opening a branch, check for merge conflicts with main. If CI status checks aren't appearing on a PR, merge conflicts are often the cause
-- **Use auto-merge**: Enable auto-merge on PRs when there are no outstanding review comments. The PR will merge automatically once CI passes
+- **Use auto-merge**: Enable auto-merge on PRs when CI is passing and there are no outstanding issues
 
 ```bash
 # Check for conflicts before creating PR
@@ -123,6 +129,8 @@ SIMD via Google Highway 1.3.0: x86-64 (SSE4.2, AVX2), ARM (NEON), scalar fallbac
 | Topic | Location |
 |-------|----------|
 | Error handling (modes, types, recovery) | `docs/error_handling.md` |
+| Index caching (CLI options, API, cache format) | `docs/caching.qmd` |
+| Code coverage (tools, limitations, interpretation) | `docs/coverage.md` |
 | Test data organization | `test/README.md` |
 | CI workflows | `.github/workflows/README.md` |
 
@@ -149,6 +157,8 @@ Use `gh issue create --label "label"` with the following labels:
 | `cli ⌨️` | vroom command line tool |
 | `simd ⚡` | SIMD implementation or optimization |
 | `arrow 🏹` | Apache Arrow integration |
+| `R 🏴‍☠️` | R language bindings or integration |
+| `python 🐍` | Python bindings or integration |
 | `security 🔒` | security vulnerability or hardening |
 | `critical ☠️` | must fix - security or correctness issue |
 | `up next 📌` | next items to address from code review |

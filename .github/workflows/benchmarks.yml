@@ -41,14 +41,30 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake build-essential python3-pip jq
+        sudo apt-get install -y cmake build-essential ccache python3-pip jq
         pip3 install --break-system-packages pandas matplotlib || pip3 install pandas matplotlib
 
     - name: Install dependencies (macOS)
       if: runner.os == 'macOS'
       run: |
-        brew install cmake jq
+        brew install cmake ccache jq
         pip3 install pandas matplotlib --break-system-packages || pip3 install pandas matplotlib
+
+    - name: Cache ccache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/ccache
+          ~/Library/Caches/ccache
+        key: ccache-benchmark-${{ runner.os }}-${{ github.sha }}
+        restore-keys: |
+          ccache-benchmark-${{ runner.os }}-
+
+    - name: Configure ccache
+      run: |
+        ccache --set-config=max_size=500M
+        ccache --set-config=compression=true
+        ccache -z
 
     - name: Get system information
       id: sysinfo
@@ -75,6 +91,10 @@ jobs:
     - name: Build benchmark executable
       run: |
         cmake --build build --target libvroom_benchmark -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+    - name: Show ccache stats
+      run: |
+        ccache -s
 
     - name: Run benchmarks
       id: run_benchmarks

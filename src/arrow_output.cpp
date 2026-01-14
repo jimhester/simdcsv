@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <arrow/builder.h>
+#include <arrow/io/file.h>
+#include <arrow/ipc/writer.h>
 #include <arrow/table.h>
 #include <cassert>
 #include <cctype>
@@ -16,6 +18,11 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+
+#ifdef LIBVROOM_ENABLE_PARQUET
+#include <parquet/arrow/writer.h>
+#include <parquet/properties.h>
+#endif
 
 namespace libvroom {
 
@@ -210,17 +217,17 @@ std::string_view ArrowConverter::extract_field(const uint8_t* buf, size_t start,
   return std::string_view(field_start, len);
 }
 
-std::vector<std::vector<ArrowConverter::FieldRange>>
-ArrowConverter::extract_field_ranges(const uint8_t* buf, size_t len, const ParseIndex& idx,
-                                     const Dialect& dialect) {
-  std::vector<std::vector<FieldRange>> columns;
+ArrowConverter::FieldExtractionResult
+ArrowConverter::extract_field_ranges_with_headers(const uint8_t* buf, size_t len,
+                                                  const ParseIndex& idx, const Dialect& dialect) {
+  FieldExtractionResult result;
   if (idx.n_threads == 0)
-    return columns;
+    return result;
   size_t total_seps = 0;
   for (uint16_t t = 0; t < idx.n_threads; ++t)
     total_seps += idx.n_indexes[t];
   if (total_seps == 0)
-    return columns;
+    return result;
   std::vector<uint64_t> all_positions;
   all_positions.reserve(total_seps);
   for (uint16_t t = 0; t < idx.n_threads; ++t)
@@ -231,7 +238,7 @@ ArrowConverter::extract_field_ranges(const uint8_t* buf, size_t len, const Parse
     }
   std::sort(all_positions.begin(), all_positions.end());
   if (all_positions.empty())
-    return columns; // No valid positions after bounds filtering
+    return result; // No valid positions after bounds filtering
   size_t num_columns = 0;
   for (size_t i = 0; i < all_positions.size(); ++i) {
     num_columns++;
@@ -239,29 +246,43 @@ ArrowConverter::extract_field_ranges(const uint8_t* buf, size_t len, const Parse
       break;
   }
   if (num_columns == 0)
-    return columns;
-  columns.resize(num_columns);
+    return result;
+  result.columns.resize(num_columns);
+  result.header_names.reserve(num_columns);
+
   size_t field_start = 0, current_col = 0;
-  bool skip_header = true;
+  bool in_header = true;
   for (size_t i = 0; i < all_positions.size(); ++i) {
     size_t field_end = all_positions[i];
     char sep_char = static_cast<char>(buf[field_end]);
-    if (!skip_header && current_col < num_columns)
-      columns[current_col].push_back({field_start, field_end});
+    if (in_header) {
+      // Extract header name during first row
+      result.header_names.push_back(
+          std::string(extract_field(buf, field_start, field_end, dialect)));
+    } else if (current_col < num_columns) {
+      result.columns[current_col].push_back({field_start, field_end});
+    }
     if (sep_char == '\n') {
-      if (skip_header)
-        skip_header = false;
+      if (in_header)
+        in_header = false;
       current_col = 0;
-    } else
+    } else {
       current_col++;
+    }
     field_start = field_end + 1;
   }
-  return columns;
+
+  // Auto-generate names for any missing columns
+  while (result.header_names.size() < num_columns)
+    result.header_names.push_back("column_" + std::to_string(result.header_names.size()));
+
+  return result;
 }
 
-std::vector<ColumnType> ArrowConverter::infer_types(const uint8_t* buf, size_t len,
-                                                    const ParseIndex& idx, const Dialect& dialect) {
-  auto field_ranges = extract_field_ranges(buf, len, idx, dialect);
+std::vector<ColumnType>
+ArrowConverter::infer_types_from_ranges(const uint8_t* buf,
+                                        const std::vector<std::vector<FieldRange>>& field_ranges,
+                                        const Dialect& dialect) {
   std::vector<ColumnType> types(field_ranges.size(), ColumnType::NULL_TYPE);
   for (size_t col = 0; col < field_ranges.size(); ++col) {
     const auto& ranges = field_ranges[col];
@@ -300,6 +321,12 @@ std::vector<ColumnType> ArrowConverter::infer_types(const uint8_t* buf, size_t l
     types[col] = (strongest == ColumnType::NULL_TYPE) ? ColumnType::STRING : strongest;
   }
   return types;
+}
+
+std::vector<ColumnType> ArrowConverter::infer_types(const uint8_t* buf, size_t len,
+                                                    const ParseIndex& idx, const Dialect& dialect) {
+  auto extraction = extract_field_ranges_with_headers(buf, len, idx, dialect);
+  return infer_types_from_ranges(buf, extraction.columns, dialect);
 }
 
 std::shared_ptr<arrow::Schema> ArrowConverter::build_schema(const std::vector<std::string>& names,
@@ -399,12 +426,15 @@ ArrowConverter::build_column(const uint8_t* buf, const std::vector<FieldRange>& 
 ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const ParseIndex& idx,
                                            const Dialect& dialect) {
   ArrowConvertResult result;
-  auto field_ranges = extract_field_ranges(buf, len, idx, dialect);
-  if (field_ranges.empty()) {
+
+  // Single extraction of field ranges and header names to avoid redundant parsing
+  auto extraction = extract_field_ranges_with_headers(buf, len, idx, dialect);
+  if (extraction.columns.empty()) {
     result.error_message = "No data";
     return result;
   }
-  size_t num_columns = field_ranges.size(), num_rows = field_ranges[0].size();
+  size_t num_columns = extraction.columns.size();
+  size_t num_rows = extraction.columns[0].size();
 
   // Validate column count against security limit
   if (options_.max_columns > 0 && num_columns > options_.max_columns) {
@@ -438,41 +468,16 @@ ArrowConvertResult ArrowConverter::convert(const uint8_t* buf, size_t len, const
     }
   }
 
-  // Extract column names from header
-  std::vector<std::string> column_names;
-  size_t total_seps = 0;
-  for (uint16_t t = 0; t < idx.n_threads; ++t)
-    total_seps += idx.n_indexes[t];
-  if (total_seps > 0) {
-    std::vector<uint64_t> all_positions;
-    for (uint16_t t = 0; t < idx.n_threads; ++t)
-      for (size_t i = 0; i < idx.n_indexes[t]; ++i) {
-        uint64_t pos = idx.indexes[t + i * idx.n_threads];
-        if (pos < len)
-          all_positions.push_back(pos); // Bounds check
-      }
-    std::sort(all_positions.begin(), all_positions.end());
-    size_t fs = 0;
-    for (size_t i = 0; i < all_positions.size() && column_names.size() < num_columns; ++i) {
-      column_names.push_back(std::string(extract_field(buf, fs, all_positions[i], dialect)));
-      fs = all_positions[i] + 1;
-      if (buf[all_positions[i]] == '\n')
-        break;
-    }
-  }
-  while (column_names.size() < num_columns)
-    column_names.push_back("column_" + std::to_string(column_names.size()));
-
-  // Get column types
+  // Get column types using pre-extracted field ranges (avoids redundant extraction)
   auto column_types = options_.infer_types
-                          ? infer_types(buf, len, idx, dialect)
+                          ? infer_types_from_ranges(buf, extraction.columns, dialect)
                           : std::vector<ColumnType>(num_columns, ColumnType::STRING);
-  result.schema = build_schema(column_names, column_types);
+  result.schema = build_schema(extraction.header_names, column_types);
 
   // Build columns
   std::vector<std::shared_ptr<arrow::Array>> arrays;
   for (size_t col = 0; col < num_columns; ++col) {
-    auto arr = build_column(buf, field_ranges[col], column_types[col], dialect);
+    auto arr = build_column(buf, extraction.columns[col], column_types[col], dialect);
     if (!arr.ok()) {
       result.error_message = arr.status().ToString();
       return result;
@@ -527,6 +532,235 @@ ArrowConvertResult csv_to_arrow_from_memory(const uint8_t* data, size_t len,
     result.error_message = e.what();
   }
   return result;
+}
+
+// =============================================================================
+// Columnar Format Export Implementation
+// =============================================================================
+
+ColumnarFormat detect_format_from_extension(const std::string& path) {
+  // Find the last dot to extract extension
+  size_t dot_pos = path.rfind('.');
+  if (dot_pos == std::string::npos || dot_pos == path.length() - 1) {
+    return ColumnarFormat::AUTO; // No extension found
+  }
+
+  std::string ext = path.substr(dot_pos + 1);
+  // Convert to lowercase for comparison
+  std::transform(ext.begin(), ext.end(), ext.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+
+  if (ext == "parquet" || ext == "pq") {
+    return ColumnarFormat::PARQUET;
+  } else if (ext == "feather" || ext == "arrow" || ext == "ipc") {
+    return ColumnarFormat::FEATHER;
+  }
+
+  return ColumnarFormat::AUTO;
+}
+
+WriteResult write_feather(const std::shared_ptr<arrow::Table>& table,
+                          const std::string& output_path) {
+  WriteResult result;
+
+  if (!table) {
+    result.error_message = "Table is null";
+    return result;
+  }
+
+  // Open output file
+  auto file_result = arrow::io::FileOutputStream::Open(output_path);
+  if (!file_result.ok()) {
+    result.error_message = "Failed to open output file: " + file_result.status().ToString();
+    return result;
+  }
+  auto output_file = *file_result;
+
+  // Write table as Arrow IPC stream (Feather v2 format)
+  auto writer_result = arrow::ipc::MakeFileWriter(output_file, table->schema());
+  if (!writer_result.ok()) {
+    result.error_message = "Failed to create IPC writer: " + writer_result.status().ToString();
+    return result;
+  }
+  auto writer = *writer_result;
+
+  // Write table batches
+  auto batches_result = table->CombineChunksToBatch();
+  if (!batches_result.ok()) {
+    result.error_message = "Failed to combine table chunks: " + batches_result.status().ToString();
+    return result;
+  }
+  auto batch = *batches_result;
+
+  auto write_status = writer->WriteRecordBatch(*batch);
+  if (!write_status.ok()) {
+    result.error_message = "Failed to write record batch: " + write_status.ToString();
+    return result;
+  }
+
+  auto close_status = writer->Close();
+  if (!close_status.ok()) {
+    result.error_message = "Failed to close writer: " + close_status.ToString();
+    return result;
+  }
+
+  // Get bytes written
+  auto pos_result = output_file->Tell();
+  if (pos_result.ok()) {
+    result.bytes_written = *pos_result;
+  }
+
+  auto file_close_status = output_file->Close();
+  if (!file_close_status.ok()) {
+    result.error_message = "Failed to close file: " + file_close_status.ToString();
+    return result;
+  }
+
+  result.success = true;
+  return result;
+}
+
+#ifdef LIBVROOM_ENABLE_PARQUET
+
+WriteResult write_parquet(const std::shared_ptr<arrow::Table>& table,
+                          const std::string& output_path, const ParquetWriteOptions& options) {
+  WriteResult result;
+
+  if (!table) {
+    result.error_message = "Table is null";
+    return result;
+  }
+
+  // Open output file
+  auto file_result = arrow::io::FileOutputStream::Open(output_path);
+  if (!file_result.ok()) {
+    result.error_message = "Failed to open output file: " + file_result.status().ToString();
+    return result;
+  }
+  auto output_file = *file_result;
+
+  // Configure Parquet writer properties
+  auto builder = parquet::WriterProperties::Builder();
+
+  // Set compression codec
+  parquet::Compression::type compression;
+  switch (options.compression) {
+  case ParquetWriteOptions::Compression::UNCOMPRESSED:
+    compression = parquet::Compression::UNCOMPRESSED;
+    break;
+  case ParquetWriteOptions::Compression::SNAPPY:
+    compression = parquet::Compression::SNAPPY;
+    break;
+  case ParquetWriteOptions::Compression::GZIP:
+    compression = parquet::Compression::GZIP;
+    break;
+  case ParquetWriteOptions::Compression::ZSTD:
+    compression = parquet::Compression::ZSTD;
+    break;
+  case ParquetWriteOptions::Compression::LZ4:
+    compression = parquet::Compression::LZ4;
+    break;
+  default:
+    compression = parquet::Compression::SNAPPY;
+    break;
+  }
+  builder.compression(compression);
+
+  auto writer_properties = builder.build();
+
+  // Configure Arrow writer properties
+  auto arrow_properties = parquet::ArrowWriterProperties::Builder().store_schema()->build();
+
+  // Write the table
+  auto status =
+      parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), output_file,
+                                 options.row_group_size, writer_properties, arrow_properties);
+
+  if (!status.ok()) {
+    result.error_message = "Failed to write Parquet file: " + status.ToString();
+    return result;
+  }
+
+  // Get bytes written
+  auto pos_result = output_file->Tell();
+  if (pos_result.ok()) {
+    result.bytes_written = *pos_result;
+  }
+
+  auto close_status = output_file->Close();
+  if (!close_status.ok()) {
+    result.error_message = "Failed to close file: " + close_status.ToString();
+    return result;
+  }
+
+  result.success = true;
+  return result;
+}
+
+#else // !LIBVROOM_ENABLE_PARQUET
+
+WriteResult write_parquet(const std::shared_ptr<arrow::Table>& /*table*/,
+                          const std::string& /*output_path*/,
+                          const ParquetWriteOptions& /*options*/) {
+  WriteResult result;
+  result.error_message =
+      "Parquet support not available. This build was compiled without Parquet support.";
+  return result;
+}
+
+#endif // LIBVROOM_ENABLE_PARQUET
+
+WriteResult write_columnar(const std::shared_ptr<arrow::Table>& table,
+                           const std::string& output_path, ColumnarFormat format,
+                           const ParquetWriteOptions& parquet_options) {
+  // Auto-detect format from extension if needed
+  if (format == ColumnarFormat::AUTO) {
+    format = detect_format_from_extension(output_path);
+    if (format == ColumnarFormat::AUTO) {
+      // Default to Parquet if extension not recognized
+      format = ColumnarFormat::PARQUET;
+    }
+  }
+
+  switch (format) {
+  case ColumnarFormat::PARQUET:
+    return write_parquet(table, output_path, parquet_options);
+  case ColumnarFormat::FEATHER:
+    return write_feather(table, output_path);
+  default:
+    WriteResult result;
+    result.error_message = "Unknown output format";
+    return result;
+  }
+}
+
+WriteResult csv_to_parquet(const std::string& csv_path, const std::string& parquet_path,
+                           const ArrowConvertOptions& arrow_options,
+                           const ParquetWriteOptions& parquet_options, const Dialect& dialect) {
+  // First convert CSV to Arrow table
+  auto arrow_result = csv_to_arrow(csv_path, arrow_options, dialect);
+  if (!arrow_result.ok()) {
+    WriteResult result;
+    result.error_message = "CSV to Arrow conversion failed: " + arrow_result.error_message;
+    return result;
+  }
+
+  // Then write to Parquet
+  return write_parquet(arrow_result.table, parquet_path, parquet_options);
+}
+
+WriteResult csv_to_feather(const std::string& csv_path, const std::string& feather_path,
+                           const ArrowConvertOptions& arrow_options, const Dialect& dialect) {
+  // First convert CSV to Arrow table
+  auto arrow_result = csv_to_arrow(csv_path, arrow_options, dialect);
+  if (!arrow_result.ok()) {
+    WriteResult result;
+    result.error_message = "CSV to Arrow conversion failed: " + arrow_result.error_message;
+    return result;
+  }
+
+  // Then write to Feather
+  return write_feather(arrow_result.table, feather_path);
 }
 
 } // namespace libvroom

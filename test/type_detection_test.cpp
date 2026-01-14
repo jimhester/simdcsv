@@ -648,6 +648,48 @@ TEST_F(TypeHintsTest, HasHint) {
   EXPECT_FALSE(hints.has_hint("unknown"));
 }
 
+TEST_F(TypeHintsTest, OverwriteHint) {
+  // Adding the same column twice should overwrite the previous value
+  hints.add("col", FieldType::INTEGER);
+  EXPECT_EQ(hints.get("col"), FieldType::INTEGER);
+  hints.add("col", FieldType::FLOAT);
+  EXPECT_EQ(hints.get("col"), FieldType::FLOAT);
+}
+
+TEST_F(TypeHintsTest, ManyColumns) {
+  // Test with many columns to verify unordered_map performance
+  const int num_columns = 1000;
+  for (int i = 0; i < num_columns; ++i) {
+    hints.add("column_" + std::to_string(i), FieldType::INTEGER);
+  }
+
+  // Verify all columns are accessible
+  for (int i = 0; i < num_columns; ++i) {
+    EXPECT_TRUE(hints.has_hint("column_" + std::to_string(i)));
+    EXPECT_EQ(hints.get("column_" + std::to_string(i)), FieldType::INTEGER);
+  }
+
+  // Verify non-existent columns return defaults
+  EXPECT_FALSE(hints.has_hint("nonexistent"));
+  EXPECT_EQ(hints.get("nonexistent"), FieldType::STRING);
+}
+
+TEST_F(TypeHintsTest, AllFieldTypes) {
+  hints.add("bool_col", FieldType::BOOLEAN);
+  hints.add("int_col", FieldType::INTEGER);
+  hints.add("float_col", FieldType::FLOAT);
+  hints.add("date_col", FieldType::DATE);
+  hints.add("string_col", FieldType::STRING);
+  hints.add("empty_col", FieldType::EMPTY);
+
+  EXPECT_EQ(hints.get("bool_col"), FieldType::BOOLEAN);
+  EXPECT_EQ(hints.get("int_col"), FieldType::INTEGER);
+  EXPECT_EQ(hints.get("float_col"), FieldType::FLOAT);
+  EXPECT_EQ(hints.get("date_col"), FieldType::DATE);
+  EXPECT_EQ(hints.get("string_col"), FieldType::STRING);
+  EXPECT_EQ(hints.get("empty_col"), FieldType::EMPTY);
+}
+
 // ============================================================================
 // Additional ColumnTypeStats Tests
 // ============================================================================
@@ -841,6 +883,81 @@ TEST_F(ColumnTypeInferenceTest, AddRowGrowsColumns) {
   inference.add_row({"a", "b"});
   inference.add_row({"c", "d", "e", "f"}); // More columns
   EXPECT_EQ(inference.num_columns(), 4);
+}
+
+// ============================================================================
+// Early Termination Tests (GitHub issue #378)
+// ============================================================================
+
+TEST_F(ColumnTypeInferenceTest, AllTypesConfirmedNotEnoughSamples) {
+  // With only a few samples, types should not be confirmed
+  inference.add_row({"123", "hello"});
+  inference.add_row({"456", "world"});
+  inference.add_row({"789", "test"});
+
+  // With default min_samples=100, should return false
+  EXPECT_FALSE(inference.all_types_confirmed());
+
+  // With min_samples=2, should return true
+  EXPECT_TRUE(inference.all_types_confirmed(2));
+}
+
+TEST_F(ColumnTypeInferenceTest, AllTypesConfirmedEnoughSamples) {
+  // Add many consistent samples
+  for (int i = 0; i < 150; ++i) {
+    inference.add_row({std::to_string(i), "text"});
+  }
+
+  // With default min_samples=100, should return true
+  EXPECT_TRUE(inference.all_types_confirmed());
+}
+
+TEST_F(ColumnTypeInferenceTest, AllTypesConfirmedWithMixedTypes) {
+  // Add samples with mixed types (some columns confirmed, some not)
+  for (int i = 0; i < 50; ++i) {
+    inference.add_row({std::to_string(i), "text"});
+  }
+
+  // At min_samples=30, should be confirmed
+  EXPECT_TRUE(inference.all_types_confirmed(30));
+
+  // At min_samples=60, should not be confirmed (not enough samples)
+  EXPECT_FALSE(inference.all_types_confirmed(60));
+}
+
+TEST_F(ColumnTypeInferenceTest, IsColumnTypeConfirmedEmptyColumn) {
+  // Test with column index out of bounds
+  EXPECT_FALSE(inference.is_column_type_confirmed(0));
+  EXPECT_FALSE(inference.is_column_type_confirmed(100));
+}
+
+TEST_F(ColumnTypeInferenceTest, IsColumnTypeConfirmedWithData) {
+  // Add enough data to one column
+  for (int i = 0; i < 150; ++i) {
+    inference.add_field(0, reinterpret_cast<const uint8_t*>("123"), 3);
+  }
+
+  // Column 0 should be confirmed
+  EXPECT_TRUE(inference.is_column_type_confirmed(0));
+
+  // Non-existent column should return false
+  EXPECT_FALSE(inference.is_column_type_confirmed(1));
+}
+
+TEST_F(ColumnTypeInferenceTest, AllTypesConfirmedWithEmptyInference) {
+  // Empty inference should return false
+  EXPECT_FALSE(inference.all_types_confirmed());
+}
+
+TEST_F(ColumnTypeInferenceTest, AllTypesConfirmedWithOnlyEmptyValues) {
+  // If all values are empty, type is not confirmed until enough samples
+  for (int i = 0; i < 50; ++i) {
+    inference.add_row({""});
+  }
+
+  // With min_samples=10 on non_empty, should NOT be confirmed
+  // because there are 0 non-empty values
+  EXPECT_FALSE(inference.all_types_confirmed(10));
 }
 
 class SIMDTypeDetectorTest : public ::testing::Test {
@@ -1130,8 +1247,8 @@ TEST_F(DirectMethodTest, IsFloatDirect) {
 }
 
 TEST_F(DirectMethodTest, IsDateDirect) {
-  EXPECT_TRUE(TypeDetector::is_date(reinterpret_cast<const uint8_t*>("2024-01-15"), 10));
-  EXPECT_FALSE(TypeDetector::is_date(reinterpret_cast<const uint8_t*>("hello"), 5));
+  EXPECT_TRUE(TypeDetector::is_date(reinterpret_cast<const uint8_t*>("2024-01-15"), 10, options));
+  EXPECT_FALSE(TypeDetector::is_date(reinterpret_cast<const uint8_t*>("hello"), 5, options));
 }
 
 TEST_F(DirectMethodTest, IsIntegerEmpty) {
@@ -1344,6 +1461,170 @@ TEST_F(ColumnTypeInferenceNATest, MergeWithNAStats) {
   EXPECT_EQ(inference.column_stats(0).total_count, 3);
   EXPECT_EQ(inference.column_stats(0).na_count, 2);
   EXPECT_EQ(inference.column_stats(0).integer_count, 1);
+}
+
+// ============================================================================
+// Date Format Preference Tests (GitHub issue #58)
+// ============================================================================
+
+class DateFormatPreferenceTest : public ::testing::Test {
+protected:
+  TypeDetectionOptions options;
+  void SetUp() override { options = TypeDetectionOptions::defaults(); }
+};
+
+TEST_F(DateFormatPreferenceTest, DefaultIsAuto) {
+  // Default should be AUTO
+  EXPECT_EQ(options.date_format_preference, DateFormatPreference::AUTO);
+}
+
+TEST_F(DateFormatPreferenceTest, ISOFormatAlwaysAccepted) {
+  // ISO format should work with all preferences
+  for (auto pref : {DateFormatPreference::AUTO, DateFormatPreference::US_FIRST,
+                    DateFormatPreference::EU_FIRST, DateFormatPreference::ISO_ONLY}) {
+    options.date_format_preference = pref;
+    EXPECT_EQ(TypeDetector::detect_field("2024-01-15", options), FieldType::DATE)
+        << "ISO format should work with preference " << static_cast<int>(pref);
+    EXPECT_EQ(TypeDetector::detect_field("2024/12/25", options), FieldType::DATE)
+        << "ISO format with slash should work with preference " << static_cast<int>(pref);
+  }
+}
+
+TEST_F(DateFormatPreferenceTest, CompactFormatAlwaysAccepted) {
+  // Compact format (YYYYMMDD) should work with all preferences
+  for (auto pref : {DateFormatPreference::AUTO, DateFormatPreference::US_FIRST,
+                    DateFormatPreference::EU_FIRST, DateFormatPreference::ISO_ONLY}) {
+    options.date_format_preference = pref;
+    EXPECT_EQ(TypeDetector::detect_field("20240115", options), FieldType::DATE)
+        << "Compact format should work with preference " << static_cast<int>(pref);
+  }
+}
+
+TEST_F(DateFormatPreferenceTest, USFormatWithAuto) {
+  // AUTO should accept US format (MM/DD/YYYY)
+  options.date_format_preference = DateFormatPreference::AUTO;
+  EXPECT_EQ(TypeDetector::detect_field("01/15/2024", options), FieldType::DATE);
+  EXPECT_EQ(TypeDetector::detect_field("12-25-2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, EUFormatWithAuto) {
+  // AUTO should accept EU format (DD/MM/YYYY) when unambiguous
+  options.date_format_preference = DateFormatPreference::AUTO;
+  // 15/01/2024 can only be EU (day 15 > 12)
+  EXPECT_EQ(TypeDetector::detect_field("15/01/2024", options), FieldType::DATE);
+  EXPECT_EQ(TypeDetector::detect_field("25-12-2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, USFirstAcceptsBothFormats) {
+  options.date_format_preference = DateFormatPreference::US_FIRST;
+  // Clear US format
+  EXPECT_EQ(TypeDetector::detect_field("01/15/2024", options), FieldType::DATE);
+  // Clear EU format (day > 12)
+  EXPECT_EQ(TypeDetector::detect_field("25/12/2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, EUFirstAcceptsBothFormats) {
+  options.date_format_preference = DateFormatPreference::EU_FIRST;
+  // Clear EU format
+  EXPECT_EQ(TypeDetector::detect_field("15/01/2024", options), FieldType::DATE);
+  // Clear US format (month > 12 would fail, so test valid US that's also valid EU)
+  EXPECT_EQ(TypeDetector::detect_field("01/12/2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, ISOOnlyRejectsUSFormat) {
+  options.date_format_preference = DateFormatPreference::ISO_ONLY;
+  // US format should be rejected
+  EXPECT_NE(TypeDetector::detect_field("01/15/2024", options), FieldType::DATE);
+  EXPECT_NE(TypeDetector::detect_field("12-25-2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, ISOOnlyRejectsEUFormat) {
+  options.date_format_preference = DateFormatPreference::ISO_ONLY;
+  // EU format should be rejected
+  EXPECT_NE(TypeDetector::detect_field("15/01/2024", options), FieldType::DATE);
+  EXPECT_NE(TypeDetector::detect_field("25-12-2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, AmbiguousDateWithAutoDefaultsToUS) {
+  // "01/02/2024" is ambiguous - could be Jan 2 (US) or Feb 1 (EU)
+  // With AUTO, US format is checked first, so this is valid as Jan 2
+  options.date_format_preference = DateFormatPreference::AUTO;
+  EXPECT_EQ(TypeDetector::detect_field("01/02/2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, AmbiguousDateWithUSFirst) {
+  // "01/02/2024" with US_FIRST should be detected as date (Jan 2)
+  options.date_format_preference = DateFormatPreference::US_FIRST;
+  EXPECT_EQ(TypeDetector::detect_field("01/02/2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, AmbiguousDateWithEUFirst) {
+  // "01/02/2024" with EU_FIRST should be detected as date (Feb 1)
+  options.date_format_preference = DateFormatPreference::EU_FIRST;
+  EXPECT_EQ(TypeDetector::detect_field("01/02/2024", options), FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, InvalidDateStillRejected) {
+  // Invalid dates should be rejected regardless of preference
+  for (auto pref : {DateFormatPreference::AUTO, DateFormatPreference::US_FIRST,
+                    DateFormatPreference::EU_FIRST, DateFormatPreference::ISO_ONLY}) {
+    options.date_format_preference = pref;
+    // Invalid month 13
+    EXPECT_NE(TypeDetector::detect_field("2024-13-01", options), FieldType::DATE);
+    // Invalid day 32
+    EXPECT_NE(TypeDetector::detect_field("2024-01-32", options), FieldType::DATE);
+  }
+}
+
+TEST_F(DateFormatPreferenceTest, ColumnTypeInferenceWithPreference) {
+  // Test that ColumnTypeInference respects date_format_preference
+  TypeDetectionOptions opts;
+  opts.date_format_preference = DateFormatPreference::ISO_ONLY;
+
+  ColumnTypeInference inference(0, opts);
+
+  // Add rows with US-format dates - should be detected as STRING in ISO_ONLY mode
+  for (int i = 0; i < 10; ++i) {
+    inference.add_row({"01/15/2024"});
+  }
+
+  auto types = inference.infer_types();
+  EXPECT_EQ(types[0], FieldType::STRING);
+}
+
+TEST_F(DateFormatPreferenceTest, ColumnTypeInferenceWithISODates) {
+  // Test that ColumnTypeInference correctly detects ISO dates
+  TypeDetectionOptions opts;
+  opts.date_format_preference = DateFormatPreference::ISO_ONLY;
+
+  ColumnTypeInference inference(0, opts);
+
+  // Add rows with ISO-format dates
+  for (int i = 0; i < 10; ++i) {
+    inference.add_row({"2024-01-15"});
+  }
+
+  auto types = inference.infer_types();
+  EXPECT_EQ(types[0], FieldType::DATE);
+}
+
+TEST_F(DateFormatPreferenceTest, DirectIsDateMethodWithPreference) {
+  // Test the is_date method directly with different preferences
+  const uint8_t* us_date = reinterpret_cast<const uint8_t*>("01/15/2024");
+  const uint8_t* eu_date = reinterpret_cast<const uint8_t*>("15/01/2024");
+  const uint8_t* iso_date = reinterpret_cast<const uint8_t*>("2024-01-15");
+
+  // AUTO accepts all
+  options.date_format_preference = DateFormatPreference::AUTO;
+  EXPECT_TRUE(TypeDetector::is_date(us_date, 10, options));
+  EXPECT_TRUE(TypeDetector::is_date(eu_date, 10, options));
+  EXPECT_TRUE(TypeDetector::is_date(iso_date, 10, options));
+
+  // ISO_ONLY only accepts ISO
+  options.date_format_preference = DateFormatPreference::ISO_ONLY;
+  EXPECT_FALSE(TypeDetector::is_date(us_date, 10, options));
+  EXPECT_FALSE(TypeDetector::is_date(eu_date, 10, options));
+  EXPECT_TRUE(TypeDetector::is_date(iso_date, 10, options));
 }
 
 int main(int argc, char** argv) {

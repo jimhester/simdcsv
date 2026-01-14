@@ -47,7 +47,7 @@ libvroom supports three error handling modes via the `ErrorMode` enum. Choose th
 ### STRICT Mode
 
 ```cpp
-ErrorCollector errors(ErrorMode::STRICT);
+ErrorCollector errors(ErrorMode::FAIL_FAST);
 ```
 
 - **Behavior**: Stop parsing on the first error encountered (any severity)
@@ -242,7 +242,7 @@ errors.add_error(err);
 // Convenience overload with individual parameters
 errors.add_error(
     ErrorCode::INCONSISTENT_FIELD_COUNT,  // code
-    ErrorSeverity::ERROR,                  // severity
+    ErrorSeverity::RECOVERABLE,                  // severity
     3,                                     // line (1-indexed)
     1,                                     // column (1-indexed)
     45,                                    // byte_offset
@@ -450,7 +450,7 @@ if (result.has_errors()) {
         if (err.severity == ErrorSeverity::WARNING) {
             // Warnings - data is usable
             std::cout << "[WARN] " << err.message << std::endl;
-        } else if (err.severity == ErrorSeverity::ERROR) {
+        } else if (err.severity == ErrorSeverity::RECOVERABLE) {
             // Errors - specific rows may be affected
             std::cout << "[ERR] Line " << err.line << ": " << err.message << std::endl;
         }

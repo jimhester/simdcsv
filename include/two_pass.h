@@ -52,19 +52,31 @@
 #include "branchless_state_machine.h"
 #include "dialect.h"
 #include "error.h"
+#include "mmap_util.h"
 #include "simd_highway.h"
 
 #include <cassert>
 #include <cstdint>
 #include <cstring> // for memcpy
+#include <functional>
 #include <future>
 #include <limits>
 #include <sstream>
-#include <unistd.h> // for getopt
 #include <unordered_set>
 #include <vector>
 
 namespace libvroom {
+
+/**
+ * @brief Progress callback for second-pass field indexing.
+ *
+ * Called periodically during parsing to report progress. The callback receives
+ * the number of bytes just processed. Return true to continue, false to cancel.
+ *
+ * This is used internally by the TwoPass parser to report chunk completion
+ * to the ProgressTracker in libvroom.h.
+ */
+using SecondPassProgressCallback = std::function<bool(size_t bytes_processed)>;
 
 /// Sentinel value indicating an invalid or unset position.
 constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
@@ -138,7 +150,7 @@ public:
   ParseIndex(ParseIndex&& other) noexcept
       : columns(other.columns), n_threads(other.n_threads), n_indexes(other.n_indexes),
         indexes(other.indexes), n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
-        indexes_ptr_(std::move(other.indexes_ptr_)) {
+        indexes_ptr_(std::move(other.indexes_ptr_)), mmap_buffer_(std::move(other.mmap_buffer_)) {
     other.n_indexes = nullptr;
     other.indexes = nullptr;
   }
@@ -160,6 +172,7 @@ public:
       indexes = other.indexes;
       n_indexes_ptr_ = std::move(other.n_indexes_ptr_);
       indexes_ptr_ = std::move(other.indexes_ptr_);
+      mmap_buffer_ = std::move(other.mmap_buffer_);
       other.n_indexes = nullptr;
       other.indexes = nullptr;
     }
@@ -171,7 +184,7 @@ public:
   ParseIndex& operator=(const ParseIndex&) = delete;
 
   /**
-   * @brief Serialize the index to a binary file.
+   * @brief Serialize the index to a binary file (v2 format).
    *
    * Writes the index structure to disk for later retrieval, avoiding the need
    * to re-parse large CSV files.
@@ -180,6 +193,18 @@ public:
    * @throws std::runtime_error If writing fails.
    */
   void write(const std::string& filename);
+
+  /**
+   * @brief Serialize the index to a binary file (v3 format with source metadata).
+   *
+   * Writes the index structure with source file metadata (mtime, size) for
+   * cache validation. This format supports mmap-based loading.
+   *
+   * @param filename Path to the output file.
+   * @param source_meta Metadata of the source CSV file for cache validation.
+   * @throws std::runtime_error If writing fails.
+   */
+  void write(const std::string& filename, const SourceMetadata& source_meta);
 
   /**
    * @brief Deserialize the index from a binary file.
@@ -195,9 +220,41 @@ public:
   void read(const std::string& filename);
 
   /**
+   * @brief Load index from a cache file using memory-mapping.
+   *
+   * This factory method creates a ParseIndex that directly references data
+   * in a memory-mapped file, avoiding any copying. The returned ParseIndex
+   * owns the memory mapping and will release it on destruction.
+   *
+   * @param cache_path Path to the cache file (.vidx format).
+   * @param source_meta Metadata of the source CSV file for validation.
+   * @return ParseIndex with mmap-backed data, or empty ParseIndex if
+   *         the cache is invalid or cannot be loaded.
+   *
+   * @note If the cache file is missing, invalid, or the source file has changed,
+   *       an empty ParseIndex is returned (check with is_valid()).
+   */
+  static ParseIndex from_mmap(const std::string& cache_path, const SourceMetadata& source_meta);
+
+  /**
+   * @brief Check if this index contains valid data.
+   *
+   * @return true if the index has been populated (either by parsing or loading).
+   */
+  bool is_valid() const { return n_indexes != nullptr && indexes != nullptr; }
+
+  /**
+   * @brief Check if this index is backed by memory-mapped data.
+   *
+   * @return true if the index data is memory-mapped (from from_mmap()).
+   */
+  bool is_mmap_backed() const { return mmap_buffer_ != nullptr; }
+
+  /**
    * @brief Destructor. Releases allocated index arrays via RAII.
    *
    * Memory is automatically freed when the unique_ptr members are destroyed.
+   * For mmap-backed indexes, the memory mapping is released instead.
    */
   ~ParseIndex() = default;
 
@@ -205,10 +262,16 @@ public:
 
 private:
   /// RAII owner for n_indexes array. Memory freed automatically on destruction.
+  /// Null when using mmap-backed data.
   std::unique_ptr<uint64_t[]> n_indexes_ptr_;
 
   /// RAII owner for indexes array. Memory freed automatically on destruction.
+  /// Null when using mmap-backed data.
   std::unique_ptr<uint64_t[]> indexes_ptr_;
+
+  /// Memory-mapped buffer for mmap-backed indexes.
+  /// When set, n_indexes and indexes point directly into this buffer's data.
+  std::unique_ptr<MmapBuffer> mmap_buffer_;
 
   // Allow TwoPass::init() to set the private members
   friend class TwoPass;
@@ -288,53 +351,77 @@ public:
     /// Position of first newline at odd quote count (safe split point if
     /// quoted). Set to null_pos if no such newline exists.
     uint64_t first_odd_nl{null_pos};
+
+    /// Total number of field separators (delimiters + newlines) found in the
+    /// chunk, excluding those inside quoted fields. Used for right-sized index
+    /// allocation.
+    uint64_t n_separators{0};
   };
   /**
-   * @brief First pass SIMD scan with dialect-aware quote character.
+   * @brief First pass SIMD scan with dialect-aware quote and delimiter
+   * characters.
+   *
+   * This function scans the buffer to:
+   * 1. Count total quote characters (for chunk boundary detection)
+   * 2. Find first newline at even/odd quote count (for safe split points)
+   * 3. Count field separators outside quotes (for right-sized allocation)
+   *
+   * @param buf Input buffer
+   * @param start Start position in buffer
+   * @param end End position in buffer
+   * @param quote_char Quote character (default: '"')
+   * @param delimiter Field delimiter character (default: ',')
+   * @return Stats with quote count, newline positions, and separator count
    */
-  static Stats first_pass_simd(const uint8_t* buf, size_t start, size_t end,
-                               char quote_char = '"') {
+  static Stats first_pass_simd(const uint8_t* buf, size_t start, size_t end, char quote_char = '"',
+                               char delimiter = ',') {
     Stats out;
     assert(end >= start && "Invalid range: end must be >= start");
     size_t len = end - start;
     size_t idx = 0;
     bool needs_even = out.first_even_nl == null_pos;
     bool needs_odd = out.first_odd_nl == null_pos;
+    uint64_t prev_iter_inside_quote = 0ULL; // Track quote state across iterations
     buf += start;
     for (; idx < len; idx += 64) {
-      __builtin_prefetch(buf + idx + 128);
+      libvroom_prefetch(buf + idx + 128);
 
-      simd_input in = fill_input(buf + idx);
+      size_t remaining = len - idx;
+      simd_input in = fill_input_safe(buf + idx, remaining);
       uint64_t mask = ~0ULL;
 
       /* TODO: look into removing branches if possible */
-      if (len - idx < 64) {
-        mask = blsmsk_u64(1ULL << (len - idx));
+      if (remaining < 64) {
+        mask = blsmsk_u64(1ULL << remaining);
       }
 
       uint64_t quotes = cmp_mask_against_input(in, static_cast<uint8_t>(quote_char)) & mask;
 
+      // Compute separator positions (delimiters + newlines) outside quotes
+      uint64_t delims = cmp_mask_against_input(in, static_cast<uint8_t>(delimiter)) & mask;
+      uint64_t nl = compute_line_ending_mask_simple(in, mask);
+      uint64_t quote_mask = find_quote_mask2(quotes, prev_iter_inside_quote);
+      uint64_t field_seps = (delims | nl) & ~quote_mask & mask;
+      out.n_separators += count_ones(field_seps);
+
       if (needs_even || needs_odd) {
-        // Support LF, CRLF, and CR-only line endings
-        uint64_t nl = compute_line_ending_mask_simple(in, mask);
-        if (nl == 0) {
-          continue;
-        }
-        if (needs_even) {
-          uint64_t quote_mask2 = find_quote_mask(quotes, ~0ULL) & mask;
-          uint64_t even_nl = quote_mask2 & nl;
-          if (even_nl > 0) {
-            out.first_even_nl = start + idx + trailing_zeroes(even_nl);
+        if (nl != 0) {
+          if (needs_even) {
+            uint64_t quote_mask2 = find_quote_mask(quotes, ~0ULL) & mask;
+            uint64_t even_nl = quote_mask2 & nl;
+            if (even_nl > 0) {
+              out.first_even_nl = start + idx + trailing_zeroes(even_nl);
+            }
+            needs_even = false;
           }
-          needs_even = false;
-        }
-        if (needs_odd) {
-          uint64_t quote_mask = find_quote_mask(quotes, 0ULL) & mask;
-          uint64_t odd_nl = quote_mask & nl & mask;
-          if (odd_nl > 0) {
-            out.first_odd_nl = start + idx + trailing_zeroes(odd_nl);
+          if (needs_odd) {
+            uint64_t quote_mask_odd = find_quote_mask(quotes, 0ULL) & mask;
+            uint64_t odd_nl = quote_mask_odd & nl & mask;
+            if (odd_nl > 0) {
+              out.first_odd_nl = start + idx + trailing_zeroes(odd_nl);
+            }
+            needs_odd = false;
           }
-          needs_odd = false;
         }
       }
 
@@ -344,10 +431,21 @@ public:
   }
 
   /**
-   * @brief First pass scalar scan with dialect-aware quote character.
+   * @brief First pass scalar scan with dialect-aware quote and delimiter
+   * characters.
+   *
+   * Scalar fallback version of first_pass_simd. Used when SIMD is not available
+   * or for small chunks.
+   *
+   * @param buf Input buffer
+   * @param start Start position in buffer
+   * @param end End position in buffer
+   * @param quote_char Quote character (default: '"')
+   * @param delimiter Field delimiter character (default: ',')
+   * @return Stats with quote count, newline positions, and separator count
    */
-  static Stats first_pass_chunk(const uint8_t* buf, size_t start, size_t end,
-                                char quote_char = '"');
+  static Stats first_pass_chunk(const uint8_t* buf, size_t start, size_t end, char quote_char = '"',
+                                char delimiter = ',');
 
   static Stats first_pass_naive(const uint8_t* buf, size_t start, size_t end);
 
@@ -374,29 +472,60 @@ public:
                                     char delimiter = ',', char quote_char = '"');
 
   /**
+   * @brief Result structure from second pass SIMD scan.
+   *
+   * Contains both the number of indexes found and whether parsing ended
+   * at a record boundary. This is used for speculation validation in
+   * Algorithm 1 from Chang et al. - if a chunk doesn't end at a record
+   * boundary, the speculation was incorrect.
+   */
+  struct SecondPassResult {
+    uint64_t n_indexes;      ///< Number of field separators found
+    bool at_record_boundary; ///< True if parsing ended at a record boundary
+  };
+
+  /**
    * @brief Second pass SIMD scan with dialect-aware delimiter and quote
    * character.
    */
   static uint64_t second_pass_simd(const uint8_t* buf, size_t start, size_t end, ParseIndex* out,
                                    size_t thread_id, char delimiter = ',', char quote_char = '"') {
-    bool is_quoted = false;
+    return second_pass_simd_with_state(buf, start, end, out, thread_id, delimiter, quote_char)
+        .n_indexes;
+  }
+
+  /**
+   * @brief Second pass SIMD scan that also returns ending state.
+   *
+   * This version returns both the index count and whether parsing ended at
+   * a record boundary. Used for speculation validation per Chang et al.
+   * Algorithm 1 - chunks must end at record boundaries for speculation
+   * to be valid.
+   *
+   * A chunk ends at a record boundary if the final quote parity is even
+   * (not inside a quoted field). If we end inside a quote, the speculation
+   * was definitely wrong and we need to fall back to two-pass parsing.
+   */
+  static SecondPassResult second_pass_simd_with_state(const uint8_t* buf, size_t start, size_t end,
+                                                      ParseIndex* out, size_t thread_id,
+                                                      char delimiter = ',', char quote_char = '"') {
     assert(end >= start && "Invalid range: end must be >= start");
     size_t len = end - start;
     uint64_t idx = 0;
     size_t n_indexes = 0;
-    size_t i = thread_id;
     uint64_t prev_iter_inside_quote = 0ULL; // either all zeros or all ones
     uint64_t base = 0;
-    buf += start;
+    const uint8_t* data = buf + start;
 
     for (; idx < len; idx += 64) {
-      __builtin_prefetch(buf + idx + 128);
-      simd_input in = fill_input(buf + idx);
+      libvroom_prefetch(data + idx + 128);
+      size_t remaining = len - idx;
+      simd_input in = fill_input_safe(data + idx, remaining);
 
       uint64_t mask = ~0ULL;
 
-      if (len - idx < 64) {
-        mask = blsmsk_u64(1ULL << (len - idx));
+      if (remaining < 64) {
+        mask = blsmsk_u64(1ULL << remaining);
       }
 
       uint64_t quotes = cmp_mask_against_input(in, static_cast<uint8_t>(quote_char)) & mask;
@@ -406,9 +535,21 @@ public:
       // Support LF, CRLF, and CR-only line endings
       uint64_t end_mask = compute_line_ending_mask_simple(in, mask);
       uint64_t field_sep = (end_mask | sep) & ~quote_mask;
+
       n_indexes += write(out->indexes + thread_id, base, start + idx, out->n_threads, field_sep);
     }
-    return n_indexes;
+
+    // Check if we ended at a record boundary:
+    // Not inside a quoted field (prev_iter_inside_quote == 0)
+    //
+    // The key insight from Chang et al. Algorithm 1: if speculative chunk
+    // boundary detection was wrong, parsing this chunk will end inside a
+    // quoted field. The next chunk would then start mid-quote, leading to
+    // incorrect parsing. By checking the ending state, we can detect this
+    // misprediction and fall back to reliable two-pass parsing.
+    bool at_record_boundary = (prev_iter_inside_quote == 0);
+
+    return {n_indexes, at_record_boundary};
   }
 
   /**
@@ -437,6 +578,31 @@ public:
                                               size_t thread_id) {
     return libvroom::second_pass_simd_branchless(sm, buf, start, end, out->indexes, thread_id,
                                                  out->n_threads);
+  }
+
+  /**
+   * @brief Branchless SIMD second pass that also returns ending state.
+   *
+   * This version returns both the index count and whether parsing ended at
+   * a record boundary. Used for speculation validation per Chang et al.
+   * Algorithm 1 - chunks must end at record boundaries for speculation
+   * to be valid.
+   *
+   * @param sm Pre-initialized branchless state machine
+   * @param buf Input buffer
+   * @param start Start position in buffer
+   * @param end End position in buffer
+   * @param out Index structure to store results
+   * @param thread_id Thread ID for interleaved storage
+   * @return SecondPassResult with count and boundary status
+   */
+  static SecondPassResult second_pass_simd_branchless_with_state(const BranchlessStateMachine& sm,
+                                                                 const uint8_t* buf, size_t start,
+                                                                 size_t end, ParseIndex* out,
+                                                                 size_t thread_id) {
+    auto result = libvroom::second_pass_simd_branchless_with_state(
+        sm, buf, start, end, out->indexes, thread_id, out->n_threads);
+    return {result.n_indexes, result.at_record_boundary};
   }
 
   /**
@@ -570,12 +736,36 @@ public:
                               size_t& column);
 
   /**
+   * @brief Check if position is at the start of a comment line.
+   *
+   * A comment line is a line that starts with the comment character,
+   * optionally preceded by whitespace (spaces or tabs).
+   *
+   * @param buf Buffer to check
+   * @param pos Position to check (must be at start of line)
+   * @param end End of buffer
+   * @param comment_char Comment character ('\0' means no comments)
+   * @return true if this is a comment line
+   */
+  static bool is_comment_line(const uint8_t* buf, size_t pos, size_t end, char comment_char);
+
+  /**
+   * @brief Skip to the end of the current line.
+   *
+   * @param buf Buffer to scan
+   * @param pos Current position
+   * @param end End of buffer
+   * @return Position after the line ending (or end if no newline found)
+   */
+  static size_t skip_to_line_end(const uint8_t* buf, size_t pos, size_t end);
+
+  /**
    * @brief Second pass with error collection and dialect support.
    */
   static uint64_t second_pass_chunk(const uint8_t* buf, size_t start, size_t end, ParseIndex* out,
                                     size_t thread_id, ErrorCollector* errors = nullptr,
                                     size_t total_len = 0, char delimiter = ',',
-                                    char quote_char = '"');
+                                    char quote_char = '"', char comment_char = '\0');
 
   /**
    * @brief Second pass that throws on error (backward compatible), with dialect
@@ -583,25 +773,50 @@ public:
    */
   static uint64_t second_pass_chunk_throwing(const uint8_t* buf, size_t start, size_t end,
                                              ParseIndex* out, size_t thread_id,
-                                             char delimiter = ',', char quote_char = '"');
+                                             char delimiter = ',', char quote_char = '"',
+                                             char comment_char = '\0');
 
   /**
    * @brief Parse using speculative multi-threading with dialect support.
+   *
+   * @param buf Input buffer
+   * @param out Output index to populate
+   * @param len Buffer length
+   * @param dialect CSV dialect settings
+   * @param progress Optional progress callback (called after each chunk completes)
+   * @return true if parsing succeeded
    */
   bool parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
-                       const Dialect& dialect = Dialect::csv());
+                       const Dialect& dialect = Dialect::csv(),
+                       const SecondPassProgressCallback& progress = nullptr);
 
   /**
    * @brief Parse using two-pass algorithm with dialect support.
+   *
+   * @param buf Input buffer
+   * @param out Output index to populate
+   * @param len Buffer length
+   * @param dialect CSV dialect settings
+   * @param progress Optional progress callback (called after each chunk completes)
+   * @return true if parsing succeeded
    */
   bool parse_two_pass(const uint8_t* buf, ParseIndex& out, size_t len,
-                      const Dialect& dialect = Dialect::csv());
+                      const Dialect& dialect = Dialect::csv(),
+                      const SecondPassProgressCallback& progress = nullptr);
 
   /**
    * @brief Parse a CSV buffer and build the field index.
+   *
+   * @param buf Input buffer
+   * @param out Output index to populate
+   * @param len Buffer length
+   * @param dialect CSV dialect settings
+   * @param progress Optional progress callback (called after each chunk completes)
+   * @return true if parsing succeeded
    */
   bool parse(const uint8_t* buf, ParseIndex& out, size_t len,
-             const Dialect& dialect = Dialect::csv());
+             const Dialect& dialect = Dialect::csv(),
+             const SecondPassProgressCallback& progress = nullptr);
 
   // Result from multi-threaded branchless parsing with error collection
   struct branchless_chunk_result {
@@ -662,7 +877,8 @@ public:
   static chunk_result second_pass_chunk_with_errors(const uint8_t* buf, size_t start, size_t end,
                                                     ParseIndex* out, size_t thread_id,
                                                     size_t total_len, ErrorMode mode,
-                                                    char delimiter = ',', char quote_char = '"');
+                                                    char delimiter = ',', char quote_char = '"',
+                                                    char comment_char = '\0');
 
   /**
    * @brief Parse a CSV buffer with error collection using multi-threading.
@@ -676,20 +892,23 @@ public:
   bool parse_with_errors(const uint8_t* buf, ParseIndex& out, size_t len, ErrorCollector& errors,
                          const Dialect& dialect = Dialect::csv());
 
-  // Check for empty header
-  static bool check_empty_header(const uint8_t* buf, size_t len, ErrorCollector& errors);
+  // Check for empty header (skips leading comment lines if comment_char is set)
+  static bool check_empty_header(const uint8_t* buf, size_t len, ErrorCollector& errors,
+                                 char comment_char = '\0');
 
   /**
    * @brief Check for duplicate column names in header with dialect support.
    */
   static void check_duplicate_columns(const uint8_t* buf, size_t len, ErrorCollector& errors,
-                                      char delimiter = ',', char quote_char = '"');
+                                      char delimiter = ',', char quote_char = '"',
+                                      char comment_char = '\0');
 
   /**
    * @brief Check for inconsistent field counts with dialect support.
    */
   static void check_field_counts(const uint8_t* buf, size_t len, ErrorCollector& errors,
-                                 char delimiter = ',', char quote_char = '"');
+                                 char delimiter = ',', char quote_char = '"',
+                                 char comment_char = '\0');
 
   // Check for mixed line endings
   static void check_line_endings(const uint8_t* buf, size_t len, ErrorCollector& errors);
@@ -709,6 +928,36 @@ public:
    * @brief Initialize an index structure with overflow validation.
    */
   ParseIndex init_safe(size_t len, size_t n_threads, ErrorCollector* errors = nullptr);
+
+  /**
+   * @brief Initialize an index structure with exact-sized allocation.
+   *
+   * This method uses the separator count from a first pass to allocate
+   * exactly the right amount of memory, reducing memory usage by 2-10x
+   * for typical CSV files compared to the worst-case allocation in init().
+   *
+   * @param total_separators Total number of separators found in first pass.
+   * @param n_threads Number of threads for parsing.
+   * @return ParseIndex with right-sized allocation.
+   */
+  ParseIndex init_counted(uint64_t total_separators, size_t n_threads);
+
+  /**
+   * @brief Initialize an index structure with exact-sized allocation and
+   * overflow validation.
+   *
+   * @param total_separators Total number of separators found in first pass.
+   * @param n_threads Number of threads for parsing.
+   * @param errors Optional error collector for overflow errors.
+   * @param n_quotes Number of quote characters found in first pass. Used to
+   *        determine if safety padding is needed for error recovery scenarios.
+   * @param len File length in bytes. Used as upper bound when n_quotes > 0
+   *        to ensure sufficient allocation for error recovery scenarios.
+   * @return ParseIndex with right-sized allocation, or empty on error.
+   */
+  ParseIndex init_counted_safe(uint64_t total_separators, size_t n_threads,
+                               ErrorCollector* errors = nullptr, uint64_t n_quotes = 0,
+                               size_t len = 0);
 };
 
 } // namespace libvroom

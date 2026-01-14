@@ -9,11 +9,13 @@
 
 #include "common_defs.h"
 #include "dialect.h"
+#include "encoding.h"
 #include "error.h"
 #include "io_util.h"
 #include "mem_util.h"
 
 #include <cstring>
+#include <limits>
 #include <new>
 #include <string>
 #include <thread>
@@ -30,11 +32,16 @@ struct libvroom_index {
   libvroom::ParseIndex idx;
   size_t num_threads;
 
+  // Memory management for indexes loaded from file (not owned by ParseIndex's unique_ptrs)
+  // These are only used when the index is loaded via libvroom_index_read()
+  std::unique_ptr<uint64_t[]> external_n_indexes;
+  std::unique_ptr<uint64_t[]> external_indexes;
+
   // Default constructor - index will be populated by Parser::parse()
   libvroom_index(size_t threads) : idx(), num_threads(threads) {}
 
-  // Note: No explicit destructor needed - libvroom::ParseIndex has its own destructor
-  // that handles cleanup of n_indexes and indexes arrays
+  // Note: For indexes populated by Parser::parse(), ParseIndex's destructor handles cleanup.
+  // For indexes loaded via libvroom_index_read(), the external_* unique_ptrs handle cleanup.
 };
 
 struct libvroom_buffer {
@@ -76,23 +83,29 @@ struct libvroom_detection_result {
   }
 };
 
+struct libvroom_load_result {
+  LoadResult cpp_result;
+
+  libvroom_load_result(LoadResult&& r) : cpp_result(std::move(r)) {}
+};
+
 // Helper functions to convert between C and C++ types
 static libvroom::ErrorMode to_cpp_mode(libvroom_error_mode_t mode) {
   switch (mode) {
   case LIBVROOM_MODE_STRICT:
-    return libvroom::ErrorMode::STRICT;
+    return libvroom::ErrorMode::FAIL_FAST;
   case LIBVROOM_MODE_PERMISSIVE:
     return libvroom::ErrorMode::PERMISSIVE;
   case LIBVROOM_MODE_BEST_EFFORT:
     return libvroom::ErrorMode::BEST_EFFORT;
   default:
-    return libvroom::ErrorMode::STRICT;
+    return libvroom::ErrorMode::FAIL_FAST;
   }
 }
 
 static libvroom_error_mode_t to_c_mode(libvroom::ErrorMode mode) {
   switch (mode) {
-  case libvroom::ErrorMode::STRICT:
+  case libvroom::ErrorMode::FAIL_FAST:
     return LIBVROOM_MODE_STRICT;
   case libvroom::ErrorMode::PERMISSIVE:
     return LIBVROOM_MODE_PERMISSIVE;
@@ -144,7 +157,7 @@ static libvroom_severity_t to_c_severity(libvroom::ErrorSeverity severity) {
   switch (severity) {
   case libvroom::ErrorSeverity::WARNING:
     return LIBVROOM_SEVERITY_WARNING;
-  case libvroom::ErrorSeverity::ERROR:
+  case libvroom::ErrorSeverity::RECOVERABLE:
     return LIBVROOM_SEVERITY_ERROR;
   case libvroom::ErrorSeverity::FATAL:
     return LIBVROOM_SEVERITY_FATAL;
@@ -200,6 +213,8 @@ const char* libvroom_error_string(libvroom_error_t error) {
     return "Out of memory";
   case LIBVROOM_ERROR_INVALID_HANDLE:
     return "Invalid handle";
+  case LIBVROOM_ERROR_CANCELLED:
+    return "Operation cancelled";
   default:
     return "Unknown error";
   }
@@ -366,6 +381,25 @@ void libvroom_error_collector_clear(libvroom_error_collector_t* collector) {
   collector->collector.clear();
 }
 
+char* libvroom_error_collector_summary(const libvroom_error_collector_t* collector) {
+  if (!collector)
+    return nullptr;
+
+  try {
+    std::string summary = collector->collector.summary();
+
+    // Allocate a copy that the caller can free()
+    char* result = static_cast<char*>(std::malloc(summary.size() + 1));
+    if (!result)
+      return nullptr;
+
+    std::memcpy(result, summary.c_str(), summary.size() + 1);
+    return result;
+  } catch (...) {
+    return nullptr;
+  }
+}
+
 void libvroom_error_collector_destroy(libvroom_error_collector_t* collector) {
   delete collector;
 }
@@ -428,6 +462,148 @@ void libvroom_index_destroy(libvroom_index_t* index) {
   delete index;
 }
 
+libvroom_error_t libvroom_index_write(const libvroom_index_t* index, const char* filename) {
+  if (!index || !filename)
+    return LIBVROOM_ERROR_NULL_POINTER;
+
+  // Check if the index has been populated (has valid data)
+  if (!index->idx.indexes || !index->idx.n_indexes)
+    return LIBVROOM_ERROR_INVALID_HANDLE;
+
+  try {
+    // Use a const_cast here because ParseIndex::write() is not const-qualified,
+    // but it doesn't actually modify the index. We need the cast because we're
+    // implementing a const C API function.
+    const_cast<libvroom::ParseIndex&>(index->idx).write(filename);
+    return LIBVROOM_OK;
+  } catch (const std::runtime_error&) {
+    return LIBVROOM_ERROR_IO;
+  } catch (...) {
+    return LIBVROOM_ERROR_INTERNAL;
+  }
+}
+
+libvroom_index_t* libvroom_index_read(const char* filename) {
+  if (!filename)
+    return nullptr;
+
+  std::FILE* fp = std::fopen(filename, "rb");
+  if (!fp)
+    return nullptr;
+
+  try {
+    // Index file format version for backward compatibility
+    // Version 1 (legacy): columns (uint64_t), n_threads (uint8_t), n_indexes, indexes
+    // Version 2: version (uint8_t=2), columns (uint64_t), n_threads (uint16_t), n_indexes, indexes
+    static constexpr uint8_t INDEX_FORMAT_VERSION = 2;
+
+    uint64_t columns = 0;
+    uint16_t n_threads = 0;
+
+    // Read first byte to detect version
+    uint8_t first_byte;
+    if (std::fread(&first_byte, sizeof(uint8_t), 1, fp) != 1) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    if (first_byte == INDEX_FORMAT_VERSION) {
+      // Version 2 format: read columns, n_threads (16-bit)
+      if (std::fread(&columns, sizeof(uint64_t), 1, fp) != 1 ||
+          std::fread(&n_threads, sizeof(uint16_t), 1, fp) != 1) {
+        std::fclose(fp);
+        return nullptr;
+      }
+    } else {
+      // Version 1 (legacy) format: first_byte is part of columns
+      uint8_t columns_rest[7];
+      if (std::fread(columns_rest, 1, 7, fp) != 7) {
+        std::fclose(fp);
+        return nullptr;
+      }
+      // Reconstruct columns from first_byte + columns_rest (little-endian)
+      columns = first_byte;
+      for (int i = 0; i < 7; ++i) {
+        columns |= static_cast<uint64_t>(columns_rest[i]) << (8 * (i + 1));
+      }
+      // Read n_threads as uint8_t
+      uint8_t n_threads_v1;
+      if (std::fread(&n_threads_v1, sizeof(uint8_t), 1, fp) != 1) {
+        std::fclose(fp);
+        return nullptr;
+      }
+      n_threads = n_threads_v1;
+    }
+
+    // Validate n_threads
+    if (n_threads == 0) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    // Create the index wrapper using unique_ptr for RAII-safe cleanup
+    std::unique_ptr<libvroom_index> index;
+    try {
+      index = std::make_unique<libvroom_index>(n_threads);
+    } catch (...) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    // Allocate and populate the ParseIndex
+    index->idx.columns = columns;
+    index->idx.n_threads = n_threads;
+
+    // Allocate n_indexes array
+    auto n_indexes_ptr = std::make_unique<uint64_t[]>(n_threads);
+    if (std::fread(n_indexes_ptr.get(), sizeof(uint64_t), n_threads, fp) != n_threads) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    // Calculate total indexes size with overflow checking
+    size_t total_size = 0;
+    for (uint16_t i = 0; i < n_threads; ++i) {
+      // Check for overflow before adding
+      if (n_indexes_ptr[i] > std::numeric_limits<size_t>::max() - total_size) {
+        std::fclose(fp);
+        return nullptr;
+      }
+      total_size += n_indexes_ptr[i];
+    }
+
+    // Validate that total_size won't cause issues with memory allocation
+    // total_size * sizeof(uint64_t) must not overflow
+    if (total_size > std::numeric_limits<size_t>::max() / sizeof(uint64_t)) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    // Allocate indexes array
+    auto indexes_ptr = std::make_unique<uint64_t[]>(total_size);
+    if (std::fread(indexes_ptr.get(), sizeof(uint64_t), total_size, fp) != total_size) {
+      std::fclose(fp);
+      return nullptr;
+    }
+
+    std::fclose(fp);
+
+    // Transfer ownership to the external memory managers in libvroom_index
+    // This ensures proper cleanup when the index is destroyed
+    index->external_n_indexes = std::move(n_indexes_ptr);
+    index->external_indexes = std::move(indexes_ptr);
+
+    // Set the raw pointers in ParseIndex to point to the externally-managed memory
+    index->idx.n_indexes = index->external_n_indexes.get();
+    index->idx.indexes = index->external_indexes.get();
+
+    return index.release();
+  } catch (...) {
+    std::fclose(fp);
+    return nullptr;
+  }
+}
+
 // Parser
 libvroom_parser_t* libvroom_parser_create(void) {
   try {
@@ -478,6 +654,63 @@ libvroom_error_t libvroom_parse(libvroom_parser_t* parser, const libvroom_buffer
   }
 }
 
+libvroom_error_t
+libvroom_parse_with_progress(libvroom_parser_t* parser, const libvroom_buffer_t* buffer,
+                             libvroom_index_t* index, libvroom_error_collector_t* errors,
+                             const libvroom_dialect_t* dialect,
+                             libvroom_progress_callback_t progress, void* user_data) {
+  if (!parser || !buffer || !index)
+    return LIBVROOM_ERROR_NULL_POINTER;
+
+  try {
+    libvroom::Dialect d = dialect ? dialect->dialect : libvroom::Dialect::csv();
+
+    // Configure parser with the number of threads from the index
+    parser->parser.set_num_threads(index->num_threads);
+
+    // Build parse options
+    libvroom::ParseOptions options;
+    options.dialect = d;
+    if (errors) {
+      options.errors = &errors->collector;
+    }
+
+    // Set up progress callback wrapper if provided
+    if (progress) {
+      options.progress_callback = [progress, user_data](size_t bytes_processed,
+                                                        size_t total_bytes) {
+        return progress(bytes_processed, total_bytes, user_data);
+      };
+    }
+
+    // Parse using the unified Parser API
+    // Use original_length (not padded data.size()) for correct parsing
+    auto result = parser->parser.parse(buffer->data.data(), buffer->original_length, options);
+
+    // Move the index from the result
+    index->idx = std::move(result.idx);
+
+    // Check if parsing was cancelled (result not successful but no fatal errors)
+    if (!result.success() && (!errors || !errors->collector.has_fatal_errors())) {
+      // Likely cancelled by progress callback
+      return LIBVROOM_ERROR_CANCELLED;
+    }
+
+    if (errors && errors->collector.has_fatal_errors()) {
+      const auto& errs = errors->collector.errors();
+      for (const auto& e : errs) {
+        if (e.severity == libvroom::ErrorSeverity::FATAL) {
+          return to_c_error(e.code);
+        }
+      }
+    }
+
+    return result.success() ? LIBVROOM_OK : LIBVROOM_ERROR_INTERNAL;
+  } catch (...) {
+    return LIBVROOM_ERROR_INTERNAL;
+  }
+}
+
 void libvroom_parser_destroy(libvroom_parser_t* parser) {
   delete parser;
 }
@@ -490,6 +723,19 @@ libvroom_detection_result_t* libvroom_detect_dialect(const libvroom_buffer_t* bu
   try {
     libvroom::DialectDetector detector;
     auto result = detector.detect(buffer->data.data(), buffer->original_length);
+    return new (std::nothrow) libvroom_detection_result(result);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+libvroom_detection_result_t* libvroom_detect_dialect_file(const char* filename) {
+  if (!filename)
+    return nullptr;
+
+  try {
+    libvroom::DialectDetector detector;
+    auto result = detector.detect_file(filename);
     return new (std::nothrow) libvroom_detection_result(result);
   } catch (...) {
     return nullptr;
@@ -597,4 +843,137 @@ size_t libvroom_recommended_threads(void) {
 
 size_t libvroom_simd_padding(void) {
   return LIBVROOM_PADDING;
+}
+
+// Encoding helper functions
+static libvroom_encoding_t to_c_encoding(libvroom::Encoding enc) {
+  switch (enc) {
+  case libvroom::Encoding::UTF8:
+    return LIBVROOM_ENCODING_UTF8;
+  case libvroom::Encoding::UTF8_BOM:
+    return LIBVROOM_ENCODING_UTF8_BOM;
+  case libvroom::Encoding::UTF16_LE:
+    return LIBVROOM_ENCODING_UTF16_LE;
+  case libvroom::Encoding::UTF16_BE:
+    return LIBVROOM_ENCODING_UTF16_BE;
+  case libvroom::Encoding::UTF32_LE:
+    return LIBVROOM_ENCODING_UTF32_LE;
+  case libvroom::Encoding::UTF32_BE:
+    return LIBVROOM_ENCODING_UTF32_BE;
+  case libvroom::Encoding::LATIN1:
+    return LIBVROOM_ENCODING_LATIN1;
+  case libvroom::Encoding::UNKNOWN:
+  default:
+    return LIBVROOM_ENCODING_UNKNOWN;
+  }
+}
+
+// Encoding Detection and Transcoding
+const char* libvroom_encoding_string(libvroom_encoding_t encoding) {
+  switch (encoding) {
+  case LIBVROOM_ENCODING_UTF8:
+    return "UTF-8";
+  case LIBVROOM_ENCODING_UTF8_BOM:
+    return "UTF-8 (BOM)";
+  case LIBVROOM_ENCODING_UTF16_LE:
+    return "UTF-16LE";
+  case LIBVROOM_ENCODING_UTF16_BE:
+    return "UTF-16BE";
+  case LIBVROOM_ENCODING_UTF32_LE:
+    return "UTF-32LE";
+  case LIBVROOM_ENCODING_UTF32_BE:
+    return "UTF-32BE";
+  case LIBVROOM_ENCODING_LATIN1:
+    return "Latin-1";
+  case LIBVROOM_ENCODING_UNKNOWN:
+  default:
+    return "Unknown";
+  }
+}
+
+libvroom_error_t libvroom_detect_encoding(const uint8_t* data, size_t length,
+                                          libvroom_encoding_result_t* result) {
+  if (!result)
+    return LIBVROOM_ERROR_NULL_POINTER;
+
+  // detect_encoding handles null data gracefully
+  auto cpp_result = libvroom::detect_encoding(data, length);
+
+  result->encoding = to_c_encoding(cpp_result.encoding);
+  result->bom_length = cpp_result.bom_length;
+  result->confidence = cpp_result.confidence;
+  result->needs_transcoding = cpp_result.needs_transcoding;
+
+  return LIBVROOM_OK;
+}
+
+libvroom_load_result_t* libvroom_load_file_with_encoding(const char* filename) {
+  if (!filename)
+    return nullptr;
+
+  try {
+    auto result = read_file_with_encoding(filename, LIBVROOM_PADDING);
+    if (!result.valid()) {
+      return nullptr;
+    }
+
+    return new (std::nothrow) libvroom_load_result(std::move(result));
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+const uint8_t* libvroom_load_result_data(const libvroom_load_result_t* result) {
+  if (!result)
+    return nullptr;
+  return result->cpp_result.data();
+}
+
+size_t libvroom_load_result_length(const libvroom_load_result_t* result) {
+  if (!result)
+    return 0;
+  return result->cpp_result.size;
+}
+
+libvroom_encoding_t libvroom_load_result_encoding(const libvroom_load_result_t* result) {
+  if (!result)
+    return LIBVROOM_ENCODING_UNKNOWN;
+  return to_c_encoding(result->cpp_result.encoding.encoding);
+}
+
+size_t libvroom_load_result_bom_length(const libvroom_load_result_t* result) {
+  if (!result)
+    return 0;
+  return result->cpp_result.encoding.bom_length;
+}
+
+double libvroom_load_result_confidence(const libvroom_load_result_t* result) {
+  if (!result)
+    return 0.0;
+  return result->cpp_result.encoding.confidence;
+}
+
+bool libvroom_load_result_was_transcoded(const libvroom_load_result_t* result) {
+  if (!result)
+    return false;
+  // Data was transformed if either:
+  // 1. needs_transcoding is true (UTF-16/UTF-32 -> UTF-8)
+  // 2. BOM was present and stripped (includes UTF-8 BOM)
+  return result->cpp_result.encoding.needs_transcoding ||
+         result->cpp_result.encoding.bom_length > 0;
+}
+
+libvroom_buffer_t* libvroom_load_result_to_buffer(const libvroom_load_result_t* result) {
+  if (!result || !result->cpp_result.valid())
+    return nullptr;
+
+  try {
+    return new (std::nothrow) libvroom_buffer(result->cpp_result.data(), result->cpp_result.size);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+void libvroom_load_result_destroy(libvroom_load_result_t* result) {
+  delete result;
 }

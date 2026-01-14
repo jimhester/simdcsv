@@ -310,6 +310,51 @@ TEST_F(UnifiedAPITest, ParseOptionsDefaults) {
   EXPECT_EQ(opts.errors, nullptr);
 }
 
+// Test: ParseOptions::auto_detect() factory method
+TEST_F(UnifiedAPITest, ParseOptionsAutoDetect) {
+  // auto_detect() should return default options with no dialect set (for auto-detection)
+  auto opts = libvroom::ParseOptions::auto_detect();
+  EXPECT_FALSE(opts.dialect.has_value());
+  EXPECT_EQ(opts.errors, nullptr);
+  EXPECT_EQ(opts.algorithm, libvroom::ParseAlgorithm::AUTO);
+}
+
+// Test: ParseOptions::auto_detect() actually performs auto-detection
+TEST_F(UnifiedAPITest, ParseOptionsAutoDetectWithParsing) {
+  auto [data, len] = make_buffer("name;age;city\nJohn;25;NYC\nJane;30;LA\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  auto result = parser.parse(buffer.data(), buffer.size(), libvroom::ParseOptions::auto_detect());
+  EXPECT_TRUE(result.success());
+  EXPECT_EQ(result.dialect.delimiter, ';'); // Should auto-detect semicolon
+  EXPECT_TRUE(result.detection.success());
+}
+
+// Test: ParseOptions::auto_detect_with_errors() factory method
+TEST_F(UnifiedAPITest, ParseOptionsAutoDetectWithErrors) {
+  libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+  auto opts = libvroom::ParseOptions::auto_detect_with_errors(errors);
+  EXPECT_FALSE(opts.dialect.has_value());
+  EXPECT_EQ(opts.errors, &errors);
+}
+
+// Test: ParseOptions::auto_detect_with_errors() performs auto-detection with error collection
+TEST_F(UnifiedAPITest, ParseOptionsAutoDetectWithErrorsAndParsing) {
+  // CSV with inconsistent field count - should auto-detect delimiter and collect errors
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+  auto result = parser.parse(buffer.data(), buffer.size(),
+                             libvroom::ParseOptions::auto_detect_with_errors(errors));
+
+  EXPECT_TRUE(result.success());
+  EXPECT_EQ(result.dialect.delimiter, ','); // Should auto-detect comma
+  EXPECT_TRUE(errors.has_errors());         // Should collect field count error
+}
+
 // Test: Custom detection options
 TEST_F(UnifiedAPITest, CustomDetectionOptions) {
   auto [data, len] = make_buffer("a:b:c\n1:2:3\n4:5:6\n");
@@ -1805,4 +1850,258 @@ TEST_F(UnifiedErrorHandlingTest, ParseMalformedAndIterate) {
     }
   }
   EXPECT_TRUE(found_error);
+}
+
+// ============================================================================
+// Tests for Progress Callback API
+// ============================================================================
+
+class ProgressCallbackTest : public ::testing::Test {
+protected:
+  static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
+    size_t len = content.size();
+    uint8_t* buf = allocate_padded_buffer(len, 64);
+    std::memcpy(buf, content.data(), len);
+    return {buf, len};
+  }
+};
+
+// Test: Progress callback is called during parsing
+TEST_F(ProgressCallbackTest, CallbackIsCalled) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n7,8,9\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  int call_count = 0;
+  size_t last_processed = 0;
+  size_t reported_total = 0;
+
+  libvroom::ParseOptions opts;
+  opts.progress_callback = [&](size_t processed, size_t total) {
+    ++call_count;
+    last_processed = processed;
+    reported_total = total;
+    return true; // continue parsing
+  };
+
+  auto result = parser.parse(buffer.data(), buffer.size(), opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_GT(call_count, 0);       // Callback was called at least once
+  EXPECT_EQ(reported_total, len); // Total matches buffer size
+  EXPECT_EQ(last_processed, len); // Final call reports 100%
+}
+
+// Test: Progress callback receives correct total size
+TEST_F(ProgressCallbackTest, CorrectTotalSize) {
+  std::string csv = "name,age\n";
+  for (int i = 0; i < 100; ++i) {
+    csv += "Person" + std::to_string(i) + "," + std::to_string(20 + i) + "\n";
+  }
+
+  auto [data, len] = make_buffer(csv);
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  size_t reported_total = 0;
+
+  libvroom::ParseOptions opts;
+  opts.progress_callback = [&](size_t, size_t total) {
+    reported_total = total;
+    return true;
+  };
+
+  auto result = parser.parse(buffer.data(), buffer.size(), opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_EQ(reported_total, len);
+}
+
+// Test: Progress callback can cancel parsing
+TEST_F(ProgressCallbackTest, CancellationSupport) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n7,8,9\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  int call_count = 0;
+
+  libvroom::ParseOptions opts;
+  opts.progress_callback = [&](size_t, size_t) {
+    ++call_count;
+    return false; // Cancel after first callback
+  };
+
+  auto result = parser.parse(buffer.data(), buffer.size(), opts);
+
+  EXPECT_FALSE(result.success()); // Parsing was cancelled
+  EXPECT_EQ(call_count, 1);       // Callback was called once before cancellation
+}
+
+// Test: Progress callback works with different dialects
+TEST_F(ProgressCallbackTest, WorksWithDifferentDialects) {
+  auto [data, len] = make_buffer("a;b;c\n1;2;3\n4;5;6\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  bool callback_called = false;
+
+  libvroom::ParseOptions opts;
+  opts.dialect = libvroom::Dialect::semicolon();
+  opts.progress_callback = [&](size_t, size_t) {
+    callback_called = true;
+    return true;
+  };
+
+  auto result = parser.parse(buffer.data(), buffer.size(), opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_TRUE(callback_called);
+}
+
+// Test: Progress callback works with auto-detection
+TEST_F(ProgressCallbackTest, WorksWithAutoDetection) {
+  auto [data, len] = make_buffer("name;age;city\nJohn;25;NYC\nJane;30;LA\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  bool callback_called = false;
+
+  libvroom::ParseOptions opts;
+  // No dialect set - auto-detection will be used
+  opts.progress_callback = [&](size_t, size_t) {
+    callback_called = true;
+    return true;
+  };
+
+  auto result = parser.parse(buffer.data(), buffer.size(), opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_TRUE(callback_called);
+  EXPECT_EQ(result.dialect.delimiter, ';'); // Should auto-detect semicolon
+}
+
+// Test: Progress callback works with error collection
+TEST_F(ProgressCallbackTest, WorksWithErrorCollection) {
+  // CSV with inconsistent field count
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  bool callback_called = false;
+  libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
+
+  libvroom::ParseOptions opts;
+  opts.errors = &errors;
+  opts.progress_callback = [&](size_t, size_t) {
+    callback_called = true;
+    return true;
+  };
+
+  auto result = parser.parse(buffer.data(), buffer.size(), opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_TRUE(callback_called);
+  EXPECT_TRUE(errors.has_errors());
+}
+
+// Test: Progress callback with null callback is ignored
+TEST_F(ProgressCallbackTest, NullCallbackIsIgnored) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  libvroom::ParseOptions opts;
+  opts.progress_callback = nullptr;
+
+  auto result = parser.parse(buffer.data(), buffer.size(), opts);
+
+  EXPECT_TRUE(result.success());
+}
+
+// Test: ParseOptions::with_progress() factory
+TEST_F(ProgressCallbackTest, WithProgressFactory) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  bool callback_called = false;
+
+  auto result = parser.parse(buffer.data(), buffer.size(),
+                             libvroom::ParseOptions::with_progress([&](size_t, size_t) {
+                               callback_called = true;
+                               return true;
+                             }));
+
+  EXPECT_TRUE(result.success());
+  EXPECT_TRUE(callback_called);
+}
+
+// Test: Progress reports monotonically increasing values
+TEST_F(ProgressCallbackTest, MonotonicallyIncreasing) {
+  std::string csv = "name,age\n";
+  for (int i = 0; i < 50; ++i) {
+    csv += "Person" + std::to_string(i) + "," + std::to_string(20 + i) + "\n";
+  }
+
+  auto [data, len] = make_buffer(csv);
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser;
+
+  std::vector<size_t> progress_values;
+
+  libvroom::ParseOptions opts;
+  opts.progress_callback = [&](size_t processed, size_t) {
+    progress_values.push_back(processed);
+    return true;
+  };
+
+  auto result = parser.parse(buffer.data(), buffer.size(), opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_GT(progress_values.size(), 0);
+
+  // Values should be monotonically non-decreasing
+  for (size_t i = 1; i < progress_values.size(); ++i) {
+    EXPECT_GE(progress_values[i], progress_values[i - 1]);
+  }
+}
+
+// Test: Progress callback with single-threaded parser
+TEST_F(ProgressCallbackTest, SingleThreaded) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser(1); // Single thread
+
+  int call_count = 0;
+
+  libvroom::ParseOptions opts;
+  opts.progress_callback = [&](size_t, size_t) {
+    ++call_count;
+    return true;
+  };
+
+  auto result = parser.parse(buffer.data(), buffer.size(), opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_GT(call_count, 0);
+}
+
+// Test: Progress callback with multi-threaded parser
+TEST_F(ProgressCallbackTest, MultiThreaded) {
+  auto [data, len] = make_buffer("a,b,c\n1,2,3\n4,5,6\n7,8,9\n");
+  libvroom::FileBuffer buffer(data, len);
+  libvroom::Parser parser(4); // Multiple threads
+
+  int call_count = 0;
+
+  libvroom::ParseOptions opts;
+  opts.progress_callback = [&](size_t, size_t) {
+    ++call_count;
+    return true;
+  };
+
+  auto result = parser.parse(buffer.data(), buffer.size(), opts);
+
+  EXPECT_TRUE(result.success());
+  EXPECT_GT(call_count, 0);
 }

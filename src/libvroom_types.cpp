@@ -43,7 +43,7 @@ FieldType TypeDetector::detect_field(const uint8_t* data, size_t length,
 
   // Check date first for compact format (8 digits like YYYYMMDD)
   // to avoid misdetecting as integer
-  if (is_date(field, len))
+  if (is_date(field, len, options))
     return FieldType::DATE;
   if (is_boolean(field, len, options))
     return FieldType::BOOLEAN;
@@ -190,18 +190,36 @@ bool TypeDetector::is_float(const uint8_t* data, size_t length,
   return has_digit && (has_decimal || has_exponent) && i == length;
 }
 
-bool TypeDetector::is_date(const uint8_t* data, size_t length) {
+bool TypeDetector::is_date(const uint8_t* data, size_t length,
+                           const TypeDetectionOptions& options) {
   if (length < 8)
     return false;
 
+  // ISO format is always checked first (unambiguous)
   if (is_date_iso(data, length))
     return true;
-  if (is_date_us(data, length))
-    return true;
-  if (is_date_eu(data, length))
-    return true;
+
+  // Compact format is also unambiguous
   if (is_date_compact(data, length))
     return true;
+
+  // For ISO_ONLY mode, skip US/EU format checking
+  if (options.date_format_preference == DateFormatPreference::ISO_ONLY)
+    return false;
+
+  // Check US and EU based on preference
+  if (options.date_format_preference == DateFormatPreference::EU_FIRST) {
+    if (is_date_eu(data, length))
+      return true;
+    if (is_date_us(data, length))
+      return true;
+  } else {
+    // AUTO and US_FIRST both check US first
+    if (is_date_us(data, length))
+      return true;
+    if (is_date_eu(data, length))
+      return true;
+  }
 
   return false;
 }
@@ -515,6 +533,48 @@ void ColumnTypeInference::merge(const ColumnTypeInference& other) {
     stats_[i].date_count += other.stats_[i].date_count;
     stats_[i].string_count += other.stats_[i].string_count;
   }
+}
+
+bool ColumnTypeInference::is_column_type_confirmed(size_t column, size_t min_samples) const {
+  if (column >= stats_.size())
+    return false;
+
+  const auto& s = stats_[column];
+  size_t non_empty = s.total_count - s.empty_count;
+
+  // Need enough samples to be confident
+  if (non_empty < min_samples)
+    return false;
+
+  // Check if any type meets the confidence threshold
+  double threshold = options_.confidence_threshold;
+
+  // Check each type - using the same logic as dominant_type()
+  if (static_cast<double>(s.boolean_count) / non_empty >= threshold)
+    return true;
+  if (static_cast<double>(s.integer_count) / non_empty >= threshold)
+    return true;
+  if (static_cast<double>(s.float_count + s.integer_count) / non_empty >= threshold)
+    return true;
+  if (static_cast<double>(s.date_count) / non_empty >= threshold)
+    return true;
+
+  // STRING type is the fallback - it's "confirmed" if we have enough samples
+  // but no other type dominates. However, for early termination purposes,
+  // we should still return true since the type won't change with more data.
+  // The only way it could change is if we see a lot more of a specific type.
+  return true;
+}
+
+bool ColumnTypeInference::all_types_confirmed(size_t min_samples) const {
+  if (stats_.empty())
+    return false;
+
+  for (size_t i = 0; i < stats_.size(); ++i) {
+    if (!is_column_type_confirmed(i, min_samples))
+      return false;
+  }
+  return true;
 }
 
 } // namespace libvroom

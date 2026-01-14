@@ -18,15 +18,183 @@
 
 #include "dialect.h"
 #include "error.h"
+#include "index_cache.h"
 #include "io_util.h"
 #include "mem_util.h"
+#include "mmap_util.h"
 #include "two_pass.h"
 #include "value_extraction.h"
 
+#include <atomic>
+#include <functional>
+#include <future>
 #include <optional>
 #include <unordered_map>
 
 namespace libvroom {
+
+/**
+ * @brief Callback signature for progress reporting during parsing.
+ *
+ * This callback is invoked periodically during parsing to report progress.
+ * It can be used to display a progress bar, update a UI, or implement
+ * cancellation logic.
+ *
+ * @param bytes_processed Number of bytes processed so far.
+ * @param total_bytes Total number of bytes to process.
+ * @return true to continue parsing, false to abort.
+ *
+ * @note The callback should return quickly to avoid slowing down parsing.
+ *       For very large files, it may be called thousands of times.
+ *
+ * @note Progress is reported at chunk boundaries (typically every 1-4MB).
+ *       The final callback may report bytes_processed < total_bytes if
+ *       parsing is aborted.
+ *
+ * @example
+ * @code
+ * // Simple console progress bar
+ * auto progress = [](size_t processed, size_t total) {
+ *     int percent = total > 0 ? (processed * 100 / total) : 0;
+ *     std::cerr << "\rProgress: " << percent << "%" << std::flush;
+ *     return true;  // continue parsing
+ * };
+ *
+ * ParseOptions opts;
+ * opts.progress_callback = progress;
+ * auto result = parser.parse(buf, len, opts);
+ * std::cerr << std::endl;  // newline after progress
+ * @endcode
+ *
+ * @example
+ * @code
+ * // Cancellable parsing
+ * std::atomic<bool> cancel_requested{false};
+ * auto progress = [&cancel_requested](size_t, size_t) {
+ *     return !cancel_requested.load();
+ * };
+ * @endcode
+ */
+using ProgressCallback = std::function<bool(size_t bytes_processed, size_t total_bytes)>;
+
+/**
+ * @brief Thread-safe progress tracker for multi-threaded parsing.
+ *
+ * This class wraps a progress callback and provides thread-safe progress
+ * updates with automatic throttling to avoid excessive callback invocations.
+ *
+ * Design:
+ * - Uses atomic counter for thread-safe progress accumulation
+ * - Throttles callback to ~1% granularity (100 updates max)
+ * - Supports cancellation by checking callback return value
+ *
+ * @note This is an internal implementation detail; users interact via
+ *       ProgressCallback directly through ParseOptions.
+ */
+class ProgressTracker {
+public:
+  /**
+   * @brief Create a progress tracker.
+   *
+   * @param callback User's progress callback (may be null)
+   * @param total_bytes Total bytes to process
+   * @param first_pass_weight Weight of first pass (0.0-1.0), default 0.1 (10%)
+   */
+  explicit ProgressTracker(ProgressCallback callback, size_t total_bytes,
+                           double first_pass_weight = 0.1)
+      : callback_(std::move(callback)), total_bytes_(total_bytes),
+        first_pass_weight_(first_pass_weight), bytes_processed_(0), last_reported_percent_(-1),
+        cancelled_(false) {}
+
+  /**
+   * @brief Report progress from first pass (chunk boundary detection).
+   *
+   * Thread-safe. Progress is weighted by first_pass_weight.
+   *
+   * @param bytes Bytes processed in this update
+   * @return true to continue, false if cancelled
+   */
+  bool add_first_pass_progress(size_t bytes) {
+    if (!callback_ || cancelled_)
+      return !cancelled_;
+
+    // First pass contributes first_pass_weight_ of total progress
+    size_t weighted = static_cast<size_t>(bytes * first_pass_weight_);
+    return add_progress_internal(weighted);
+  }
+
+  /**
+   * @brief Report progress from second pass (field indexing).
+   *
+   * Thread-safe. Progress is weighted by (1 - first_pass_weight).
+   *
+   * @param bytes Bytes processed in this update
+   * @return true to continue, false if cancelled
+   */
+  bool add_second_pass_progress(size_t bytes) {
+    if (!callback_ || cancelled_)
+      return !cancelled_;
+
+    // Second pass contributes (1 - first_pass_weight_) of total progress
+    // First pass already added its weighted bytes to bytes_processed_,
+    // so we just add the second pass weighted bytes.
+    double second_weight = 1.0 - first_pass_weight_;
+    size_t weighted = static_cast<size_t>(bytes * second_weight);
+    return add_progress_internal(weighted);
+  }
+
+  /**
+   * @brief Report completion (100%).
+   */
+  void complete() {
+    if (callback_ && !cancelled_) {
+      callback_(total_bytes_, total_bytes_);
+    }
+  }
+
+  /**
+   * @brief Check if parsing was cancelled.
+   */
+  bool is_cancelled() const { return cancelled_.load(std::memory_order_acquire); }
+
+  /**
+   * @brief Check if a callback is registered.
+   */
+  bool has_callback() const { return static_cast<bool>(callback_); }
+
+private:
+  bool add_progress_internal(size_t weighted_bytes) {
+    size_t old_val = bytes_processed_.fetch_add(weighted_bytes, std::memory_order_relaxed);
+    size_t new_val = old_val + weighted_bytes;
+
+    // Calculate percentage (0-100)
+    int new_percent = total_bytes_ > 0 ? static_cast<int>((new_val * 100) / total_bytes_) : 0;
+    new_percent = std::min(new_percent, 100);
+
+    // Only call callback if percentage changed (throttling)
+    int last = last_reported_percent_.load(std::memory_order_relaxed);
+    if (new_percent > last) {
+      // Try to update last_reported_percent_ atomically
+      if (last_reported_percent_.compare_exchange_strong(last, new_percent,
+                                                         std::memory_order_relaxed)) {
+        // We won the race to report this percentage
+        bool should_continue = callback_(new_val, total_bytes_);
+        if (!should_continue) {
+          cancelled_.store(true, std::memory_order_release);
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  ProgressCallback callback_;
+  size_t total_bytes_;
+  double first_pass_weight_;
+  std::atomic<size_t> bytes_processed_;
+  std::atomic<int> last_reported_percent_;
+  std::atomic<bool> cancelled_;
+};
 
 /**
  * @brief Algorithm selection for parsing.
@@ -280,6 +448,13 @@ struct ParseOptions {
    * If a pointer is provided, errors go to both the external collector and
    * the Result's internal collector.
    *
+   * **Performance note**: When an explicit dialect is provided and errors is
+   * nullptr, the parser uses a fast path that achieves ~370 MB/s vs ~205 MB/s
+   * with comprehensive validation. The fast path only detects fatal quote
+   * errors; it does NOT detect inconsistent field counts or duplicate column
+   * names. Provide an external error collector if you need comprehensive
+   * validation.
+   *
    * @note The ErrorCollector must remain valid for the duration of parsing.
    *
    * For most use cases, the Result's internal error collector is sufficient:
@@ -324,6 +499,60 @@ struct ParseOptions {
   SizeLimits limits = SizeLimits::defaults();
 
   /**
+   * @brief Index caching configuration.
+   *
+   * When set (has_value()), the parser will attempt to load a cached index from
+   * disk on cache hit, or write the parsed index to disk on cache miss. This
+   * can dramatically speed up repeated reads of the same file.
+   *
+   * When nullopt (default), caching is disabled.
+   *
+   * @note Caching requires a file path to be provided via source_path.
+   *       Caching is not supported for stdin or memory-only buffers.
+   *
+   * @see CacheConfig for location options (SAME_DIR, XDG_CACHE, CUSTOM)
+   */
+  std::optional<CacheConfig> cache = std::nullopt;
+
+  /**
+   * @brief Source file path for caching.
+   *
+   * Required when caching is enabled. Used to compute the cache file path
+   * and to validate cache freshness against the source file metadata.
+   * If empty when caching is enabled, caching will be silently disabled.
+   */
+  std::string source_path;
+
+  /**
+   * @brief Force re-parsing even if a valid cache exists.
+   *
+   * When true, ignores any existing cache and re-parses the file, then
+   * writes a new cache file. Useful for refreshing stale caches or
+   * debugging cache issues.
+   *
+   * Only applies when caching is enabled (cache.has_value()).
+   */
+  bool force_cache_refresh = false;
+
+  /**
+   * @brief Optional callback for progress reporting during parsing.
+   *
+   * When set, this callback is invoked periodically to report parsing
+   * progress. It can be used to display progress bars, update UIs, or
+   * implement cancellation by returning false.
+   *
+   * The callback receives:
+   * - bytes_processed: Number of bytes processed so far
+   * - total_bytes: Total size being parsed
+   *
+   * Returns true to continue, false to abort parsing.
+   *
+   * @note Progress is approximate and reported at chunk boundaries.
+   * @see ProgressCallback for detailed documentation and examples.
+   */
+  ProgressCallback progress_callback = nullptr;
+
+  /**
    * @brief Factory for default options (auto-detect dialect, fast path).
    *
    * Equivalent to standard(). Both methods create identical options.
@@ -359,6 +588,41 @@ struct ParseOptions {
   }
 
   /**
+   * @brief Factory for auto-detection mode with explicit intent.
+   *
+   * Returns default options configured for dialect auto-detection.
+   * This is functionally equivalent to defaults() and standard(), but
+   * provides more self-documenting code when auto-detection is the
+   * explicit requirement.
+   *
+   * @return ParseOptions configured for auto-detection.
+   *
+   * @example
+   * @code
+   * auto result = parser.parse(buf, len, ParseOptions::auto_detect());
+   * @endcode
+   */
+  static ParseOptions auto_detect() { return ParseOptions{}; }
+
+  /**
+   * @brief Factory for auto-detection with error collection.
+   *
+   * Convenience method combining dialect auto-detection with error
+   * collection. This provides more self-documenting code compared to
+   * using with_errors() when auto-detection is the explicit intent.
+   *
+   * @param e Reference to an ErrorCollector for collecting parse errors.
+   * @return ParseOptions configured for auto-detection with error collection.
+   *
+   * @example
+   * @code
+   * ErrorCollector errors(ErrorMode::PERMISSIVE);
+   * auto result = parser.parse(buf, len, ParseOptions::auto_detect_with_errors(errors));
+   * @endcode
+   */
+  static ParseOptions auto_detect_with_errors(ErrorCollector& e) { return with_errors(e); }
+
+  /**
    * @brief Factory for options with both dialect and error collection.
    */
   static ParseOptions with_dialect_and_errors(const Dialect& d, ErrorCollector& e) {
@@ -388,6 +652,50 @@ struct ParseOptions {
     ParseOptions opts;
     opts.dialect = d;
     opts.algorithm = ParseAlgorithm::BRANCHLESS;
+    return opts;
+  }
+
+  /**
+   * @brief Factory for options with caching enabled.
+   *
+   * Creates options with automatic caching enabled. Cache files are placed
+   * in the default location (same directory as source, or XDG_CACHE as fallback).
+   *
+   * @param file_path Path to the source CSV file (required for caching)
+   */
+  static ParseOptions with_cache(const std::string& file_path) {
+    ParseOptions opts;
+    opts.cache = CacheConfig::defaults();
+    opts.source_path = file_path;
+    return opts;
+  }
+
+  /**
+   * @brief Factory for options with caching to a custom directory.
+   *
+   * Creates options with caching enabled, storing cache files in the
+   * specified directory.
+   *
+   * @param file_path Path to the source CSV file
+   * @param cache_dir Directory to store cache files
+   */
+  static ParseOptions with_cache_dir(const std::string& file_path, const std::string& cache_dir) {
+    ParseOptions opts;
+    opts.cache = CacheConfig::custom(cache_dir);
+    opts.source_path = file_path;
+    return opts;
+  }
+
+  /**
+   * @brief Factory for options with progress callback.
+   *
+   * Creates options with a progress callback for monitoring parse progress.
+   *
+   * @param callback Progress callback function
+   */
+  static ParseOptions with_progress(ProgressCallback callback) {
+    ParseOptions opts;
+    opts.progress_callback = std::move(callback);
     return opts;
   }
 };
@@ -711,7 +1019,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
     } else if ((byte & 0xE0) == 0xC0) {
       // Two-byte sequence (110xxxxx 10xxxxxx)
       if (i + 1 >= len || (buf[i + 1] & 0xC0) != 0x80) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: truncated 2-byte sequence");
         if (errors.should_stop())
           return;
@@ -721,7 +1029,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
       }
       // Check for overlong encoding (code points < 0x80 encoded as 2 bytes)
       if ((byte & 0x1E) == 0) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: overlong 2-byte encoding");
         if (errors.should_stop())
           return;
@@ -731,7 +1039,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
     } else if ((byte & 0xF0) == 0xE0) {
       // Three-byte sequence (1110xxxx 10xxxxxx 10xxxxxx)
       if (i + 2 >= len || (buf[i + 1] & 0xC0) != 0x80 || (buf[i + 2] & 0xC0) != 0x80) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: truncated 3-byte sequence");
         if (errors.should_stop())
           return;
@@ -742,12 +1050,12 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
       // Check for overlong encoding and surrogate code points
       uint32_t cp = ((byte & 0x0F) << 12) | ((buf[i + 1] & 0x3F) << 6) | (buf[i + 2] & 0x3F);
       if (cp < 0x800) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: overlong 3-byte encoding");
         if (errors.should_stop())
           return;
       } else if (cp >= 0xD800 && cp <= 0xDFFF) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: surrogate code point");
         if (errors.should_stop())
           return;
@@ -758,7 +1066,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
       // Four-byte sequence (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
       if (i + 3 >= len || (buf[i + 1] & 0xC0) != 0x80 || (buf[i + 2] & 0xC0) != 0x80 ||
           (buf[i + 3] & 0xC0) != 0x80) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: truncated 4-byte sequence");
         if (errors.should_stop())
           return;
@@ -770,12 +1078,12 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
       uint32_t cp = ((byte & 0x07) << 18) | ((buf[i + 1] & 0x3F) << 12) |
                     ((buf[i + 2] & 0x3F) << 6) | (buf[i + 3] & 0x3F);
       if (cp < 0x10000) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: overlong 4-byte encoding");
         if (errors.should_stop())
           return;
       } else if (cp > 0x10FFFF) {
-        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+        errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                          "Invalid UTF-8 sequence: code point exceeds U+10FFFF");
         if (errors.should_stop())
           return;
@@ -785,7 +1093,7 @@ inline void validate_utf8_internal(const uint8_t* buf, size_t len, ErrorCollecto
     } else {
       // Invalid leading byte (10xxxxxx continuation byte without leading byte,
       // or invalid 5/6-byte sequence starts 111110xx/1111110x)
-      errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::ERROR, line, column, i,
+      errors.add_error(ErrorCode::INVALID_UTF8, ErrorSeverity::RECOVERABLE, line, column, i,
                        "Invalid UTF-8 sequence: invalid leading byte");
       if (errors.should_stop())
         return;
@@ -1088,6 +1396,8 @@ public:
     bool successful{false};    ///< Whether parsing completed without fatal errors.
     Dialect dialect;           ///< The dialect used for parsing.
     DetectionResult detection; ///< Detection result (populated by parse_auto).
+    bool used_cache{false};    ///< True if index was loaded from cache.
+    std::string cache_path;    ///< Path to cache file (empty if caching disabled).
 
   private:
     const uint8_t* buf_{nullptr};                                ///< Pointer to the parsed buffer.
@@ -1583,17 +1893,6 @@ public:
       return result;
     }
 
-    // Initialize index with size limits (will validate overflow internally)
-    result.idx = parser_.init_safe(len, num_threads_, collector);
-    if (result.idx.indexes == nullptr) {
-      // Allocation failed or would overflow
-      if (options.errors != nullptr) {
-        result.error_collector().merge_from(*options.errors);
-      }
-      result.successful = false;
-      return result;
-    }
-
     // UTF-8 validation (optional, enabled via SizeLimits::validate_utf8)
     if (options.limits.validate_utf8) {
       validate_utf8_internal(buf, len, *collector);
@@ -1606,6 +1905,68 @@ public:
       }
     }
 
+    // =======================================================================
+    // Index Caching Logic
+    // =======================================================================
+    // Caching is only supported when:
+    // 1. CacheConfig is provided (cache.has_value())
+    // 2. A source file path is provided (!source_path.empty())
+    bool can_use_cache = options.cache.has_value() && !options.source_path.empty();
+
+    // Helper to emit cache warnings (captures warning callback from config)
+    auto cache_warn = [&options]([[maybe_unused]] const std::string& message) {
+      if (options.cache.has_value() && options.cache->warning_callback) {
+        options.cache->warning_callback(message);
+      }
+    };
+
+    if (can_use_cache) {
+      const CacheConfig& cache_config = *options.cache;
+      auto [cache_path, writable] =
+          IndexCache::try_compute_writable_path(options.source_path, cache_config);
+      result.cache_path = cache_path;
+
+      // Try to load from cache (unless force_cache_refresh is set)
+      if (!options.force_cache_refresh && !cache_path.empty()) {
+        // Use IndexCache::load() for automatic corruption detection and cleanup
+        auto load_result = IndexCache::load(cache_path, options.source_path);
+
+        if (load_result.success()) {
+          // Cache hit! Use the cached index
+          result.idx = std::move(load_result.index);
+          result.used_cache = true;
+          result.successful = true;
+
+          // Determine dialect for cached result
+          if (options.dialect.has_value()) {
+            result.dialect = options.dialect.value();
+          } else {
+            // Auto-detect dialect even for cached indexes
+            DialectDetector detector(options.detection_options);
+            result.detection = detector.detect(buf, len);
+            result.dialect = result.detection.success() ? result.detection.dialect : Dialect::csv();
+          }
+
+          // Store buffer reference to enable row/column iteration
+          result.set_buffer(buf, len);
+
+          return result;
+        }
+
+        // Cache miss or corruption
+        // Log corruption as a warning (non-fatal) so callers are aware
+        if (load_result.was_corrupted) {
+          cache_warn("Cache corruption detected and file deleted: " + load_result.error_message);
+        }
+      }
+
+      // Cache miss - continue with normal parsing, then write cache
+    }
+
+    // =======================================================================
+    // Normal Parsing Path
+    // =======================================================================
+
     // Determine dialect (explicit or auto-detect)
     if (options.dialect.has_value()) {
       result.dialect = options.dialect.value();
@@ -1616,19 +1977,121 @@ public:
       result.dialect = result.detection.success() ? result.detection.dialect : Dialect::csv();
     }
 
+    // =======================================================================
+    // Progress Tracking Setup
+    // =======================================================================
+    // Create progress tracker if callback is provided
+    // First pass (separator counting) is ~10% of work, second pass ~90%
+    ProgressTracker progress_tracker(options.progress_callback, len, 0.1);
+
+    // Report start of parsing (0%)
+    if (progress_tracker.has_callback()) {
+      if (!options.progress_callback(0, len)) {
+        result.successful = false;
+        return result;
+      }
+    }
+
+    // =======================================================================
+    // First Pass: Count separators with granular progress
+    // =======================================================================
+    // For granular progress during first pass, split into chunks and report
+    // progress after each chunk completes.
+    TwoPass::Stats count_stats;
+    const size_t min_chunk_size = 1024 * 1024; // 1MB chunks for progress granularity
+
+    if (progress_tracker.has_callback() && len > min_chunk_size * 2) {
+      // Split first pass into chunks for progress reporting
+      size_t n_chunks = std::min(static_cast<size_t>(100), len / min_chunk_size);
+      n_chunks = std::max(n_chunks, static_cast<size_t>(1));
+      size_t chunk_size = len / n_chunks;
+
+      count_stats = {0, null_pos, null_pos, 0};
+
+      for (size_t i = 0; i < n_chunks && !progress_tracker.is_cancelled(); ++i) {
+        size_t start = i * chunk_size;
+        size_t end = (i == n_chunks - 1) ? len : (i + 1) * chunk_size;
+
+        auto chunk_stats = TwoPass::first_pass_simd(buf, start, end, result.dialect.quote_char,
+                                                    result.dialect.delimiter);
+        count_stats.n_separators += chunk_stats.n_separators;
+        count_stats.n_quotes += chunk_stats.n_quotes;
+        // Track first even/odd newlines from first chunk only
+        if (i == 0) {
+          count_stats.first_even_nl = chunk_stats.first_even_nl;
+          count_stats.first_odd_nl = chunk_stats.first_odd_nl;
+        }
+
+        // Report progress for this chunk
+        progress_tracker.add_first_pass_progress(end - start);
+      }
+
+      if (progress_tracker.is_cancelled()) {
+        result.successful = false;
+        return result;
+      }
+    } else {
+      // Single-pass for small files or no progress callback
+      count_stats = TwoPass::first_pass_simd(buf, 0, len, result.dialect.quote_char,
+                                             result.dialect.delimiter);
+
+      // Report first pass complete
+      if (progress_tracker.has_callback()) {
+        progress_tracker.add_first_pass_progress(len);
+      }
+    }
+
+    result.idx = parser_.init_counted_safe(count_stats.n_separators, num_threads_, collector,
+                                           count_stats.n_quotes, len);
+    if (result.idx.indexes == nullptr) {
+      // Allocation failed or would overflow
+      if (options.errors != nullptr) {
+        result.error_collector().merge_from(*options.errors);
+      }
+      result.successful = false;
+      return result;
+    }
+
     // Parse with error collection - never throw for parse errors
     //
     // Design principle: The error-collecting variants (_with_errors) do
     // comprehensive validation (field counts, quote checking, etc.), while
-    // the fast-path variants only check for fatal quote errors. We prefer
-    // error-collecting variants for better error detection, and wrap
-    // fast-path variants in try-catch for backward compatibility.
+    // the fast-path variants only check for fatal quote errors.
+    //
+    // Performance optimization (issue #443): Use the fast path (parse_speculate)
+    // by default when:
+    // 1. Explicit dialect is provided (skips detection overhead)
+    // 2. No external error collector requested (options.errors == nullptr)
+    //
+    // When an external error collector is explicitly provided, we use the
+    // comprehensive validation path to detect issues like inconsistent field
+    // counts and duplicate column names.
+    bool use_fast_path = options.errors == nullptr && options.dialect.has_value() &&
+                         (options.algorithm == ParseAlgorithm::AUTO ||
+                          options.algorithm == ParseAlgorithm::SPECULATIVE);
+
+    // Create second-pass progress callback that wraps the progress tracker
+    SecondPassProgressCallback second_pass_progress = nullptr;
+    if (progress_tracker.has_callback()) {
+      second_pass_progress = [&progress_tracker](size_t bytes_processed) {
+        return progress_tracker.add_second_pass_progress(bytes_processed);
+      };
+    }
+
     try {
       if (!options.dialect.has_value()) {
         // Auto-detect path - always uses error collection
+        // Note: parse_auto doesn't support progress callback yet
         result.successful = parser_.parse_auto(buf, result.idx, len, *collector, &result.detection,
                                                options.detection_options);
         result.dialect = result.detection.dialect;
+      } else if (use_fast_path) {
+        // Fast path: speculative parsing without comprehensive validation
+        // This path achieves ~370 MB/s vs ~205 MB/s with validation (issue #443)
+        // Note: This path does NOT detect inconsistent field counts or
+        // duplicate column names - use an explicit error collector if needed
+        result.successful =
+            parser_.parse_speculate(buf, result.idx, len, result.dialect, second_pass_progress);
       } else if (options.algorithm == ParseAlgorithm::BRANCHLESS) {
         // Branchless with comprehensive error collection
         result.successful =
@@ -1638,12 +2101,11 @@ public:
         result.successful =
             parser_.parse_two_pass_with_errors(buf, result.idx, len, *collector, result.dialect);
       } else if (options.algorithm == ParseAlgorithm::SPECULATIVE) {
-        // Speculative: fast path with try-catch (no _with_errors variant)
-        // Note: This path does NOT detect inconsistent field counts
-        result.successful = parser_.parse_speculate(buf, result.idx, len, result.dialect);
+        // Speculative with external error collector - use validation
+        result.successful =
+            parser_.parse_with_errors(buf, result.idx, len, *collector, result.dialect);
       } else {
-        // AUTO/default: Use error-collecting variant for comprehensive
-        // validation when errors are being collected, fast path otherwise
+        // AUTO with external error collector: Use comprehensive validation
         result.successful =
             parser_.parse_with_errors(buf, result.idx, len, *collector, result.dialect);
       }
@@ -1662,6 +2124,30 @@ public:
     // If external collector was used, copy errors to internal collector
     if (options.errors != nullptr) {
       result.error_collector().merge_from(*options.errors);
+    }
+
+    // =======================================================================
+    // Progress Callback: Report parsing complete (100%)
+    // =======================================================================
+    if (options.progress_callback && result.successful) {
+      // Report full completion; ignore return value since we're done parsing
+      options.progress_callback(len, len);
+    }
+
+    // =======================================================================
+    // Write Cache on Miss (if caching enabled and parse successful)
+    // =======================================================================
+    if (can_use_cache && result.successful && !result.cache_path.empty()) {
+      // Store column count in idx for caching (idx.columns may be 0 because
+      // num_columns() typically uses the ValueExtractor)
+      result.idx.columns = result.num_columns();
+      // Write cache file - emit warning on failure
+      bool write_success =
+          IndexCache::write_atomic(result.cache_path, result.idx, options.source_path);
+      if (!write_success) {
+        cache_warn("Failed to write cache file '" + result.cache_path +
+                   "'; caching disabled for this parse");
+      }
     }
 
     // Store buffer reference to enable row/column iteration

@@ -38,4 +38,20 @@ Thumbs.db
 # Documentation build output
 docs/_site/
 docs/api/
+docs/api-reference/
+docs/python-reference/
+docs/objects.json
 docs/.quarto/
+
+# Python
+python/.venv/
+python/dist/
+python/build/
+python/src/vroom_csv/__pycache__/
+python/src/vroom_csv/_version.py
+python/tests/__pycache__/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/

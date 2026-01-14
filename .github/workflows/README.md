@@ -4,14 +4,67 @@ This directory contains GitHub Actions workflows for libvroom continuous integra
 
 ## Workflows
 
+### python.yml - Python Bindings Tests
+
+Tests Python bindings for vroom-csv across multiple Python versions and platforms.
+
+**Triggers:**
+- Push to main/master branches
+- Pull requests to main/master branches
+
+**Test Matrix:**
+- **Platforms**: Ubuntu (latest), macOS (latest)
+- **Python Versions**: 3.9, 3.10, 3.11, 3.12
+- **Total Jobs**: 8 combinations
+
+**Build Steps:**
+1. Checkout code
+2. Set up Python with specified version
+3. Install build dependencies (CMake, build tools)
+4. Install Python package with test dependencies via `pip install .[test]`
+5. Run pytest on Python tests
+
+**Tests Covered:**
+- `read_csv()` function (basic parsing, delimiters, headers)
+- `Table` class functionality (column/row access, properties)
+- Arrow PyCapsule interface (`__arrow_c_schema__`, `__arrow_c_stream__`)
+- PyArrow interoperability (conversion to PyArrow Table)
+- Polars interoperability (conversion to Polars DataFrame)
+
+### python-wheels.yml - Python Wheel Distribution
+
+Builds Python wheels for distribution on PyPI.
+
+**Triggers:**
+- Push to main branch (fast builds for TestPyPI)
+- Push of release tags (`v*`) (full builds for PyPI)
+- Manual dispatch via workflow_dispatch
+
+**Note:** PRs do NOT trigger wheel builds to save CI time. Regular Python testing is handled by `python.yml`.
+
+**Build Strategy:**
+- **Main branch**: Fast builds only (x86_64 Linux, both macOS archs)
+- **Release tags**: Full builds including slow Linux ARM64 via QEMU (~20+ min)
+
+**Build Matrix:**
+- **Platforms**: Ubuntu (latest), macOS 14 (ARM)
+- **Python Versions**: 3.9, 3.10, 3.11, 3.12
+- **Architectures**: x86_64 always, ARM64 on macOS (native), ARM64 on Linux (releases only)
+
+**Jobs:**
+1. `build_wheels` - Build wheels using cibuildwheel
+2. `build_sdist` - Build source distribution
+3. `publish` - Publish to PyPI (only on release tags)
+4. `publish-testpypi` - Publish to TestPyPI (only on main branch)
+
 ### ci.yml - Main CI Pipeline
 
-Runs on every push and pull request to main/master branches and all `claude/**` branches.
+Runs on every push and pull request to main/master branches.
 
 **Build Matrix:**
 - **Platforms**: Ubuntu (latest), macOS (latest)
-- **Build Types**: Release, Debug
-- **Total Jobs**: 4 build combinations
+- **Build Types**: Release, Debug (Debug skipped on macOS)
+- **Total Jobs**: 3 build combinations
 
 **Build Steps:**
 1. Checkout code
@@ -22,10 +75,23 @@ Runs on every push and pull request to main/master branches and all `claude/**` 
 6. Run error handling tests (37 tests)
 7. Run full CTest suite (79 tests)
 
-**Code Quality Checks:**
-1. Verify required files exist
-2. Count and validate test files
-3. Ensure all 16 malformed CSV test files present
+### Additional CI Jobs
+
+**Code Coverage** (runs on every push/PR):
+- Builds with `-DENABLE_COVERAGE=ON`
+- Generates coverage with lcov
+- Uploads to Codecov
+- **Note**: Header file coverage may appear artificially low due to gcov limitations. See [docs/coverage.md](../../docs/coverage.md) for details.
+
+**Minimal Release Build** (main branch only):
+- Builds with `-DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF`
+- Verifies library and CLI binary are built
+- Confirms test/benchmark executables are NOT built
+
+**Shared Library Build** (runs on every push/PR):
+- Builds with `-DBUILD_SHARED_LIBS=ON`
+- Verifies shared library (.so) is created
+- Tests vroom binary links correctly
 
 ## CI Badge
 
@@ -53,8 +119,7 @@ When adding new test files:
 
 1. Add test file to appropriate `test/data/` subdirectory
 2. Update test harness (`csv_parser_test.cpp` or `error_handling_test.cpp`)
-3. Update file count validation in `ci.yml` if needed
-4. CI will automatically run new tests on next push
+3. CI will automatically run new tests on next push
 
 ## Platform-Specific Notes
 
@@ -84,14 +149,9 @@ When adding new test files:
 2. Check if test data files are present
 3. Verify file permissions and line endings
 
-### Code Quality Failures
-1. Ensure all required files committed
-2. Check file counts match expected values
-3. Verify directory structure
-
 ## Performance Considerations
 
-- **Caching**: Could add CMake/build caching for faster builds
+- **Caching**: FetchContent dependencies are cached to speed up rebuilds
 - **Parallel builds**: CMake uses multiple cores by default
 - **Test parallelization**: CTest can run tests in parallel
 
@@ -124,10 +184,9 @@ See `fuzz/README.md` for local fuzzing instructions.
 
 Potential workflow additions:
 
-1. **Coverage reporting**: Add code coverage with lcov/gcov
-2. **Benchmarking**: Performance regression testing
-3. **Static analysis**: clang-tidy, cppcheck
-4. **Format checking**: clang-format validation
-5. **Windows builds**: MSVC support
-6. **ARM64 builds**: Native ARM testing
-7. **Release automation**: Automatic tagging and releases
+1. **Benchmarking**: Performance regression testing
+2. **Static analysis**: clang-tidy, cppcheck
+3. **Format checking**: clang-format validation
+4. **Windows builds**: MSVC support
+5. **ARM64 builds**: Native ARM testing
+6. **Release automation**: Automatic tagging and releases
