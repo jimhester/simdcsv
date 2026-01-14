@@ -100,10 +100,10 @@ jobs:
       env:
         CC: clang
         CXX: clang++
-      run: |
         # scikit-build-core respects CMAKE_ARGS environment variable
-        # Use shell quoting to properly pass flags with spaces
-        export CMAKE_ARGS='-DCMAKE_CXX_FLAGS=-fprofile-instr-generate -fcoverage-mapping -DCMAKE_MODULE_LINKER_FLAGS=-fprofile-instr-generate'
+        # Inner quotes needed to group multi-word flags
+        CMAKE_ARGS: '-DCMAKE_CXX_FLAGS="-fprofile-instr-generate -fcoverage-mapping" -DCMAKE_MODULE_LINKER_FLAGS=-fprofile-instr-generate'
+      run: |
         python -m pip install --no-build-isolation -v -e .[test]
 
     - name: Run tests with coverage
