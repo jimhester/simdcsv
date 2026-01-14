@@ -50,7 +50,7 @@ const char* error_severity_to_string(ErrorSeverity severity) {
   switch (severity) {
   case ErrorSeverity::WARNING:
     return "WARNING";
-  case ErrorSeverity::ERROR:
+  case ErrorSeverity::RECOVERABLE:
     return "ERROR";
   case ErrorSeverity::FATAL:
     return "FATAL";
@@ -87,7 +87,7 @@ std::string ErrorCollector::summary() const {
     case ErrorSeverity::WARNING:
       warnings++;
       break;
-    case ErrorSeverity::ERROR:
+    case ErrorSeverity::RECOVERABLE:
       errors++;
       break;
     case ErrorSeverity::FATAL:

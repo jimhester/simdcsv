@@ -87,7 +87,7 @@ libvroom::StreamReader reader("data.csv");
 // From file path with configuration
 libvroom::StreamConfig config;
 config.dialect = libvroom::Dialect::tsv();
-config.error_mode = libvroom::ErrorMode::STRICT;
+config.error_mode = libvroom::ErrorMode::FAIL_FAST;
 libvroom::StreamReader reader("data.tsv", config);
 
 // From input stream
@@ -321,7 +321,7 @@ int main(int argc, char* argv[]) {
     // Configure for tab-separated, strict error handling
     libvroom::StreamConfig config;
     config.dialect = libvroom::Dialect::tsv();
-    config.error_mode = libvroom::ErrorMode::STRICT;
+    config.error_mode = libvroom::ErrorMode::FAIL_FAST;
 
     try {
         libvroom::StreamReader reader(argv[1], config);

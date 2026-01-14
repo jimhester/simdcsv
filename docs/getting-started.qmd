@@ -415,7 +415,7 @@ if (result.has_errors()) {
 }
 
 // Method 2: External error collector with specific mode
-libvroom::ErrorCollector errors(libvroom::ErrorMode::STRICT);
+libvroom::ErrorCollector errors(libvroom::ErrorMode::FAIL_FAST);
 auto result2 = parser.parse(buffer.data(), buffer.size(), {.errors = &errors});
 
 // Error modes:

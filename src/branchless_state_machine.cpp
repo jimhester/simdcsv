@@ -95,7 +95,7 @@ uint64_t second_pass_simd_branchless_with_errors(const BranchlessStateMachine& s
 
   // Process 64-byte blocks with SIMD
   for (; pos + 64 <= len; pos += 64) {
-    __builtin_prefetch(data + pos + 128);
+    libvroom_prefetch(data + pos + 128);
 
     simd_input in = fill_input(data + pos);
 
@@ -114,7 +114,7 @@ uint64_t second_pass_simd_branchless_with_errors(const BranchlessStateMachine& s
         size_t error_pos = start + pos + static_cast<size_t>(bit_pos);
         size_t line, col;
         get_error_line_column(buf, buf_len, error_pos, line, col);
-        errors->add_error(ErrorCode::NULL_BYTE, ErrorSeverity::ERROR, line, col, error_pos,
+        errors->add_error(ErrorCode::NULL_BYTE, ErrorSeverity::RECOVERABLE, line, col, error_pos,
                           "Null byte in data", get_error_context(buf, buf_len, error_pos));
         if (errors->should_stop())
           return count;
@@ -130,7 +130,7 @@ uint64_t second_pass_simd_branchless_with_errors(const BranchlessStateMachine& s
         std::string msg = "Quote character '";
         msg += quote_char;
         msg += "' in unquoted field";
-        errors->add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::ERROR, line, col,
+        errors->add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::RECOVERABLE, line, col,
                           error_pos, msg, get_error_context(buf, buf_len, error_pos));
         if (errors->should_stop())
           return count;
@@ -160,7 +160,7 @@ uint64_t second_pass_simd_branchless_with_errors(const BranchlessStateMachine& s
         size_t error_pos = start + pos + static_cast<size_t>(bit_pos);
         size_t line, col;
         get_error_line_column(buf, buf_len, error_pos, line, col);
-        errors->add_error(ErrorCode::NULL_BYTE, ErrorSeverity::ERROR, line, col, error_pos,
+        errors->add_error(ErrorCode::NULL_BYTE, ErrorSeverity::RECOVERABLE, line, col, error_pos,
                           "Null byte in data", get_error_context(buf, buf_len, error_pos));
         if (errors->should_stop())
           return count;
@@ -175,7 +175,7 @@ uint64_t second_pass_simd_branchless_with_errors(const BranchlessStateMachine& s
         std::string msg = "Quote character '";
         msg += quote_char;
         msg += "' in unquoted field";
-        errors->add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::ERROR, line, col,
+        errors->add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::RECOVERABLE, line, col,
                           error_pos, msg, get_error_context(buf, buf_len, error_pos));
         if (errors->should_stop())
           return count;

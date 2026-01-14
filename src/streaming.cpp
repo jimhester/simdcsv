@@ -150,13 +150,13 @@ struct StreamParser::Impl {
       std::string msg = "Field size " + std::to_string(field_size) + " bytes exceeds maximum " +
                         std::to_string(config.max_field_size) + " bytes";
       if (error_callback) {
-        ParseError err(ErrorCode::FIELD_TOO_LARGE, ErrorSeverity::ERROR, row_count + 1,
+        ParseError err(ErrorCode::FIELD_TOO_LARGE, ErrorSeverity::RECOVERABLE, row_count + 1,
                        current_field_bounds.size() + 1, total_bytes, msg);
         if (!error_callback(err)) {
           stopped = true;
         }
       }
-      errors.add_error(ErrorCode::FIELD_TOO_LARGE, ErrorSeverity::ERROR, row_count + 1,
+      errors.add_error(ErrorCode::FIELD_TOO_LARGE, ErrorSeverity::RECOVERABLE, row_count + 1,
                        current_field_bounds.size() + 1, total_bytes, msg);
       return;
     }
@@ -323,16 +323,16 @@ struct StreamParser::Impl {
         // Quote in unquoted field - error but continue
         if (errors.mode() != ErrorMode::BEST_EFFORT) {
           if (error_callback) {
-            ParseError err(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::ERROR, row_count + 1,
-                           current_field_bounds.size() + 1, total_bytes + (pos - buffer_start),
-                           "Quote character in unquoted field");
+            ParseError err(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::RECOVERABLE,
+                           row_count + 1, current_field_bounds.size() + 1,
+                           total_bytes + (pos - buffer_start), "Quote character in unquoted field");
             if (!error_callback(err)) {
               stopped = true;
             }
           }
-          errors.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::ERROR, row_count + 1,
-                           current_field_bounds.size() + 1, total_bytes + (pos - buffer_start),
-                           "Quote character in unquoted field");
+          errors.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::RECOVERABLE,
+                           row_count + 1, current_field_bounds.size() + 1,
+                           total_bytes + (pos - buffer_start), "Quote character in unquoted field");
         }
       }
       break;
@@ -377,15 +377,17 @@ struct StreamParser::Impl {
         // Invalid character after closing quote
         if (errors.mode() != ErrorMode::BEST_EFFORT) {
           if (error_callback) {
-            ParseError err(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::ERROR, row_count + 1,
-                           current_field_bounds.size() + 1, total_bytes + (pos - buffer_start),
+            ParseError err(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::RECOVERABLE,
+                           row_count + 1, current_field_bounds.size() + 1,
+                           total_bytes + (pos - buffer_start),
                            "Invalid character after closing quote");
             if (!error_callback(err)) {
               stopped = true;
             }
           }
-          errors.add_error(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::ERROR, row_count + 1,
-                           current_field_bounds.size() + 1, total_bytes + (pos - buffer_start),
+          errors.add_error(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::RECOVERABLE,
+                           row_count + 1, current_field_bounds.size() + 1,
+                           total_bytes + (pos - buffer_start),
                            "Invalid character after closing quote");
         }
         // Recovery: treat as part of unquoted field
@@ -434,7 +436,7 @@ struct StreamParser::Impl {
       if (errors.should_stop()) {
         partial_buffer.clear();
         current_field_bounds.clear();
-        return StreamStatus::ERROR;
+        return StreamStatus::STREAM_ERROR;
       }
 
       // Check if error callback requested stop
@@ -490,7 +492,7 @@ struct StreamParser::Impl {
         errors.add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL, row_count + 1,
                          current_field_bounds.size() + 1, total_bytes,
                          "Unclosed quote at end of file");
-        if (errors.mode() != ErrorMode::STRICT) {
+        if (errors.mode() != ErrorMode::FAIL_FAST) {
           // Best effort: emit partial field
           emit_field(data, field_start, len);
           emit_row();
@@ -512,7 +514,7 @@ struct StreamParser::Impl {
       partial_buffer.clear();
     }
 
-    return errors.has_fatal_errors() ? StreamStatus::ERROR : StreamStatus::END_OF_DATA;
+    return errors.has_fatal_errors() ? StreamStatus::STREAM_ERROR : StreamStatus::END_OF_DATA;
   }
 
   // Pull model: get next row from pending queue
@@ -744,7 +746,7 @@ bool StreamReader::next_row() {
       break;
 
     case StreamStatus::END_OF_DATA:
-    case StreamStatus::ERROR:
+    case StreamStatus::STREAM_ERROR:
       return false;
 
     default:

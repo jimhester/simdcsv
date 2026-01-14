@@ -65,7 +65,8 @@ enum class StreamStatus {
   ROW_READY,      ///< A complete row is available (pull model)
   END_OF_DATA,    ///< No more data to process
   NEED_MORE_DATA, ///< Parser needs more input data
-  ERROR           ///< Parse error occurred
+  STREAM_ERROR    ///< Parse error occurred (renamed from ERROR to avoid Windows
+                  ///< macro conflict)
 };
 
 /**
@@ -294,7 +295,7 @@ public:
    * Must be called after all chunks have been fed to process
    * any partial row at the end of the file.
    *
-   * @return StreamStatus::END_OF_DATA on success, StreamStatus::ERROR if errors occurred
+   * @return StreamStatus::END_OF_DATA on success, StreamStatus::STREAM_ERROR if errors occurred
    */
   StreamStatus finish();
 
@@ -317,7 +318,7 @@ public:
    * @return StreamStatus::ROW_READY if a row is available,
    *         StreamStatus::NEED_MORE_DATA if more input needed,
    *         StreamStatus::END_OF_DATA if finish() was called and no more rows,
-   *         StreamStatus::ERROR if a parse error occurred
+   *         StreamStatus::STREAM_ERROR if a parse error occurred
    */
   StreamStatus next_row();
 

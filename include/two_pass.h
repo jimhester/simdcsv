@@ -62,7 +62,6 @@
 #include <future>
 #include <limits>
 #include <sstream>
-#include <unistd.h> // for getopt
 #include <unordered_set>
 #include <vector>
 
@@ -385,7 +384,7 @@ public:
     uint64_t prev_iter_inside_quote = 0ULL; // Track quote state across iterations
     buf += start;
     for (; idx < len; idx += 64) {
-      __builtin_prefetch(buf + idx + 128);
+      libvroom_prefetch(buf + idx + 128);
 
       size_t remaining = len - idx;
       simd_input in = fill_input_safe(buf + idx, remaining);
@@ -519,7 +518,7 @@ public:
     const uint8_t* data = buf + start;
 
     for (; idx < len; idx += 64) {
-      __builtin_prefetch(data + idx + 128);
+      libvroom_prefetch(data + idx + 128);
       size_t remaining = len - idx;
       simd_input in = fill_input_safe(data + idx, remaining);
 

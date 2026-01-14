@@ -9,6 +9,13 @@
 #include <cstdint>
 #include <cstring>
 
+// MSVC intrinsics for bit manipulation
+#ifdef _MSC_VER
+#include <intrin.h>
+#pragma intrinsic(_BitScanForward64)
+#pragma intrinsic(__popcnt64)
+#endif
+
 // Include Highway for portable SIMD
 #undef HWY_TARGET_INCLUDE
 #include "hwy/highway.h"
@@ -41,11 +48,21 @@ really_inline uint64_t blsmsk_u64(uint64_t input_num) {
 really_inline int trailing_zeroes(uint64_t input_num) {
   if (input_num == 0)
     return 64;
+#ifdef _MSC_VER
+  unsigned long index;
+  _BitScanForward64(&index, input_num);
+  return static_cast<int>(index);
+#else
   return __builtin_ctzll(input_num);
+#endif
 }
 
 really_inline long long int count_ones(uint64_t input_num) {
+#ifdef _MSC_VER
+  return static_cast<long long int>(__popcnt64(input_num));
+#else
   return __builtin_popcountll(input_num);
+#endif
 }
 
 // Fill SIMD input from memory (caller must ensure at least 64 bytes are readable)

@@ -93,19 +93,19 @@ struct libvroom_load_result {
 static libvroom::ErrorMode to_cpp_mode(libvroom_error_mode_t mode) {
   switch (mode) {
   case LIBVROOM_MODE_STRICT:
-    return libvroom::ErrorMode::STRICT;
+    return libvroom::ErrorMode::FAIL_FAST;
   case LIBVROOM_MODE_PERMISSIVE:
     return libvroom::ErrorMode::PERMISSIVE;
   case LIBVROOM_MODE_BEST_EFFORT:
     return libvroom::ErrorMode::BEST_EFFORT;
   default:
-    return libvroom::ErrorMode::STRICT;
+    return libvroom::ErrorMode::FAIL_FAST;
   }
 }
 
 static libvroom_error_mode_t to_c_mode(libvroom::ErrorMode mode) {
   switch (mode) {
-  case libvroom::ErrorMode::STRICT:
+  case libvroom::ErrorMode::FAIL_FAST:
     return LIBVROOM_MODE_STRICT;
   case libvroom::ErrorMode::PERMISSIVE:
     return LIBVROOM_MODE_PERMISSIVE;
@@ -157,7 +157,7 @@ static libvroom_severity_t to_c_severity(libvroom::ErrorSeverity severity) {
   switch (severity) {
   case libvroom::ErrorSeverity::WARNING:
     return LIBVROOM_SEVERITY_WARNING;
-  case libvroom::ErrorSeverity::ERROR:
+  case libvroom::ErrorSeverity::RECOVERABLE:
     return LIBVROOM_SEVERITY_ERROR;
   case libvroom::ErrorSeverity::FATAL:
     return LIBVROOM_SEVERITY_FATAL;
