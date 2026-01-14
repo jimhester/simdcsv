@@ -68,7 +68,8 @@ jobs:
       run: |
         python -m pytest tests/ -v --tb=short
 
-  # Coverage job - run on single configuration to upload to Codecov
+  # Combined coverage job - measures both Python code and C++ bindings
+  # Uses Clang with LLVM coverage for bindings.cpp, pytest-cov for Python
   python-coverage:
     name: Python Coverage
     runs-on: ubuntu-latest
@@ -76,6 +77,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Needed for setuptools-scm
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -85,26 +88,95 @@ jobs:
     - name: Install build dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake build-essential
+        sudo apt-get install -y cmake clang llvm
 
-    - name: Install Python package with test dependencies
-      working-directory: python
+    - name: Install Python build tools
       run: |
         python -m pip install --upgrade pip
-        python -m pip install .[test]
+        python -m pip install build scikit-build-core pybind11 setuptools-scm
+
+    - name: Create coverage toolchain file
+      run: |
+        cat > ${{ github.workspace }}/coverage-toolchain.cmake << 'EOF'
+        message(STATUS "Coverage toolchain file loaded")
+        set(CMAKE_C_COMPILER clang)
+        set(CMAKE_CXX_COMPILER clang++)
+        # Use CACHE FORCE to ensure flags are not overridden
+        set(CMAKE_CXX_FLAGS "-fprofile-instr-generate -fcoverage-mapping" CACHE STRING "" FORCE)
+        set(CMAKE_C_FLAGS "-fprofile-instr-generate -fcoverage-mapping" CACHE STRING "" FORCE)
+        set(CMAKE_MODULE_LINKER_FLAGS "-fprofile-instr-generate" CACHE STRING "" FORCE)
+        set(CMAKE_SHARED_LINKER_FLAGS "-fprofile-instr-generate" CACHE STRING "" FORCE)
+        message(STATUS "CMAKE_CXX_FLAGS = ${CMAKE_CXX_FLAGS}")
+        EOF
+        cat ${{ github.workspace }}/coverage-toolchain.cmake
+
+    - name: Build Python package with coverage instrumentation
+      working-directory: python
+      env:
+        CMAKE_ARGS: "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/coverage-toolchain.cmake"
+      run: |
+        # Use --config-settings to set Debug build type (prevents stripping)
+        python -m pip install --no-build-isolation -v -e .[test] \
+          --config-settings=cmake.build-type=Debug
 
     - name: Run tests with coverage
       working-directory: python
+      # Continue even if tests fail to generate coverage report
+      continue-on-error: true
+      env:
+        LLVM_PROFILE_FILE: "coverage-%p.profraw"
       run: |
         python -m pytest tests/ -v --tb=short --cov=vroom_csv --cov-report=xml --cov-report=term
 
-    - name: Upload coverage to Codecov
+    - name: Generate C++ bindings coverage report
+      working-directory: python
+      run: |
+        # Find llvm-profdata and llvm-cov
+        LLVM_PROFDATA=$(which llvm-profdata || find /usr -name 'llvm-profdata*' -type f | head -1)
+        LLVM_COV=$(which llvm-cov || find /usr -name 'llvm-cov*' -type f | head -1)
+
+        echo "Using llvm-profdata: $LLVM_PROFDATA"
+        echo "Using llvm-cov: $LLVM_COV"
+
+        # Merge raw profiles
+        $LLVM_PROFDATA merge -sparse coverage-*.profraw -o coverage.profdata
+
+        # Find the compiled extension module
+        EXTENSION=$(find . -name '_core*.so' -type f | head -1)
+        echo "Found extension: $EXTENSION"
+
+        # Generate coverage report in lcov format
+        $LLVM_COV export "$EXTENSION" \
+          -instr-profile=coverage.profdata \
+          -format=lcov \
+          -ignore-filename-regex='(_deps/|/usr/|pybind11)' \
+          > bindings-coverage.info
+
+        # Show summary
+        echo "=== Python Bindings Coverage Summary ==="
+        $LLVM_COV report "$EXTENSION" \
+          -instr-profile=coverage.profdata \
+          -ignore-filename-regex='(_deps/|/usr/|pybind11)' \
+          --show-region-summary=false
+
+    - name: Upload Python coverage to Codecov
       uses: codecov/codecov-action@v4
       if: github.repository == 'jimhester/libvroom'
       continue-on-error: true
       with:
         files: ./python/coverage.xml
         flags: python
+        fail_ci_if_error: false
+        verbose: true
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+    - name: Upload C++ bindings coverage to Codecov
+      uses: codecov/codecov-action@v4
+      if: github.repository == 'jimhester/libvroom'
+      continue-on-error: true
+      with:
+        files: ./python/bindings-coverage.info
+        flags: python-bindings
         fail_ci_if_error: false
         verbose: true
         token: ${{ secrets.CODECOV_TOKEN }}
