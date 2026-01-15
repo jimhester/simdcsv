@@ -1978,4 +1978,57 @@ ParseIndex TwoPass::init_counted_safe(uint64_t total_separators, size_t n_thread
   return out;
 }
 
+//-----------------------------------------------------------------------------
+// ParseIndex shared ownership implementation
+//-----------------------------------------------------------------------------
+
+std::shared_ptr<const ParseIndex> ParseIndex::share() {
+  // Create a new ParseIndex that shares ownership of the underlying data
+  auto shared = std::make_shared<ParseIndex>();
+
+  // Copy scalar members
+  shared->columns = columns;
+  shared->n_threads = n_threads;
+  shared->region_size = region_size;
+
+  // Share the buffer reference (if set)
+  shared->buffer_ = buffer_;
+
+  // Handle different ownership modes
+  if (mmap_buffer_) {
+    // Convert unique_ptr mmap to shared_ptr
+    if (!mmap_buffer_shared_) {
+      mmap_buffer_shared_ = std::move(mmap_buffer_);
+    }
+    shared->mmap_buffer_shared_ = mmap_buffer_shared_;
+    // n_indexes and indexes already point into mmap'd memory
+    shared->n_indexes = n_indexes;
+    shared->indexes = indexes;
+  } else if (n_indexes_shared_ || indexes_shared_) {
+    // Already using shared ownership - just copy the shared_ptrs
+    shared->n_indexes_shared_ = n_indexes_shared_;
+    shared->indexes_shared_ = indexes_shared_;
+    shared->n_indexes = n_indexes;
+    shared->indexes = indexes;
+  } else if (n_indexes_ptr_ || indexes_ptr_) {
+    // Convert unique_ptr to shared_ptr for sharing
+    if (n_indexes_ptr_) {
+      n_indexes_shared_ = std::shared_ptr<uint64_t[]>(n_indexes_ptr_.release());
+    }
+    if (indexes_ptr_) {
+      indexes_shared_ = std::shared_ptr<uint64_t[]>(indexes_ptr_.release());
+    }
+    shared->n_indexes_shared_ = n_indexes_shared_;
+    shared->indexes_shared_ = indexes_shared_;
+    shared->n_indexes = n_indexes;
+    shared->indexes = indexes;
+  } else {
+    // No data to share - empty index
+    shared->n_indexes = nullptr;
+    shared->indexes = nullptr;
+  }
+
+  return shared;
+}
+
 } // namespace libvroom

@@ -50,14 +50,14 @@ static size_t skip_comment_lines_from(const uint8_t* buf, size_t len, size_t pos
   return pos;
 }
 
-ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx,
+ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx_ref,
                                const Dialect& dialect, const ExtractionConfig& config)
-    : buf_(buf), len_(len), idx_(idx), dialect_(dialect), config_(config) {
+    : buf_(buf), len_(len), idx_ptr_(&idx_ref), dialect_(dialect), config_(config) {
   // Determine number of columns by finding the first newline separator.
   // Uses O(n_threads) iteration through thread data instead of sorted indexes.
-  uint64_t total_indexes = idx_.total_indexes();
+  uint64_t total_indexes = idx().total_indexes();
   for (uint64_t i = 0; i < total_indexes; ++i) {
-    FieldSpan span = idx_.get_field_span(i);
+    FieldSpan span = idx().get_field_span(i);
     if (!span.is_valid() || span.end >= len_)
       continue;
     uint8_t c = buf_[span.end];
@@ -69,16 +69,16 @@ ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex&
   recalculate_num_rows();
 }
 
-ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx,
+ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx_ref,
                                const Dialect& dialect, const ExtractionConfig& config,
                                const ColumnConfigMap& column_configs)
-    : buf_(buf), len_(len), idx_(idx), dialect_(dialect), config_(config),
+    : buf_(buf), len_(len), idx_ptr_(&idx_ref), dialect_(dialect), config_(config),
       column_configs_(column_configs) {
   // Determine number of columns by finding the first newline separator.
   // Uses O(n_threads) iteration through thread data instead of sorted indexes.
-  uint64_t total_indexes = idx_.total_indexes();
+  uint64_t total_indexes = idx().total_indexes();
   for (uint64_t i = 0; i < total_indexes; ++i) {
-    FieldSpan span = idx_.get_field_span(i);
+    FieldSpan span = idx().get_field_span(i);
     if (!span.is_valid() || span.end >= len_)
       continue;
     uint8_t c = buf_[span.end];
@@ -92,6 +92,38 @@ ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex&
   resolve_column_configs();
 }
 
+ValueExtractor::ValueExtractor(std::shared_ptr<const ParseIndex> shared_idx, const Dialect& dialect,
+                               const ExtractionConfig& config)
+    : buf_(nullptr), len_(0), idx_ptr_(nullptr), dialect_(dialect), config_(config),
+      shared_idx_(std::move(shared_idx)) {
+  if (!shared_idx_) {
+    throw std::invalid_argument("shared_idx cannot be null");
+  }
+  if (!shared_idx_->has_buffer()) {
+    throw std::invalid_argument("ParseIndex must have buffer set for shared ownership");
+  }
+
+  // Get buffer from the shared ParseIndex
+  shared_buffer_ = shared_idx_->buffer();
+  buf_ = shared_buffer_->data();
+  len_ = shared_buffer_->size();
+
+  // Determine number of columns by finding the first newline separator.
+  // Uses O(n_threads) iteration through thread data instead of sorted indexes.
+  uint64_t total_indexes = idx().total_indexes();
+  for (uint64_t i = 0; i < total_indexes; ++i) {
+    FieldSpan span = idx().get_field_span(i);
+    if (!span.is_valid() || span.end >= len_)
+      continue;
+    uint8_t c = buf_[span.end];
+    if (c == '\n' || c == '\r') {
+      num_columns_ = i + 1;
+      break;
+    }
+  }
+  recalculate_num_rows();
+}
+
 std::string_view ValueExtractor::get_string_view(size_t row, size_t col) const {
   if (row >= num_rows_)
     throw std::out_of_range("Row index out of range");
@@ -103,7 +135,7 @@ std::string_view ValueExtractor::get_string_view(size_t row, size_t col) const {
 std::string_view ValueExtractor::get_string_view_internal(size_t row, size_t col) const {
   size_t field_idx = compute_field_index(row, col);
   // Use ParseIndex::get_field_span() for O(n_threads) field access
-  FieldSpan span = idx_.get_field_span(field_idx);
+  FieldSpan span = idx().get_field_span(field_idx);
   // Return empty view with valid pointer to avoid undefined behavior when
   // converting to std::string
   if (!span.is_valid())
@@ -120,7 +152,7 @@ std::string_view ValueExtractor::get_string_view_internal(size_t row, size_t col
   // that may exist between the end of the previous row and the start of this row.
   if (col == 0 && field_idx > 0 && dialect_.comment_char != '\0') {
     // Get previous field's end position to check for newline
-    FieldSpan prev_span = idx_.get_field_span(field_idx - 1);
+    FieldSpan prev_span = idx().get_field_span(field_idx - 1);
     if (prev_span.is_valid() && prev_span.end < len_ &&
         (buf_[prev_span.end] == '\n' || buf_[prev_span.end] == '\r')) {
       // Previous field ended at a row boundary - skip any comment lines
@@ -144,7 +176,7 @@ std::string_view ValueExtractor::get_string_view_internal(size_t row, size_t col
 std::string ValueExtractor::get_string(size_t row, size_t col) const {
   size_t field_idx = compute_field_index(row, col);
   // Use ParseIndex::get_field_span() for O(n_threads) field access
-  FieldSpan span = idx_.get_field_span(field_idx);
+  FieldSpan span = idx().get_field_span(field_idx);
   if (!span.is_valid())
     return std::string(); // Bounds check
   size_t start = span.start;
@@ -159,7 +191,7 @@ std::string ValueExtractor::get_string(size_t row, size_t col) const {
   // that may exist between the end of the previous row and the start of this row.
   if (col == 0 && field_idx > 0 && dialect_.comment_char != '\0') {
     // Get previous field's end position to check for newline
-    FieldSpan prev_span = idx_.get_field_span(field_idx - 1);
+    FieldSpan prev_span = idx().get_field_span(field_idx - 1);
     if (prev_span.is_valid() && prev_span.end < len_ &&
         (buf_[prev_span.end] == '\n' || buf_[prev_span.end] == '\r')) {
       // Previous field ended at a row boundary - skip any comment lines
@@ -180,7 +212,7 @@ size_t ValueExtractor::compute_field_index(size_t row, size_t col) const {
 }
 
 void ValueExtractor::recalculate_num_rows() {
-  uint64_t total_indexes = idx_.total_indexes();
+  uint64_t total_indexes = idx().total_indexes();
   if (total_indexes > 0 && num_columns_ > 0) {
     size_t total_rows = total_indexes / num_columns_;
     num_rows_ = has_header_ ? (total_rows > 0 ? total_rows - 1 : 0) : total_rows;
@@ -233,7 +265,7 @@ std::vector<std::string> ValueExtractor::get_header() const {
   headers.reserve(num_columns_);
   for (size_t col = 0; col < num_columns_; ++col) {
     // Use ParseIndex::get_field_span() for O(n_threads) field access
-    FieldSpan span = idx_.get_field_span(col);
+    FieldSpan span = idx().get_field_span(col);
     if (!span.is_valid())
       break; // Bounds check
     size_t start = span.start;
@@ -265,7 +297,7 @@ bool ValueExtractor::get_field_bounds(size_t row, size_t col, size_t& start, siz
     return false;
   size_t field_idx = compute_field_index(row, col);
   // Use ParseIndex::get_field_span() for O(n_threads) field access
-  FieldSpan span = idx_.get_field_span(field_idx);
+  FieldSpan span = idx().get_field_span(field_idx);
   if (!span.is_valid())
     return false;
   start = span.start;
@@ -276,7 +308,7 @@ bool ValueExtractor::get_field_bounds(size_t row, size_t col, size_t& start, siz
   // that may exist between the end of the previous row and the start of this row.
   if (col == 0 && field_idx > 0 && dialect_.comment_char != '\0') {
     // Get previous field's end position to check for newline
-    FieldSpan prev_span = idx_.get_field_span(field_idx - 1);
+    FieldSpan prev_span = idx().get_field_span(field_idx - 1);
     if (prev_span.is_valid() && prev_span.end < len_ &&
         (buf_[prev_span.end] == '\n' || buf_[prev_span.end] == '\r')) {
       // Previous field ended at a row boundary - skip any comment lines
@@ -290,7 +322,7 @@ bool ValueExtractor::get_field_bounds(size_t row, size_t col, size_t& start, siz
 
 ValueExtractor::Location ValueExtractor::byte_offset_to_location(size_t byte_offset) const {
   // Handle edge cases
-  uint64_t total_indexes = idx_.total_indexes();
+  uint64_t total_indexes = idx().total_indexes();
   if (total_indexes == 0 || num_columns_ == 0) {
     return {0, 0, false};
   }
@@ -300,7 +332,7 @@ ValueExtractor::Location ValueExtractor::byte_offset_to_location(size_t byte_off
   // For most use cases (error reporting), this is called infrequently.
   uint64_t prev_end = 0;
   for (uint64_t i = 0; i < total_indexes; ++i) {
-    FieldSpan span = idx_.get_field_span(i);
+    FieldSpan span = idx().get_field_span(i);
     if (!span.is_valid())
       continue;
 
