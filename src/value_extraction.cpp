@@ -279,4 +279,32 @@ bool ValueExtractor::get_field_bounds(size_t row, size_t col, size_t& start, siz
   return true;
 }
 
+ValueExtractor::Location ValueExtractor::byte_offset_to_location(size_t byte_offset) const {
+  // Handle edge cases
+  if (linear_indexes_.empty() || num_columns_ == 0) {
+    return {0, 0, false};
+  }
+
+  // If byte_offset is beyond the last separator, it's out of range
+  if (byte_offset > linear_indexes_.back()) {
+    return {0, 0, false};
+  }
+
+  // Binary search to find the first separator >= byte_offset
+  // This is the separator that ends the field containing byte_offset
+  auto it = std::lower_bound(linear_indexes_.begin(), linear_indexes_.end(), byte_offset);
+
+  // If byte_offset equals a separator position, it's at a field boundary
+  // We consider the separator to belong to the field it ends
+  size_t field_index = static_cast<size_t>(it - linear_indexes_.begin());
+
+  // Convert field index to row/column
+  // linear_indexes_ contains all separators in row-major order
+  // Each row has num_columns_ fields (and therefore num_columns_ separators)
+  size_t row = field_index / num_columns_;
+  size_t col = field_index % num_columns_;
+
+  return {row, col, true};
+}
+
 } // namespace libvroom

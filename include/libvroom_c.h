@@ -1028,6 +1028,61 @@ const libvroom_column_config_t* libvroom_parser_get_column_config(const libvroom
  */
 libvroom_error_t libvroom_parser_clear_column_config(libvroom_parser_t* parser);
 
+/**
+ * @brief Row filtering options for parsing.
+ *
+ * These options control which rows are included in the parsed result:
+ * - skip: Number of data rows to skip at the beginning
+ * - n_max: Maximum number of data rows to read (0 = unlimited)
+ * - comment: Comment character ('\0' = no comment handling)
+ * - skip_empty_rows: Whether to skip rows containing only whitespace
+ *
+ * @example
+ * @code
+ * libvroom_row_filter_options_t opts = {
+ *     .skip = 10,           // Skip first 10 rows
+ *     .n_max = 100,         // Read at most 100 rows
+ *     .comment = '#',       // Skip lines starting with #
+ *     .skip_empty_rows = true
+ * };
+ * @endcode
+ */
+typedef struct libvroom_row_filter_options {
+  /** @brief Number of data rows to skip at the beginning (default: 0) */
+  size_t skip;
+
+  /** @brief Maximum number of data rows to read, 0 = unlimited (default: 0) */
+  size_t n_max;
+
+  /** @brief Comment character, '\0' = no comment handling (default: '\0') */
+  char comment;
+
+  /** @brief Whether to skip rows containing only whitespace (default: false) */
+  bool skip_empty_rows;
+} libvroom_row_filter_options_t;
+
+/**
+ * @brief Parse a CSV buffer with row filtering options.
+ *
+ * Similar to libvroom_parse(), but also applies row filtering based on
+ * the provided options. Filtering is applied during iteration/access.
+ *
+ * @param parser The parser to use. Must not be NULL.
+ * @param buffer The buffer containing CSV data. Must not be NULL.
+ * @param[in,out] index Index to store field positions. Must not be NULL.
+ * @param[in,out] errors Error collector for parse errors. Must not be NULL.
+ * @param dialect CSV dialect to use for parsing. Must not be NULL.
+ * @param filter Row filtering options. May be NULL for no filtering.
+ * @return LIBVROOM_OK on success, or an error code if parsing failed.
+ *
+ * @see libvroom_parse() for parsing without filtering.
+ */
+libvroom_error_t libvroom_parse_filtered(libvroom_parser_t* parser, const libvroom_buffer_t* buffer,
+                                         libvroom_index_t* index,
+                                         libvroom_error_collector_t* errors,
+                                         const libvroom_dialect_t* dialect,
+                                         const libvroom_row_filter_options_t* filter);
+
 /** @} */ /* end of parser group */
 
 /**

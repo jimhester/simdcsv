@@ -943,6 +943,26 @@ add_dependencies(comment_line_test copy_test_data)
 # Register comment line tests with CTest
 gtest_discover_tests(comment_line_test)
 
+# Row filtering test executable (skip, n_max, comment, skip_empty_rows)
+add_executable(row_filter_test
+    test/row_filter_test.cpp
+)
+
+target_link_libraries(row_filter_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(row_filter_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(row_filter_test copy_test_data)
+
+# Register row filter tests with CTest
+gtest_discover_tests(row_filter_test)
+
 # Memory-mapped file utilities test executable
 add_executable(mmap_util_test
     test/mmap_util_test.cpp

@@ -418,6 +418,54 @@ public:
     return get_type_hint(col_index) == TypeHint::SKIP;
   }
 
+  /**
+   * @brief Result of a byte offset to (row, column) lookup.
+   *
+   * Location represents the result of finding which CSV cell contains
+   * a given byte offset. This enables efficient error reporting by
+   * converting internal byte positions to human-readable row/column
+   * coordinates.
+   */
+  struct Location {
+    size_t row;    ///< 0-based row index (data rows, header is row 0 if present)
+    size_t column; ///< 0-based column index
+    bool found;    ///< true if byte offset is within valid CSV data
+
+    /// @return true if the location is valid (found == true)
+    explicit operator bool() const { return found; }
+  };
+
+  /**
+   * @brief Convert a byte offset to (row, column) coordinates.
+   *
+   * Uses binary search on the internal index for O(log n) lookup instead of
+   * O(n) linear scan. This is useful for error reporting when you have a
+   * byte offset from parsing and need to display the location to users.
+   *
+   * The row number returned is 0-based and includes the header row (if present).
+   * So row 0 is the header (if has_header() is true), row 1 is the first data row.
+   * If has_header() is false, row 0 is the first data row.
+   *
+   * @param byte_offset Byte offset into the CSV buffer
+   * @return Location with row/column if found, or {0, 0, false} if offset is
+   *         out of range or no data exists
+   *
+   * @note Complexity: O(log n) where n is the number of fields in the CSV
+   *
+   * @example
+   * @code
+   * auto result = parser.parse(buf, len);
+   * ValueExtractor extractor(buf, len, result.idx);
+   *
+   * // Convert byte offset 150 to row/column
+   * auto loc = extractor.byte_offset_to_location(150);
+   * if (loc) {
+   *     std::cout << "Row " << loc.row << ", Column " << loc.column << std::endl;
+   * }
+   * @endcode
+   */
+  Location byte_offset_to_location(size_t byte_offset) const;
+
 private:
   const uint8_t* buf_;
   size_t len_;

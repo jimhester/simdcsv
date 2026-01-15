@@ -568,6 +568,94 @@ struct ParseOptions {
    */
   ProgressCallback progress_callback = nullptr;
 
+  // =========================================================================
+  // Row Filtering Options
+  // =========================================================================
+
+  /**
+   * @brief Number of data rows to skip at the beginning.
+   *
+   * After reading any header row (if has_header is true), skip this many
+   * data rows before starting to index rows. This is applied during parsing
+   * to avoid indexing rows that will be discarded.
+   *
+   * Default: 0 (no rows skipped)
+   *
+   * @note Comment lines and empty lines (when skip_empty_rows is true) are
+   *       not counted towards skip - only actual data rows are counted.
+   *
+   * @example
+   * @code
+   * // Skip first 10 data rows
+   * auto result = parser.parse(buf, len, {.skip = 10});
+   * @endcode
+   */
+  size_t skip = 0;
+
+  /**
+   * @brief Maximum number of data rows to read.
+   *
+   * After skipping rows (if skip > 0), read at most this many data rows.
+   * Parsing stops early once n_max rows have been indexed. This is applied
+   * during parsing to avoid processing the entire file when only a subset
+   * is needed.
+   *
+   * A value of 0 means no limit (read all rows).
+   *
+   * Default: 0 (no limit)
+   *
+   * @note The header row (if present) is not counted towards n_max.
+   *
+   * @example
+   * @code
+   * // Read only the first 100 data rows
+   * auto result = parser.parse(buf, len, {.n_max = 100});
+   *
+   * // Skip 10 rows, then read 100
+   * auto result = parser.parse(buf, len, {.skip = 10, .n_max = 100});
+   * @endcode
+   */
+  size_t n_max = 0;
+
+  /**
+   * @brief Comment character for line skipping.
+   *
+   * Lines starting with this character (optionally preceded by whitespace)
+   * are treated as comments and excluded from parsing. Comment lines are
+   * not counted towards skip or n_max limits.
+   *
+   * A value of '\0' (null character) means no comment handling.
+   *
+   * Default: '\0' (no comment handling)
+   *
+   * @note This overrides the comment_char in the Dialect if both are set.
+   *       If only dialect.comment_char is set, that will be used.
+   *
+   * @example
+   * @code
+   * // Skip lines starting with #
+   * auto result = parser.parse(buf, len, {.comment = '#'});
+   * @endcode
+   */
+  char comment = '\0';
+
+  /**
+   * @brief Whether to skip empty rows during parsing.
+   *
+   * When true, rows that contain only whitespace or are completely empty
+   * are excluded from the index. Empty rows are not counted towards skip
+   * or n_max limits.
+   *
+   * Default: false (empty rows are preserved)
+   *
+   * @example
+   * @code
+   * // Skip blank lines in the CSV
+   * auto result = parser.parse(buf, len, {.skip_empty_rows = true});
+   * @endcode
+   */
+  bool skip_empty_rows = false;
+
   /**
    * @brief Per-column configuration overrides for value extraction.
    *
@@ -1446,6 +1534,196 @@ public:
     const std::unordered_map<std::string, size_t>* column_map_;
   };
 
+  // Forward declaration for FilteredRowView
+  class FilteredRowView;
+
+  /**
+   * @brief Iterator for filtered row view (supports skip/n_max/skip_empty_rows).
+   *
+   * This iterator is used internally by FilteredRowView to iterate over rows
+   * with filtering applied.
+   */
+  class FilteredRowIterator {
+  public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = Row;
+    using difference_type = std::ptrdiff_t;
+    using pointer = Row*;
+    using reference = Row;
+
+    FilteredRowIterator(const ValueExtractor* extractor, size_t idx, size_t total,
+                        const std::unordered_map<std::string, size_t>* column_map, size_t skip,
+                        size_t n_max, bool skip_empty_rows)
+        : extractor_(extractor), idx_(idx), total_(total), column_map_(column_map), skip_(skip),
+          n_max_(n_max), skip_empty_rows_(skip_empty_rows) {
+      advance_to_valid();
+    }
+
+    Row operator*() const { return Row(extractor_, current_actual_, column_map_); }
+
+    FilteredRowIterator& operator++() {
+      ++idx_;
+      advance_to_valid();
+      return *this;
+    }
+
+    FilteredRowIterator operator++(int) {
+      FilteredRowIterator tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+
+    bool operator==(const FilteredRowIterator& other) const { return idx_ == other.idx_; }
+    bool operator!=(const FilteredRowIterator& other) const { return idx_ != other.idx_; }
+
+  private:
+    const ValueExtractor* extractor_;
+    size_t idx_;   // Filtered index (0..n_max_)
+    size_t total_; // Total rows available after skip
+    const std::unordered_map<std::string, size_t>* column_map_;
+    size_t skip_;
+    size_t n_max_;
+    bool skip_empty_rows_;
+    size_t current_actual_{0}; // Actual row index in extractor
+
+    bool is_row_empty(size_t actual_idx) const {
+      if (!extractor_)
+        return true;
+      size_t ncols = extractor_->num_columns();
+      for (size_t c = 0; c < ncols; ++c) {
+        std::string val = extractor_->get_string(actual_idx, c);
+        for (char ch : val) {
+          if (ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n') {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    void advance_to_valid() {
+      // Reached end?
+      if (n_max_ > 0 && idx_ >= n_max_) {
+        idx_ = total_; // Mark as end
+        return;
+      }
+
+      if (!skip_empty_rows_) {
+        // Simple case: direct mapping
+        size_t actual = skip_ + idx_;
+        size_t extractor_total = extractor_ ? extractor_->num_rows() : 0;
+        if (actual >= extractor_total) {
+          idx_ = total_;
+          return;
+        }
+        current_actual_ = actual;
+        return;
+      }
+
+      // Complex case: skip empty rows
+      size_t extractor_total = extractor_ ? extractor_->num_rows() : 0;
+      size_t count = 0;
+      for (size_t i = skip_; i < extractor_total; ++i) {
+        if (!is_row_empty(i)) {
+          if (count == idx_) {
+            current_actual_ = i;
+            return;
+          }
+          ++count;
+        }
+      }
+      // No valid row found
+      idx_ = total_;
+    }
+  };
+
+  /**
+   * @brief Filtered iterable view over rows with skip/n_max/skip_empty_rows support.
+   *
+   * FilteredRowView applies row filtering before iteration, respecting:
+   * - skip: Number of data rows to skip from the beginning
+   * - n_max: Maximum number of rows to return (0 = unlimited)
+   * - skip_empty_rows: Whether to exclude rows containing only whitespace
+   */
+  class FilteredRowView {
+  public:
+    FilteredRowView(const ValueExtractor* extractor,
+                    const std::unordered_map<std::string, size_t>* column_map, size_t skip,
+                    size_t n_max, bool skip_empty_rows)
+        : extractor_(extractor), column_map_(column_map), skip_(skip), n_max_(n_max),
+          skip_empty_rows_(skip_empty_rows) {
+      compute_size();
+    }
+
+    FilteredRowIterator begin() const {
+      return FilteredRowIterator(extractor_, 0, size_, column_map_, skip_, n_max_,
+                                 skip_empty_rows_);
+    }
+
+    FilteredRowIterator end() const {
+      return FilteredRowIterator(extractor_, size_, size_, column_map_, skip_, n_max_,
+                                 skip_empty_rows_);
+    }
+
+    /// @return The number of rows after filtering.
+    size_t size() const { return size_; }
+
+    /// @return true if there are no rows after filtering.
+    bool empty() const { return size_ == 0; }
+
+  private:
+    const ValueExtractor* extractor_;
+    const std::unordered_map<std::string, size_t>* column_map_;
+    size_t skip_;
+    size_t n_max_;
+    bool skip_empty_rows_;
+    size_t size_{0};
+
+    bool is_row_empty(size_t actual_idx) const {
+      if (!extractor_)
+        return true;
+      size_t ncols = extractor_->num_columns();
+      for (size_t c = 0; c < ncols; ++c) {
+        std::string val = extractor_->get_string(actual_idx, c);
+        for (char ch : val) {
+          if (ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n') {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    void compute_size() {
+      if (!extractor_) {
+        size_ = 0;
+        return;
+      }
+
+      size_t total = extractor_->num_rows();
+      if (skip_ >= total) {
+        size_ = 0;
+        return;
+      }
+      size_t available = total - skip_;
+
+      if (!skip_empty_rows_) {
+        size_ = (n_max_ > 0 && n_max_ < available) ? n_max_ : available;
+        return;
+      }
+
+      // Count non-empty rows
+      size_t count = 0;
+      size_t max_to_count = (n_max_ > 0) ? n_max_ : SIZE_MAX;
+      for (size_t i = skip_; i < total && count < max_to_count; ++i) {
+        if (!is_row_empty(i)) {
+          ++count;
+        }
+      }
+      size_ = count;
+    }
+  };
+
   /**
    * @brief Result of a parsing operation.
    *
@@ -1494,6 +1772,11 @@ public:
     bool used_cache{false};    ///< True if index was loaded from cache.
     std::string cache_path;    ///< Path to cache file (empty if caching disabled).
 
+    // Row filtering options (from ParseOptions, applied during iteration)
+    size_t skip_{0};              ///< Number of data rows to skip
+    size_t n_max_{0};             ///< Maximum rows to return (0 = unlimited)
+    bool skip_empty_rows_{false}; ///< Whether to skip empty rows
+
   private:
     const uint8_t* buf_{nullptr};                                ///< Pointer to the parsed buffer.
     size_t len_{0};                                              ///< Length of the parsed buffer.
@@ -1533,6 +1816,52 @@ public:
       }
     }
 
+    /// Check if a row (by actual index in extractor) is empty or whitespace-only
+    bool is_row_empty(size_t actual_row_idx) const {
+      if (!extractor_)
+        return true;
+      size_t ncols = extractor_->num_columns();
+      for (size_t c = 0; c < ncols; ++c) {
+        std::string val = extractor_->get_string(actual_row_idx, c);
+        // Check if any character is non-whitespace
+        for (char ch : val) {
+          if (ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n') {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    /// Translate a filtered row index to actual extractor row index
+    /// Returns SIZE_MAX if the index is out of range
+    size_t translate_row_index(size_t filtered_idx) const {
+      if (!skip_empty_rows_) {
+        // Simple case: just add skip offset
+        size_t actual = skip_ + filtered_idx;
+        size_t total = extractor_ ? extractor_->num_rows() : 0;
+        if (actual >= total)
+          return SIZE_MAX;
+        if (n_max_ > 0 && filtered_idx >= n_max_)
+          return SIZE_MAX;
+        return actual;
+      }
+
+      // Complex case: need to skip empty rows
+      size_t total = extractor_ ? extractor_->num_rows() : 0;
+      size_t count = 0;
+      size_t limit = (n_max_ > 0) ? n_max_ : SIZE_MAX;
+      for (size_t i = skip_; i < total && count < limit; ++i) {
+        if (!is_row_empty(i)) {
+          if (count == filtered_idx) {
+            return i;
+          }
+          ++count;
+        }
+      }
+      return SIZE_MAX;
+    }
+
   public:
     Result() = default;
     Result(Result&&) = default;
@@ -1543,17 +1872,24 @@ public:
     Result& operator=(const Result&) = delete;
 
     /**
-     * @brief Store buffer reference for later iteration.
+     * @brief Store buffer reference and row filtering options for later iteration.
      *
      * This is called internally by Parser::parse() to enable row iteration.
      * Users should not call this directly.
      *
      * @param buf Pointer to the CSV data buffer.
      * @param len Length of the buffer.
+     * @param skip Number of data rows to skip (default: 0)
+     * @param n_max Maximum rows to return, 0 = unlimited (default: 0)
+     * @param skip_empty_rows Whether to skip empty rows (default: false)
      */
-    void set_buffer(const uint8_t* buf, size_t len) {
+    void set_buffer(const uint8_t* buf, size_t len, size_t skip = 0, size_t n_max = 0,
+                    bool skip_empty_rows = false) {
       buf_ = buf;
       len_ = len;
+      skip_ = skip;
+      n_max_ = n_max;
+      skip_empty_rows_ = skip_empty_rows;
       // Reset extractor and column map since buffer changed
       extractor_.reset();
       column_map_.clear();
@@ -1684,20 +2020,76 @@ public:
     // =====================================================================
 
     /**
-     * @brief Get the number of data rows (excluding header).
-     * @return Number of data rows.
+     * @brief Get the effective number of data rows after applying row filtering.
+     *
+     * The returned count reflects:
+     * - Rows after skipping `skip_` initial rows
+     * - Limited by `n_max_` if set
+     * - Empty rows excluded if `skip_empty_rows_` is true
+     *
+     * @note When skip_empty_rows_ is true, this requires scanning all rows
+     *       to count non-empty ones, which has O(n) cost.
+     *
+     * @return Number of data rows (excluding header and filtered rows).
      */
     size_t num_rows() const {
+      ensure_extractor();
+      if (!extractor_)
+        return 0;
+
+      size_t total = extractor_->num_rows();
+
+      // If no filtering, return total
+      if (skip_ == 0 && n_max_ == 0 && !skip_empty_rows_) {
+        return total;
+      }
+
+      // Apply skip
+      if (skip_ >= total) {
+        return 0;
+      }
+      size_t available = total - skip_;
+
+      // If we don't need to skip empty rows, just apply n_max
+      if (!skip_empty_rows_) {
+        if (n_max_ > 0 && n_max_ < available) {
+          return n_max_;
+        }
+        return available;
+      }
+
+      // With skip_empty_rows, we need to count non-empty rows
+      size_t count = 0;
+      size_t max_to_check = (n_max_ > 0) ? n_max_ : available;
+      for (size_t i = 0; i < available && count < max_to_check; ++i) {
+        size_t actual_idx = skip_ + i;
+        if (!is_row_empty(actual_idx)) {
+          ++count;
+        }
+      }
+      return count;
+    }
+
+    /**
+     * @brief Get the total number of rows before filtering.
+     *
+     * This returns the raw row count from parsing, before applying
+     * skip/n_max/skip_empty_rows filters.
+     *
+     * @return Total number of data rows in the parsed index.
+     */
+    size_t total_rows() const {
       ensure_extractor();
       return extractor_ ? extractor_->num_rows() : 0;
     }
 
     /**
-     * @brief Get an iterable view over all data rows.
+     * @brief Get an iterable view over all data rows (respects skip/n_max/skip_empty_rows).
      *
      * This enables range-based for loop iteration over the parsed CSV.
+     * When row filtering options are set, this returns a filtered view.
      *
-     * @return RowView for iteration.
+     * @return FilteredRowView for iteration (applies skip/n_max/skip_empty_rows).
      *
      * @example
      * @code
@@ -1706,26 +2098,42 @@ public:
      * }
      * @endcode
      */
-    RowView rows() const {
+    FilteredRowView rows() const {
+      ensure_extractor();
+      ensure_column_map();
+      return FilteredRowView(extractor_.get(), &column_map_, skip_, n_max_, skip_empty_rows_);
+    }
+
+    /**
+     * @brief Get an unfiltered iterable view over all data rows.
+     *
+     * This returns a view that ignores skip/n_max/skip_empty_rows settings,
+     * iterating over all parsed rows. Useful when you need to access the
+     * raw parsed data.
+     *
+     * @return RowView for iteration (no filtering applied).
+     */
+    RowView all_rows() const {
       ensure_extractor();
       ensure_column_map();
       return RowView(extractor_.get(), &column_map_);
     }
 
     /**
-     * @brief Get a specific row by index.
+     * @brief Get a specific row by index (respects skip/n_max/skip_empty_rows).
      *
-     * @param row_index 0-based row index (excluding header).
+     * @param row_index 0-based row index (excluding header and filtered rows).
      * @return Row object for accessing fields.
      * @throws std::out_of_range if row_index >= num_rows().
      */
     Row row(size_t row_index) const {
       ensure_extractor();
       ensure_column_map();
-      if (row_index >= num_rows()) {
+      size_t actual_idx = translate_row_index(row_index);
+      if (actual_idx == SIZE_MAX) {
         throw std::out_of_range("Row index out of range");
       }
-      return Row(extractor_.get(), row_index, &column_map_);
+      return Row(extractor_.get(), actual_idx, &column_map_);
     }
 
     /**
@@ -2009,6 +2417,64 @@ public:
      * @return Const reference to the internal ErrorCollector.
      */
     const ErrorCollector& error_collector() const { return error_collector_; }
+
+    // =====================================================================
+    // Byte Offset Lookup API
+    // =====================================================================
+
+    /**
+     * @brief Result of a byte offset to (row, column) lookup.
+     *
+     * Location represents the result of finding which CSV cell contains
+     * a given byte offset. This enables efficient error reporting by
+     * converting internal byte positions to human-readable row/column
+     * coordinates.
+     */
+    struct Location {
+      size_t row;    ///< 0-based row index (row 0 = header if present, else first data row)
+      size_t column; ///< 0-based column index
+      bool found;    ///< true if byte offset is within valid CSV data
+
+      /// @return true if the location is valid (found == true)
+      explicit operator bool() const { return found; }
+    };
+
+    /**
+     * @brief Convert a byte offset to (row, column) coordinates.
+     *
+     * Uses binary search on the internal index for O(log n) lookup instead of
+     * O(n) linear scan. This is useful for error reporting when you have a
+     * byte offset from parsing and need to display the location to users.
+     *
+     * The row number returned is 0-based and includes the header row (if present).
+     * So row 0 is the header (if has_header() is true), row 1 is the first data row.
+     * If has_header() is false, row 0 is the first data row.
+     *
+     * @param byte_offset Byte offset into the CSV buffer
+     * @return Location with row/column if found, or {0, 0, false} if offset is
+     *         out of range or no data exists
+     *
+     * @note Complexity: O(log n) where n is the number of fields in the CSV
+     *
+     * @example
+     * @code
+     * auto result = parser.parse(buf, len);
+     *
+     * // Convert byte offset 150 to row/column
+     * auto loc = result.byte_offset_to_location(150);
+     * if (loc) {
+     *     std::cout << "Row " << loc.row << ", Column " << loc.column << std::endl;
+     * }
+     * @endcode
+     */
+    Location byte_offset_to_location(size_t byte_offset) const {
+      ensure_extractor();
+      if (!extractor_) {
+        return {0, 0, false};
+      }
+      auto ve_loc = extractor_->byte_offset_to_location(byte_offset);
+      return {ve_loc.row, ve_loc.column, ve_loc.found};
+    }
   };
 
   /**
@@ -2151,8 +2617,8 @@ public:
             result.dialect = result.detection.success() ? result.detection.dialect : Dialect::csv();
           }
 
-          // Store buffer reference to enable row/column iteration
-          result.set_buffer(buf, len);
+          // Store buffer reference and row filtering options to enable row/column iteration
+          result.set_buffer(buf, len, options.skip, options.n_max, options.skip_empty_rows);
           // Pass extraction options from ParseOptions to Result
           result.set_extraction_options(options.extraction_config, options.column_configs);
 
@@ -2181,6 +2647,12 @@ public:
       DialectDetector detector(options.detection_options);
       result.detection = detector.detect(buf, len);
       result.dialect = result.detection.success() ? result.detection.dialect : Dialect::csv();
+    }
+
+    // Apply comment character from ParseOptions if specified
+    // This overrides any comment_char in the dialect
+    if (options.comment != '\0') {
+      result.dialect.comment_char = options.comment;
     }
 
     // =======================================================================
@@ -2356,8 +2828,8 @@ public:
       }
     }
 
-    // Store buffer reference to enable row/column iteration
-    result.set_buffer(buf, len);
+    // Store buffer reference and row filtering options to enable row/column iteration
+    result.set_buffer(buf, len, options.skip, options.n_max, options.skip_empty_rows);
     // Pass extraction options from ParseOptions to Result
     result.set_extraction_options(options.extraction_config, options.column_configs);
 

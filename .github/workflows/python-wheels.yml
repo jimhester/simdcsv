@@ -20,6 +20,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # History and tags needed for setuptools_scm to compute version
+          # based on distance from the last tag (e.g., v0.0.1 -> 0.0.2.dev18)
+          # Using 100 commits buffer instead of full history (0) for efficiency
+          fetch-depth: 100
+          fetch-tags: true
 
       # Only set up QEMU for release builds (slow emulation)
       - name: Set up QEMU (Linux ARM64)
@@ -67,6 +73,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # History and tags needed for setuptools_scm to compute version
+          # based on distance from the last tag (e.g., v0.0.1 -> 0.0.2.dev18)
+          # Using 100 commits buffer instead of full history (0) for efficiency
+          fetch-depth: 100
+          fetch-tags: true
 
       - name: Build sdist
         run: |
