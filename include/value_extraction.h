@@ -267,8 +267,8 @@ private:
       return std::string_view();
     }
 
-    size_t start = span.start;
-    size_t end = std::min(span.end, len_);
+    size_t start = static_cast<size_t>(span.start);
+    size_t end = std::min(static_cast<size_t>(span.end), len_);
 
     // Handle CR in CRLF endings
     if (end > start && buf_[end - 1] == '\r') {
@@ -953,8 +953,8 @@ inline std::string LazyColumn::get_string(size_t row) const {
     return std::string();
   }
 
-  size_t start = span.start;
-  size_t end = std::min(span.end, len_);
+  size_t start = static_cast<size_t>(span.start);
+  size_t end = std::min(static_cast<size_t>(span.end), len_);
 
   // Handle CR in CRLF endings
   if (end > start && buf_[end - 1] == '\r') {
