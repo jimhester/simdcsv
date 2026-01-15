@@ -18,6 +18,9 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        # Need full history to checkout base commit for comparison
+        fetch-depth: 0
 
     - name: Install dependencies
       run: |
@@ -38,61 +41,100 @@ jobs:
         ccache --set-config=compression=true
         ccache -z
 
+    - name: Get base commit SHA
+      id: base
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+        else
+          # For push to main, compare against parent commit
+          BASE_SHA=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+        fi
+        echo "sha=$BASE_SHA" >> $GITHUB_OUTPUT
+        echo "Base commit: $BASE_SHA"
+
     - name: Configure CMake (Release)
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=Release
 
-    - name: Build benchmark
+    - name: Build benchmark (HEAD)
       run: |
-        cmake --build build --target libvroom_benchmark --config Release
+        cmake --build build --target libvroom_benchmark --config Release -j$(nproc)
 
     - name: Show ccache stats
       run: |
         ccache -s
 
-    - name: Run quick benchmark
+    # Run HEAD benchmark first (current PR/commit)
+    - name: Run benchmark (HEAD)
       timeout-minutes: 5
       run: |
-        # Run benchmarks from parser_overhead_benchmarks.cpp which use generated data
-        # (500K rows x 10 cols, ~32MB) - larger size for stable timing (see issue #508)
-        #
-        # Selected benchmarks for regression detection:
-        # - BM_RawFirstPass: Raw SIMD first pass scanning performance
-        # - BM_RawTwoPassComplete: Complete two-pass index building (first + second pass)
-        # - BM_ParserWithExplicitDialect: Full parser overhead with known dialect
-        # - BM_ParserBranchless: Branchless algorithm variant
-        # - BM_ParserSpeculative: Speculative multi-threaded algorithm
-        # - BM_ParserMultiThread/1: Single-threaded parser
-        # - BM_ParserMultiThread/4: Multi-threaded parser (4 threads)
-        ./build/libvroom_benchmark \
+        echo "=== Benchmarking HEAD commit ==="
+        # Use taskset for CPU affinity (pin to CPU 0) and nice for scheduling priority
+        # This reduces variance from CPU migration and context switching
+        sudo nice -n -5 taskset -c 0 ./build/libvroom_benchmark \
           --benchmark_filter="BM_RawFirstPass$|BM_RawTwoPassComplete|BM_ParserWithExplicitDialect|BM_ParserBranchless|BM_ParserSpeculative|BM_ParserMultiThread/1$|BM_ParserMultiThread/4$" \
-          --benchmark_repetitions=3 \
+          --benchmark_repetitions=5 \
           --benchmark_min_time=0.5s \
-          --benchmark_out=build/benchmark_results.json \
+          --benchmark_out=build/head_results.json \
           --benchmark_out_format=json
 
-    - name: Download previous benchmark results
-      uses: actions/cache/restore@v4
-      id: cache-benchmark
-      with:
-        path: baseline_benchmark.json
-        # Cache key includes version to allow resetting baseline when benchmarks change
-        # Increment version (v2, v3, etc.) when benchmark names or methodology changes
-        key: benchmark-baseline-v3-${{ runner.os }}-main
-        restore-keys: |
-          benchmark-baseline-v3-${{ runner.os }}-main
+    # Now checkout and build BASE for comparison (only for PRs or when base exists)
+    - name: Checkout BASE commit
+      if: steps.base.outputs.sha != ''
+      run: |
+        echo "=== Checking out BASE commit: ${{ steps.base.outputs.sha }} ==="
+        git checkout ${{ steps.base.outputs.sha }}
 
-    - name: Compare benchmarks and detect regression
+    - name: Build benchmark (BASE)
+      if: steps.base.outputs.sha != ''
+      run: |
+        # Clean and rebuild for BASE commit
+        cmake -B build -DCMAKE_BUILD_TYPE=Release
+        cmake --build build --target libvroom_benchmark --config Release -j$(nproc)
+
+    - name: Run benchmark (BASE)
+      if: steps.base.outputs.sha != ''
+      timeout-minutes: 5
+      run: |
+        echo "=== Benchmarking BASE commit ==="
+        # Use same CPU affinity and priority settings for fair comparison
+        sudo nice -n -5 taskset -c 0 ./build/libvroom_benchmark \
+          --benchmark_filter="BM_RawFirstPass$|BM_RawTwoPassComplete|BM_ParserWithExplicitDialect|BM_ParserBranchless|BM_ParserSpeculative|BM_ParserMultiThread/1$|BM_ParserMultiThread/4$" \
+          --benchmark_repetitions=5 \
+          --benchmark_min_time=0.5s \
+          --benchmark_out=build/base_results.json \
+          --benchmark_out_format=json
+
+    # Return to HEAD for the comparison script
+    - name: Checkout HEAD for comparison
+      if: steps.base.outputs.sha != ''
+      run: |
+        git checkout ${{ github.sha }}
+
+    - name: Compare benchmarks (same-job relative)
+      if: steps.base.outputs.sha != ''
       id: compare
-      run: python3 benchmark/check_regression.py
+      run: |
+        echo "=== Comparing HEAD vs BASE (same-job relative benchmarking) ==="
+        python3 benchmark/check_regression.py \
+          --head build/head_results.json \
+          --base build/base_results.json \
+          --threshold 0.15
 
-    - name: Save baseline for future runs
-      uses: actions/cache/save@v4
-      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-      with:
-        path: baseline_benchmark.json
-        # Must match the key used in restore step above
-        key: benchmark-baseline-v3-${{ runner.os }}-main
+    - name: Report results (no baseline)
+      if: steps.base.outputs.sha == ''
+      run: |
+        echo "=== No baseline commit available for comparison ==="
+        echo "HEAD benchmark completed successfully."
+        python3 -c "
+import json
+with open('build/head_results.json') as f:
+    data = json.load(f)
+for b in data.get('benchmarks', []):
+    if not b.get('aggregate_name'):
+        print(f\"  {b['name']}: {b['real_time']:.2f} ns\")
+"
 
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4
@@ -100,6 +142,6 @@ jobs:
       with:
         name: benchmark-results
         path: |
-          build/benchmark_results.json
-          baseline_benchmark.json
+          build/head_results.json
+          build/base_results.json
         retention-days: 30
