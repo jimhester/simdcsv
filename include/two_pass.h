@@ -61,6 +61,7 @@
 #include <functional>
 #include <future>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <unordered_set>
 #include <vector>
@@ -249,7 +250,10 @@ public:
         indexes_ptr_(std::move(other.indexes_ptr_)),
         chunk_starts_ptr_(std::move(other.chunk_starts_ptr_)),
         region_offsets_ptr_(std::move(other.region_offsets_ptr_)),
-        mmap_buffer_(std::move(other.mmap_buffer_)) {
+        mmap_buffer_(std::move(other.mmap_buffer_)), buffer_(std::move(other.buffer_)),
+        n_indexes_shared_(std::move(other.n_indexes_shared_)),
+        indexes_shared_(std::move(other.indexes_shared_)),
+        mmap_buffer_shared_(std::move(other.mmap_buffer_shared_)) {
     other.n_indexes = nullptr;
     other.indexes = nullptr;
     other.chunk_starts = nullptr;
@@ -279,6 +283,10 @@ public:
       chunk_starts_ptr_ = std::move(other.chunk_starts_ptr_);
       region_offsets_ptr_ = std::move(other.region_offsets_ptr_);
       mmap_buffer_ = std::move(other.mmap_buffer_);
+      buffer_ = std::move(other.buffer_);
+      n_indexes_shared_ = std::move(other.n_indexes_shared_);
+      indexes_shared_ = std::move(other.indexes_shared_);
+      mmap_buffer_shared_ = std::move(other.mmap_buffer_shared_);
       other.n_indexes = nullptr;
       other.indexes = nullptr;
       other.chunk_starts = nullptr;
@@ -474,13 +482,122 @@ public:
 
   void fill_double_array(ParseIndex* idx, uint64_t column, double* out) {}
 
+  // =========================================================================
+  // Shared ownership API for buffer lifetime safety
+  // =========================================================================
+
+  /**
+   * @brief Set the shared buffer reference.
+   *
+   * Associates this ParseIndex with a shared buffer. This enables safe sharing
+   * of the underlying CSV data buffer between multiple consumers (e.g.,
+   * ValueExtractor, lazy columns) that may outlive the original ParseIndex.
+   *
+   * @param buffer Shared pointer to the CSV data buffer.
+   *
+   * @note The buffer should contain the same data that was used during parsing.
+   *       The ParseIndex stores byte offsets into this buffer.
+   *
+   * @example
+   * @code
+   * // Create a shared buffer
+   * auto buffer = std::make_shared<std::vector<uint8_t>>(data, data + len);
+   *
+   * // Parse and associate the buffer
+   * auto result = parser.parse(buffer->data(), buffer->size());
+   * result.idx.set_buffer(buffer);
+   *
+   * // Now ValueExtractor and lazy columns can safely share the buffer
+   * @endcode
+   */
+  void set_buffer(std::shared_ptr<const std::vector<uint8_t>> buffer) {
+    buffer_ = std::move(buffer);
+  }
+
+  /**
+   * @brief Get the shared buffer reference.
+   *
+   * @return Shared pointer to the CSV data buffer, or nullptr if not set.
+   */
+  std::shared_ptr<const std::vector<uint8_t>> buffer() const { return buffer_; }
+
+  /**
+   * @brief Check if this index has a shared buffer reference.
+   *
+   * @return true if a shared buffer has been set via set_buffer().
+   */
+  bool has_buffer() const { return buffer_ != nullptr; }
+
+  /**
+   * @brief Get a pointer to the buffer data.
+   *
+   * Returns a pointer to the underlying buffer data if a shared buffer is set.
+   * This is a convenience method for accessing the data without manually
+   * checking has_buffer() and dereferencing.
+   *
+   * @return Pointer to the buffer data, or nullptr if no buffer is set.
+   */
+  const uint8_t* buffer_data() const { return buffer_ ? buffer_->data() : nullptr; }
+
+  /**
+   * @brief Get the size of the buffer.
+   *
+   * @return Size of the buffer in bytes, or 0 if no buffer is set.
+   */
+  size_t buffer_size() const { return buffer_ ? buffer_->size() : 0; }
+
+  /**
+   * @brief Create a shared reference to this ParseIndex.
+   *
+   * This factory method creates a shared_ptr that shares ownership of this
+   * ParseIndex's internal data. Multiple shared ParseIndex instances can
+   * coexist, and the underlying data is freed only when all references are
+   * released.
+   *
+   * This is the recommended way to share ParseIndex data between components
+   * that may have independent lifetimes (e.g., lazy columns in R's ALTREP).
+   *
+   * @return A new shared_ptr<const ParseIndex> that shares this index's data.
+   *
+   * @note The returned ParseIndex shares the same underlying index arrays.
+   *       Modifications to the original ParseIndex after calling share()
+   *       may affect the shared copy, so the original should not be modified.
+   *
+   * @warning After calling share(), the original ParseIndex should be
+   *          considered immutable. Moving or modifying it may invalidate
+   *          the shared copy.
+   *
+   * @example
+   * @code
+   * // Parse a CSV file
+   * auto result = parser.parse(buf, len);
+   *
+   * // Create a shared reference for a lazy column
+   * auto shared_idx = result.idx.share();
+   *
+   * // The original can now be moved/destroyed without affecting shared_idx
+   * ParseIndex temp = std::move(result.idx);
+   *
+   * // shared_idx still has valid data
+   * @endcode
+   */
+  std::shared_ptr<const ParseIndex> share();
+
+  /**
+   * @brief Check if this index is using shared ownership.
+   *
+   * @return true if this index was created via share() and uses shared
+   *         ownership semantics for its internal data.
+   */
+  bool is_shared() const { return n_indexes_shared_ != nullptr || indexes_shared_ != nullptr; }
+
 private:
   /// RAII owner for n_indexes array. Memory freed automatically on destruction.
-  /// Null when using mmap-backed data.
+  /// Null when using mmap-backed data or shared ownership.
   std::unique_ptr<uint64_t[]> n_indexes_ptr_;
 
   /// RAII owner for indexes array. Memory freed automatically on destruction.
-  /// Null when using mmap-backed data.
+  /// Null when using mmap-backed data or shared ownership.
   std::unique_ptr<uint64_t[]> indexes_ptr_;
 
   /// RAII owner for chunk_starts array. Memory freed automatically on destruction.
@@ -492,6 +609,22 @@ private:
   /// Memory-mapped buffer for mmap-backed indexes.
   /// When set, n_indexes and indexes point directly into this buffer's data.
   std::unique_ptr<MmapBuffer> mmap_buffer_;
+
+  /// Shared reference to the CSV data buffer.
+  /// When set, the buffer's lifetime is managed by reference counting,
+  /// allowing safe sharing between ParseIndex and consumers like ValueExtractor.
+  std::shared_ptr<const std::vector<uint8_t>> buffer_;
+
+  /// Shared owner for n_indexes array (used when share() is called).
+  /// When set, n_indexes_ptr_ is null and this manages the memory.
+  std::shared_ptr<uint64_t[]> n_indexes_shared_;
+
+  /// Shared owner for indexes array (used when share() is called).
+  /// When set, indexes_ptr_ is null and this manages the memory.
+  std::shared_ptr<uint64_t[]> indexes_shared_;
+
+  /// Shared reference to mmap buffer for shared ParseIndex instances.
+  std::shared_ptr<MmapBuffer> mmap_buffer_shared_;
 
   // Allow TwoPass::init() to set the private members
   friend class TwoPass;

@@ -2812,13 +2812,23 @@ public:
       options.progress_callback(len, len);
     }
 
+    // Store buffer reference and row filtering options to enable row/column iteration
+    // (must be done before num_columns() which needs the buffer for ValueExtractor)
+    result.set_buffer(buf, len, options.skip, options.n_max, options.skip_empty_rows);
+    // Pass extraction options from ParseOptions to Result
+    result.set_extraction_options(options.extraction_config, options.column_configs);
+
+    // =======================================================================
+    // Set Column Count in Index (needed for ParseIndex::get_field_span)
+    // =======================================================================
+    if (result.successful && result.idx.columns == 0) {
+      result.idx.columns = result.num_columns();
+    }
+
     // =======================================================================
     // Write Cache on Miss (if caching enabled and parse successful)
     // =======================================================================
     if (can_use_cache && result.successful && !result.cache_path.empty()) {
-      // Store column count in idx for caching (idx.columns may be 0 because
-      // num_columns() typically uses the ValueExtractor)
-      result.idx.columns = result.num_columns();
       // Write cache file - emit warning on failure
       bool write_success =
           IndexCache::write_atomic(result.cache_path, result.idx, options.source_path);
@@ -2827,11 +2837,6 @@ public:
                    "'; caching disabled for this parse");
       }
     }
-
-    // Store buffer reference and row filtering options to enable row/column iteration
-    result.set_buffer(buf, len, options.skip, options.n_max, options.skip_empty_rows);
-    // Pass extraction options from ParseOptions to Result
-    result.set_extraction_options(options.extraction_config, options.column_configs);
 
     return result;
   }

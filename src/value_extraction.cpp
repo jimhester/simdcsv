@@ -53,30 +53,31 @@ static size_t skip_comment_lines_from(const uint8_t* buf, size_t len, size_t pos
 
 ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx,
                                const Dialect& dialect, const ExtractionConfig& config)
-    : buf_(buf), len_(len), idx_(idx), dialect_(dialect), config_(config) {
+    : buf_(buf), len_(len), idx_ptr_(&idx), dialect_(dialect), config_(config) {
+  const ParseIndex& idx_ref = *idx_ptr_;
   uint64_t total_indexes = 0;
-  for (uint16_t i = 0; i < idx_.n_threads; ++i)
-    total_indexes += idx_.n_indexes[i];
+  for (uint16_t i = 0; i < idx_ref.n_threads; ++i)
+    total_indexes += idx_ref.n_indexes[i];
   linear_indexes_.reserve(total_indexes);
   // Read indexes handling three possible layouts:
   // - region_offsets != nullptr: Right-sized per-thread regions (from init_counted_per_thread)
   // - region_size > 0: Uniform per-thread regions at indexes[t * region_size]
   // - region_size == 0 && region_offsets == nullptr: Contiguous from deserialization
-  for (uint16_t t = 0; t < idx_.n_threads; ++t) {
+  for (uint16_t t = 0; t < idx_ref.n_threads; ++t) {
     uint64_t* thread_base;
-    if (idx_.region_offsets != nullptr) {
-      thread_base = idx_.indexes + idx_.region_offsets[t];
-    } else if (idx_.region_size > 0) {
-      thread_base = idx_.indexes + t * idx_.region_size;
+    if (idx_ref.region_offsets != nullptr) {
+      thread_base = idx_ref.indexes + idx_ref.region_offsets[t];
+    } else if (idx_ref.region_size > 0) {
+      thread_base = idx_ref.indexes + t * idx_ref.region_size;
     } else {
       // Contiguous layout: compute offset for this thread
       size_t offset = 0;
       for (uint16_t i = 0; i < t; ++i) {
-        offset += idx_.n_indexes[i];
+        offset += idx_ref.n_indexes[i];
       }
-      thread_base = idx_.indexes + offset;
+      thread_base = idx_ref.indexes + offset;
     }
-    for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j)
+    for (uint64_t j = 0; j < idx_ref.n_indexes[t]; ++j)
       linear_indexes_.push_back(thread_base[j]);
   }
   std::sort(linear_indexes_.begin(), linear_indexes_.end());
@@ -98,15 +99,16 @@ ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex&
 ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx,
                                const Dialect& dialect, const ExtractionConfig& config,
                                const ColumnConfigMap& column_configs)
-    : buf_(buf), len_(len), idx_(idx), dialect_(dialect), config_(config),
+    : buf_(buf), len_(len), idx_ptr_(&idx), dialect_(dialect), config_(config),
       column_configs_(column_configs) {
+  const ParseIndex& idx_ref = *idx_ptr_;
   uint64_t total_indexes = 0;
-  for (uint16_t i = 0; i < idx_.n_threads; ++i)
-    total_indexes += idx_.n_indexes[i];
+  for (uint16_t i = 0; i < idx_ref.n_threads; ++i)
+    total_indexes += idx_ref.n_indexes[i];
   linear_indexes_.reserve(total_indexes);
-  for (uint16_t t = 0; t < idx_.n_threads; ++t)
-    for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j)
-      linear_indexes_.push_back(idx_.indexes[t + (j * idx_.n_threads)]);
+  for (uint16_t t = 0; t < idx_ref.n_threads; ++t)
+    for (uint64_t j = 0; j < idx_ref.n_indexes[t]; ++j)
+      linear_indexes_.push_back(idx_ref.indexes[t + (j * idx_ref.n_threads)]);
   std::sort(linear_indexes_.begin(), linear_indexes_.end());
   size_t first_nl = 0;
   for (size_t i = 0; i < linear_indexes_.size(); ++i) {
@@ -123,6 +125,64 @@ ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex&
   recalculate_num_rows();
   // Resolve any name-based column configs now that we have headers
   resolve_column_configs();
+}
+
+ValueExtractor::ValueExtractor(std::shared_ptr<const ParseIndex> shared_idx, const Dialect& dialect,
+                               const ExtractionConfig& config)
+    : buf_(nullptr), len_(0), idx_ptr_(nullptr), dialect_(dialect), config_(config),
+      shared_idx_(std::move(shared_idx)) {
+  if (!shared_idx_) {
+    throw std::invalid_argument("shared_idx cannot be null");
+  }
+  if (!shared_idx_->has_buffer()) {
+    throw std::invalid_argument("ParseIndex must have buffer set for shared ownership");
+  }
+
+  // Get buffer from the shared ParseIndex
+  shared_buffer_ = shared_idx_->buffer();
+  buf_ = shared_buffer_->data();
+  len_ = shared_buffer_->size();
+
+  const ParseIndex& idx_ref = *shared_idx_;
+  uint64_t total_indexes = 0;
+  for (uint16_t i = 0; i < idx_ref.n_threads; ++i)
+    total_indexes += idx_ref.n_indexes[i];
+  linear_indexes_.reserve(total_indexes);
+  // Read indexes handling three possible layouts:
+  // - region_offsets != nullptr: Right-sized per-thread regions (from init_counted_per_thread)
+  // - region_size > 0: Uniform per-thread regions at indexes[t * region_size]
+  // - region_size == 0 && region_offsets == nullptr: Contiguous from deserialization
+  for (uint16_t t = 0; t < idx_ref.n_threads; ++t) {
+    uint64_t* thread_base;
+    if (idx_ref.region_offsets != nullptr) {
+      thread_base = idx_ref.indexes + idx_ref.region_offsets[t];
+    } else if (idx_ref.region_size > 0) {
+      thread_base = idx_ref.indexes + t * idx_ref.region_size;
+    } else {
+      // Contiguous layout: compute offset for this thread
+      size_t offset = 0;
+      for (uint16_t i = 0; i < t; ++i) {
+        offset += idx_ref.n_indexes[i];
+      }
+      thread_base = idx_ref.indexes + offset;
+    }
+    for (uint64_t j = 0; j < idx_ref.n_indexes[t]; ++j)
+      linear_indexes_.push_back(thread_base[j]);
+  }
+  std::sort(linear_indexes_.begin(), linear_indexes_.end());
+  size_t first_nl = 0;
+  for (size_t i = 0; i < linear_indexes_.size(); ++i) {
+    if (linear_indexes_[i] >= len_)
+      continue; // Bounds check
+    // Support LF, CRLF, and CR-only line endings
+    uint8_t c = buf_[linear_indexes_[i]];
+    if (c == '\n' || c == '\r') {
+      first_nl = i;
+      break;
+    }
+  }
+  num_columns_ = first_nl + 1;
+  recalculate_num_rows();
 }
 
 std::string_view ValueExtractor::get_string_view(size_t row, size_t col) const {
