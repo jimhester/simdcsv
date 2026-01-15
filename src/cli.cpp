@@ -287,6 +287,12 @@ void printUsage(const char* prog) {
   cerr << "                        latin1, windows-1252\n";
   cerr << "  -j            Output in JSON format (for dialect/schema/stats)\n";
   cerr << "  -m <size>     Sample size for schema/stats (0=all rows, default: 0)\n";
+  cerr << "                Used with --sequential; ignored with distributed sampling\n";
+  cerr << "  --distributed Use distributed sampling for type inference (default)\n";
+  cerr << "                Samples from equally-spaced locations throughout the file\n";
+  cerr << "  --sequential  Use sequential sampling (first N rows only)\n";
+  cerr << "  --sample-locations <n>   Number of sample locations (default: 100)\n";
+  cerr << "  --rows-per-location <n>  Rows per location (default: 100)\n";
   cerr << "  -o <file>     Output file path (for convert command)\n";
   cerr << "  -F <format>   Output format: parquet, feather, auto (default: auto)\n";
   cerr << "  -C <codec>    Compression codec for Parquet: snappy, gzip, zstd, lz4, none\n";
@@ -1601,10 +1607,62 @@ struct ColumnStats {
   }
 };
 
+// Helper function to compute distributed sample indices for CLI
+// Matches the algorithm used in ArrowConverter::compute_sample_indices
+static std::vector<size_t> computeDistributedSampleIndices(size_t num_rows,
+                                                           size_t num_sample_locations,
+                                                           size_t rows_per_location) {
+  std::vector<size_t> indices;
+
+  if (num_rows == 0 || num_sample_locations == 0) {
+    return indices;
+  }
+
+  size_t total_samples = num_sample_locations * rows_per_location;
+
+  if (num_rows <= total_samples) {
+    // File smaller than total sample size: sample all rows
+    indices.reserve(num_rows);
+    for (size_t i = 0; i < num_rows; ++i) {
+      indices.push_back(i);
+    }
+  } else {
+    if (num_sample_locations == 1) {
+      // Single location: sample first rows_per_location rows
+      indices.reserve(rows_per_location);
+      for (size_t i = 0; i < rows_per_location && i < num_rows; ++i) {
+        indices.push_back(i);
+      }
+    } else {
+      // Multiple locations: calculate step and cap rows per location to avoid overlap
+      size_t last_start = num_rows - rows_per_location;
+      size_t step = last_start / (num_sample_locations - 1);
+
+      // Cap actual rows per location to avoid overlap between consecutive blocks
+      size_t actual_rows_per_loc = std::min(rows_per_location, step > 0 ? step : rows_per_location);
+
+      indices.reserve(num_sample_locations * actual_rows_per_loc);
+
+      for (size_t loc = 0; loc < num_sample_locations; ++loc) {
+        size_t start = (loc * last_start) / (num_sample_locations - 1);
+        size_t rows_this_loc =
+            (loc == num_sample_locations - 1) ? rows_per_location : actual_rows_per_loc;
+
+        for (size_t i = 0; i < rows_this_loc; ++i) {
+          indices.push_back(start + i);
+        }
+      }
+    }
+  }
+
+  return indices;
+}
+
 // Command: schema - display inferred schema with column names, types, and nullable
 int cmdSchema(const char* filename, int n_threads, bool has_header,
               const libvroom::Dialect& dialect, bool auto_detect, bool json_output,
-              bool strict_mode, size_t sample_size = 0, size_t max_errors = 0) {
+              bool strict_mode, size_t sample_size, bool use_distributed_sampling,
+              size_t num_sample_locations, size_t rows_per_location, size_t max_errors = 0) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
                           libvroom::Encoding::UNKNOWN, nullptr, nullptr, max_errors);
   if (!result.success)
@@ -1638,27 +1696,44 @@ int cmdSchema(const char* filename, int n_threads, bool has_header,
   libvroom::ColumnTypeInference type_inference(num_cols);
 
   // Process data rows (skip header if present)
-  // With sampling and early termination optimization
   size_t start_row = has_header ? 1 : 0;
   size_t total_data_rows = rows.size() > start_row ? rows.size() - start_row : 0;
-  size_t max_rows_to_process =
-      (sample_size > 0) ? std::min(sample_size, total_data_rows) : total_data_rows;
-  size_t rows_processed = 0;
   constexpr size_t EARLY_TERMINATION_CHECK_INTERVAL = 1000;
   constexpr size_t EARLY_TERMINATION_MIN_SAMPLES = 100;
 
-  for (size_t r = start_row; r < rows.size() && rows_processed < max_rows_to_process; ++r) {
-    const auto& row = rows[r];
-    for (size_t c = 0; c < std::min(row.size(), num_cols); ++c) {
-      const std::string& field = row[c];
-      type_inference.add_field(c, reinterpret_cast<const uint8_t*>(field.data()), field.size());
+  if (use_distributed_sampling) {
+    // Distributed sampling: sample from equally-spaced locations
+    auto sample_indices =
+        computeDistributedSampleIndices(total_data_rows, num_sample_locations, rows_per_location);
+    for (size_t idx : sample_indices) {
+      size_t r = start_row + idx;
+      if (r >= rows.size())
+        continue;
+      const auto& row = rows[r];
+      for (size_t c = 0; c < std::min(row.size(), num_cols); ++c) {
+        const std::string& field = row[c];
+        type_inference.add_field(c, reinterpret_cast<const uint8_t*>(field.data()), field.size());
+      }
     }
-    ++rows_processed;
+  } else {
+    // Sequential sampling: sample first N rows
+    size_t max_rows_to_process =
+        (sample_size > 0) ? std::min(sample_size, total_data_rows) : total_data_rows;
+    size_t rows_processed = 0;
 
-    // Check for early termination every N rows (only if not sampling)
-    if (sample_size == 0 && rows_processed % EARLY_TERMINATION_CHECK_INTERVAL == 0) {
-      if (type_inference.all_types_confirmed(EARLY_TERMINATION_MIN_SAMPLES)) {
-        break;
+    for (size_t r = start_row; r < rows.size() && rows_processed < max_rows_to_process; ++r) {
+      const auto& row = rows[r];
+      for (size_t c = 0; c < std::min(row.size(), num_cols); ++c) {
+        const std::string& field = row[c];
+        type_inference.add_field(c, reinterpret_cast<const uint8_t*>(field.data()), field.size());
+      }
+      ++rows_processed;
+
+      // Check for early termination every N rows (only if not sampling)
+      if (sample_size == 0 && rows_processed % EARLY_TERMINATION_CHECK_INTERVAL == 0) {
+        if (type_inference.all_types_confirmed(EARLY_TERMINATION_MIN_SAMPLES)) {
+          break;
+        }
       }
     }
   }
@@ -1831,7 +1906,8 @@ int cmdConvert(const char* filename, const std::string& output_path, int n_threa
 
 // Command: stats - display statistical summary for each column
 int cmdStats(const char* filename, int n_threads, bool has_header, const libvroom::Dialect& dialect,
-             bool auto_detect, bool json_output, bool strict_mode, size_t sample_size = 0,
+             bool auto_detect, bool json_output, bool strict_mode, size_t sample_size,
+             bool use_distributed_sampling, size_t num_sample_locations, size_t rows_per_location,
              size_t max_errors = 0) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
                           libvroom::Encoding::UNKNOWN, nullptr, nullptr, max_errors);
@@ -1872,14 +1948,14 @@ int cmdStats(const char* filename, int n_threads, bool has_header, const libvroo
   libvroom::ColumnTypeInference type_inference(num_cols);
 
   // Process data rows (skip header if present)
-  // With sampling optimization
   size_t start_row = has_header ? 1 : 0;
   size_t total_data_rows = rows.size() > start_row ? rows.size() - start_row : 0;
-  size_t max_rows_to_process =
-      (sample_size > 0) ? std::min(sample_size, total_data_rows) : total_data_rows;
   size_t rows_processed = 0;
 
-  for (size_t r = start_row; r < rows.size() && rows_processed < max_rows_to_process; ++r) {
+  // Helper lambda to process a single row
+  auto process_row = [&](size_t r) {
+    if (r >= rows.size())
+      return;
     const auto& row = rows[r];
     for (size_t c = 0; c < std::min(row.size(), num_cols); ++c) {
       const std::string& field = row[c];
@@ -1909,6 +1985,23 @@ int cmdStats(const char* filename, int n_threads, bool has_header, const libvroo
       stats[c].add_string_value(field);
     }
     ++rows_processed;
+  };
+
+  if (use_distributed_sampling) {
+    // Distributed sampling: sample from equally-spaced locations
+    auto sample_indices =
+        computeDistributedSampleIndices(total_data_rows, num_sample_locations, rows_per_location);
+    for (size_t idx : sample_indices) {
+      process_row(start_row + idx);
+    }
+  } else {
+    // Sequential sampling: sample first N rows
+    size_t max_rows_to_process =
+        (sample_size > 0) ? std::min(sample_size, total_data_rows) : total_data_rows;
+
+    for (size_t r = start_row; r < rows.size() && rows_processed < max_rows_to_process; ++r) {
+      process_row(r);
+    }
   }
 
   // Calculate data_row_count based on what we actually processed
@@ -2075,8 +2168,13 @@ int main(int argc, char* argv[]) {
   bool strict_mode = false;         // Strict mode: exit with code 1 on any parse error
   unsigned int random_seed = 0;     // Random seed for sample command (0 = use random_device)
   libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN; // User-specified encoding
-  size_t sample_size = 0;      // Sample size for schema/stats (0 = all rows)
-  CliCacheConfig cache_config; // Index caching configuration
+  size_t sample_size = 0; // Sample size for schema/stats (0 = all rows)
+  // Distributed sampling options for type inference (schema/stats commands)
+  bool use_distributed_sampling = true; // Use distributed sampling by default
+  size_t num_sample_locations = 100;    // Number of sample locations for distributed sampling
+  size_t rows_per_location = 100;       // Rows per location for distributed sampling
+  size_t max_errors = 0;                // Maximum errors to collect (0 = use default of 10000)
+  CliCacheConfig cache_config;          // Index caching configuration
   // Progress bar: auto-enabled for TTY by default, can be overridden by --progress/--no-progress
   bool progress_auto = true;     // Use automatic TTY detection
   bool progress_enabled = false; // Explicit override value
@@ -2087,7 +2185,6 @@ int main(int argc, char* argv[]) {
   string output_path;     // Output file for convert command
   string output_format;   // Output format for convert command (parquet, feather, auto)
   string compression_str; // Compression codec for Parquet (snappy, gzip, zstd, lz4, none)
-  size_t max_errors = 0;  // Maximum errors to collect (0 = use default of 10000)
 
   // Pre-scan for long options (since we're not using getopt_long)
   for (int i = 2; i < argc; ++i) {
@@ -2160,6 +2257,82 @@ int main(int argc, char* argv[]) {
       }
       --argc;
       --i; // Recheck this position
+    } else if (strcmp(argv[i], "--sequential") == 0) {
+      use_distributed_sampling = false;
+      // Remove --sequential from argv by shifting remaining args
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i; // Recheck this position
+    } else if (strcmp(argv[i], "--distributed") == 0) {
+      use_distributed_sampling = true;
+      // Remove --distributed from argv by shifting remaining args
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i; // Recheck this position
+    } else if (strncmp(argv[i], "--sample-locations=", 19) == 0) {
+      char* endptr;
+      long val = strtol(argv[i] + 19, &endptr, 10);
+      if (*endptr != '\0' || val < 1) {
+        cerr << "Error: Invalid sample-locations value '" << (argv[i] + 19) << "'\n";
+        return 1;
+      }
+      num_sample_locations = static_cast<size_t>(val);
+      use_distributed_sampling = true;
+      // Remove from argv
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i;
+    } else if (strcmp(argv[i], "--sample-locations") == 0 && i + 1 < argc) {
+      char* endptr;
+      long val = strtol(argv[i + 1], &endptr, 10);
+      if (*endptr != '\0' || val < 1) {
+        cerr << "Error: Invalid sample-locations value '" << argv[i + 1] << "'\n";
+        return 1;
+      }
+      num_sample_locations = static_cast<size_t>(val);
+      use_distributed_sampling = true;
+      // Remove both option and value from argv
+      for (int j = i; j < argc - 2; ++j) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      --i;
+    } else if (strncmp(argv[i], "--rows-per-location=", 20) == 0) {
+      char* endptr;
+      long val = strtol(argv[i] + 20, &endptr, 10);
+      if (*endptr != '\0' || val < 1) {
+        cerr << "Error: Invalid rows-per-location value '" << (argv[i] + 20) << "'\n";
+        return 1;
+      }
+      rows_per_location = static_cast<size_t>(val);
+      use_distributed_sampling = true;
+      // Remove from argv
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i;
+    } else if (strcmp(argv[i], "--rows-per-location") == 0 && i + 1 < argc) {
+      char* endptr;
+      long val = strtol(argv[i + 1], &endptr, 10);
+      if (*endptr != '\0' || val < 1) {
+        cerr << "Error: Invalid rows-per-location value '" << argv[i + 1] << "'\n";
+        return 1;
+      }
+      rows_per_location = static_cast<size_t>(val);
+      use_distributed_sampling = true;
+      // Remove both option and value from argv
+      for (int j = i; j < argc - 2; ++j) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      --i;
     } else if (strncmp(argv[i], "--max-errors=", 13) == 0) {
       char* endptr;
       long val = strtol(argv[i] + 13, &endptr, 10);
@@ -2173,7 +2346,7 @@ int main(int argc, char* argv[]) {
         argv[j] = argv[j + 1];
       }
       --argc;
-      --i; // Recheck this position
+      --i;
     } else if (strcmp(argv[i], "--max-errors") == 0 && i + 1 < argc) {
       char* endptr;
       long val = strtol(argv[i + 1], &endptr, 10);
@@ -2187,7 +2360,7 @@ int main(int argc, char* argv[]) {
         argv[j] = argv[j + 2];
       }
       argc -= 2;
-      --i; // Recheck this position
+      --i;
     }
   }
 
@@ -2272,6 +2445,8 @@ int main(int argc, char* argv[]) {
         return 1;
       }
       sample_size = static_cast<size_t>(val);
+      // Using -m implies sequential sampling (legacy behavior)
+      use_distributed_sampling = false;
       break;
     }
     case 'S':
@@ -2356,10 +2531,12 @@ int main(int argc, char* argv[]) {
     result = cmdDialect(filename, json_output, force_output);
   } else if (command == "schema") {
     result = cmdSchema(filename, n_threads, has_header, dialect, auto_detect, json_output,
-                       strict_mode, sample_size, max_errors);
+                       strict_mode, sample_size, use_distributed_sampling, num_sample_locations,
+                       rows_per_location, max_errors);
   } else if (command == "stats") {
     result = cmdStats(filename, n_threads, has_header, dialect, auto_detect, json_output,
-                      strict_mode, sample_size, max_errors);
+                      strict_mode, sample_size, use_distributed_sampling, num_sample_locations,
+                      rows_per_location, max_errors);
 #ifdef LIBVROOM_ENABLE_ARROW
   } else if (command == "convert") {
     result = cmdConvert(filename, output_path, n_threads, dialect, auto_detect, output_format,

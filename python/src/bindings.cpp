@@ -1549,6 +1549,101 @@ Dialect detect_dialect(const std::string& path) {
 constexpr size_t MMAP_AUTO_THRESHOLD = 100ULL * 1024 * 1024;
 
 // =============================================================================
+// Sampling strategy for type inference
+// =============================================================================
+
+/// Strategy for selecting rows during type inference
+enum class SamplingStrategy {
+  SEQUENTIAL, ///< Sample first N rows (legacy behavior, good for linear access)
+  DISTRIBUTED ///< Sample from equally-spaced locations throughout file (good for SSDs)
+};
+
+/**
+ * @brief Compute indices of rows to sample for type inference.
+ *
+ * For SEQUENTIAL strategy, returns [0, 1, ..., min(num_rows, sample_size)-1].
+ * For DISTRIBUTED strategy, samples rows_per_location contiguous rows from
+ * num_sample_locations equally-spaced positions throughout the file.
+ *
+ * The algorithm ensures:
+ * 1. First sample location starts at row 0
+ * 2. Last sample location captures the last rows of the file
+ * 3. No duplicate row indices (achieved by capping rows per location to step size)
+ *
+ * @param num_rows Total number of rows available
+ * @param strategy Sampling strategy to use
+ * @param sample_size Number of rows for SEQUENTIAL strategy
+ * @param num_sample_locations Number of sample locations for DISTRIBUTED strategy
+ * @param rows_per_location Rows per location for DISTRIBUTED strategy
+ * @return Vector of row indices to sample
+ */
+std::vector<size_t> compute_sample_indices(size_t num_rows, SamplingStrategy strategy,
+                                           size_t sample_size, size_t num_sample_locations,
+                                           size_t rows_per_location) {
+  std::vector<size_t> indices;
+
+  if (num_rows == 0) {
+    return indices;
+  }
+
+  if (strategy == SamplingStrategy::SEQUENTIAL) {
+    // Legacy behavior: first N rows
+    size_t limit = std::min(sample_size, num_rows);
+    indices.reserve(limit);
+    for (size_t i = 0; i < limit; ++i) {
+      indices.push_back(i);
+    }
+  } else {
+    // Distributed sampling
+    size_t total_desired = num_sample_locations * rows_per_location;
+
+    if (num_rows <= total_desired) {
+      // File smaller than desired samples: sample all rows
+      indices.reserve(num_rows);
+      for (size_t i = 0; i < num_rows; ++i) {
+        indices.push_back(i);
+      }
+    } else {
+      // Ensure at least 2 locations
+      size_t num_locations = std::max(num_sample_locations, size_t(2));
+      size_t rows_per_loc = rows_per_location;
+
+      // Last location starts at (num_rows - rows_per_loc) so it captures the end
+      size_t last_start = num_rows - rows_per_loc;
+      // Step between location starts
+      size_t step = last_start / (num_locations - 1);
+
+      // To avoid overlap/duplicates, cap actual rows per location to step size
+      // (except for the last location which gets the full rows_per_loc)
+      size_t actual_rows_per_loc = std::min(rows_per_loc, step > 0 ? step : rows_per_loc);
+
+      indices.reserve(num_locations * actual_rows_per_loc);
+
+      for (size_t loc = 0; loc < num_locations; ++loc) {
+        size_t start;
+        size_t rows_this_loc;
+
+        if (loc == num_locations - 1) {
+          // Last location: use linear formula to land exactly at last_start
+          start = last_start;
+          rows_this_loc = rows_per_loc;
+        } else {
+          // Linear interpolation for consistent spacing
+          start = (loc * last_start) / (num_locations - 1);
+          rows_this_loc = actual_rows_per_loc;
+        }
+
+        for (size_t i = 0; i < rows_this_loc && (start + i) < num_rows; ++i) {
+          indices.push_back(start + i);
+        }
+      }
+    }
+  }
+
+  return indices;
+}
+
+// =============================================================================
 // read_csv function with full options
 // =============================================================================
 
@@ -1561,7 +1656,9 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
                bool empty_is_null = true,
                std::optional<std::unordered_map<std::string, std::string>> dtype = std::nullopt,
                size_t num_threads = 1, std::optional<bool> memory_map = std::nullopt,
-               std::optional<PyProgressCallback> progress = std::nullopt) {
+               std::optional<PyProgressCallback> progress = std::nullopt,
+               std::optional<std::string> sampling_strategy = std::nullopt,
+               size_t sample_locations = 100, size_t rows_per_location = 100) {
   auto data = std::make_shared<TableData>();
 
   // Configure null value handling
@@ -1731,17 +1828,34 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
   size_t n_cols = data->column_names.size();
   data->column_types.resize(n_cols, ColumnType::STRING);
 
+  // Determine sampling strategy
+  // Default is "distributed" for better type detection across the file
+  SamplingStrategy strategy = SamplingStrategy::DISTRIBUTED;
+  if (sampling_strategy) {
+    if (*sampling_strategy == "sequential") {
+      strategy = SamplingStrategy::SEQUENTIAL;
+    } else if (*sampling_strategy == "distributed") {
+      strategy = SamplingStrategy::DISTRIBUTED;
+    } else {
+      throw py::value_error("Unknown sampling_strategy '" + *sampling_strategy +
+                            "'. Supported values: 'sequential', 'distributed'");
+    }
+  }
+
   // Run type inference on sampled rows (from the filtered dataset)
   constexpr size_t TYPE_INFERENCE_ROWS = 1000;
   size_t effective_rows = data->effective_num_rows();
-  size_t n_rows_to_sample = std::min(effective_rows, TYPE_INFERENCE_ROWS);
 
-  if (n_rows_to_sample > 0) {
+  // Compute sample indices based on strategy
+  auto sample_indices = compute_sample_indices(effective_rows, strategy, TYPE_INFERENCE_ROWS,
+                                               sample_locations, rows_per_location);
+
+  if (!sample_indices.empty()) {
     libvroom::ColumnTypeInference inference(n_cols);
 
-    for (size_t row = 0; row < n_rows_to_sample; ++row) {
+    for (size_t row_idx : sample_indices) {
       // Use translate_row_index to account for skip_rows
-      auto r = data->result.row(data->translate_row_index(row));
+      auto r = data->result.row(data->translate_row_index(row_idx));
       for (size_t col = 0; col < n_cols; ++col) {
         // Map to underlying column if using usecols
         size_t underlying_col = data->selected_columns.empty() ? col : data->selected_columns[col];
@@ -2338,6 +2452,8 @@ Examples
         py::arg("usecols") = py::none(), py::arg("null_values") = py::none(),
         py::arg("empty_is_null") = true, py::arg("dtype") = py::none(), py::arg("num_threads") = 1,
         py::arg("memory_map") = py::none(), py::arg("progress") = py::none(),
+        py::arg("sampling_strategy") = py::none(), py::arg("sample_locations") = 100,
+        py::arg("rows_per_location") = 100,
         R"doc(
 Read a CSV file and return a Table object.
 
@@ -2397,6 +2513,21 @@ progress : callable, optional
     The callback receives two arguments: (bytes_read: int, total_bytes: int).
     It is called periodically during parsing at chunk boundaries (typically
     every 1-4MB). Use this to display progress bars or update UIs.
+sampling_strategy : str, optional
+    Strategy for selecting rows during type inference. Options:
+    - "distributed" (default): Sample from equally-spaced locations throughout
+      the file. This is better for detecting types that appear later in the file.
+      Good for SSD storage where random access is fast.
+    - "sequential": Sample the first N rows. This is the legacy behavior,
+      good for linear access patterns (e.g., network streams, HDDs).
+sample_locations : int, default 100
+    Number of sample locations for distributed sampling. Only used when
+    sampling_strategy="distributed". The file is divided into this many
+    equally-spaced positions for sampling.
+rows_per_location : int, default 100
+    Number of contiguous rows to sample at each location for distributed
+    sampling. Only used when sampling_strategy="distributed". Total samples
+    will be approximately sample_locations * rows_per_location (10,000 by default).
 
 Returns
 -------
@@ -2460,6 +2591,12 @@ Examples
 ...     print(f"\r{pct:.1f}%", end="", flush=True)
 >>> table = vroom_csv.read_csv("huge.csv", progress=show_progress)
 >>> print()  # newline after progress
+
+>>> # Use sequential sampling for type inference (legacy behavior)
+>>> table = vroom_csv.read_csv("data.csv", sampling_strategy="sequential")
+
+>>> # Custom distributed sampling configuration
+>>> table = vroom_csv.read_csv("data.csv", sample_locations=50, rows_per_location=200)
 
 >>> # Convert to Polars
 >>> import polars as pl
