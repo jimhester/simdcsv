@@ -476,21 +476,13 @@ private:
   size_t num_rows_ = 0;
   size_t num_columns_ = 0;
   bool has_header_ = true;
-  std::vector<uint64_t> linear_indexes_;
-
   // Cache of resolved configs (merged with global config) for fast lookup
   mutable std::unordered_map<size_t, ExtractionConfig> resolved_configs_;
 
   std::string_view get_string_view_internal(size_t row, size_t col) const;
   size_t compute_field_index(size_t row, size_t col) const;
   std::string unescape_field(std::string_view field) const;
-  void recalculate_num_rows() {
-    size_t total_indexes = linear_indexes_.size();
-    if (total_indexes > 0 && num_columns_ > 0) {
-      size_t total_rows = total_indexes / num_columns_;
-      num_rows_ = has_header_ ? (total_rows > 0 ? total_rows - 1 : 0) : total_rows;
-    }
-  }
+  void recalculate_num_rows();
 
   /**
    * Get the effective extraction config for a column.
