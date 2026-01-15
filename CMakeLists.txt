@@ -662,6 +662,26 @@ add_dependencies(column_config_test copy_test_data)
 # Register column config tests with CTest
 gtest_discover_tests(column_config_test)
 
+# Lazy column test executable
+add_executable(lazy_column_test
+    test/lazy_column_test.cpp
+)
+
+target_link_libraries(lazy_column_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(lazy_column_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(lazy_column_test copy_test_data)
+
+# Register lazy column tests with CTest
+gtest_discover_tests(lazy_column_test)
+
 # Streaming parser test executable
 add_executable(streaming_test
     test/streaming_test.cpp

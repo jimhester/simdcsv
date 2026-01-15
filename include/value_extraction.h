@@ -4,11 +4,13 @@
 #include "common_defs.h"
 #include "dialect.h"
 #include "extraction_config.h"
+#include "two_pass.h"
 
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -19,7 +21,303 @@
 
 namespace libvroom {
 
-class ParseIndex;
+// Forward declarations
+class ValueExtractor;
+class LazyColumnIterator;
+
+/**
+ * @brief Lazy column accessor for ALTREP-style deferred field parsing.
+ *
+ * LazyColumn provides per-column lazy access to CSV data without loading
+ * or parsing the entire file upfront. This enables R's ALTREP pattern
+ * where columns are only parsed when accessed.
+ *
+ * Key features:
+ * - **Random access**: O(n_threads) access to any row via operator[]
+ * - **Byte range access**: get_bounds() returns raw byte ranges for deferred parsing
+ * - **Iterator support**: Range-based for loops via begin()/end()
+ * - **Zero-copy views**: Returns string_view into the original buffer
+ *
+ * The class holds lightweight references to the buffer, index, and dialect.
+ * It does NOT copy or sort the index, making construction O(1).
+ *
+ * @note The underlying buffer and ParseIndex must remain valid for the lifetime
+ *       of the LazyColumn. This is typically managed by the Parser::Result object.
+ *
+ * @example
+ * @code
+ * // Create lazy column from parser result
+ * auto result = parser.parse(buf, len);
+ * LazyColumn col = result.get_column(0);
+ *
+ * // Random access - parses only row 100
+ * std::string_view value = col[100];
+ *
+ * // Get byte bounds for deferred parsing
+ * FieldSpan span = col.get_bounds(100);
+ * // Parse later: parse_integer<int64_t>(buf + span.start, span.length())
+ *
+ * // Iterate (parses each row on access)
+ * for (std::string_view row_value : col) {
+ *     process(row_value);
+ * }
+ * @endcode
+ *
+ * @see ValueExtractor for eager column extraction
+ * @see ParseIndex::get_field_span() for the underlying field lookup
+ */
+class LazyColumn {
+public:
+  /**
+   * @brief Construct a lazy column accessor.
+   *
+   * @param buf Pointer to the CSV data buffer
+   * @param len Length of the buffer in bytes
+   * @param idx Reference to the parsed index
+   * @param col Column index (0-based)
+   * @param has_header Whether the CSV has a header row (affects row indexing)
+   * @param dialect CSV dialect for quote handling
+   * @param config Extraction configuration for parsing
+   */
+  LazyColumn(const uint8_t* buf, size_t len, const ParseIndex& idx, size_t col, bool has_header,
+             const Dialect& dialect = Dialect::csv(),
+             const ExtractionConfig& config = ExtractionConfig::defaults())
+      : buf_(buf), len_(len), idx_(&idx), col_(col), has_header_(has_header), dialect_(dialect),
+        config_(config) {
+    // Compute number of rows
+    if (idx_->columns > 0) {
+      uint64_t total_fields = idx_->total_indexes();
+      uint64_t total_rows = total_fields / idx_->columns;
+      num_rows_ = has_header_ ? (total_rows > 0 ? total_rows - 1 : 0) : total_rows;
+    }
+  }
+
+  /**
+   * @brief Get the number of data rows in the column.
+   *
+   * @return Number of rows (excludes header if has_header is true)
+   */
+  size_t size() const { return num_rows_; }
+
+  /**
+   * @brief Check if the column is empty.
+   */
+  bool empty() const { return num_rows_ == 0; }
+
+  /**
+   * @brief Get the column index.
+   */
+  size_t column_index() const { return col_; }
+
+  /**
+   * @brief Random access to a row's string value.
+   *
+   * Returns a string_view into the original buffer. The view is valid as long
+   * as the underlying buffer remains valid. Quote characters are included in
+   * the returned view for quoted fields.
+   *
+   * @param row Row index (0-based, excludes header)
+   * @return String view of the field content
+   * @throws std::out_of_range if row >= size()
+   *
+   * @note Complexity: O(n_threads) due to ParseIndex::get_field_span()
+   */
+  std::string_view operator[](size_t row) const {
+    if (row >= num_rows_) {
+      throw std::out_of_range("LazyColumn: row index out of range");
+    }
+    FieldSpan span = get_bounds(row);
+    if (!span.is_valid()) {
+      return std::string_view();
+    }
+    return get_field_content(span);
+  }
+
+  /**
+   * @brief Get raw byte boundaries for a row.
+   *
+   * Returns the byte range in the source buffer for deferred parsing.
+   * This enables the ALTREP pattern where parsing happens only when
+   * the value is actually needed.
+   *
+   * @param row Row index (0-based, excludes header)
+   * @return FieldSpan with start/end byte positions, or invalid span if out of bounds
+   *
+   * @note Complexity: O(n_threads) due to ParseIndex::get_field_span()
+   *
+   * @example
+   * @code
+   * FieldSpan span = col.get_bounds(row);
+   * if (span.is_valid()) {
+   *     // Deferred parsing - only parse when value is needed
+   *     auto result = parse_integer<int64_t>(
+   *         reinterpret_cast<const char*>(buf + span.start),
+   *         span.length()
+   *     );
+   * }
+   * @endcode
+   */
+  FieldSpan get_bounds(size_t row) const {
+    // Adjust row for header
+    size_t actual_row = has_header_ ? row + 1 : row;
+    return idx_->get_field_span(actual_row, col_);
+  }
+
+  /**
+   * @brief Get a typed value from a row.
+   *
+   * Parses the field content to the requested type using the configured
+   * ExtractionConfig.
+   *
+   * @tparam T The type to extract (int32_t, int64_t, double, bool)
+   * @param row Row index (0-based, excludes header)
+   * @return ExtractResult containing the parsed value or error/NA status
+   * @throws std::out_of_range if row >= size()
+   */
+  template <typename T> ExtractResult<T> get(size_t row) const;
+
+  /**
+   * @brief Get string value with unescaping applied.
+   *
+   * Unlike operator[], this method handles escape sequences (e.g., doubled
+   * quotes) and returns a clean string. This involves a copy.
+   *
+   * @param row Row index (0-based, excludes header)
+   * @return Unescaped string content
+   * @throws std::out_of_range if row >= size()
+   */
+  std::string get_string(size_t row) const;
+
+  // Iterator support
+  class Iterator;
+  Iterator begin() const;
+  Iterator end() const;
+
+  /**
+   * @brief Iterator for lazy column traversal.
+   *
+   * Provides input iterator semantics for range-based for loops.
+   * Each dereference accesses the field via the ParseIndex, so
+   * iterating is O(n * n_threads) total.
+   */
+  class Iterator {
+  public:
+    using iterator_category = std::input_iterator_tag;
+    using value_type = std::string_view;
+    using difference_type = std::ptrdiff_t;
+    using pointer = const std::string_view*;
+    using reference = std::string_view;
+
+    Iterator(const LazyColumn* col, size_t row) : col_(col), row_(row) {}
+
+    reference operator*() const { return (*col_)[row_]; }
+
+    Iterator& operator++() {
+      ++row_;
+      return *this;
+    }
+
+    Iterator operator++(int) {
+      Iterator tmp = *this;
+      ++row_;
+      return tmp;
+    }
+
+    bool operator==(const Iterator& other) const { return row_ == other.row_; }
+
+    bool operator!=(const Iterator& other) const { return row_ != other.row_; }
+
+    size_t row() const { return row_; }
+
+  private:
+    const LazyColumn* col_;
+    size_t row_;
+  };
+
+  /**
+   * @brief Get the extraction configuration.
+   */
+  const ExtractionConfig& config() const { return config_; }
+
+  /**
+   * @brief Get the dialect.
+   */
+  const Dialect& dialect() const { return dialect_; }
+
+  /**
+   * @brief Check if the column has a header.
+   */
+  bool has_header() const { return has_header_; }
+
+private:
+  const uint8_t* buf_;
+  size_t len_;
+  const ParseIndex* idx_;
+  size_t col_;
+  bool has_header_;
+  Dialect dialect_;
+  ExtractionConfig config_;
+  size_t num_rows_ = 0;
+
+  /**
+   * @brief Extract field content from a span, handling quotes.
+   */
+  std::string_view get_field_content(const FieldSpan& span) const {
+    if (!span.is_valid() || span.start >= len_) {
+      return std::string_view();
+    }
+
+    size_t start = static_cast<size_t>(span.start);
+    size_t end = std::min(static_cast<size_t>(span.end), len_);
+
+    // Handle CR in CRLF endings
+    if (end > start && buf_[end - 1] == '\r') {
+      --end;
+    }
+
+    // Handle quoted fields - strip outer quotes
+    if (end > start && buf_[start] == static_cast<uint8_t>(dialect_.quote_char)) {
+      if (buf_[end - 1] == static_cast<uint8_t>(dialect_.quote_char)) {
+        ++start;
+        --end;
+      }
+    }
+
+    if (end < start) {
+      end = start;
+    }
+
+    return std::string_view(reinterpret_cast<const char*>(buf_ + start), end - start);
+  }
+};
+
+// LazyColumn iterator methods (defined after the class)
+inline LazyColumn::Iterator LazyColumn::begin() const {
+  return Iterator(this, 0);
+}
+
+inline LazyColumn::Iterator LazyColumn::end() const {
+  return Iterator(this, num_rows_);
+}
+
+/**
+ * @brief Factory function to create a LazyColumn from a ParseIndex.
+ *
+ * @param buf Pointer to the CSV data buffer
+ * @param len Length of the buffer
+ * @param idx Reference to the parsed index
+ * @param col Column index (0-based)
+ * @param has_header Whether the CSV has a header row
+ * @param dialect CSV dialect settings
+ * @param config Extraction configuration
+ * @return LazyColumn for the specified column
+ */
+inline LazyColumn make_lazy_column(const uint8_t* buf, size_t len, const ParseIndex& idx,
+                                   size_t col, bool has_header = true,
+                                   const Dialect& dialect = Dialect::csv(),
+                                   const ExtractionConfig& config = ExtractionConfig::defaults()) {
+  return LazyColumn(buf, len, idx, col, has_header, dialect, config);
+}
 
 template <typename IntType>
 really_inline ExtractResult<IntType>
@@ -284,6 +582,48 @@ public:
       has_header_ = has_header;
       recalculate_num_rows();
     }
+  }
+
+  // =========================================================================
+  // Buffer and Index accessors (for LazyColumn factory)
+  // =========================================================================
+
+  /**
+   * @brief Get the underlying data buffer pointer.
+   */
+  const uint8_t* buffer() const { return buf_; }
+
+  /**
+   * @brief Get the buffer length.
+   */
+  size_t buffer_length() const { return len_; }
+
+  /**
+   * @brief Get the parse index reference.
+   */
+  const ParseIndex& index() const { return idx_; }
+
+  /**
+   * @brief Get the dialect.
+   */
+  const Dialect& dialect() const { return dialect_; }
+
+  /**
+   * @brief Create a LazyColumn for the specified column.
+   *
+   * Factory method to create a LazyColumn that provides lazy per-row access
+   * to a single column. This is useful for R ALTREP integration where columns
+   * are only parsed when accessed.
+   *
+   * @param col Column index (0-based)
+   * @return LazyColumn for the specified column
+   * @throws std::out_of_range if col >= num_columns()
+   */
+  LazyColumn get_lazy_column(size_t col) const {
+    if (col >= num_columns_) {
+      throw std::out_of_range("Column index out of range");
+    }
+    return LazyColumn(buf_, len_, idx_, col, has_header_, dialect_, config_);
   }
 
   std::string_view get_string_view(size_t row, size_t col) const;
@@ -572,10 +912,102 @@ inline RowIterator end(const ValueExtractor& ve) {
   return RowIterator(&ve, ve.num_rows());
 }
 
+// LazyColumn::get<T>() implementation is defined after simd_number_parsing.h
+
 } // namespace libvroom
 
 // Include SIMD number parsing after all types are defined
 // This provides the implementations for parse_integer_simd and parse_double_simd
 #include "simd_number_parsing.h"
+
+// LazyColumn template method implementations (need SIMD parsers)
+namespace libvroom {
+
+template <typename T> ExtractResult<T> LazyColumn::get(size_t row) const {
+  if (row >= num_rows_) {
+    throw std::out_of_range("LazyColumn: row index out of range");
+  }
+
+  std::string_view sv = (*this)[row];
+
+  // LCOV_EXCL_BR_START - if constexpr branches are compile-time only
+  if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, int32_t>) {
+    return parse_integer_simd<T>(sv.data(), sv.size(), config_);
+  } else if constexpr (std::is_same_v<T, double>) {
+    return parse_double_simd(sv.data(), sv.size(), config_);
+  } else if constexpr (std::is_same_v<T, bool>) {
+    return parse_bool(sv.data(), sv.size(), config_);
+  } else {
+    static_assert(!std::is_same_v<T, T>, "Unsupported type");
+  }
+  // LCOV_EXCL_BR_STOP
+}
+
+inline std::string LazyColumn::get_string(size_t row) const {
+  if (row >= num_rows_) {
+    throw std::out_of_range("LazyColumn: row index out of range");
+  }
+
+  FieldSpan span = get_bounds(row);
+  if (!span.is_valid() || span.start >= len_) {
+    return std::string();
+  }
+
+  size_t start = static_cast<size_t>(span.start);
+  size_t end = std::min(static_cast<size_t>(span.end), len_);
+
+  // Handle CR in CRLF endings
+  if (end > start && buf_[end - 1] == '\r') {
+    --end;
+  }
+
+  if (end < start) {
+    end = start;
+  }
+
+  std::string_view raw(reinterpret_cast<const char*>(buf_ + start), end - start);
+
+  // Handle quoted fields - unescape
+  if (raw.empty() || raw.front() != dialect_.quote_char) {
+    return std::string(raw);
+  }
+
+  if (raw.size() < 2 || raw.back() != dialect_.quote_char) {
+    return std::string(raw);
+  }
+
+  // Strip quotes and unescape doubled quotes
+  std::string_view inner = raw.substr(1, raw.size() - 2);
+  std::string result;
+  result.reserve(inner.size());
+
+  for (size_t i = 0; i < inner.size(); ++i) {
+    char c = inner[i];
+    if (c == dialect_.escape_char && i + 1 < inner.size() && inner[i + 1] == dialect_.quote_char) {
+      result += dialect_.quote_char;
+      ++i;
+    } else {
+      result += c;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * @brief Create a LazyColumn from a ValueExtractor.
+ *
+ * Factory function to create a LazyColumn from an existing ValueExtractor,
+ * inheriting its buffer, index, dialect, and config.
+ *
+ * @param extractor Source ValueExtractor
+ * @param col Column index (0-based)
+ * @return LazyColumn for the specified column
+ */
+inline LazyColumn get_lazy_column(const ValueExtractor& extractor, size_t col) {
+  return extractor.get_lazy_column(col);
+}
+
+} // namespace libvroom
 
 #endif // LIBVROOM_VALUE_EXTRACTION_H
