@@ -35,6 +35,9 @@ logs/
 .DS_Store
 Thumbs.db
 
+# Work review status
+.work-review-status
+
 # Documentation build output
 docs/_site/
 docs/api/

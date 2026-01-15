@@ -16,14 +16,25 @@
 
 #include <cstring>
 #include <limits>
+#include <list>
 #include <new>
 #include <string>
 #include <thread>
 #include <vector>
 
+// Internal structure for per-column configuration (needs to be defined before libvroom_parser)
+struct libvroom_column_config {
+  libvroom::ColumnConfigMap configs;
+  // Store owned strings for NA values since ColumnConfig uses string_view.
+  // Using std::list instead of std::vector to ensure stability of references
+  // when new entries are added (vector reallocation would invalidate string_view pointers).
+  std::list<std::vector<std::string>> owned_na_values;
+};
+
 // Internal structures wrapping C++ objects
 struct libvroom_parser {
   libvroom::Parser parser;
+  std::unique_ptr<libvroom_column_config> column_config;
 
   libvroom_parser(size_t num_threads = 1) : parser(num_threads) {}
 };
@@ -715,6 +726,39 @@ void libvroom_parser_destroy(libvroom_parser_t* parser) {
   delete parser;
 }
 
+libvroom_error_t libvroom_parser_set_column_config(libvroom_parser_t* parser,
+                                                   const libvroom_column_config_t* config) {
+  if (!parser) {
+    return LIBVROOM_ERROR_NULL_POINTER;
+  }
+
+  try {
+    if (config) {
+      // Copy the config
+      parser->column_config = std::make_unique<libvroom_column_config>();
+      parser->column_config->configs = config->configs;
+      parser->column_config->owned_na_values = config->owned_na_values;
+    } else {
+      parser->column_config.reset();
+    }
+    return LIBVROOM_OK;
+  } catch (...) {
+    return LIBVROOM_ERROR_INTERNAL;
+  }
+}
+
+const libvroom_column_config_t* libvroom_parser_get_column_config(const libvroom_parser_t* parser) {
+  if (!parser) {
+    return nullptr;
+  }
+  return parser->column_config.get();
+}
+
+libvroom_error_t libvroom_parser_clear_column_config(libvroom_parser_t* parser) {
+  return libvroom_parser_set_column_config(parser,
+                                           static_cast<const libvroom_column_config_t*>(nullptr));
+}
+
 // Dialect Detection
 libvroom_detection_result_t* libvroom_detect_dialect(const libvroom_buffer_t* buffer) {
   if (!buffer)
@@ -976,4 +1020,244 @@ libvroom_buffer_t* libvroom_load_result_to_buffer(const libvroom_load_result_t* 
 
 void libvroom_load_result_destroy(libvroom_load_result_t* result) {
   delete result;
+}
+
+// =============================================================================
+// Per-Column Configuration API
+// =============================================================================
+
+// Note: libvroom_column_config struct is defined at the top of the file
+
+// Helper to convert C type hint to C++ TypeHint
+static libvroom::TypeHint c_type_hint_to_cpp(libvroom_type_hint_t hint) {
+  switch (hint) {
+  case LIBVROOM_TYPE_AUTO:
+    return libvroom::TypeHint::AUTO;
+  case LIBVROOM_TYPE_BOOLEAN:
+    return libvroom::TypeHint::BOOLEAN;
+  case LIBVROOM_TYPE_INTEGER:
+    return libvroom::TypeHint::INTEGER;
+  case LIBVROOM_TYPE_DOUBLE:
+    return libvroom::TypeHint::DOUBLE;
+  case LIBVROOM_TYPE_STRING:
+    return libvroom::TypeHint::STRING;
+  case LIBVROOM_TYPE_DATE:
+    return libvroom::TypeHint::DATE;
+  case LIBVROOM_TYPE_DATETIME:
+    return libvroom::TypeHint::DATETIME;
+  case LIBVROOM_TYPE_SKIP:
+    return libvroom::TypeHint::SKIP;
+  default:
+    return libvroom::TypeHint::AUTO;
+  }
+}
+
+// Helper to convert C++ TypeHint to C type hint
+static libvroom_type_hint_t cpp_type_hint_to_c(libvroom::TypeHint hint) {
+  switch (hint) {
+  case libvroom::TypeHint::AUTO:
+    return LIBVROOM_TYPE_AUTO;
+  case libvroom::TypeHint::BOOLEAN:
+    return LIBVROOM_TYPE_BOOLEAN;
+  case libvroom::TypeHint::INTEGER:
+    return LIBVROOM_TYPE_INTEGER;
+  case libvroom::TypeHint::DOUBLE:
+    return LIBVROOM_TYPE_DOUBLE;
+  case libvroom::TypeHint::STRING:
+    return LIBVROOM_TYPE_STRING;
+  case libvroom::TypeHint::DATE:
+    return LIBVROOM_TYPE_DATE;
+  case libvroom::TypeHint::DATETIME:
+    return LIBVROOM_TYPE_DATETIME;
+  case libvroom::TypeHint::SKIP:
+    return LIBVROOM_TYPE_SKIP;
+  default:
+    return LIBVROOM_TYPE_AUTO;
+  }
+}
+
+libvroom_column_config_t* libvroom_column_config_create(void) {
+  try {
+    return new (std::nothrow) libvroom_column_config{};
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+libvroom_error_t libvroom_column_config_set_type_by_index(libvroom_column_config_t* config,
+                                                          size_t col_index,
+                                                          libvroom_type_hint_t type_hint) {
+  if (!config) {
+    return LIBVROOM_ERROR_NULL_POINTER;
+  }
+
+  try {
+    libvroom::ColumnConfig col_config;
+    col_config.type_hint = c_type_hint_to_cpp(type_hint);
+    config->configs.set(col_index, col_config);
+    return LIBVROOM_OK;
+  } catch (...) {
+    return LIBVROOM_ERROR_INTERNAL;
+  }
+}
+
+libvroom_error_t libvroom_column_config_set_type_by_name(libvroom_column_config_t* config,
+                                                         const char* col_name,
+                                                         libvroom_type_hint_t type_hint) {
+  if (!config || !col_name) {
+    return LIBVROOM_ERROR_NULL_POINTER;
+  }
+
+  try {
+    libvroom::ColumnConfig col_config;
+    col_config.type_hint = c_type_hint_to_cpp(type_hint);
+    config->configs.set(std::string(col_name), col_config);
+    return LIBVROOM_OK;
+  } catch (...) {
+    return LIBVROOM_ERROR_INTERNAL;
+  }
+}
+
+libvroom_error_t libvroom_column_config_set_na_values_by_index(libvroom_column_config_t* config,
+                                                               size_t col_index,
+                                                               const char** na_values,
+                                                               size_t num_values) {
+  if (!config) {
+    return LIBVROOM_ERROR_NULL_POINTER;
+  }
+  if (num_values > 0 && !na_values) {
+    return LIBVROOM_ERROR_NULL_POINTER;
+  }
+
+  try {
+    // Store owned strings
+    std::vector<std::string> owned;
+    owned.reserve(num_values);
+    for (size_t i = 0; i < num_values; ++i) {
+      if (na_values[i]) {
+        owned.push_back(na_values[i]);
+      }
+    }
+    config->owned_na_values.push_back(std::move(owned));
+
+    // Create string_views pointing to owned storage
+    std::vector<std::string_view> views;
+    const auto& stored = config->owned_na_values.back();
+    views.reserve(stored.size());
+    for (const auto& s : stored) {
+      views.emplace_back(s);
+    }
+
+    // Get or create column config
+    libvroom::ColumnConfig col_config;
+    const auto* existing = config->configs.get(col_index);
+    if (existing) {
+      col_config = *existing;
+    }
+    col_config.na_values = views;
+    config->configs.set(col_index, col_config);
+
+    return LIBVROOM_OK;
+  } catch (...) {
+    return LIBVROOM_ERROR_INTERNAL;
+  }
+}
+
+libvroom_error_t libvroom_column_config_set_na_values_by_name(libvroom_column_config_t* config,
+                                                              const char* col_name,
+                                                              const char** na_values,
+                                                              size_t num_values) {
+  if (!config || !col_name) {
+    return LIBVROOM_ERROR_NULL_POINTER;
+  }
+  if (num_values > 0 && !na_values) {
+    return LIBVROOM_ERROR_NULL_POINTER;
+  }
+
+  try {
+    // Store owned strings
+    std::vector<std::string> owned;
+    owned.reserve(num_values);
+    for (size_t i = 0; i < num_values; ++i) {
+      if (na_values[i]) {
+        owned.push_back(na_values[i]);
+      }
+    }
+    config->owned_na_values.push_back(std::move(owned));
+
+    // Create string_views pointing to owned storage
+    std::vector<std::string_view> views;
+    const auto& stored = config->owned_na_values.back();
+    views.reserve(stored.size());
+    for (const auto& s : stored) {
+      views.emplace_back(s);
+    }
+
+    // Get or create column config
+    libvroom::ColumnConfig col_config;
+    const auto* existing = config->configs.get(std::string(col_name));
+    if (existing) {
+      col_config = *existing;
+    }
+    col_config.na_values = views;
+    config->configs.set(std::string(col_name), col_config);
+
+    return LIBVROOM_OK;
+  } catch (...) {
+    return LIBVROOM_ERROR_INTERNAL;
+  }
+}
+
+libvroom_type_hint_t
+libvroom_column_config_get_type_by_index(const libvroom_column_config_t* config, size_t col_index) {
+  if (!config) {
+    return LIBVROOM_TYPE_AUTO;
+  }
+
+  const auto* col_config = config->configs.get(col_index);
+  if (col_config && col_config->type_hint.has_value()) {
+    return cpp_type_hint_to_c(*col_config->type_hint);
+  }
+  return LIBVROOM_TYPE_AUTO;
+}
+
+bool libvroom_column_config_empty(const libvroom_column_config_t* config) {
+  if (!config) {
+    return true;
+  }
+  return config->configs.empty();
+}
+
+void libvroom_column_config_clear(libvroom_column_config_t* config) {
+  if (config) {
+    config->configs.clear();
+    config->owned_na_values.clear();
+  }
+}
+
+void libvroom_column_config_destroy(libvroom_column_config_t* config) {
+  delete config;
+}
+
+const char* libvroom_type_hint_string(libvroom_type_hint_t type_hint) {
+  switch (type_hint) {
+  case LIBVROOM_TYPE_AUTO:
+    return "auto";
+  case LIBVROOM_TYPE_BOOLEAN:
+    return "boolean";
+  case LIBVROOM_TYPE_INTEGER:
+    return "integer";
+  case LIBVROOM_TYPE_DOUBLE:
+    return "double";
+  case LIBVROOM_TYPE_STRING:
+    return "string";
+  case LIBVROOM_TYPE_DATE:
+    return "date";
+  case LIBVROOM_TYPE_DATETIME:
+    return "datetime";
+  case LIBVROOM_TYPE_SKIP:
+    return "skip";
+  default:
+    return "unknown";
+  }
 }

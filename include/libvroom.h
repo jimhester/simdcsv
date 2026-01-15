@@ -569,6 +569,46 @@ struct ParseOptions {
   ProgressCallback progress_callback = nullptr;
 
   /**
+   * @brief Per-column configuration overrides for value extraction.
+   *
+   * When set, these configurations are used during value extraction to
+   * override the global ExtractionConfig for specific columns. This enables:
+   * - Column-specific NA value definitions
+   * - Column-specific type hints (force integer, double, string, etc.)
+   * - Column-specific boolean true/false values
+   * - Skipping specific columns during extraction
+   *
+   * Columns can be specified by index (0-based) or by name (resolved using
+   * the header row). Name-based configurations are resolved after parsing
+   * when headers are available.
+   *
+   * @example
+   * @code
+   * ParseOptions opts;
+   * opts.column_configs.set("id", ColumnConfig::as_integer());
+   * opts.column_configs.set("price", ColumnConfig::as_double());
+   * opts.column_configs.set(5, ColumnConfig::skip());  // Skip column 5
+   *
+   * auto result = parser.parse(buf, len, opts);
+   * @endcode
+   *
+   * @see ColumnConfig for available per-column options
+   * @see ColumnConfigMap for managing column configurations
+   */
+  ColumnConfigMap column_configs;
+
+  /**
+   * @brief Global extraction configuration for value parsing.
+   *
+   * These settings apply to all columns that don't have specific overrides
+   * in column_configs. Controls NA value detection, boolean parsing,
+   * whitespace handling, and integer parsing options.
+   *
+   * @see ExtractionConfig for available options
+   */
+  ExtractionConfig extraction_config = ExtractionConfig::defaults();
+
+  /**
    * @brief Factory for default options (auto-detect dialect, fast path).
    *
    * Equivalent to standard(). Both methods create identical options.
@@ -712,6 +752,45 @@ struct ParseOptions {
   static ParseOptions with_progress(ProgressCallback callback) {
     ParseOptions opts;
     opts.progress_callback = std::move(callback);
+    return opts;
+  }
+
+  /**
+   * @brief Factory for options with per-column configuration.
+   *
+   * Creates options with per-column configuration overrides for value
+   * extraction. Use this to specify different parsing settings for
+   * specific columns.
+   *
+   * @param configs ColumnConfigMap with per-column settings
+   * @return ParseOptions configured with the column configs
+   *
+   * @example
+   * @code
+   * ColumnConfigMap configs;
+   * configs.set("id", ColumnConfig::as_integer());
+   * configs.set("price", ColumnConfig::as_double());
+   *
+   * auto result = parser.parse(buf, len, ParseOptions::with_column_configs(configs));
+   * @endcode
+   */
+  static ParseOptions with_column_configs(const ColumnConfigMap& configs) {
+    ParseOptions opts;
+    opts.column_configs = configs;
+    return opts;
+  }
+
+  /**
+   * @brief Factory for options with extraction configuration.
+   *
+   * Creates options with custom global extraction settings.
+   *
+   * @param config ExtractionConfig with parsing settings
+   * @return ParseOptions configured with the extraction config
+   */
+  static ParseOptions with_extraction_config(const ExtractionConfig& config) {
+    ParseOptions opts;
+    opts.extraction_config = config;
     return opts;
   }
 };
@@ -1424,10 +1503,20 @@ public:
     /// Internal error collector for unified error handling.
     /// Uses PERMISSIVE mode by default to collect all errors without stopping.
     ErrorCollector error_collector_{ErrorMode::PERMISSIVE};
+    /// Global extraction configuration for value parsing.
+    ExtractionConfig extraction_config_;
+    /// Per-column configuration overrides.
+    ColumnConfigMap column_configs_;
 
     void ensure_extractor() const {
       if (!extractor_ && buf_ && len_ > 0) {
-        extractor_ = std::make_unique<ValueExtractor>(buf_, len_, idx, dialect);
+        if (!column_configs_.empty()) {
+          extractor_ = std::make_unique<ValueExtractor>(buf_, len_, idx, dialect,
+                                                        extraction_config_, column_configs_);
+        } else {
+          extractor_ =
+              std::make_unique<ValueExtractor>(buf_, len_, idx, dialect, extraction_config_);
+        }
       }
     }
 
@@ -1470,6 +1559,102 @@ public:
       column_map_.clear();
       column_map_initialized_ = false;
     }
+
+    /**
+     * @brief Set extraction configuration options.
+     *
+     * This is called internally by Parser::parse() to pass configuration from
+     * ParseOptions. Users should set options on ParseOptions before parsing.
+     *
+     * @param config Global extraction configuration
+     * @param column_configs Per-column configuration overrides
+     */
+    void set_extraction_options(const ExtractionConfig& config,
+                                const ColumnConfigMap& column_configs) {
+      extraction_config_ = config;
+      column_configs_ = column_configs;
+      // Reset extractor since config changed
+      if (extractor_) {
+        extractor_.reset();
+      }
+    }
+
+    // =========================================================================
+    // Per-column configuration API
+    // =========================================================================
+
+    /**
+     * @brief Get the per-column configuration map.
+     * @return Reference to the ColumnConfigMap
+     */
+    const ColumnConfigMap& column_configs() const { return column_configs_; }
+
+    /**
+     * @brief Set per-column configuration after parsing.
+     *
+     * This allows modifying column configurations after parsing,
+     * which will affect subsequent value extraction.
+     *
+     * @param configs ColumnConfigMap with per-column settings
+     */
+    void set_column_configs(const ColumnConfigMap& configs) {
+      column_configs_ = configs;
+      // Reset extractor so new configs take effect
+      if (extractor_) {
+        extractor_.reset();
+      }
+    }
+
+    /**
+     * @brief Set configuration for a specific column by index.
+     * @param col_index 0-based column index
+     * @param config Configuration to apply
+     */
+    void set_column_config(size_t col_index, const ColumnConfig& config) {
+      column_configs_.set(col_index, config);
+      // Update extractor if it exists
+      if (extractor_) {
+        extractor_->set_column_config(col_index, config);
+      }
+    }
+
+    /**
+     * @brief Set configuration for a specific column by name.
+     * @param col_name Column name (case-sensitive)
+     * @param config Configuration to apply
+     */
+    void set_column_config(const std::string& col_name, const ColumnConfig& config) {
+      column_configs_.set(col_name, config);
+      // Update extractor if it exists
+      if (extractor_) {
+        extractor_->set_column_config(col_name, config);
+      }
+    }
+
+    /**
+     * @brief Get the type hint for a specific column.
+     * @param col_index 0-based column index
+     * @return The type hint, or TypeHint::AUTO if none is set
+     */
+    TypeHint get_type_hint(size_t col_index) const {
+      ensure_extractor();
+      return extractor_ ? extractor_->get_type_hint(col_index) : TypeHint::AUTO;
+    }
+
+    /**
+     * @brief Check if a column should be skipped during extraction.
+     * @param col_index 0-based column index
+     * @return true if the column has TypeHint::SKIP
+     */
+    bool should_skip_column(size_t col_index) const {
+      return get_type_hint(col_index) == TypeHint::SKIP;
+    }
+
+    /**
+     * @brief Get the global extraction configuration.
+     * @return Reference to ExtractionConfig
+     */
+    const ExtractionConfig& extraction_config() const { return extraction_config_; }
 
     /// @return true if parsing was successful.
     bool success() const { return successful; }
@@ -1968,6 +2153,8 @@ public:
 
           // Store buffer reference to enable row/column iteration
           result.set_buffer(buf, len);
+          // Pass extraction options from ParseOptions to Result
+          result.set_extraction_options(options.extraction_config, options.column_configs);
 
           return result;
         }
@@ -2171,6 +2358,8 @@ public:
 
     // Store buffer reference to enable row/column iteration
     result.set_buffer(buf, len);
+    // Pass extraction options from ParseOptions to Result
+    result.set_extraction_options(options.extraction_config, options.column_configs);
 
     return result;
   }

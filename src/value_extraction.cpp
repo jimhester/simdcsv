@@ -77,6 +77,36 @@ ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex&
   recalculate_num_rows();
 }
 
+ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx,
+                               const Dialect& dialect, const ExtractionConfig& config,
+                               const ColumnConfigMap& column_configs)
+    : buf_(buf), len_(len), idx_(idx), dialect_(dialect), config_(config),
+      column_configs_(column_configs) {
+  uint64_t total_indexes = 0;
+  for (uint16_t i = 0; i < idx_.n_threads; ++i)
+    total_indexes += idx_.n_indexes[i];
+  linear_indexes_.reserve(total_indexes);
+  for (uint16_t t = 0; t < idx_.n_threads; ++t)
+    for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j)
+      linear_indexes_.push_back(idx_.indexes[t + (j * idx_.n_threads)]);
+  std::sort(linear_indexes_.begin(), linear_indexes_.end());
+  size_t first_nl = 0;
+  for (size_t i = 0; i < linear_indexes_.size(); ++i) {
+    if (linear_indexes_[i] >= len_)
+      continue; // Bounds check
+    // Support LF, CRLF, and CR-only line endings
+    uint8_t c = buf_[linear_indexes_[i]];
+    if (c == '\n' || c == '\r') {
+      first_nl = i;
+      break;
+    }
+  }
+  num_columns_ = first_nl + 1;
+  recalculate_num_rows();
+  // Resolve any name-based column configs now that we have headers
+  resolve_column_configs();
+}
+
 std::string_view ValueExtractor::get_string_view(size_t row, size_t col) const {
   if (row >= num_rows_)
     throw std::out_of_range("Row index out of range");
