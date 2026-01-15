@@ -304,6 +304,10 @@ void printUsage(const char* prog) {
   cerr << "  -p, --progress  Show progress bar during parsing (auto-enabled for TTY)\n";
   cerr << "  --no-progress   Disable progress bar\n";
   cerr << "  --max-errors <n>  Maximum errors to collect (default: 10000)\n";
+  cerr << "  --skip <n>        Skip N data rows at the beginning\n";
+  cerr << "  --n-max <n>       Read at most N data rows (0 = unlimited)\n";
+  cerr << "  --comment <char>  Skip lines starting with this character\n";
+  cerr << "  --skip-empty      Skip rows containing only whitespace\n";
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
   cerr << "\nDialect Detection:\n";
@@ -366,6 +370,14 @@ struct CliCacheConfig {
   std::string cache_dir; ///< Custom cache directory (empty = same dir)
 };
 
+/// Row filtering options for CLI
+struct CliRowFilterOptions {
+  size_t skip{0};              ///< Number of data rows to skip at the beginning
+  size_t n_max{0};             ///< Maximum rows to read (0 = unlimited)
+  char comment{'\0'};          ///< Comment character ('\0' = no comment handling)
+  bool skip_empty_rows{false}; ///< Whether to skip empty rows
+};
+
 // Parse a file or stdin - returns ParseResult with RAII-managed data
 // If detected_encoding is provided, the detected encoding will be stored there
 // If strict_mode is true, exits with error on any parse warning or error
@@ -373,13 +385,16 @@ struct CliCacheConfig {
 // If cache_config is provided and enabled, enables index caching
 // If progress_callback is provided, it will be called during parsing
 // If max_errors > 0, limits the number of errors collected (0 = use default)
-ParseResult
-parseFile(const char* filename, int n_threads,
-          const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
-          libvroom::EncodingResult* detected_encoding = nullptr, bool strict_mode = false,
-          libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
-          const CliCacheConfig* cache_config = nullptr,
-          libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
+// If row_filter is provided, applies row filtering options
+ParseResult parseFile(const char* filename, int n_threads,
+                      const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
+                      bool auto_detect = false,
+                      libvroom::EncodingResult* detected_encoding = nullptr,
+                      bool strict_mode = false,
+                      libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
+                      const CliCacheConfig* cache_config = nullptr,
+                      libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0,
+                      const CliRowFilterOptions* row_filter = nullptr) {
   ParseResult result;
 
   try {
@@ -452,6 +467,14 @@ parseFile(const char* filename, int n_threads,
   // Set up progress callback if provided
   if (progress_callback) {
     options.progress_callback = progress_callback;
+  }
+
+  // Apply row filtering options if provided
+  if (row_filter != nullptr) {
+    options.skip = row_filter->skip;
+    options.n_max = row_filter->n_max;
+    options.comment = row_filter->comment;
+    options.skip_empty_rows = row_filter->skip_empty_rows;
   }
 
   auto parse_result = parser.parse(result.load_result.data(), result.load_result.size, options);
@@ -757,9 +780,10 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
             bool strict_mode = false,
             libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
             const CliCacheConfig* cache_config = nullptr,
-            libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
+            libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0,
+            const CliRowFilterOptions* row_filter = nullptr) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config, progress_callback, max_errors);
+                          forced_encoding, cache_config, progress_callback, max_errors, row_filter);
   if (!result.success)
     return 1;
 
@@ -951,9 +975,10 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
               unsigned int seed = 0, bool strict_mode = false,
               libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
               const CliCacheConfig* cache_config = nullptr,
-              libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
+              libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0,
+              const CliRowFilterOptions* row_filter = nullptr) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config, progress_callback, max_errors);
+                          forced_encoding, cache_config, progress_callback, max_errors, row_filter);
   if (!result.success)
     return 1;
 
@@ -1020,9 +1045,10 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
               bool strict_mode = false,
               libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
               const CliCacheConfig* cache_config = nullptr,
-              libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
+              libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0,
+              const CliRowFilterOptions* row_filter = nullptr) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config, progress_callback, max_errors);
+                          forced_encoding, cache_config, progress_callback, max_errors, row_filter);
   if (!result.success)
     return 1;
 
@@ -1113,9 +1139,10 @@ int cmdInfo(const char* filename, int n_threads, bool has_header,
             bool strict_mode = false,
             libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
             const CliCacheConfig* cache_config = nullptr,
-            libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
+            libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0,
+            const CliRowFilterOptions* row_filter = nullptr) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config, progress_callback, max_errors);
+                          forced_encoding, cache_config, progress_callback, max_errors, row_filter);
   if (!result.success)
     return 1;
 
@@ -1153,9 +1180,10 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
               bool strict_mode = false,
               libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
               const CliCacheConfig* cache_config = nullptr,
-              libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
+              libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0,
+              const CliRowFilterOptions* row_filter = nullptr) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config, progress_callback, max_errors);
+                          forced_encoding, cache_config, progress_callback, max_errors, row_filter);
   if (!result.success)
     return 1;
 
@@ -2175,6 +2203,7 @@ int main(int argc, char* argv[]) {
   size_t rows_per_location = 100;       // Rows per location for distributed sampling
   size_t max_errors = 0;                // Maximum errors to collect (0 = use default of 10000)
   CliCacheConfig cache_config;          // Index caching configuration
+  CliRowFilterOptions row_filter;       // Row filtering options
   // Progress bar: auto-enabled for TTY by default, can be overridden by --progress/--no-progress
   bool progress_auto = true;     // Use automatic TTY detection
   bool progress_enabled = false; // Explicit override value
@@ -2361,6 +2390,89 @@ int main(int argc, char* argv[]) {
       }
       argc -= 2;
       --i;
+    } else if (strncmp(argv[i], "--skip=", 7) == 0) {
+      char* endptr;
+      long val = strtol(argv[i] + 7, &endptr, 10);
+      if (*endptr != '\0' || val < 0) {
+        cerr << "Error: Invalid skip value '" << (argv[i] + 7) << "'\n";
+        return 1;
+      }
+      row_filter.skip = static_cast<size_t>(val);
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i;
+    } else if (strcmp(argv[i], "--skip") == 0 && i + 1 < argc) {
+      char* endptr;
+      long val = strtol(argv[i + 1], &endptr, 10);
+      if (*endptr != '\0' || val < 0) {
+        cerr << "Error: Invalid skip value '" << argv[i + 1] << "'\n";
+        return 1;
+      }
+      row_filter.skip = static_cast<size_t>(val);
+      for (int j = i; j < argc - 2; ++j) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      --i;
+    } else if (strncmp(argv[i], "--n-max=", 8) == 0) {
+      char* endptr;
+      long val = strtol(argv[i] + 8, &endptr, 10);
+      if (*endptr != '\0' || val < 0) {
+        cerr << "Error: Invalid n-max value '" << (argv[i] + 8) << "'\n";
+        return 1;
+      }
+      row_filter.n_max = static_cast<size_t>(val);
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i;
+    } else if (strcmp(argv[i], "--n-max") == 0 && i + 1 < argc) {
+      char* endptr;
+      long val = strtol(argv[i + 1], &endptr, 10);
+      if (*endptr != '\0' || val < 0) {
+        cerr << "Error: Invalid n-max value '" << argv[i + 1] << "'\n";
+        return 1;
+      }
+      row_filter.n_max = static_cast<size_t>(val);
+      for (int j = i; j < argc - 2; ++j) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      --i;
+    } else if (strncmp(argv[i], "--comment=", 10) == 0) {
+      const char* val = argv[i] + 10;
+      if (strlen(val) != 1) {
+        cerr << "Error: Comment must be a single character, got '" << val << "'\n";
+        return 1;
+      }
+      row_filter.comment = val[0];
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i;
+    } else if (strcmp(argv[i], "--comment") == 0 && i + 1 < argc) {
+      const char* val = argv[i + 1];
+      if (strlen(val) != 1) {
+        cerr << "Error: Comment must be a single character, got '" << val << "'\n";
+        return 1;
+      }
+      row_filter.comment = val[0];
+      for (int j = i; j < argc - 2; ++j) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      --i;
+    } else if (strcmp(argv[i], "--skip-empty") == 0) {
+      row_filter.skip_empty_rows = true;
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i;
     }
   }
 
@@ -2499,7 +2611,7 @@ int main(int argc, char* argv[]) {
     result = cmdCount(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "head") {
     result = cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
-                     forced_encoding, &cache_config, progress_cb, max_errors);
+                     forced_encoding, &cache_config, progress_cb, max_errors, &row_filter);
     progress_bar.finish();
   } else if (command == "tail") {
     // Note: tail uses streaming API which doesn't support caching or progress yet
@@ -2507,7 +2619,8 @@ int main(int argc, char* argv[]) {
                      forced_encoding);
   } else if (command == "sample") {
     result = cmdSample(filename, n_threads, num_rows, has_header, dialect, auto_detect, random_seed,
-                       strict_mode, forced_encoding, &cache_config, progress_cb, max_errors);
+                       strict_mode, forced_encoding, &cache_config, progress_cb, max_errors,
+                       &row_filter);
     progress_bar.finish();
   } else if (command == "select") {
     if (columns.empty()) {
@@ -2515,15 +2628,15 @@ int main(int argc, char* argv[]) {
       return 1;
     }
     result = cmdSelect(filename, n_threads, columns, has_header, dialect, auto_detect, strict_mode,
-                       forced_encoding, &cache_config, progress_cb, max_errors);
+                       forced_encoding, &cache_config, progress_cb, max_errors, &row_filter);
     progress_bar.finish();
   } else if (command == "info") {
     result = cmdInfo(filename, n_threads, has_header, dialect, auto_detect, strict_mode,
-                     forced_encoding, &cache_config, progress_cb, max_errors);
+                     forced_encoding, &cache_config, progress_cb, max_errors, &row_filter);
     progress_bar.finish();
   } else if (command == "pretty") {
     result = cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
-                       forced_encoding, &cache_config, progress_cb, max_errors);
+                       forced_encoding, &cache_config, progress_cb, max_errors, &row_filter);
     progress_bar.finish();
   } else if (command == "dialect") {
     // Note: dialect command ignores -d, --strict, and -e flags since it's for detection
