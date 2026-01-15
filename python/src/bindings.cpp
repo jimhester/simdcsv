@@ -1097,6 +1097,25 @@ public:
     return result;
   }
 
+  // Get a LazyColumn for a specific column
+  libvroom::LazyColumn get_lazy_column(size_t col) const {
+    if (col >= data_->effective_num_columns()) {
+      throw py::index_error("Column index out of range");
+    }
+    size_t underlying_col = data_->map_column_index(col);
+    return data_->result.get_lazy_column(underlying_col);
+  }
+
+  // Get a LazyColumn by name
+  libvroom::LazyColumn get_lazy_column_by_name(const std::string& name) const {
+    auto it = std::find(data_->column_names.begin(), data_->column_names.end(), name);
+    if (it == data_->column_names.end()) {
+      throw py::key_error("Column not found: " + name);
+    }
+    size_t logical_idx = static_cast<size_t>(std::distance(data_->column_names.begin(), it));
+    return get_lazy_column(logical_idx);
+  }
+
 private:
   std::shared_ptr<TableData> data_;
 };
@@ -2346,6 +2365,128 @@ PYBIND11_MODULE(_core, m) {
   m.attr("ParseError") = py::handle(ParseError);
   m.attr("IOError") = py::handle(IOError_custom);
 
+  // FieldSpan class - represents byte boundaries for a CSV field
+  py::class_<libvroom::FieldSpan>(m, "FieldSpan", R"doc(
+Byte boundaries for a CSV field in the source buffer.
+
+FieldSpan provides the byte range for a single CSV field, enabling
+efficient value extraction without re-parsing the entire file. This
+is useful for implementing lazy/deferred parsing patterns.
+
+Attributes
+----------
+start : int
+    Byte offset of field start (inclusive).
+end : int
+    Byte offset of field end (exclusive, at delimiter/newline).
+
+Examples
+--------
+>>> import vroom_csv
+>>> table = vroom_csv.read_csv("data.csv")
+>>> lazy_col = table.get_lazy_column(0)
+>>> span = lazy_col.get_bounds(0)
+>>> print(f"Field at bytes [{span.start}, {span.end})")
+>>> print(f"Length: {span.length()} bytes")
+)doc")
+      .def_readonly("start", &libvroom::FieldSpan::start, "Byte offset of field start (inclusive)")
+      .def_readonly("end", &libvroom::FieldSpan::end,
+                    "Byte offset of field end (exclusive, at delimiter/newline)")
+      .def("length", &libvroom::FieldSpan::length, "Get the field length in bytes")
+      .def("is_valid", &libvroom::FieldSpan::is_valid, "Check if the span is valid")
+      .def("__repr__",
+           [](const libvroom::FieldSpan& span) {
+             std::ostringstream ss;
+             if (span.is_valid()) {
+               ss << "FieldSpan(start=" << span.start << ", end=" << span.end
+                  << ", length=" << span.length() << ")";
+             } else {
+               ss << "FieldSpan(invalid)";
+             }
+             return ss.str();
+           })
+      .def("__bool__", &libvroom::FieldSpan::is_valid);
+
+  // LazyColumn class - provides lazy per-row access to a column
+  py::class_<libvroom::LazyColumn>(m, "LazyColumn", R"doc(
+Lazy column accessor for ALTREP-style deferred field parsing.
+
+LazyColumn provides per-column lazy access to CSV data without loading
+or parsing the entire column upfront. This is particularly useful for
+implementing R's ALTREP pattern where columns are only parsed when
+accessed.
+
+Key features:
+- **Random access**: O(n_threads) access to any row via indexing
+- **Byte range access**: get_bounds() returns raw byte ranges for deferred parsing
+- **Zero-copy views**: Returns views into the original buffer
+
+Note: The underlying buffer and index must remain valid for the lifetime
+of the LazyColumn.
+
+Examples
+--------
+>>> import vroom_csv
+>>> table = vroom_csv.read_csv("data.csv")
+>>> lazy_col = table.get_lazy_column(0)
+>>>
+>>> # Check size
+>>> print(f"Column has {len(lazy_col)} rows")
+>>>
+>>> # Random access a value
+>>> value = lazy_col[100]
+>>> print(f"Row 100: {value}")
+>>>
+>>> # Get byte bounds for deferred parsing
+>>> span = lazy_col.get_bounds(100)
+>>> if span:
+...     print(f"Bytes [{span.start}, {span.end})")
+)doc")
+      .def("__len__", &libvroom::LazyColumn::size, "Get the number of rows in the column")
+      .def("size", &libvroom::LazyColumn::size, "Get the number of rows in the column")
+      .def("empty", &libvroom::LazyColumn::empty, "Check if the column is empty")
+      .def("column_index", &libvroom::LazyColumn::column_index, "Get the column index (0-based)")
+      .def("has_header", &libvroom::LazyColumn::has_header, "Check if the column has a header")
+      .def(
+          "__getitem__",
+          [](const libvroom::LazyColumn& col, size_t row) -> std::string {
+            if (row >= col.size()) {
+              throw py::index_error("Row index out of range");
+            }
+            return std::string(col[row]);
+          },
+          py::arg("row"), "Get the string value at a row index")
+      .def(
+          "__getitem__",
+          [](const libvroom::LazyColumn& col, py::slice slice) -> std::vector<std::string> {
+            size_t start, stop, step, slicelength;
+            if (!slice.compute(col.size(), &start, &stop, &step, &slicelength)) {
+              throw py::error_already_set();
+            }
+            std::vector<std::string> result;
+            result.reserve(slicelength);
+            for (size_t i = 0; i < slicelength; ++i) {
+              result.push_back(std::string(col[start + i * step]));
+            }
+            return result;
+          },
+          py::arg("slice"), "Get a slice of values")
+      .def("get_bounds", &libvroom::LazyColumn::get_bounds, py::arg("row"),
+           "Get byte boundaries for a row (for deferred parsing)")
+      .def("get_string", &libvroom::LazyColumn::get_string, py::arg("row"),
+           "Get unescaped string value at a row (handles quote escaping)")
+      .def("__repr__",
+           [](const libvroom::LazyColumn& col) {
+             std::ostringstream ss;
+             ss << "LazyColumn(column=" << col.column_index() << ", size=" << col.size()
+                << ", has_header=" << (col.has_header() ? "True" : "False") << ")";
+             return ss.str();
+           })
+      .def(
+          "__iter__",
+          [](const libvroom::LazyColumn& col) { return py::make_iterator(col.begin(), col.end()); },
+          py::keep_alive<0, 1>(), "Iterate over column values");
+
   // Dialect class
   py::class_<Dialect>(m, "Dialect", R"doc(
 CSV dialect configuration and detection result.
@@ -2428,7 +2569,12 @@ Examples
       // Error handling
       .def("has_errors", &Table::has_errors, "Check if any parse errors occurred")
       .def("error_summary", &Table::error_summary, "Get summary of parse errors")
-      .def("errors", &Table::errors, "Get list of all parse error messages");
+      .def("errors", &Table::errors, "Get list of all parse error messages")
+      // Lazy column access
+      .def("get_lazy_column", &Table::get_lazy_column, py::arg("index"),
+           "Get a LazyColumn for lazy per-row access to a column by index")
+      .def("get_lazy_column", &Table::get_lazy_column_by_name, py::arg("name"),
+           "Get a LazyColumn for lazy per-row access to a column by name");
 
   // RowIterator class for streaming row-by-row iteration
   py::class_<RowIterator>(m, "RowIterator", R"doc(

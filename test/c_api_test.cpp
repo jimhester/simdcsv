@@ -1887,3 +1887,322 @@ TEST_F(CAPITest, IndexSerializationMultipleWriteRead) {
   libvroom_index_destroy(idx1);
   libvroom_index_destroy(idx2);
 }
+
+// ============================================================================
+// FieldSpan Tests
+// ============================================================================
+
+TEST_F(CAPITest, FieldSpanIsValid) {
+  // Valid span
+  libvroom_field_span_t valid = {0, 10};
+  EXPECT_TRUE(libvroom_field_span_is_valid(valid));
+
+  // Invalid spans
+  libvroom_field_span_t invalid1 = {LIBVROOM_FIELD_SPAN_INVALID, 10};
+  EXPECT_FALSE(libvroom_field_span_is_valid(invalid1));
+
+  libvroom_field_span_t invalid2 = {0, LIBVROOM_FIELD_SPAN_INVALID};
+  EXPECT_FALSE(libvroom_field_span_is_valid(invalid2));
+
+  libvroom_field_span_t invalid3 = {LIBVROOM_FIELD_SPAN_INVALID, LIBVROOM_FIELD_SPAN_INVALID};
+  EXPECT_FALSE(libvroom_field_span_is_valid(invalid3));
+}
+
+TEST_F(CAPITest, FieldSpanLength) {
+  libvroom_field_span_t span = {5, 15};
+  EXPECT_EQ(libvroom_field_span_length(span), 10u);
+
+  libvroom_field_span_t empty_span = {5, 5};
+  EXPECT_EQ(libvroom_field_span_length(empty_span), 0u);
+
+  libvroom_field_span_t invalid = {LIBVROOM_FIELD_SPAN_INVALID, LIBVROOM_FIELD_SPAN_INVALID};
+  EXPECT_EQ(libvroom_field_span_length(invalid), 0u);
+}
+
+TEST_F(CAPITest, IndexGetFieldSpan) {
+  // CSV: "a,b,c\n1,2,3\n"
+  //       0123456789...
+  const uint8_t data[] = "a,b,c\n1,2,3\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_dialect_t* dialect = libvroom_dialect_create(',', '"', '"', true);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, dialect);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Test get_field_span with global index
+  // First field should be "a" starting at 0
+  libvroom_field_span_t span0 = libvroom_index_get_field_span(index, 0);
+  EXPECT_TRUE(libvroom_field_span_is_valid(span0));
+  EXPECT_EQ(span0.start, 0u);
+
+  // Test out of bounds returns invalid
+  libvroom_field_span_t out_of_bounds = libvroom_index_get_field_span(index, 1000);
+  EXPECT_FALSE(libvroom_field_span_is_valid(out_of_bounds));
+
+  // Test null pointer handling
+  libvroom_field_span_t null_result = libvroom_index_get_field_span(nullptr, 0);
+  EXPECT_FALSE(libvroom_field_span_is_valid(null_result));
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, IndexGetFieldSpanRowCol) {
+  // CSV: "name,value\nalpha,1\nbeta,2\n"
+  const uint8_t data[] = "name,value\nalpha,1\nbeta,2\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_dialect_t* dialect = libvroom_dialect_create(',', '"', '"', true);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, dialect);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Get field at row 0 (header), column 0 = "name"
+  libvroom_field_span_t span_0_0 = libvroom_index_get_field_span_rc(index, 0, 0);
+  EXPECT_TRUE(libvroom_field_span_is_valid(span_0_0));
+  EXPECT_EQ(span_0_0.start, 0u);
+  EXPECT_EQ(span_0_0.end, 4u); // "name" = 4 chars
+
+  // Get field at row 1 (data), column 0 = "alpha"
+  libvroom_field_span_t span_1_0 = libvroom_index_get_field_span_rc(index, 1, 0);
+  EXPECT_TRUE(libvroom_field_span_is_valid(span_1_0));
+
+  // Get field at row 1 (data), column 1 = "1"
+  libvroom_field_span_t span_1_1 = libvroom_index_get_field_span_rc(index, 1, 1);
+  EXPECT_TRUE(libvroom_field_span_is_valid(span_1_1));
+
+  // Test null pointer handling
+  libvroom_field_span_t null_result = libvroom_index_get_field_span_rc(nullptr, 0, 0);
+  EXPECT_FALSE(libvroom_field_span_is_valid(null_result));
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+// ============================================================================
+// LazyColumn Tests
+// ============================================================================
+
+TEST_F(CAPITest, LazyColumnCreate) {
+  const uint8_t data[] = "name,value\nalpha,1\nbeta,2\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_dialect_t* dialect = libvroom_dialect_create(',', '"', '"', true);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, dialect);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Create lazy column for column 0 (with header)
+  libvroom_lazy_column_t* col = libvroom_lazy_column_create(buffer, index, 0, true, dialect);
+  ASSERT_NE(col, nullptr);
+
+  // Should have 2 data rows (excluding header)
+  EXPECT_EQ(libvroom_lazy_column_size(col), 2u);
+  EXPECT_FALSE(libvroom_lazy_column_empty(col));
+  EXPECT_EQ(libvroom_lazy_column_index(col), 0u);
+
+  libvroom_lazy_column_destroy(col);
+  libvroom_dialect_destroy(dialect);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, LazyColumnCreateNullHandling) {
+  const uint8_t data[] = "a,b\n1,2\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+
+  // Null buffer should return nullptr
+  EXPECT_EQ(libvroom_lazy_column_create(nullptr, index, 0, true, nullptr), nullptr);
+
+  // Null index should return nullptr
+  EXPECT_EQ(libvroom_lazy_column_create(buffer, nullptr, 0, true, nullptr), nullptr);
+
+  // Destroy with nullptr should be safe
+  libvroom_lazy_column_destroy(nullptr);
+
+  libvroom_index_destroy(index);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, LazyColumnGetBounds) {
+  const uint8_t data[] = "name,value\nalpha,1\nbeta,2\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_dialect_t* dialect = libvroom_dialect_create(',', '"', '"', true);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, dialect);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  libvroom_lazy_column_t* col = libvroom_lazy_column_create(buffer, index, 0, true, dialect);
+  ASSERT_NE(col, nullptr);
+
+  // Get bounds for row 0 (first data row, "alpha")
+  libvroom_field_span_t span0 = libvroom_lazy_column_get_bounds(col, 0);
+  EXPECT_TRUE(libvroom_field_span_is_valid(span0));
+
+  // Get bounds for row 1 (second data row, "beta")
+  libvroom_field_span_t span1 = libvroom_lazy_column_get_bounds(col, 1);
+  EXPECT_TRUE(libvroom_field_span_is_valid(span1));
+
+  // Out of bounds should return invalid span
+  libvroom_field_span_t out_of_bounds = libvroom_lazy_column_get_bounds(col, 100);
+  EXPECT_FALSE(libvroom_field_span_is_valid(out_of_bounds));
+
+  // Null column should return invalid span
+  libvroom_field_span_t null_col = libvroom_lazy_column_get_bounds(nullptr, 0);
+  EXPECT_FALSE(libvroom_field_span_is_valid(null_col));
+
+  libvroom_lazy_column_destroy(col);
+  libvroom_dialect_destroy(dialect);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, LazyColumnGetString) {
+  const uint8_t data[] = "name,value\nalpha,1\nbeta,2\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_dialect_t* dialect = libvroom_dialect_create(',', '"', '"', true);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, dialect);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  libvroom_lazy_column_t* col = libvroom_lazy_column_create(buffer, index, 0, true, dialect);
+  ASSERT_NE(col, nullptr);
+
+  // Get string for row 0 ("alpha")
+  size_t length = 0;
+  const char* str0 = libvroom_lazy_column_get_string(col, 0, &length);
+  EXPECT_NE(str0, nullptr);
+  EXPECT_EQ(length, 5u);
+  EXPECT_EQ(std::string_view(str0, length), "alpha");
+
+  // Get string for row 1 ("beta")
+  const char* str1 = libvroom_lazy_column_get_string(col, 1, &length);
+  EXPECT_NE(str1, nullptr);
+  EXPECT_EQ(length, 4u);
+  EXPECT_EQ(std::string_view(str1, length), "beta");
+
+  // Test with nullptr length
+  const char* str_no_len = libvroom_lazy_column_get_string(col, 0, nullptr);
+  EXPECT_NE(str_no_len, nullptr);
+
+  // Out of bounds should return nullptr
+  const char* out_of_bounds = libvroom_lazy_column_get_string(col, 100, &length);
+  EXPECT_EQ(out_of_bounds, nullptr);
+  EXPECT_EQ(length, 0u);
+
+  // Null column should return nullptr
+  const char* null_col = libvroom_lazy_column_get_string(nullptr, 0, &length);
+  EXPECT_EQ(null_col, nullptr);
+
+  libvroom_lazy_column_destroy(col);
+  libvroom_dialect_destroy(dialect);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, LazyColumnWithoutHeader) {
+  // Test lazy column when has_header is false
+  const uint8_t data[] = "alpha,1\nbeta,2\ngamma,3\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_dialect_t* dialect = libvroom_dialect_create(',', '"', '"', true);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, dialect);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Create lazy column without header flag
+  libvroom_lazy_column_t* col = libvroom_lazy_column_create(buffer, index, 0, false, dialect);
+  ASSERT_NE(col, nullptr);
+
+  // Should have 3 rows (all rows are data rows)
+  EXPECT_EQ(libvroom_lazy_column_size(col), 3u);
+
+  // First row should be "alpha"
+  size_t length = 0;
+  const char* str0 = libvroom_lazy_column_get_string(col, 0, &length);
+  EXPECT_NE(str0, nullptr);
+  EXPECT_EQ(std::string_view(str0, length), "alpha");
+
+  libvroom_lazy_column_destroy(col);
+  libvroom_dialect_destroy(dialect);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, LazyColumnQuotedFields) {
+  // Test lazy column with quoted fields
+  const uint8_t data[] = "name,desc\n\"John\",\"Hello, World\"\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_dialect_t* dialect = libvroom_dialect_create(',', '"', '"', true);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, dialect);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Create lazy column for column 0 (names)
+  libvroom_lazy_column_t* col0 = libvroom_lazy_column_create(buffer, index, 0, true, dialect);
+  ASSERT_NE(col0, nullptr);
+
+  // Get string should strip outer quotes
+  size_t length = 0;
+  const char* str = libvroom_lazy_column_get_string(col0, 0, &length);
+  EXPECT_NE(str, nullptr);
+  EXPECT_EQ(std::string_view(str, length), "John");
+
+  // Create lazy column for column 1 (desc with comma in quoted field)
+  libvroom_lazy_column_t* col1 = libvroom_lazy_column_create(buffer, index, 1, true, dialect);
+  ASSERT_NE(col1, nullptr);
+
+  const char* desc = libvroom_lazy_column_get_string(col1, 0, &length);
+  EXPECT_NE(desc, nullptr);
+  EXPECT_EQ(std::string_view(desc, length), "Hello, World");
+
+  libvroom_lazy_column_destroy(col1);
+  libvroom_lazy_column_destroy(col0);
+  libvroom_dialect_destroy(dialect);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, LazyColumnEmptyFunctions) {
+  // Test empty/size/index functions with null
+  EXPECT_TRUE(libvroom_lazy_column_empty(nullptr));
+  EXPECT_EQ(libvroom_lazy_column_size(nullptr), 0u);
+  EXPECT_EQ(libvroom_lazy_column_index(nullptr), 0u);
+}
