@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -276,6 +277,46 @@ public:
   ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx, const Dialect& dialect,
                  const ExtractionConfig& config, const ColumnConfigMap& column_configs);
 
+  /**
+   * Constructor with shared ParseIndex ownership for buffer lifetime safety.
+   *
+   * This constructor accepts a shared_ptr to a ParseIndex, enabling safe sharing
+   * of the underlying data between multiple consumers. The buffer data is obtained
+   * from the ParseIndex's shared buffer reference.
+   *
+   * Use this constructor when:
+   * - The ValueExtractor may outlive the original ParseIndex
+   * - Multiple consumers need concurrent access to the same parsed data
+   * - Implementing lazy column access (e.g., R's ALTREP)
+   *
+   * @param shared_idx Shared pointer to a ParseIndex with buffer set
+   * @param dialect CSV dialect settings
+   * @param config Global extraction configuration
+   *
+   * @throws std::invalid_argument if shared_idx is null or has no buffer
+   *
+   * @example
+   * @code
+   * // Parse and set up shared buffer
+   * auto buffer = std::make_shared<std::vector<uint8_t>>(data, data + len);
+   * auto result = parser.parse(buffer->data(), buffer->size());
+   * result.idx.set_buffer(buffer);
+   *
+   * // Create shared index and extractor
+   * auto shared_idx = result.idx.share();
+   * ValueExtractor extractor(shared_idx, dialect, config);
+   *
+   * // Original ParseIndex can be moved/destroyed safely
+   * result = {};  // Destroy original
+   *
+   * // Extractor still works - it holds shared references
+   * auto value = extractor.get<double>(0, 0);
+   * @endcode
+   */
+  ValueExtractor(std::shared_ptr<const ParseIndex> shared_idx,
+                 const Dialect& dialect = Dialect::csv(),
+                 const ExtractionConfig& config = ExtractionConfig::defaults());
+
   size_t num_rows() const { return num_rows_; }
   size_t num_columns() const { return num_columns_; }
   bool has_header() const { return has_header_; }
@@ -469,7 +510,7 @@ public:
 private:
   const uint8_t* buf_;
   size_t len_;
-  const ParseIndex& idx_;
+  const ParseIndex* idx_ptr_; // Non-owning pointer (from reference constructor)
   Dialect dialect_;
   ExtractionConfig config_;
   ColumnConfigMap column_configs_;
@@ -478,8 +519,15 @@ private:
   bool has_header_ = true;
   std::vector<uint64_t> linear_indexes_;
 
+  // Shared ownership members for buffer lifetime safety
+  std::shared_ptr<const ParseIndex> shared_idx_;              // Owns ParseIndex when shared
+  std::shared_ptr<const std::vector<uint8_t>> shared_buffer_; // Owns buffer when shared
+
   // Cache of resolved configs (merged with global config) for fast lookup
   mutable std::unordered_map<size_t, ExtractionConfig> resolved_configs_;
+
+  // Helper to get the ParseIndex (works for both ownership modes)
+  const ParseIndex& idx() const { return shared_idx_ ? *shared_idx_ : *idx_ptr_; }
 
   std::string_view get_string_view_internal(size_t row, size_t col) const;
   size_t compute_field_index(size_t row, size_t col) const;

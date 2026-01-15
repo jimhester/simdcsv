@@ -1003,6 +1003,24 @@ add_dependencies(index_cache_test copy_test_data)
 # Register index cache tests with CTest
 gtest_discover_tests(index_cache_test)
 
+# Buffer lifetime test executable
+add_executable(buffer_lifetime_test
+    test/buffer_lifetime_test.cpp
+)
+
+target_link_libraries(buffer_lifetime_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(buffer_lifetime_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Register buffer lifetime tests with CTest
+gtest_discover_tests(buffer_lifetime_test)
+
 # Arrow output test (only if Arrow is enabled)
 if(LIBVROOM_ENABLE_ARROW)
     add_executable(arrow_output_test test/arrow_output_test.cpp)
