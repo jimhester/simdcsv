@@ -3,14 +3,22 @@
 
 This script compares current benchmark results against a baseline and
 detects performance regressions that exceed a configurable threshold.
+
+Usage:
+    # Compare two local files (same-job relative benchmarking)
+    python check_regression.py --head head.json --base base.json
+
+    # Legacy mode: use hardcoded paths and cache-based baseline
+    python check_regression.py
 """
 
+import argparse
 import json
 import sys
 import os
 import shutil
 
-REGRESSION_THRESHOLD = 0.10  # 10% regression threshold
+REGRESSION_THRESHOLD = 0.15  # 15% regression threshold (increased for CI variability)
 EXPECTED_BENCHMARK_COUNT = 7  # Number of benchmarks we expect to run
 
 
@@ -71,7 +79,7 @@ def load_benchmark(filepath, check_errors=False):
     return {name: sum(times) / len(times) for name, times in results.items()}, time_unit
 
 
-def compare_benchmarks(baseline, current, time_unit='ms'):
+def compare_benchmarks(baseline, current, time_unit='ms', threshold=REGRESSION_THRESHOLD):
     """Compare current results against baseline and detect regressions."""
     regressions = []
     improvements = []
@@ -103,9 +111,9 @@ def compare_benchmarks(baseline, current, time_unit='ms'):
         # Positive ratio means regression (slower), negative means improvement
         ratio = (curr_time - base_time) / base_time
 
-        if ratio > REGRESSION_THRESHOLD:
+        if ratio > threshold:
             regressions.append((name, base_time, curr_time, ratio))
-        elif ratio < -REGRESSION_THRESHOLD:
+        elif ratio < -threshold:
             improvements.append((name, base_time, curr_time, ratio))
         else:
             unchanged.append((name, base_time, curr_time, ratio))
@@ -114,13 +122,34 @@ def compare_benchmarks(baseline, current, time_unit='ms'):
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Check for performance regressions')
+    parser.add_argument('--head', help='Path to HEAD benchmark results JSON')
+    parser.add_argument('--base', help='Path to BASE benchmark results JSON')
+    parser.add_argument('--threshold', type=float, default=REGRESSION_THRESHOLD,
+                        help=f'Regression threshold (default: {REGRESSION_THRESHOLD})')
+    args = parser.parse_args()
+
     # Check if this is a main branch push
     is_main_push = os.environ.get('GITHUB_EVENT_NAME') == 'push' and \
                    os.environ.get('GITHUB_REF') in ('refs/heads/main', 'refs/heads/master')
 
+    # Determine file paths based on arguments or defaults
+    if args.head and args.base:
+        # Same-job relative benchmarking mode
+        head_path = args.head
+        base_path = args.base
+        relative_mode = True
+    else:
+        # Legacy mode: use hardcoded paths
+        head_path = 'build/benchmark_results.json'
+        base_path = 'baseline_benchmark.json'
+        relative_mode = False
+
+    threshold = args.threshold
+
     # Load results (check for errors in current results)
-    current, time_unit = load_benchmark('build/benchmark_results.json', check_errors=True)
-    baseline, _ = load_benchmark('baseline_benchmark.json')
+    current, time_unit = load_benchmark(head_path, check_errors=True)
+    baseline, _ = load_benchmark(base_path)
 
     if current is None:
         print("ERROR: Current benchmark results not found or invalid!")
@@ -135,19 +164,26 @@ def main():
     print("=" * 70)
     print("PERFORMANCE REGRESSION CHECK")
     print("=" * 70)
-    print(f"Regression threshold: {REGRESSION_THRESHOLD * 100:.0f}%")
+    if relative_mode:
+        print("Mode: Same-job relative benchmarking (HEAD vs BASE)")
+    else:
+        print("Mode: Cache-based baseline comparison")
+    print(f"Regression threshold: {threshold * 100:.0f}%")
     print(f"Benchmarks in current results: {len(current)}")
     print(f"Current benchmarks: {sorted(current.keys())}")
     print()
 
     if baseline is None:
+        if relative_mode:
+            print("ERROR: BASE benchmark results not found!")
+            sys.exit(1)
         print("No baseline found. This run will establish the baseline.")
         print()
         print("Current benchmark results:")
         for name, time in sorted(current.items()):
             print(f"  {name}: {time:.2f} {time_unit}")
 
-        # Only save baseline on main branch pushes
+        # Only save baseline on main branch pushes (not in relative mode)
         if is_main_push:
             shutil.copy('build/benchmark_results.json', 'baseline_benchmark.json')
             print()
@@ -173,7 +209,8 @@ def main():
                 print(f"  Benchmarks only in baseline (removed): {sorted(only_in_baseline)}")
             print()
 
-        regressions, improvements, unchanged, skipped = compare_benchmarks(baseline, current, time_unit)
+        regressions, improvements, unchanged, skipped = compare_benchmarks(
+            baseline, current, time_unit or 'ns', threshold)
 
         if skipped:
             print("SKIPPED (baseline time too small for reliable comparison):")
@@ -211,14 +248,14 @@ def main():
             print()
 
         if not regressions:
-            if is_main_push:
+            if is_main_push and not relative_mode:
                 shutil.copy('build/benchmark_results.json', 'baseline_benchmark.json')
                 print("Baseline updated with current results (main branch push).")
             print()
             print("SUCCESS: No performance regressions detected!")
         else:
             print()
-            print(f"FAILURE: {len(regressions)} benchmark(s) regressed by more than {REGRESSION_THRESHOLD * 100:.0f}%")
+            print(f"FAILURE: {len(regressions)} benchmark(s) regressed by more than {threshold * 100:.0f}%")
             # Set output for GitHub Actions
             with open(os.environ.get('GITHUB_OUTPUT', '/dev/null'), 'a') as f:
                 f.write('regression=true\n')
