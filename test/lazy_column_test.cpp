@@ -537,6 +537,75 @@ TEST_F(LazyColumnTest, LazyAccessDoesNotParseAll) {
   EXPECT_EQ(col.get<int64_t>(99).get(), 99);
 }
 
+// ============================================================================
+// Column Bounds Validation Tests
+// ============================================================================
+
+TEST_F(LazyColumnTest, MakeLazyColumnThrowsOnInvalidColumn) {
+  ParseCSV("a,b,c\n1,2,3\n");
+
+  // Valid columns (0, 1, 2) should not throw
+  EXPECT_NO_THROW(make_lazy_column(buffer_->data(), buffer_->size(), idx(), 0, true));
+  EXPECT_NO_THROW(make_lazy_column(buffer_->data(), buffer_->size(), idx(), 1, true));
+  EXPECT_NO_THROW(make_lazy_column(buffer_->data(), buffer_->size(), idx(), 2, true));
+
+  // Invalid column (3) should throw
+  EXPECT_THROW(make_lazy_column(buffer_->data(), buffer_->size(), idx(), 3, true),
+               std::out_of_range);
+
+  // Very large column should throw
+  EXPECT_THROW(make_lazy_column(buffer_->data(), buffer_->size(), idx(), 100, true),
+               std::out_of_range);
+}
+
+TEST_F(LazyColumnTest, MakeLazyColumnUncheckedDoesNotThrow) {
+  ParseCSV("a,b,c\n1,2,3\n");
+
+  // Valid columns should work normally
+  EXPECT_NO_THROW(make_lazy_column_unchecked(buffer_->data(), buffer_->size(), idx(), 0, true));
+
+  // Invalid column should NOT throw - behavior is undefined but shouldn't crash
+  EXPECT_NO_THROW(make_lazy_column_unchecked(buffer_->data(), buffer_->size(), idx(), 100, true));
+}
+
+TEST_F(LazyColumnTest, MakeLazyColumnErrorMessageIncludesColumnInfo) {
+  ParseCSV("a,b,c\n1,2,3\n");
+
+  try {
+    make_lazy_column(buffer_->data(), buffer_->size(), idx(), 5, true);
+    FAIL() << "Expected std::out_of_range exception";
+  } catch (const std::out_of_range& e) {
+    std::string msg = e.what();
+    // Error message should include the invalid column index
+    EXPECT_NE(msg.find("5"), std::string::npos) << "Error message should contain column index 5";
+    // Error message should include the actual number of columns
+    EXPECT_NE(msg.find("3"), std::string::npos) << "Error message should contain columns = 3";
+  }
+}
+
+TEST_F(LazyColumnTest, ConstructorValidateBoundsParameter) {
+  ParseCSV("a,b\n1,2\n");
+
+  // With validate_bounds=true (default), invalid column should throw
+  EXPECT_THROW(LazyColumn(buffer_->data(), buffer_->size(), idx(), 10, true, Dialect::csv(),
+                          ExtractionConfig::defaults(), true),
+               std::out_of_range);
+
+  // With validate_bounds=false, invalid column should not throw
+  EXPECT_NO_THROW(LazyColumn(buffer_->data(), buffer_->size(), idx(), 10, true, Dialect::csv(),
+                             ExtractionConfig::defaults(), false));
+}
+
+TEST_F(LazyColumnTest, BoundsValidationWithZeroColumns) {
+  // Parse an empty/minimal CSV that results in 0 columns
+  // An empty CSV with no data results in idx.columns = 0
+  ParseCSV("");
+
+  // Any column index should be invalid when columns = 0
+  EXPECT_THROW(make_lazy_column(buffer_->data(), buffer_->size(), idx(), 0, true),
+               std::out_of_range);
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
