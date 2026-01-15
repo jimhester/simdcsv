@@ -191,15 +191,18 @@ Automatically detects performance regressions on every push and PR.
 **How it Works:**
 1. Builds the benchmark executable in Release mode
 2. Runs a subset of benchmarks from `parser_overhead_benchmarks.cpp`:
-   - `BM_RawFirstPass` - Raw SIMD scanning performance
-   - `BM_ParserWithExplicitDialect` - Full parser overhead
+   - `BM_RawFirstPass` - Raw SIMD first pass scanning performance
+   - `BM_RawTwoPassComplete` - Complete two-pass index building
+   - `BM_ParserWithExplicitDialect` - Full parser overhead with known dialect
+   - `BM_ParserBranchless` - Branchless algorithm variant
+   - `BM_ParserSpeculative` - Speculative multi-threaded algorithm
    - `BM_ParserMultiThread/1` - Single-threaded parser
-   - `BM_ParserMultiThread/4` - Multi-threaded parser
+   - `BM_ParserMultiThread/4` - Multi-threaded parser (4 threads)
 3. Compares results against a cached baseline (from main branch)
 4. Fails if any benchmark regresses by more than 10%
 
 **Baseline Management:**
-- Baseline is cached per-OS with a version key (e.g., `benchmark-baseline-v2-Linux-main`)
+- Baseline is cached per-OS with a version key (e.g., `benchmark-baseline-v3-Linux-main`)
 - On main branch pushes, the baseline is updated with current results
 - PRs compare against the cached main branch baseline
 - If benchmark names change, increment the cache version in `benchmark.yml`

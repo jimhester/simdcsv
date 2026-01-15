@@ -56,13 +56,16 @@ jobs:
         # Run benchmarks from parser_overhead_benchmarks.cpp which use generated data
         # (500K rows x 10 cols, ~32MB) - larger size for stable timing (see issue #508)
         #
-        # Selected benchmarks:
-        # - BM_RawFirstPass: Raw SIMD scanning performance
-        # - BM_ParserWithExplicitDialect: Full parser overhead
+        # Selected benchmarks for regression detection:
+        # - BM_RawFirstPass: Raw SIMD first pass scanning performance
+        # - BM_RawTwoPassComplete: Complete two-pass index building (first + second pass)
+        # - BM_ParserWithExplicitDialect: Full parser overhead with known dialect
+        # - BM_ParserBranchless: Branchless algorithm variant
+        # - BM_ParserSpeculative: Speculative multi-threaded algorithm
         # - BM_ParserMultiThread/1: Single-threaded parser
-        # - BM_ParserMultiThread/4: Multi-threaded parser
+        # - BM_ParserMultiThread/4: Multi-threaded parser (4 threads)
         ./build/libvroom_benchmark \
-          --benchmark_filter="BM_RawFirstPass|BM_ParserWithExplicitDialect|BM_ParserMultiThread/1$|BM_ParserMultiThread/4$" \
+          --benchmark_filter="BM_RawFirstPass$|BM_RawTwoPassComplete|BM_ParserWithExplicitDialect|BM_ParserBranchless|BM_ParserSpeculative|BM_ParserMultiThread/1$|BM_ParserMultiThread/4$" \
           --benchmark_repetitions=3 \
           --benchmark_min_time=0.5s \
           --benchmark_out=build/benchmark_results.json \
@@ -75,9 +78,9 @@ jobs:
         path: baseline_benchmark.json
         # Cache key includes version to allow resetting baseline when benchmarks change
         # Increment version (v2, v3, etc.) when benchmark names or methodology changes
-        key: benchmark-baseline-v2-${{ runner.os }}-main
+        key: benchmark-baseline-v3-${{ runner.os }}-main
         restore-keys: |
-          benchmark-baseline-v2-${{ runner.os }}-main
+          benchmark-baseline-v3-${{ runner.os }}-main
 
     - name: Compare benchmarks and detect regression
       id: compare
@@ -89,7 +92,7 @@ jobs:
       with:
         path: baseline_benchmark.json
         # Must match the key used in restore step above
-        key: benchmark-baseline-v2-${{ runner.os }}-main
+        key: benchmark-baseline-v3-${{ runner.os }}-main
 
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4

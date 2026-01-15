@@ -11,7 +11,7 @@ import os
 import shutil
 
 REGRESSION_THRESHOLD = 0.10  # 10% regression threshold
-EXPECTED_BENCHMARK_COUNT = 4  # Number of benchmarks we expect to run
+EXPECTED_BENCHMARK_COUNT = 7  # Number of benchmarks we expect to run
 
 
 def load_benchmark(filepath, check_errors=False):
