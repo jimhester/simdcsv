@@ -54,24 +54,29 @@ void ParseIndex::write(const std::string& filename) {
   }
 
   // Write indexes: linearize from per-thread regions to contiguous format.
-  // region_size > 0 means per-thread regions, region_size == 0 means already contiguous.
+  // Determine where each thread's data is stored:
+  // - region_offsets != nullptr: per-thread right-sized regions (from init_counted_per_thread)
+  // - region_size > 0: uniform per-thread regions (from init/init_counted)
+  // - otherwise: already contiguous layout (from deserialized cache)
   for (uint16_t t = 0; t < n_threads; ++t) {
-    uint64_t* thread_base = (region_size > 0) ? (indexes + t * region_size) : nullptr;
-    if (region_size > 0) {
-      if (std::fwrite(thread_base, sizeof(uint64_t), n_indexes[t], fp) != n_indexes[t]) {
-        std::fclose(fp);
-        throw std::runtime_error("error writing index2");
-      }
+    uint64_t* thread_base;
+    if (region_offsets != nullptr) {
+      // Right-sized per-thread regions
+      thread_base = indexes + region_offsets[t];
+    } else if (region_size > 0) {
+      // Uniform per-thread regions
+      thread_base = indexes + t * region_size;
     } else {
       // Already contiguous: compute offset for this thread
       size_t offset = 0;
       for (uint16_t i = 0; i < t; ++i) {
         offset += n_indexes[i];
       }
-      if (std::fwrite(indexes + offset, sizeof(uint64_t), n_indexes[t], fp) != n_indexes[t]) {
-        std::fclose(fp);
-        throw std::runtime_error("error writing index2");
-      }
+      thread_base = indexes + offset;
+    }
+    if (std::fwrite(thread_base, sizeof(uint64_t), n_indexes[t], fp) != n_indexes[t]) {
+      std::fclose(fp);
+      throw std::runtime_error("error writing index2");
     }
   }
 
@@ -263,25 +268,31 @@ void ParseIndex::write(const std::string& filename, const SourceMetadata& source
     success = success && (std::fwrite(n_indexes, sizeof(uint64_t), n_threads, fp) == n_threads);
 
     // Write indexes array: linearize from per-thread regions to contiguous format.
-    // region_size > 0 means per-thread regions, region_size == 0 means already contiguous.
+    // Determine where each thread's data is stored:
+    // - region_offsets != nullptr: per-thread right-sized regions (from init_counted_per_thread)
+    // - region_size > 0: uniform per-thread regions (from init/init_counted)
+    // - otherwise: already contiguous layout (from deserialized cache)
     if (indexes != nullptr) {
       for (uint16_t t = 0; t < n_threads && success; ++t) {
         if (n_indexes[t] == 0)
           continue;
-        if (region_size > 0) {
-          // Per-thread regions: write from thread's region
-          uint64_t* thread_base = indexes + t * region_size;
-          success = success &&
-                    (std::fwrite(thread_base, sizeof(uint64_t), n_indexes[t], fp) == n_indexes[t]);
+        uint64_t* thread_base;
+        if (region_offsets != nullptr) {
+          // Right-sized per-thread regions
+          thread_base = indexes + region_offsets[t];
+        } else if (region_size > 0) {
+          // Uniform per-thread regions
+          thread_base = indexes + t * region_size;
         } else {
           // Already contiguous: compute offset for this thread
           size_t offset = 0;
           for (uint16_t i = 0; i < t; ++i) {
             offset += n_indexes[i];
           }
-          success = success && (std::fwrite(indexes + offset, sizeof(uint64_t), n_indexes[t], fp) ==
-                                n_indexes[t]);
+          thread_base = indexes + offset;
         }
+        success = success &&
+                  (std::fwrite(thread_base, sizeof(uint64_t), n_indexes[t], fp) == n_indexes[t]);
       }
     }
   }
@@ -651,8 +662,11 @@ uint64_t TwoPass::second_pass_chunk(const uint8_t* buf, size_t start, size_t end
                                     char delimiter, char quote_char, char comment_char) {
   uint64_t pos = start;
   size_t n_indexes = 0;
-  // Use contiguous per-thread storage: start at thread_id * region_size
-  size_t i = thread_id * out->region_size;
+  // Use contiguous per-thread storage.
+  // Use region_offsets if available (per-thread right-sized allocation),
+  // otherwise fall back to uniform region_size.
+  size_t i = out->region_offsets != nullptr ? out->region_offsets[thread_id]
+                                            : thread_id * out->region_size;
   csv_state s = RECORD_START;
   bool at_line_start = true; // Track if we're at the start of a line
 
@@ -766,8 +780,11 @@ uint64_t TwoPass::second_pass_chunk_throwing(const uint8_t* buf, size_t start, s
                                              char quote_char, char comment_char) {
   uint64_t pos = start;
   size_t n_indexes = 0;
-  // Use contiguous per-thread storage: start at thread_id * region_size
-  size_t i = thread_id * out->region_size;
+  // Use contiguous per-thread storage.
+  // Use region_offsets if available (per-thread right-sized allocation),
+  // otherwise fall back to uniform region_size.
+  size_t i = out->region_offsets != nullptr ? out->region_offsets[thread_id]
+                                            : thread_id * out->region_size;
   csv_state s = RECORD_START;
   bool at_line_start = true; // Track if we're at the start of a line
 
@@ -1068,7 +1085,10 @@ TwoPass::branchless_chunk_result TwoPass::second_pass_branchless_chunk_with_erro
   branchless_chunk_result result;
   result.errors.set_mode(mode);
   // Calculate per-thread base pointer for contiguous storage
-  uint64_t* thread_base = out->indexes + thread_id * out->region_size;
+  // Use region_offsets if available (per-thread right-sized allocation)
+  uint64_t* thread_base = out->region_offsets != nullptr
+                              ? out->indexes + out->region_offsets[thread_id]
+                              : out->indexes + thread_id * out->region_size;
   // Use SIMD-optimized version for better performance
   result.n_indexes = second_pass_simd_branchless_with_errors(
       sm, buf, start, end, thread_base, thread_id, out->n_threads, &result.errors, total_len);
@@ -1973,6 +1993,148 @@ ParseIndex TwoPass::init_counted_safe(uint64_t total_separators, size_t n_thread
   }
 
   out.indexes_ptr_ = std::make_unique<uint64_t[]>(allocation_size);
+  out.indexes = out.indexes_ptr_.get();
+
+  return out;
+}
+
+ParseIndex TwoPass::init_counted_per_thread(const std::vector<uint64_t>& thread_separator_counts,
+                                            size_t n_threads, size_t padding_per_thread) {
+  ParseIndex out;
+  // Ensure at least 1 thread for valid memory allocation
+  if (n_threads == 0)
+    n_threads = 1;
+
+  // Validate vector size matches n_threads
+  if (thread_separator_counts.size() != n_threads) {
+    throw std::runtime_error("thread_separator_counts size (" +
+                             std::to_string(thread_separator_counts.size()) +
+                             ") must match n_threads (" + std::to_string(n_threads) + ")");
+  }
+
+  out.n_threads = n_threads;
+
+  // Allocate n_indexes array with RAII ownership
+  out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.n_indexes = out.n_indexes_ptr_.get();
+
+  // Allocate chunk_starts array with RAII ownership
+  out.chunk_starts_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.chunk_starts = out.chunk_starts_ptr_.get();
+  for (size_t i = 0; i < n_threads; ++i) {
+    out.chunk_starts[i] = 0;
+  }
+
+  // Allocate region_offsets array with RAII ownership
+  out.region_offsets_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.region_offsets = out.region_offsets_ptr_.get();
+
+  // Calculate total allocation and per-thread offsets
+  // Each thread gets: its separator count + padding
+  uint64_t total_allocation = 0;
+  for (size_t t = 0; t < n_threads; ++t) {
+    out.region_offsets[t] = total_allocation;
+    total_allocation += thread_separator_counts[t] + padding_per_thread;
+  }
+
+  // Set region_size to 0 to indicate per-thread variable sizing
+  // (readers should use region_offsets instead)
+  out.region_size = 0;
+
+  // Allocate indexes array with RAII ownership
+  out.indexes_ptr_ = std::make_unique<uint64_t[]>(static_cast<size_t>(total_allocation));
+  out.indexes = out.indexes_ptr_.get();
+
+  return out;
+}
+
+ParseIndex
+TwoPass::init_counted_per_thread_safe(const std::vector<uint64_t>& thread_separator_counts,
+                                      size_t n_threads, ErrorCollector* errors,
+                                      size_t padding_per_thread) {
+  ParseIndex out;
+  // Ensure at least 1 thread for valid memory allocation
+  if (n_threads == 0)
+    n_threads = 1;
+
+  // Validate vector size matches n_threads
+  if (thread_separator_counts.size() != n_threads) {
+    std::string msg = "thread_separator_counts size (" +
+                      std::to_string(thread_separator_counts.size()) + ") must match n_threads (" +
+                      std::to_string(n_threads) + ")";
+    if (errors != nullptr) {
+      errors->add_error(ErrorCode::INTERNAL_ERROR, ErrorSeverity::FATAL, 1, 1, 0, msg);
+      return out;
+    } else {
+      throw std::runtime_error(msg);
+    }
+  }
+
+  out.n_threads = n_threads;
+
+  // Calculate total allocation with overflow checking
+  uint64_t total_allocation = 0;
+  bool overflow = false;
+
+  for (size_t t = 0; t < n_threads && !overflow; ++t) {
+    uint64_t count = thread_separator_counts[t];
+    // Check count + padding overflow
+    if (count > std::numeric_limits<uint64_t>::max() - padding_per_thread) {
+      overflow = true;
+      break;
+    }
+    uint64_t padded_count = count + padding_per_thread;
+
+    // Check accumulation overflow
+    if (total_allocation > std::numeric_limits<uint64_t>::max() - padded_count) {
+      overflow = true;
+      break;
+    }
+    total_allocation += padded_count;
+  }
+
+  // Check final allocation: total_allocation * sizeof(uint64_t)
+  if (!overflow && total_allocation > std::numeric_limits<size_t>::max() / sizeof(uint64_t)) {
+    overflow = true;
+  }
+
+  if (overflow) {
+    std::string msg = "Index allocation would overflow: n_threads=" + std::to_string(n_threads);
+    if (errors != nullptr) {
+      errors->add_error(ErrorCode::INDEX_ALLOCATION_OVERFLOW, ErrorSeverity::FATAL, 1, 1, 0, msg);
+      return out;
+    } else {
+      throw std::runtime_error(msg);
+    }
+  }
+
+  // Safe to allocate - use RAII to ensure proper cleanup
+  out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.n_indexes = out.n_indexes_ptr_.get();
+
+  // Allocate chunk_starts array with RAII ownership
+  out.chunk_starts_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.chunk_starts = out.chunk_starts_ptr_.get();
+  for (size_t i = 0; i < n_threads; ++i) {
+    out.chunk_starts[i] = 0;
+  }
+
+  // Allocate region_offsets array with RAII ownership
+  out.region_offsets_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.region_offsets = out.region_offsets_ptr_.get();
+
+  // Calculate per-thread offsets
+  uint64_t offset = 0;
+  for (size_t t = 0; t < n_threads; ++t) {
+    out.region_offsets[t] = offset;
+    offset += thread_separator_counts[t] + padding_per_thread;
+  }
+
+  // Set region_size to 0 to indicate per-thread variable sizing
+  out.region_size = 0;
+
+  // Allocate indexes array with RAII ownership
+  out.indexes_ptr_ = std::make_unique<uint64_t[]>(static_cast<size_t>(total_allocation));
   out.indexes = out.indexes_ptr_.get();
 
   return out;

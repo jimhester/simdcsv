@@ -204,6 +204,193 @@ TEST(IndexAllocationTest, AcceptsNormalSize) {
 }
 
 // ============================================================================
+// PER-THREAD RIGHT-SIZED ALLOCATION TESTS (Issue #573)
+// ============================================================================
+
+TEST(InitCountedPerThreadTest, BasicAllocation) {
+  TwoPass parser;
+
+  // Simulate per-thread separator counts from first pass
+  std::vector<uint64_t> counts = {100, 150, 80, 120}; // 4 threads
+  size_t n_threads = 4;
+
+  auto idx = parser.init_counted_per_thread(counts, n_threads);
+
+  EXPECT_NE(idx.indexes, nullptr);
+  EXPECT_NE(idx.n_indexes, nullptr);
+  EXPECT_NE(idx.region_offsets, nullptr);
+  EXPECT_EQ(idx.n_threads, n_threads);
+  // region_size should be 0 when using region_offsets
+  EXPECT_EQ(idx.region_size, 0);
+
+  // Verify region_offsets are correctly calculated
+  // Each region is count + padding (default 8)
+  EXPECT_EQ(idx.region_offsets[0], 0);
+  EXPECT_EQ(idx.region_offsets[1], 100 + 8);
+  EXPECT_EQ(idx.region_offsets[2], 100 + 8 + 150 + 8);
+  EXPECT_EQ(idx.region_offsets[3], 100 + 8 + 150 + 8 + 80 + 8);
+}
+
+TEST(InitCountedPerThreadTest, SingleThread) {
+  TwoPass parser;
+
+  std::vector<uint64_t> counts = {500};
+  auto idx = parser.init_counted_per_thread(counts, 1);
+
+  EXPECT_NE(idx.indexes, nullptr);
+  EXPECT_NE(idx.region_offsets, nullptr);
+  EXPECT_EQ(idx.n_threads, 1);
+  EXPECT_EQ(idx.region_offsets[0], 0);
+}
+
+TEST(InitCountedPerThreadTest, CustomPadding) {
+  TwoPass parser;
+
+  std::vector<uint64_t> counts = {100, 200};
+  size_t padding = 16;
+  auto idx = parser.init_counted_per_thread(counts, 2, padding);
+
+  EXPECT_EQ(idx.region_offsets[0], 0);
+  EXPECT_EQ(idx.region_offsets[1], 100 + 16);
+}
+
+TEST(InitCountedPerThreadTest, ZeroCounts) {
+  TwoPass parser;
+
+  // Some threads might find no separators in their chunk
+  std::vector<uint64_t> counts = {0, 100, 0, 50};
+  auto idx = parser.init_counted_per_thread(counts, 4);
+
+  EXPECT_NE(idx.indexes, nullptr);
+  EXPECT_EQ(idx.region_offsets[0], 0);
+  EXPECT_EQ(idx.region_offsets[1], 0 + 8); // padding only
+  EXPECT_EQ(idx.region_offsets[2], 8 + 100 + 8);
+  EXPECT_EQ(idx.region_offsets[3], 8 + 108 + 0 + 8);
+}
+
+TEST(InitCountedPerThreadTest, MismatchedCountsThrows) {
+  TwoPass parser;
+
+  // Vector size doesn't match n_threads
+  std::vector<uint64_t> counts = {100, 200};
+  EXPECT_THROW({ parser.init_counted_per_thread(counts, 4); }, std::runtime_error);
+}
+
+TEST(InitCountedPerThreadSafeTest, BasicAllocation) {
+  TwoPass parser;
+
+  std::vector<uint64_t> counts = {100, 150, 80, 120};
+  auto idx = parser.init_counted_per_thread_safe(counts, 4);
+
+  EXPECT_NE(idx.indexes, nullptr);
+  EXPECT_NE(idx.region_offsets, nullptr);
+  EXPECT_EQ(idx.n_threads, 4);
+}
+
+TEST(InitCountedPerThreadSafeTest, OverflowWithErrorCollector) {
+  TwoPass parser;
+  ErrorCollector errors(ErrorMode::PERMISSIVE);
+
+  // Create counts that would overflow when summed
+  std::vector<uint64_t> counts = {std::numeric_limits<uint64_t>::max() - 10,
+                                  std::numeric_limits<uint64_t>::max() - 10};
+  auto idx = parser.init_counted_per_thread_safe(counts, 2, &errors);
+
+  EXPECT_EQ(idx.indexes, nullptr);
+  EXPECT_TRUE(errors.has_fatal_errors());
+  EXPECT_EQ(errors.errors()[0].code, ErrorCode::INDEX_ALLOCATION_OVERFLOW);
+}
+
+TEST(InitCountedPerThreadSafeTest, MismatchedCountsWithErrorCollector) {
+  TwoPass parser;
+  ErrorCollector errors(ErrorMode::PERMISSIVE);
+
+  // Vector size doesn't match n_threads
+  std::vector<uint64_t> counts = {100, 200};
+  auto idx = parser.init_counted_per_thread_safe(counts, 4, &errors);
+
+  EXPECT_EQ(idx.indexes, nullptr);
+  EXPECT_TRUE(errors.has_fatal_errors());
+}
+
+TEST(InitCountedPerThreadSafeTest, ThrowsOnMismatchWithoutCollector) {
+  TwoPass parser;
+
+  std::vector<uint64_t> counts = {100, 200};
+  EXPECT_THROW({ parser.init_counted_per_thread_safe(counts, 4, nullptr); }, std::runtime_error);
+}
+
+TEST(InitCountedPerThreadTest, ThreadDataAccess) {
+  TwoPass parser;
+
+  // Create an index with per-thread regions
+  std::vector<uint64_t> counts = {3, 2, 4}; // 3 threads with different counts
+  auto idx = parser.init_counted_per_thread(counts, 3);
+
+  // Simulate writing data to each thread's region
+  // Thread 0: region starts at 0
+  idx.indexes[idx.region_offsets[0] + 0] = 10;
+  idx.indexes[idx.region_offsets[0] + 1] = 20;
+  idx.indexes[idx.region_offsets[0] + 2] = 30;
+  idx.n_indexes[0] = 3;
+
+  // Thread 1: region starts at 3 + 8 = 11
+  idx.indexes[idx.region_offsets[1] + 0] = 40;
+  idx.indexes[idx.region_offsets[1] + 1] = 50;
+  idx.n_indexes[1] = 2;
+
+  // Thread 2: region starts at 11 + 2 + 8 = 21
+  idx.indexes[idx.region_offsets[2] + 0] = 60;
+  idx.indexes[idx.region_offsets[2] + 1] = 70;
+  idx.indexes[idx.region_offsets[2] + 2] = 80;
+  idx.indexes[idx.region_offsets[2] + 3] = 90;
+  idx.n_indexes[2] = 4;
+
+  // Verify thread_data() returns correct views
+  auto view0 = idx.thread_data(0);
+  EXPECT_EQ(view0.size(), 3);
+  EXPECT_EQ(view0[0], 10);
+  EXPECT_EQ(view0[1], 20);
+  EXPECT_EQ(view0[2], 30);
+
+  auto view1 = idx.thread_data(1);
+  EXPECT_EQ(view1.size(), 2);
+  EXPECT_EQ(view1[0], 40);
+  EXPECT_EQ(view1[1], 50);
+
+  auto view2 = idx.thread_data(2);
+  EXPECT_EQ(view2.size(), 4);
+  EXPECT_EQ(view2[0], 60);
+  EXPECT_EQ(view2[1], 70);
+  EXPECT_EQ(view2[2], 80);
+  EXPECT_EQ(view2[3], 90);
+}
+
+TEST(InitCountedPerThreadTest, MemorySavingsCalculation) {
+  // Demonstrate memory savings of right-sized allocation
+  // For a file with 10000 separators distributed across 4 threads:
+  // - Old approach: 10000 * 4 = 40000 slots (each thread gets full capacity)
+  // - New approach: 2500 + 2500 + 2500 + 2500 + 32 (padding) = 10032 slots
+  // This is ~75% memory reduction!
+
+  TwoPass parser;
+
+  // Simulate 10000 separators evenly distributed across 4 threads
+  std::vector<uint64_t> counts = {2500, 2500, 2500, 2500};
+
+  auto idx = parser.init_counted_per_thread(counts, 4);
+
+  // Verify total allocation is close to actual count (plus padding)
+  uint64_t total_allocation = idx.region_offsets[3] + counts[3] + 8;
+  EXPECT_EQ(total_allocation, 10000 + 4 * 8); // 10032 slots
+
+  // Compare to old approach which would allocate:
+  // region_size = total_separators + 8 = 10008
+  // allocation = region_size * n_threads = 10008 * 4 = 40032 slots
+  // Savings = 1 - (10032 / 40032) = ~75%
+}
+
+// ============================================================================
 // STREAMING PARSER FIELD SIZE TESTS
 // ============================================================================
 

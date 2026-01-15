@@ -642,7 +642,7 @@ public:
   /**
    * @brief Get the parse index reference.
    */
-  const ParseIndex& index() const { return idx_; }
+  const ParseIndex& index() const { return idx(); }
 
   /**
    * @brief Get the dialect.
@@ -664,7 +664,7 @@ public:
     if (col >= num_columns_) {
       throw std::out_of_range("Column index out of range");
     }
-    return LazyColumn(buf_, len_, idx_, col, has_header_, dialect_, config_);
+    return LazyColumn(buf_, len_, idx(), col, has_header_, dialect_, config_);
   }
 
   std::string_view get_string_view(size_t row, size_t col) const;
