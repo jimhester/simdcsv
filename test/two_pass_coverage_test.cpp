@@ -2863,6 +2863,326 @@ TEST_F(SpeculationValidationTest, FallbackProducesCorrectResults) {
   EXPECT_EQ(total_spec, total_two);
 }
 
+// ============================================================================
+// FIELDSPAN AND THREAD_DATA TESTS
+// ============================================================================
+
+class FieldSpanTest : public ::testing::Test {
+protected:
+  std::vector<uint8_t> makeBuffer(const std::string& content) {
+    std::vector<uint8_t> buf(content.size() + LIBVROOM_PADDING);
+    std::memcpy(buf.data(), content.data(), content.size());
+    return buf;
+  }
+};
+
+TEST_F(FieldSpanTest, FieldSpanDefaultConstructor) {
+  FieldSpan span;
+  EXPECT_FALSE(span.is_valid());
+  EXPECT_EQ(span.start, null_pos);
+  EXPECT_EQ(span.end, null_pos);
+  EXPECT_EQ(span.length(), 0);
+}
+
+TEST_F(FieldSpanTest, FieldSpanExplicitConstructor) {
+  FieldSpan span(10, 20);
+  EXPECT_TRUE(span.is_valid());
+  EXPECT_EQ(span.start, 10);
+  EXPECT_EQ(span.end, 20);
+  EXPECT_EQ(span.length(), 10);
+}
+
+TEST_F(FieldSpanTest, IndexViewBasicOperations) {
+  std::vector<uint64_t> data = {1, 2, 3, 4, 5};
+  IndexView view(data.data(), data.size());
+
+  EXPECT_EQ(view.size(), 5);
+  EXPECT_FALSE(view.empty());
+  EXPECT_EQ(view[0], 1);
+  EXPECT_EQ(view[4], 5);
+
+  // Test iterators
+  uint64_t sum = 0;
+  for (auto val : view) {
+    sum += val;
+  }
+  EXPECT_EQ(sum, 15);
+}
+
+TEST_F(FieldSpanTest, IndexViewEmptyView) {
+  IndexView view;
+  EXPECT_EQ(view.size(), 0);
+  EXPECT_TRUE(view.empty());
+  EXPECT_EQ(view.data(), nullptr);
+}
+
+TEST_F(FieldSpanTest, ThreadDataSingleThread) {
+  std::string content = "a,b,c\n1,2,3\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  parser.parse(buf.data(), idx, content.size());
+
+  // Should have separators at positions: 1,3,5,7,9,11 (commas and newlines)
+  auto view = idx.thread_data(0);
+  EXPECT_FALSE(view.empty());
+  EXPECT_EQ(view.size(), idx.n_indexes[0]);
+
+  // Verify first separator is the first comma
+  EXPECT_EQ(view[0], 1); // position of first ','
+}
+
+TEST_F(FieldSpanTest, ThreadDataOutOfBounds) {
+  std::string content = "a,b\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  parser.parse(buf.data(), idx, content.size());
+
+  // Request thread 5 when only 1 thread exists
+  auto view = idx.thread_data(5);
+  EXPECT_TRUE(view.empty());
+}
+
+TEST_F(FieldSpanTest, ThreadDataMultiThread) {
+  // Create a larger CSV to test multi-threaded parsing
+  std::string content;
+  for (int i = 0; i < 100; i++) {
+    content += "field1,field2,field3\n";
+  }
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 4);
+  parser.parse(buf.data(), idx, content.size());
+
+  // Verify all threads have data
+  uint64_t total = 0;
+  for (uint16_t t = 0; t < idx.n_threads; t++) {
+    auto view = idx.thread_data(t);
+    EXPECT_EQ(view.size(), idx.n_indexes[t]);
+    total += view.size();
+  }
+  EXPECT_EQ(total, idx.total_indexes());
+}
+
+TEST_F(FieldSpanTest, TotalIndexes) {
+  std::string content = "a,b,c\n1,2,3\n4,5,6\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  parser.parse(buf.data(), idx, content.size());
+
+  uint64_t total = idx.total_indexes();
+  EXPECT_GT(total, 0);
+  EXPECT_EQ(total, idx.n_indexes[0]); // Single-threaded
+}
+
+TEST_F(FieldSpanTest, GetFieldSpanFirstField) {
+  // CSV: "hello,world\n"
+  //       01234567891011
+  // Field 0: start=0, end=5 (at comma)
+  std::string content = "hello,world\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  parser.parse(buf.data(), idx, content.size());
+
+  FieldSpan span = idx.get_field_span(0);
+  EXPECT_TRUE(span.is_valid());
+  EXPECT_EQ(span.start, 0);
+  EXPECT_EQ(span.end, 5); // Position of first comma
+  EXPECT_EQ(span.length(), 5);
+
+  // Verify field content
+  std::string field(reinterpret_cast<const char*>(buf.data() + span.start), span.length());
+  EXPECT_EQ(field, "hello");
+}
+
+TEST_F(FieldSpanTest, GetFieldSpanSecondField) {
+  // CSV: "hello,world\n"
+  std::string content = "hello,world\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  parser.parse(buf.data(), idx, content.size());
+
+  FieldSpan span = idx.get_field_span(1);
+  EXPECT_TRUE(span.is_valid());
+  EXPECT_EQ(span.start, 6); // After the comma
+  EXPECT_EQ(span.end, 11);  // Position of newline
+  EXPECT_EQ(span.length(), 5);
+
+  // Verify field content
+  std::string field(reinterpret_cast<const char*>(buf.data() + span.start), span.length());
+  EXPECT_EQ(field, "world");
+}
+
+TEST_F(FieldSpanTest, GetFieldSpanMultipleRows) {
+  // CSV: "a,b\nc,d\n"
+  //       01234567
+  // Row 0: Field 0 (a): start=0, end=1; Field 1 (b): start=2, end=3
+  // Row 1: Field 2 (c): start=4, end=5; Field 3 (d): start=6, end=7
+  std::string content = "a,b\nc,d\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  idx.columns = 2;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Test each field
+  FieldSpan span0 = idx.get_field_span(0);
+  EXPECT_TRUE(span0.is_valid());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf.data() + span0.start), span0.length()),
+            "a");
+
+  FieldSpan span1 = idx.get_field_span(1);
+  EXPECT_TRUE(span1.is_valid());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf.data() + span1.start), span1.length()),
+            "b");
+
+  FieldSpan span2 = idx.get_field_span(2);
+  EXPECT_TRUE(span2.is_valid());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf.data() + span2.start), span2.length()),
+            "c");
+
+  FieldSpan span3 = idx.get_field_span(3);
+  EXPECT_TRUE(span3.is_valid());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf.data() + span3.start), span3.length()),
+            "d");
+}
+
+TEST_F(FieldSpanTest, GetFieldSpanByRowCol) {
+  // CSV: "a,b,c\n1,2,3\n"
+  std::string content = "a,b,c\n1,2,3\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  idx.columns = 3;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Test (0, 0) -> "a"
+  FieldSpan span00 = idx.get_field_span(0, 0);
+  EXPECT_TRUE(span00.is_valid());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf.data() + span00.start), span00.length()),
+            "a");
+
+  // Test (0, 2) -> "c"
+  FieldSpan span02 = idx.get_field_span(0, 2);
+  EXPECT_TRUE(span02.is_valid());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf.data() + span02.start), span02.length()),
+            "c");
+
+  // Test (1, 1) -> "2"
+  FieldSpan span11 = idx.get_field_span(1, 1);
+  EXPECT_TRUE(span11.is_valid());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf.data() + span11.start), span11.length()),
+            "2");
+}
+
+TEST_F(FieldSpanTest, GetFieldSpanByRowColNoColumns) {
+  std::string content = "a,b\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  // Don't set columns - should return invalid span
+  parser.parse(buf.data(), idx, content.size());
+
+  FieldSpan span = idx.get_field_span(0, 0);
+  EXPECT_FALSE(span.is_valid());
+}
+
+TEST_F(FieldSpanTest, GetFieldSpanOutOfBounds) {
+  std::string content = "a,b\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  parser.parse(buf.data(), idx, content.size());
+
+  // Request field way beyond the end
+  FieldSpan span = idx.get_field_span(1000);
+  EXPECT_FALSE(span.is_valid());
+}
+
+TEST_F(FieldSpanTest, GetFieldSpanColumnOutOfBounds) {
+  std::string content = "a,b\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  idx.columns = 2;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Request column 5 when only 2 columns
+  FieldSpan span = idx.get_field_span(0, 5);
+  EXPECT_FALSE(span.is_valid());
+}
+
+TEST_F(FieldSpanTest, GetFieldSpanEmptyIndex) {
+  ParseIndex idx;
+  FieldSpan span = idx.get_field_span(0);
+  EXPECT_FALSE(span.is_valid());
+}
+
+TEST_F(FieldSpanTest, ChunkStartsPopulated) {
+  std::string content;
+  for (int i = 0; i < 100; i++) {
+    content += "field1,field2,field3\n";
+  }
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 4);
+  parser.parse(buf.data(), idx, content.size());
+
+  // chunk_starts should be allocated and populated
+  EXPECT_NE(idx.chunk_starts, nullptr);
+
+  // First chunk always starts at 0
+  EXPECT_EQ(idx.chunk_starts[0], 0);
+
+  // chunk_starts should be increasing
+  for (uint16_t t = 1; t < idx.n_threads; t++) {
+    EXPECT_GT(idx.chunk_starts[t], idx.chunk_starts[t - 1]);
+  }
+}
+
+TEST_F(FieldSpanTest, GetFieldSpanMultiThreaded) {
+  // Create larger content to ensure multi-threaded parsing
+  std::string content;
+  for (int i = 0; i < 200; i++) {
+    content += "field" + std::to_string(i) + ",value" + std::to_string(i) + "\n";
+  }
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 4);
+  idx.columns = 2;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Test first field
+  FieldSpan span0 = idx.get_field_span(0);
+  EXPECT_TRUE(span0.is_valid());
+  std::string field0(reinterpret_cast<const char*>(buf.data() + span0.start), span0.length());
+  EXPECT_EQ(field0, "field0");
+
+  // Test some field in the middle
+  FieldSpan span100 = idx.get_field_span(100);
+  EXPECT_TRUE(span100.is_valid());
+  // Field 100 is row 50, column 0 -> "field50"
+  std::string field100(reinterpret_cast<const char*>(buf.data() + span100.start), span100.length());
+  EXPECT_EQ(field100, "field50");
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
