@@ -232,25 +232,26 @@ private:
     }
     merged_indexes_.reserve(total);
 
-    // Collect all indexes handling two possible layouts:
-    // - region_size > 0: Per-thread regions at indexes[t * region_size]
-    // - region_size == 0: Contiguous layout from deserialization
-    if (idx_.region_size > 0) {
-      // Per-thread regions
-      for (int t = 0; t < idx_.n_threads; ++t) {
-        uint64_t* thread_base = idx_.indexes + t * idx_.region_size;
-        for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j) {
-          merged_indexes_.push_back(thread_base[j]);
+    // Collect all indexes handling three possible layouts:
+    // - region_offsets != nullptr: Right-sized per-thread regions (from init_counted_per_thread)
+    // - region_size > 0: Uniform per-thread regions at indexes[t * region_size]
+    // - region_size == 0 && region_offsets == nullptr: Contiguous from deserialization
+    for (int t = 0; t < idx_.n_threads; ++t) {
+      uint64_t* thread_base;
+      if (idx_.region_offsets != nullptr) {
+        thread_base = idx_.indexes + idx_.region_offsets[t];
+      } else if (idx_.region_size > 0) {
+        thread_base = idx_.indexes + t * idx_.region_size;
+      } else {
+        // Contiguous layout: compute offset for this thread
+        size_t offset = 0;
+        for (int i = 0; i < t; ++i) {
+          offset += idx_.n_indexes[i];
         }
+        thread_base = idx_.indexes + offset;
       }
-    } else {
-      // Contiguous layout: thread 0 at offset 0, thread 1 at offset n_indexes[0], etc.
-      size_t offset = 0;
-      for (int t = 0; t < idx_.n_threads; ++t) {
-        for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j) {
-          merged_indexes_.push_back(idx_.indexes[offset + j]);
-        }
-        offset += idx_.n_indexes[t];
+      for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j) {
+        merged_indexes_.push_back(thread_base[j]);
       }
     }
 

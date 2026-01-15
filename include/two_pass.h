@@ -224,6 +224,14 @@ public:
   /// by chunk_starts_ptr_.
   uint64_t* chunk_starts{nullptr};
 
+  /// Array of size n_threads containing the starting offset within the indexes
+  /// array for each thread's region. Used for right-sized per-thread allocation
+  /// where each thread gets a region sized for its actual separator count.
+  /// When nullptr, uniform region_size is used (thread t starts at t * region_size).
+  /// @note This is a raw pointer accessor for compatibility; memory is managed
+  /// by region_offsets_ptr_.
+  uint64_t* region_offsets{nullptr};
+
   /// Default constructor. Creates an empty, uninitialized index.
   ParseIndex() = default;
 
@@ -238,9 +246,10 @@ public:
   ParseIndex(ParseIndex&& other) noexcept
       : columns(other.columns), n_threads(other.n_threads), region_size(other.region_size),
         n_indexes(other.n_indexes), indexes(other.indexes), chunk_starts(other.chunk_starts),
-        n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
+        region_offsets(other.region_offsets), n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
         indexes_ptr_(std::move(other.indexes_ptr_)),
         chunk_starts_ptr_(std::move(other.chunk_starts_ptr_)),
+        region_offsets_ptr_(std::move(other.region_offsets_ptr_)),
         mmap_buffer_(std::move(other.mmap_buffer_)), buffer_(std::move(other.buffer_)),
         n_indexes_shared_(std::move(other.n_indexes_shared_)),
         indexes_shared_(std::move(other.indexes_shared_)),
@@ -248,6 +257,7 @@ public:
     other.n_indexes = nullptr;
     other.indexes = nullptr;
     other.chunk_starts = nullptr;
+    other.region_offsets = nullptr;
   }
 
   /**
@@ -267,9 +277,11 @@ public:
       n_indexes = other.n_indexes;
       indexes = other.indexes;
       chunk_starts = other.chunk_starts;
+      region_offsets = other.region_offsets;
       n_indexes_ptr_ = std::move(other.n_indexes_ptr_);
       indexes_ptr_ = std::move(other.indexes_ptr_);
       chunk_starts_ptr_ = std::move(other.chunk_starts_ptr_);
+      region_offsets_ptr_ = std::move(other.region_offsets_ptr_);
       mmap_buffer_ = std::move(other.mmap_buffer_);
       buffer_ = std::move(other.buffer_);
       n_indexes_shared_ = std::move(other.n_indexes_shared_);
@@ -278,6 +290,7 @@ public:
       other.n_indexes = nullptr;
       other.indexes = nullptr;
       other.chunk_starts = nullptr;
+      other.region_offsets = nullptr;
     }
     return *this;
   }
@@ -380,8 +393,11 @@ public:
     if (t >= n_threads || indexes == nullptr || n_indexes == nullptr) {
       return IndexView(); // Empty view
     }
-    if (region_size > 0) {
-      // Per-thread regions: direct O(1) access
+    if (region_offsets != nullptr) {
+      // Right-sized per-thread regions: O(1) access via offset array
+      return IndexView(indexes + region_offsets[t], n_indexes[t]);
+    } else if (region_size > 0) {
+      // Uniform per-thread regions: direct O(1) access
       return IndexView(indexes + t * region_size, n_indexes[t]);
     } else {
       // Contiguous layout (deserialized): compute offset by summing prior counts
@@ -586,6 +602,9 @@ private:
 
   /// RAII owner for chunk_starts array. Memory freed automatically on destruction.
   std::unique_ptr<uint64_t[]> chunk_starts_ptr_;
+
+  /// RAII owner for region_offsets array. Memory freed automatically on destruction.
+  std::unique_ptr<uint64_t[]> region_offsets_ptr_;
 
   /// Memory-mapped buffer for mmap-backed indexes.
   /// When set, n_indexes and indexes point directly into this buffer's data.
@@ -853,7 +872,11 @@ public:
 
     // Calculate per-thread base pointer for contiguous storage.
     // Each thread writes to its own region to avoid false sharing.
-    uint64_t* thread_base = out->indexes + thread_id * out->region_size;
+    // Use region_offsets if available (per-thread right-sized allocation),
+    // otherwise fall back to uniform region_size.
+    uint64_t* thread_base = out->region_offsets != nullptr
+                                ? out->indexes + out->region_offsets[thread_id]
+                                : out->indexes + thread_id * out->region_size;
 
     for (; idx < len; idx += 64) {
       libvroom_prefetch(data + idx + 128);
@@ -915,7 +938,10 @@ public:
                                               size_t start, size_t end, ParseIndex* out,
                                               size_t thread_id) {
     // Calculate per-thread base pointer for contiguous storage
-    uint64_t* thread_base = out->indexes + thread_id * out->region_size;
+    // Use region_offsets if available (per-thread right-sized allocation)
+    uint64_t* thread_base = out->region_offsets != nullptr
+                                ? out->indexes + out->region_offsets[thread_id]
+                                : out->indexes + thread_id * out->region_size;
     return libvroom::second_pass_simd_branchless(sm, buf, start, end, thread_base, thread_id,
                                                  out->n_threads);
   }
@@ -941,7 +967,10 @@ public:
                                                                  size_t end, ParseIndex* out,
                                                                  size_t thread_id) {
     // Calculate per-thread base pointer for contiguous storage
-    uint64_t* thread_base = out->indexes + thread_id * out->region_size;
+    // Use region_offsets if available (per-thread right-sized allocation)
+    uint64_t* thread_base = out->region_offsets != nullptr
+                                ? out->indexes + out->region_offsets[thread_id]
+                                : out->indexes + thread_id * out->region_size;
     auto result = libvroom::second_pass_simd_branchless_with_state(sm, buf, start, end, thread_base,
                                                                    thread_id, out->n_threads);
     return {result.n_indexes, result.at_record_boundary};
@@ -1303,6 +1332,52 @@ public:
   ParseIndex init_counted_safe(uint64_t total_separators, size_t n_threads,
                                ErrorCollector* errors = nullptr, uint64_t n_quotes = 0,
                                size_t len = 0);
+
+  /**
+   * @brief Initialize an index structure with per-thread right-sized allocation.
+   *
+   * This method uses per-thread separator counts from a first pass to allocate
+   * exactly the right amount of memory for each thread's region. This provides
+   * optimal memory usage by avoiding the worst-case assumption that all
+   * separators could end up in any single thread's chunk.
+   *
+   * Memory savings: For a file with N separators evenly distributed across T
+   * threads, this allocates ~N entries instead of ~N*T entries.
+   *
+   * @param thread_separator_counts Vector of separator counts per thread.
+   *        Size must match n_threads parameter.
+   * @param n_threads Number of threads for parsing.
+   * @param padding_per_thread Extra slots per thread for safety (default: 8).
+   * @return ParseIndex with right-sized per-thread allocation.
+   *
+   * @example
+   * @code
+   * // After first pass that collected per-thread stats:
+   * std::vector<uint64_t> counts = {1000, 1200, 800, 1100}; // 4 threads
+   * auto idx = parser.init_counted_per_thread(counts, 4);
+   * // Total allocation: (1000+8) + (1200+8) + (800+8) + (1100+8) = 4132 slots
+   * // vs init_counted: 4*4100 = 16400 slots with uniform regions
+   * @endcode
+   */
+  ParseIndex init_counted_per_thread(const std::vector<uint64_t>& thread_separator_counts,
+                                     size_t n_threads, size_t padding_per_thread = 8);
+
+  /**
+   * @brief Initialize an index structure with per-thread right-sized allocation
+   *        and overflow validation.
+   *
+   * Same as init_counted_per_thread but with overflow checking and error
+   * reporting.
+   *
+   * @param thread_separator_counts Vector of separator counts per thread.
+   * @param n_threads Number of threads for parsing.
+   * @param errors Optional error collector for overflow errors.
+   * @param padding_per_thread Extra slots per thread for safety (default: 8).
+   * @return ParseIndex with right-sized allocation, or empty on error.
+   */
+  ParseIndex init_counted_per_thread_safe(const std::vector<uint64_t>& thread_separator_counts,
+                                          size_t n_threads, ErrorCollector* errors = nullptr,
+                                          size_t padding_per_thread = 8);
 };
 
 } // namespace libvroom
