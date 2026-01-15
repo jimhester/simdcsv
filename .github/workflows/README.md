@@ -180,13 +180,63 @@ Continuous fuzz testing using libFuzzer with sanitizers.
 
 See `fuzz/README.md` for local fuzzing instructions.
 
+### benchmark.yml - Performance Regression Detection
+
+Automatically detects performance regressions on every push and PR.
+
+**Triggers:**
+- Push to main/master branches
+- Pull requests to main/master branches
+
+**How it Works:**
+1. Builds the benchmark executable in Release mode
+2. Runs a subset of benchmarks from `parser_overhead_benchmarks.cpp`:
+   - `BM_RawFirstPass` - Raw SIMD first pass scanning performance
+   - `BM_RawTwoPassComplete` - Complete two-pass index building
+   - `BM_ParserWithExplicitDialect` - Full parser overhead with known dialect
+   - `BM_ParserBranchless` - Branchless algorithm variant
+   - `BM_ParserSpeculative` - Speculative multi-threaded algorithm
+   - `BM_ParserMultiThread/1` - Single-threaded parser
+   - `BM_ParserMultiThread/4` - Multi-threaded parser (4 threads)
+3. Compares results against a cached baseline (from main branch)
+4. Fails if any benchmark regresses by more than 10%
+
+**Baseline Management:**
+- Baseline is cached per-OS with a version key (e.g., `benchmark-baseline-v3-Linux-main`)
+- On main branch pushes, the baseline is updated with current results
+- PRs compare against the cached main branch baseline
+- If benchmark names change, increment the cache version in `benchmark.yml`
+
+**Cache Key Versioning:**
+If you rename benchmarks or change benchmark methodology, you need to reset the baseline:
+1. Edit `.github/workflows/benchmark.yml`
+2. Increment the version in the cache key (e.g., `v2` → `v3`)
+3. The next main branch push will establish a new baseline
+
+**Artifacts:**
+- `benchmark-results` artifact contains JSON results (30-day retention)
+- Both current results and baseline are uploaded for debugging
+
+### benchmarks.yml - Full Benchmark Suite
+
+Runs the complete benchmark suite for releases and manual comparison.
+
+**Triggers:**
+- Push of release tags (`v*`)
+- Manual dispatch with optional comparison ref
+
+**Features:**
+- Multi-platform: Ubuntu and macOS
+- Full benchmark suite (not just regression subset)
+- Historical result storage for releases
+- Optional comparison against any git ref
+
 ## Future Enhancements
 
 Potential workflow additions:
 
-1. **Benchmarking**: Performance regression testing
-2. **Static analysis**: clang-tidy, cppcheck
-3. **Format checking**: clang-format validation
-4. **Windows builds**: MSVC support
-5. **ARM64 builds**: Native ARM testing
-6. **Release automation**: Automatic tagging and releases
+1. **Static analysis**: clang-tidy, cppcheck
+2. **Format checking**: clang-format validation
+3. **Windows builds**: MSVC support
+4. **ARM64 builds**: Native ARM testing
+5. **Release automation**: Automatic tagging and releases

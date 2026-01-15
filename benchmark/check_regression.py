@@ -11,7 +11,7 @@ import os
 import shutil
 
 REGRESSION_THRESHOLD = 0.10  # 10% regression threshold
-EXPECTED_BENCHMARK_COUNT = 4  # Number of benchmarks we expect to run
+EXPECTED_BENCHMARK_COUNT = 7  # Number of benchmarks we expect to run
 
 
 def load_benchmark(filepath, check_errors=False):
@@ -22,16 +22,17 @@ def load_benchmark(filepath, check_errors=False):
         check_errors: If True, fail on benchmark errors
 
     Returns:
-        Dict of benchmark name -> average time in nanoseconds, or None on error
+        Tuple of (results dict, time_unit string) where results maps
+        benchmark name -> average time, or (None, None) on error
     """
     if not os.path.exists(filepath):
-        return None
+        return None, None
     try:
         with open(filepath, 'r') as f:
             data = json.load(f)
     except json.JSONDecodeError as e:
         print(f"ERROR: Failed to parse JSON from {filepath}: {e}")
-        return None
+        return None, None
 
     # Check for benchmark errors
     errors = []
@@ -44,10 +45,11 @@ def load_benchmark(filepath, check_errors=False):
         print("ERROR: Benchmark execution errors detected:")
         for err in errors:
             print(err)
-        return None
+        return None, None
 
     # Extract benchmark results, keyed by name
     results = {}
+    time_unit = 'ns'  # default
     for bench in data.get('benchmarks', []):
         name = bench.get('name', '')
         # Skip aggregate results (mean, median, stddev)
@@ -56,26 +58,35 @@ def load_benchmark(filepath, check_errors=False):
         # Skip benchmarks that had errors
         if bench.get('error_occurred') or bench.get('error_message'):
             continue
-        # Use real_time as the primary metric (nanoseconds)
+        # Use real_time as the primary metric
         if 'real_time' in bench:
             if name not in results:
                 results[name] = []
             results[name].append(bench['real_time'])
+            # Capture time unit from first valid benchmark
+            if 'time_unit' in bench:
+                time_unit = bench['time_unit']
 
     # Average multiple runs
-    return {name: sum(times) / len(times) for name, times in results.items()}
+    return {name: sum(times) / len(times) for name, times in results.items()}, time_unit
 
 
-def compare_benchmarks(baseline, current):
+def compare_benchmarks(baseline, current, time_unit='ms'):
     """Compare current results against baseline and detect regressions."""
     regressions = []
     improvements = []
     unchanged = []
     skipped = []
 
-    # Minimum time threshold (1ms in nanoseconds) to avoid division by zero
-    # and unreliable comparisons for very fast benchmarks
-    MIN_TIME_THRESHOLD_NS = 1_000_000
+    # Minimum time threshold to avoid division by zero and unreliable comparisons
+    # for very fast benchmarks. We use 1ms as the threshold regardless of time_unit
+    # since benchmarks faster than that are too noisy for reliable regression detection.
+    MIN_TIME_THRESHOLD = {
+        'ns': 1_000_000,  # 1ms in nanoseconds
+        'us': 1_000,      # 1ms in microseconds
+        'ms': 1,          # 1ms in milliseconds
+        's': 0.001,       # 1ms in seconds
+    }.get(time_unit, 1)
 
     for name, curr_time in current.items():
         if name not in baseline:
@@ -85,7 +96,7 @@ def compare_benchmarks(baseline, current):
         base_time = baseline[name]
 
         # Skip comparison if baseline time is zero or below threshold
-        if base_time <= 0 or base_time < MIN_TIME_THRESHOLD_NS:
+        if base_time <= 0 or base_time < MIN_TIME_THRESHOLD:
             skipped.append((name, base_time, curr_time))
             continue
 
@@ -108,8 +119,8 @@ def main():
                    os.environ.get('GITHUB_REF') in ('refs/heads/main', 'refs/heads/master')
 
     # Load results (check for errors in current results)
-    current = load_benchmark('build/benchmark_results.json', check_errors=True)
-    baseline = load_benchmark('baseline_benchmark.json')
+    current, time_unit = load_benchmark('build/benchmark_results.json', check_errors=True)
+    baseline, _ = load_benchmark('baseline_benchmark.json')
 
     if current is None:
         print("ERROR: Current benchmark results not found or invalid!")
@@ -125,7 +136,8 @@ def main():
     print("PERFORMANCE REGRESSION CHECK")
     print("=" * 70)
     print(f"Regression threshold: {REGRESSION_THRESHOLD * 100:.0f}%")
-    print(f"Benchmarks found: {len(current)}")
+    print(f"Benchmarks in current results: {len(current)}")
+    print(f"Current benchmarks: {sorted(current.keys())}")
     print()
 
     if baseline is None:
@@ -133,7 +145,7 @@ def main():
         print()
         print("Current benchmark results:")
         for name, time in sorted(current.items()):
-            print(f"  {name}: {time:.2f} ns")
+            print(f"  {name}: {time:.2f} {time_unit}")
 
         # Only save baseline on main branch pushes
         if is_main_push:
@@ -144,22 +156,39 @@ def main():
             print()
             print("Skipping baseline save (not a main branch push).")
     else:
-        regressions, improvements, unchanged, skipped = compare_benchmarks(baseline, current)
+        print(f"Benchmarks in baseline: {len(baseline)}")
+        print(f"Baseline benchmarks: {sorted(baseline.keys())}")
+        print()
+
+        # Check for benchmark name mismatches
+        current_names = set(current.keys())
+        baseline_names = set(baseline.keys())
+        only_in_current = current_names - baseline_names
+        only_in_baseline = baseline_names - current_names
+        if only_in_current or only_in_baseline:
+            print("WARNING: Benchmark name mismatch detected!")
+            if only_in_current:
+                print(f"  Benchmarks only in current (new): {sorted(only_in_current)}")
+            if only_in_baseline:
+                print(f"  Benchmarks only in baseline (removed): {sorted(only_in_baseline)}")
+            print()
+
+        regressions, improvements, unchanged, skipped = compare_benchmarks(baseline, current, time_unit)
 
         if skipped:
             print("SKIPPED (baseline time too small for reliable comparison):")
             for name, base, curr in skipped:
                 print(f"  {name}")
-                print(f"    Baseline: {base:.2f} ns (below 1ms threshold)")
-                print(f"    Current:  {curr:.2f} ns")
+                print(f"    Baseline: {base:.2f} {time_unit} (below threshold)")
+                print(f"    Current:  {curr:.2f} {time_unit}")
             print()
 
         if regressions:
             print("REGRESSIONS DETECTED:")
             for name, base, curr, ratio in regressions:
                 print(f"  {name}")
-                print(f"    Baseline: {base:.2f} ns")
-                print(f"    Current:  {curr:.2f} ns")
+                print(f"    Baseline: {base:.2f} {time_unit}")
+                print(f"    Current:  {curr:.2f} {time_unit}")
                 print(f"    Change:   +{ratio * 100:.1f}% (REGRESSION)")
             print()
 
@@ -167,8 +196,8 @@ def main():
             print("IMPROVEMENTS:")
             for name, base, curr, ratio in improvements:
                 print(f"  {name}")
-                print(f"    Baseline: {base:.2f} ns")
-                print(f"    Current:  {curr:.2f} ns")
+                print(f"    Baseline: {base:.2f} {time_unit}")
+                print(f"    Current:  {curr:.2f} {time_unit}")
                 print(f"    Change:   {ratio * 100:.1f}%")
             print()
 
