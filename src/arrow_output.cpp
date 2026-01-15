@@ -4,6 +4,7 @@
 
 #include "io_util.h"
 #include "mem_util.h"
+#include "two_pass.h"
 
 #include <algorithm>
 #include <arrow/builder.h>
@@ -589,8 +590,8 @@ ArrowConvertResult csv_to_arrow(const std::string& filename, const ArrowConvertO
   try {
     auto [buffer, size] = read_file(filename, 64);
 
-    two_pass parser;
-    index idx = parser.init(size, 1);
+    TwoPass parser;
+    ParseIndex idx = parser.init(size, 1);
     parser.parse(buffer.get(), idx, size, dialect);
     ArrowConverter converter(options);
     result = converter.convert(buffer.get(), size, idx, dialect);
@@ -615,8 +616,8 @@ ArrowConvertResult csv_to_arrow_from_memory(const uint8_t* data, size_t len,
 
   try {
     std::memcpy(buf, data, len);
-    two_pass parser;
-    index idx = parser.init(len, 1);
+    TwoPass parser;
+    ParseIndex idx = parser.init(len, 1);
     parser.parse(buf, idx, len, dialect);
     ArrowConverter converter(options);
     result = converter.convert(buf, len, idx, dialect);
