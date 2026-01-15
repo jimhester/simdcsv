@@ -166,3 +166,96 @@ Use `gh issue create --label "label"` with the following labels:
 | `help wanted ❤️` | we'd love your help! |
 | `duplicate` | this issue or pull request already exists |
 | `wontfix ❌` | this will not be worked on |
+
+
+## Related projects
+
+These projects are checked out locally and can be useful references for features, ideas or optimization techniques.
+
+### simdjson (`~/p/simdjson`)
+
+High-performance SIMD JSON parser achieving gigabytes/second throughput. Uses a two-stage algorithm similar to libvroom: Stage 1 uses SIMD to find structural boundaries, Stage 2 handles variable-width content.
+
+| Directory | Contents |
+|-----------|----------|
+| `src/generic/stage1/` | Core SIMD structural indexing - character scanning, UTF-8 validation |
+| `src/generic/stage2/` | Tape builder, string/number parsing after boundaries identified |
+| `include/simdjson/haswell/` | x86-64 AVX2 SIMD implementation (`simd.h`, `intrinsics.h`) |
+| `include/simdjson/arm64/` | ARM NEON SIMD implementation |
+| `src/internal/` | Lookup tables for character classification, number parsing |
+| `doc/` | Algorithm documentation (`HACKING.md` explains two-stage approach) |
+
+### DuckDB (`~/p/duckdb`)
+
+High-performance analytical database with sophisticated CSV parsing, plus Arrow and Parquet integration. Useful reference for dialect detection, type inference, multi-threaded scanning, and columnar format conversion.
+
+| Directory | Contents |
+|-----------|----------|
+| `src/execution/operator/csv_scanner/` | Complete CSV parsing engine |
+| `src/execution/operator/csv_scanner/sniffer/` | Dialect detection, type detection, header detection |
+| `src/execution/operator/csv_scanner/state_machine/` | State machine CSV parsing with caching |
+| `src/common/vector_operations/` | Vectorized/SIMD-friendly bulk data operations |
+| `src/function/table/` | CSV entry points (`read_csv.cpp`, `sniff_csv.cpp`) |
+| `src/common/arrow/` | Arrow integration (`arrow_converter.cpp`, `arrow_appender.cpp`, type mapping) |
+| `src/function/table/arrow/` | Arrow table functions, schema mapping between Arrow and DuckDB |
+| `src/include/duckdb/common/arrow/appender/` | Type-specific Arrow appenders (scalar, list, struct, union) |
+| `extension/parquet/` | Complete Parquet extension with reader/writer pipeline |
+| `extension/parquet/reader/` | Column-specific Parquet readers (decimals, lists, structs, strings) |
+| `extension/parquet/writer/` | Column-specific Parquet writers with encoding and compression |
+| `extension/parquet/decoder/` | Low-level decoders (RLE, bit-packing, delta encoding, byte stream split) |
+
+### Apache Arrow (`~/p/arrow`)
+
+Universal columnar format and multi-language toolbox. Essential reference for outputting parsed CSV data to Arrow format.
+
+| Directory | Contents |
+|-----------|----------|
+| `cpp/src/arrow/csv/` | CSV reader/writer with `parser.cc`, `chunker.cc`, `column_builder.cc` |
+| `cpp/src/arrow/array/` | Columnar Array implementations (primitive, binary, nested types) |
+| `cpp/src/arrow/ipc/` | Arrow IPC format, Feather writer (`writer.cc`, `feather.cc`) |
+| `cpp/src/parquet/` | Parquet columnar format support |
+| `cpp/src/arrow/io/` | I/O interfaces (InputStream, RandomAccessFile, buffering) |
+| `format/` | FlatBuffers schemas (`.fbs`) defining Arrow's columnar format |
+
+### vroom (`~/p/vroom`)
+
+R package for fast delimited file reading using lazy Altrep columns. This is the package libvroom will integrate with as the native parsing engine.
+
+| Directory | Contents |
+|-----------|----------|
+| `src/delimited_index.h` | Two-pass indexing with quote parity tracking (471 lines) |
+| `src/delimited_index.cc` | Index implementation with multi-threaded chunking (432 lines) |
+| `src/columns.h` | R Altrep integration for lazy column loading |
+| `src/collectors.h` | Type collectors (integer, double, factor, datetime) |
+| `src/DateTimeParser.h` | Locale-aware datetime parsing |
+| `R/vroom.R` | Main R API - parameter handling and interface contract |
+| `inst/bench/` | Benchmark datasets and performance testing |
+
+### zsv (`~/p/zsv`)
+
+"The world's fastest SIMD CSV parser" - a high-performance C library and extensible CLI. Uses portable SIMD vectors (SSE4.2, AVX2, AVX512) with minimal memory footprint (2.7x smaller than xsv, 52x smaller than DuckDB).
+
+| Directory | Contents |
+|-----------|----------|
+| `src/zsv_internal.c` | Core state machine with conditional SIMD (16B/32B/64B vectors) |
+| `src/vector_delim.c` | SIMD delimiter detection using `movemask` for bulk 32/64-byte scanning |
+| `src/zsv_scan_delim.c` | Main scanning state machine with quote parity and field boundaries |
+| `include/zsv/api.h` | Pull/push parser API (`zsv_new`, `zsv_parse_more`, `zsv_get_cell`) |
+| `include/zsv/common.h` | Data structures (`zsv_cell`, `zsv_parser`, status codes) |
+| `app/` | CLI commands: `select.c`, `2json.c`, `2db.c`, `compare.c`, `benchmark/` |
+| `app/external/simdutf/` | SIMD UTF-8 validation library |
+
+### data.table (`~/p/data.table`)
+
+R package with the legendary `fread()` CSV parser. Uses memory-mapped I/O, multi-threaded OpenMP parsing, and sophisticated type detection with ordered type hierarchy and type bumping.
+
+| Directory | Contents |
+|-----------|----------|
+| `src/fread.c` | Main CSV parser (3,002 lines) - type detection, parallel processing, quote handling |
+| `src/fread.h` | Parser API with callback interface for type detection and buffer management |
+| `src/freadLookups.h` | Lookup tables for fast type parsing and validation |
+| `src/freadR.c` | R language bindings for fread |
+| `src/fwrite.c` | High-performance CSV writer |
+| `R/fread.R` | R interface with argument parsing and dialect detection |
+| `inst/tests/` | Comprehensive test suite with real-world CSV edge cases |
+| `vignettes/datatable-fread-and-fwrite.Rmd` | fread/fwrite usage documentation |
