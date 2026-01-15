@@ -24,18 +24,32 @@ cmake --build build-fuzz
 
 ## Running Locally
 
+**Important**: Fuzzing performs heavy disk I/O. To avoid SSD wear, use RAM-backed
+storage (`/dev/shm` on Linux/WSL2).
+
 ```bash
-# Run with corpus (recommended)
-./build-fuzz/fuzz_csv_parser build-fuzz/fuzz_corpus -max_len=65536
+# Set up corpus and artifacts on RAM disk (recommended)
+mkdir -p /dev/shm/fuzz_corpus /dev/shm/fuzz_artifacts
+cp -r build-fuzz/fuzz_corpus/* /dev/shm/fuzz_corpus/
+
+# Run with RAM-backed corpus (recommended)
+./build-fuzz/fuzz_csv_parser /dev/shm/fuzz_corpus \
+  -artifact_prefix=/dev/shm/fuzz_artifacts/ -max_len=65536
 
 # Run for a specific duration (e.g., 60 seconds)
-timeout 60s ./build-fuzz/fuzz_csv_parser build-fuzz/fuzz_corpus -max_len=65536
+./build-fuzz/fuzz_csv_parser /dev/shm/fuzz_corpus \
+  -artifact_prefix=/dev/shm/fuzz_artifacts/ -max_len=65536 -max_total_time=60
 
-# Run all targets
+# Run all targets in parallel
 for t in fuzz_csv_parser fuzz_dialect_detection fuzz_parse_auto; do
-  timeout 60s ./build-fuzz/$t build-fuzz/fuzz_corpus -max_len=65536
+  ./build-fuzz/$t /dev/shm/fuzz_corpus \
+    -artifact_prefix=/dev/shm/fuzz_artifacts/${t}_ -max_len=65536 -max_total_time=60 &
 done
+wait
 ```
+
+**Note**: `/dev/shm` is a RAM-backed tmpfs filesystem available on Linux and WSL2.
+It typically has several GB available (check with `df -h /dev/shm`).
 
 ## Seed Corpus
 

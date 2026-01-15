@@ -4,6 +4,10 @@ project:
   render:
     - "*.qmd"
     - "api-reference/**/*.qmd"
+    - "python-reference/**/*.qmd"
+
+metadata-files:
+  - python-reference/_sidebar.yml
 
 website:
   title: "libvroom"
@@ -12,39 +16,82 @@ website:
   repo-actions: [issue]
 
   navbar:
-    left:
-      - text: "Home"
-        href: index.qmd
-      - text: "Getting Started"
-        href: getting-started.qmd
-      - text: "Integration Guide"
-        href: integration-guide.qmd
-      - text: "CLI"
-        href: cli.qmd
-      - text: "Streaming Parser"
-        href: streaming.qmd
-      - text: "Caching"
-        href: caching.qmd
-      - text: "C API"
-        href: c-api.qmd
-      - text: "Architecture"
-        href: architecture.qmd
-      - text: "Error Handling"
-        href: error-handling.qmd
-      - text: "Benchmarks"
-        href: benchmarks.qmd
-      - text: "API Reference"
-        href: api-reference/index.qmd
     right:
       - icon: github
         href: https://github.com/jimhester/libvroom
 
+  sidebar:
+    style: docked
+    search: true
+    contents:
+      - section: "Getting Started"
+        contents:
+          - index.qmd
+          - getting-started.qmd
+          - integration-guide.qmd
+      - section: "User Guide"
+        contents:
+          - cli.qmd
+          - streaming.qmd
+          - caching.qmd
+          - error-handling.qmd
+      - section: "Python"
+        contents:
+          - python.qmd
+          - text: "Python API Reference"
+            href: python-reference/index.qmd
+      - section: "Reference"
+        contents:
+          - c-api.qmd
+          - architecture.qmd
+          - benchmarks.qmd
+          - text: "C++ API Reference"
+            href: api-reference/index.qmd
+
   page-footer:
-    center: "Built with [Quarto](https://quarto.org/) and [Doxygen](https://doxygen.nl/)"
+    center: "Built with [Quarto](https://quarto.org/), [Doxygen](https://doxygen.nl/), and [quartodoc](https://machow.github.io/quartodoc/)"
 
 format:
   html:
     theme: cosmo
     toc: true
+    toc-location: right
     code-copy: true
     code-overflow: wrap
+
+quartodoc:
+  package: vroom_csv
+  dir: python-reference
+  title: Python API Reference
+  style: pkgdown
+  parser: numpy
+  sidebar: python-reference/_sidebar.yml
+  sections:
+    - title: Reading CSV Files
+      desc: Functions for reading CSV files
+      contents:
+        - read_csv
+        - read_csv_batched
+        - read_csv_rows
+    - title: Dialect Detection
+      desc: Detect CSV format automatically
+      contents:
+        - detect_dialect
+    - title: Data Classes
+      desc: Classes representing parsed CSV data
+      contents:
+        - Table
+        - RecordBatch
+        - BatchedReader
+        - RowIterator
+        - Dialect
+    - title: Utilities
+      desc: Utility functions and classes
+      contents:
+        - default_progress
+    - title: Exceptions
+      desc: Exception classes for error handling
+      contents:
+        - VroomError
+        - ParseError
+        - IOError

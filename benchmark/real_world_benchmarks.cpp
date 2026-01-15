@@ -231,9 +231,11 @@ static void BM_financial_data(benchmark::State& state) {
     }
 
     libvroom::Parser parser(4);
+    // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
+    libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      auto result = parser.parse(buffer.data(), buffer.size, opts);
       benchmark::DoNotOptimize(result);
     }
 
@@ -264,9 +266,11 @@ static void BM_nyc_taxi_data(benchmark::State& state) {
     }
 
     libvroom::Parser parser(4);
+    // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
+    libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      auto result = parser.parse(buffer.data(), buffer.size, opts);
       benchmark::DoNotOptimize(result);
     }
 
@@ -297,9 +301,11 @@ static void BM_genomics_data(benchmark::State& state) {
     }
 
     libvroom::Parser parser(4);
+    // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
+    libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      auto result = parser.parse(buffer.data(), buffer.size, opts);
       benchmark::DoNotOptimize(result);
     }
 
@@ -329,9 +335,11 @@ static void BM_log_data(benchmark::State& state) {
     }
 
     libvroom::Parser parser(4);
+    // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
+    libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      auto result = parser.parse(buffer.data(), buffer.size, opts);
       benchmark::DoNotOptimize(result);
     }
 
@@ -359,9 +367,11 @@ static void BM_wide_table(benchmark::State& state) {
     }
 
     libvroom::Parser parser(4);
+    // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
+    libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      auto result = parser.parse(buffer.data(), buffer.size, opts);
       benchmark::DoNotOptimize(result);
     }
 
@@ -400,9 +410,11 @@ static void BM_simd_levels(benchmark::State& state) {
 
   const auto& buffer = test_data.at(filename);
   libvroom::Parser parser(1);
+  // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
+  libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
 
   for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size);
+    auto result = parser.parse(buffer.data(), buffer.size, opts);
     benchmark::DoNotOptimize(result);
   }
 

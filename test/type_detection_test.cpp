@@ -188,8 +188,13 @@ TEST_F(TypeDetectorTest, IntegerWithPlusSign) {
 }
 
 TEST_F(TypeDetectorTest, IntegerSignOnly) {
-  // Just a sign with no digits should be STRING
+  // "+" is STRING (not a valid integer, not NA)
   EXPECT_EQ(TypeDetector::detect_field("+", options), FieldType::STRING);
+  // "-" is detected as NA (single char placeholder) by default
+  EXPECT_EQ(TypeDetector::detect_field("-", options), FieldType::NA);
+
+  // With detect_na disabled, "-" becomes STRING
+  options.detect_na = false;
   EXPECT_EQ(TypeDetector::detect_field("-", options), FieldType::STRING);
 }
 
@@ -330,7 +335,11 @@ TEST_F(TypeDetectorTest, FloatCustomDecimalPoint) {
 }
 
 TEST_F(TypeDetectorTest, FloatNoDigitsJustDecimal) {
-  // Just a decimal point
+  // Just a decimal point is detected as NA (single char placeholder) by default
+  EXPECT_EQ(TypeDetector::detect_field(".", options), FieldType::NA);
+
+  // With detect_na disabled, "." becomes STRING
+  options.detect_na = false;
   EXPECT_EQ(TypeDetector::detect_field(".", options), FieldType::STRING);
 }
 
@@ -1277,6 +1286,181 @@ TEST_F(TypePriorityTest, BooleanBeforeIntegerSingleDigit) {
   options.bool_as_int = false;
   EXPECT_EQ(TypeDetector::detect_field("0", options), FieldType::INTEGER);
   EXPECT_EQ(TypeDetector::detect_field("1", options), FieldType::INTEGER);
+}
+
+// ============================================================================
+// NA Value Detection Tests
+// ============================================================================
+
+class NADetectionTest : public ::testing::Test {
+protected:
+  TypeDetectionOptions options;
+  void SetUp() override { options = TypeDetectionOptions::defaults(); }
+};
+
+TEST_F(NADetectionTest, NABasic) {
+  EXPECT_EQ(TypeDetector::detect_field("NA", options), FieldType::NA);
+}
+
+TEST_F(NADetectionTest, NACaseInsensitive) {
+  EXPECT_EQ(TypeDetector::detect_field("NA", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("na", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("Na", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("nA", options), FieldType::NA);
+}
+
+TEST_F(NADetectionTest, NASlash) {
+  EXPECT_EQ(TypeDetector::detect_field("N/A", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("n/a", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("N/a", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("n/A", options), FieldType::NA);
+}
+
+TEST_F(NADetectionTest, NullValues) {
+  EXPECT_EQ(TypeDetector::detect_field("null", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("NULL", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("Null", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("nUlL", options), FieldType::NA);
+}
+
+TEST_F(NADetectionTest, NoneValues) {
+  EXPECT_EQ(TypeDetector::detect_field("none", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("NONE", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("None", options), FieldType::NA);
+}
+
+TEST_F(NADetectionTest, SingleCharPlaceholders) {
+  EXPECT_EQ(TypeDetector::detect_field("-", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field(".", options), FieldType::NA);
+}
+
+TEST_F(NADetectionTest, NAWithWhitespace) {
+  // Whitespace should be trimmed, then NA detected
+  EXPECT_EQ(TypeDetector::detect_field("  NA  ", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field("\tN/A\t", options), FieldType::NA);
+  EXPECT_EQ(TypeDetector::detect_field(" null ", options), FieldType::NA);
+}
+
+TEST_F(NADetectionTest, NADetectionDisabled) {
+  options.detect_na = false;
+  // When detect_na is false, NA values should be detected as STRING
+  EXPECT_EQ(TypeDetector::detect_field("NA", options), FieldType::STRING);
+  EXPECT_EQ(TypeDetector::detect_field("N/A", options), FieldType::STRING);
+  EXPECT_EQ(TypeDetector::detect_field("null", options), FieldType::STRING);
+  EXPECT_EQ(TypeDetector::detect_field("None", options), FieldType::STRING);
+  // Single char placeholders: "-" becomes STRING, "." becomes STRING
+  EXPECT_EQ(TypeDetector::detect_field("-", options), FieldType::STRING);
+  EXPECT_EQ(TypeDetector::detect_field(".", options), FieldType::STRING);
+}
+
+TEST_F(NADetectionTest, NotNA) {
+  // Values that should NOT be detected as NA
+  EXPECT_NE(TypeDetector::detect_field("NaN", options), FieldType::NA); // Float special value
+  EXPECT_NE(TypeDetector::detect_field("NAT", options), FieldType::NA); // Not a valid NA
+  EXPECT_NE(TypeDetector::detect_field("N", options), FieldType::NA);   // Single N is boolean
+  EXPECT_NE(TypeDetector::detect_field("Nullable", options), FieldType::NA);
+  EXPECT_NE(TypeDetector::detect_field("nothing", options), FieldType::NA);
+  EXPECT_NE(TypeDetector::detect_field("n", options), FieldType::NA); // Single n is boolean
+}
+
+TEST_F(NADetectionTest, NATypeToString) {
+  EXPECT_STREQ(field_type_to_string(FieldType::NA), "na");
+}
+
+TEST_F(NADetectionTest, IsNADirect) {
+  EXPECT_TRUE(TypeDetector::is_na(reinterpret_cast<const uint8_t*>("NA"), 2));
+  EXPECT_TRUE(TypeDetector::is_na(reinterpret_cast<const uint8_t*>("null"), 4));
+  EXPECT_FALSE(TypeDetector::is_na(reinterpret_cast<const uint8_t*>("NaN"), 3));
+  EXPECT_FALSE(TypeDetector::is_na(reinterpret_cast<const uint8_t*>("hello"), 5));
+}
+
+// ============================================================================
+// ColumnTypeStats NA Tests
+// ============================================================================
+
+class ColumnTypeStatsNATest : public ::testing::Test {
+protected:
+  ColumnTypeStats stats;
+};
+
+TEST_F(ColumnTypeStatsNATest, AddNAType) {
+  stats.add(FieldType::NA);
+  stats.add(FieldType::NA);
+  EXPECT_EQ(stats.total_count, 2);
+  EXPECT_EQ(stats.na_count, 2);
+}
+
+TEST_F(ColumnTypeStatsNATest, DominantTypeWithNAExcluded) {
+  // NA values should be excluded from the denominator like EMPTY
+  for (int i = 0; i < 90; ++i)
+    stats.add(FieldType::INTEGER);
+  for (int i = 0; i < 10; ++i)
+    stats.add(FieldType::NA);
+  // 90/90 = 100% integers (NA excluded)
+  EXPECT_EQ(stats.dominant_type(0.9), FieldType::INTEGER);
+}
+
+TEST_F(ColumnTypeStatsNATest, DominantTypeWithNAAndEmpty) {
+  // Both NA and EMPTY should be excluded from the denominator
+  for (int i = 0; i < 80; ++i)
+    stats.add(FieldType::INTEGER);
+  for (int i = 0; i < 10; ++i)
+    stats.add(FieldType::NA);
+  for (int i = 0; i < 10; ++i)
+    stats.add(FieldType::EMPTY);
+  // 80/80 = 100% integers (NA and EMPTY excluded)
+  EXPECT_EQ(stats.dominant_type(0.9), FieldType::INTEGER);
+}
+
+TEST_F(ColumnTypeStatsNATest, DominantTypeAllNA) {
+  for (int i = 0; i < 100; ++i)
+    stats.add(FieldType::NA);
+  // All NA = 0 non-empty => returns EMPTY
+  EXPECT_EQ(stats.dominant_type(), FieldType::EMPTY);
+}
+
+// ============================================================================
+// ColumnTypeInference NA Tests
+// ============================================================================
+
+class ColumnTypeInferenceNATest : public ::testing::Test {
+protected:
+  ColumnTypeInference inference;
+};
+
+TEST_F(ColumnTypeInferenceNATest, RowWithNAValues) {
+  inference.add_row({"123", "NA", "null", "2024-01-15", "None"});
+  auto types = inference.infer_types();
+  EXPECT_EQ(types[0], FieldType::INTEGER);
+  EXPECT_EQ(types[1], FieldType::EMPTY); // All NA -> returns EMPTY as dominant
+  EXPECT_EQ(types[2], FieldType::EMPTY); // All NA -> returns EMPTY as dominant
+  EXPECT_EQ(types[3], FieldType::DATE);
+  EXPECT_EQ(types[4], FieldType::EMPTY); // All NA -> returns EMPTY as dominant
+}
+
+TEST_F(ColumnTypeInferenceNATest, MixedNAAndIntegers) {
+  // Add integers with some NA values - integers should still dominate
+  for (int i = 0; i < 9; ++i) {
+    inference.add_row({"123"});
+  }
+  inference.add_row({"NA"});
+  auto types = inference.infer_types();
+  EXPECT_EQ(types[0], FieldType::INTEGER); // 9/9 = 100% integers (NA excluded)
+}
+
+TEST_F(ColumnTypeInferenceNATest, MergeWithNAStats) {
+  ColumnTypeInference other;
+  other.add_row({"NA"});
+  other.add_row({"null"});
+
+  inference.add_row({"123"});
+
+  inference.merge(other);
+
+  // Should have 3 total: 2 NA + 1 INTEGER
+  EXPECT_EQ(inference.column_stats(0).total_count, 3);
+  EXPECT_EQ(inference.column_stats(0).na_count, 2);
+  EXPECT_EQ(inference.column_stats(0).integer_count, 1);
 }
 
 // ============================================================================

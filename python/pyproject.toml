@@ -36,6 +36,7 @@ classifiers = [
 test = ["pytest>=7.0", "pytest-cov>=4.0", "pyarrow>=14.0"]
 arrow = ["pyarrow>=14.0"]
 polars = ["polars>=0.20"]
+all = ["pyarrow>=14.0", "polars>=0.20"]
 benchmark = ["pandas>=2.0", "polars>=0.20", "pyarrow>=14.0", "duckdb>=0.9"]
 dev = ["pytest>=7.0", "pyarrow>=14.0", "polars>=0.20", "ruff", "mypy"]
 
