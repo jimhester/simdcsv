@@ -27,15 +27,23 @@ Complete C++ API documentation for libvroom, generated from source code comments
 
 | Class | Description |
 |-------|-------------|
-| [two_pass](/api-reference/Classes/classlibvroom_1_1two__pass.qmd) | Main CSV parser using speculative two-pass algorithm |
-| [index](/api-reference/Classes/classlibvroom_1_1index.qmd) | Result structure containing parsed field positions |
-| [ErrorCollector](/api-reference/Classes/classlibvroom_1_1ErrorCollector.qmd) | Collects and manages parse errors |
-| [parser](/api-reference/Classes/classlibvroom_1_1parser.qmd) | Convenience wrapper for parsing operations |
+| [Parser](/api-reference/Classes/classlibvroom_1_1Parser.qmd) | Main CSV parser class with unified API |
+| [FileBuffer](/api-reference/Classes/classlibvroom_1_1FileBuffer.qmd) | RAII wrapper for file buffers with automatic cleanup |
+| [ParseIndex](/api-reference/Classes/classlibvroom_1_1ParseIndex.qmd) | Result structure containing parsed field positions |
+| [TwoPass](/api-reference/Classes/classlibvroom_1_1TwoPass.qmd) | Low-level two-pass parsing algorithm |
+
+### Configuration
+
+| Type | Description |
+|------|-------------|
+| [ParseOptions](/api-reference/Classes/structlibvroom_1_1ParseOptions.qmd) | Configuration options for parsing |
+| [SizeLimits](/api-reference/Classes/structlibvroom_1_1SizeLimits.qmd) | Size limits for secure CSV parsing |
 
 ### Error Handling
 
 | Type | Description |
 |------|-------------|
+| [ErrorCollector](/api-reference/Classes/classlibvroom_1_1ErrorCollector.qmd) | Collects and manages parse errors |
 | [ParseError](/api-reference/Classes/structlibvroom_1_1ParseError.qmd) | Structure representing a single parse error |
 | [ParseException](/api-reference/Classes/classlibvroom_1_1ParseException.qmd) | Exception thrown in STRICT error mode |
 
