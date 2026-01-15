@@ -14,6 +14,7 @@
 #include "error.h"
 #include "extraction_config.h"
 #include "mmap_util.h"
+#include "simd_number_parsing.h"
 #include "streaming.h"
 #include "value_extraction.h"
 
@@ -676,8 +677,6 @@ static void build_int64_column_array(ArrowArray* array, const std::vector<std::s
   auto* validity = new std::vector<uint8_t>(validity_bytes, 0xFF); // All valid initially
 
   int64_t null_count = 0;
-  libvroom::ExtractionConfig config;
-
   for (size_t i = 0; i < n_rows; ++i) {
     const std::string& s = data[i];
     // Check for null values first
@@ -687,7 +686,7 @@ static void build_int64_column_array(ArrowArray* array, const std::vector<std::s
       ++null_count;
       continue;
     }
-    auto result = libvroom::parse_integer<int64_t>(s.data(), s.size(), config);
+    auto result = libvroom::SIMDIntegerParser::parse_int64(s.data(), s.size());
     if (result.ok()) {
       values[i] = result.get();
     } else {
@@ -752,7 +751,6 @@ static void build_float64_column_array(ArrowArray* array, const std::vector<std:
   auto* validity = new std::vector<uint8_t>(validity_bytes, 0xFF);
 
   int64_t null_count = 0;
-  libvroom::ExtractionConfig config;
 
   for (size_t i = 0; i < n_rows; ++i) {
     const std::string& s = data[i];
@@ -763,7 +761,7 @@ static void build_float64_column_array(ArrowArray* array, const std::vector<std:
       ++null_count;
       continue;
     }
-    auto result = libvroom::parse_double(s.data(), s.size(), config);
+    auto result = libvroom::SIMDDoubleParser::parse_double(s.data(), s.size());
     if (result.ok()) {
       values[i] = result.get();
     } else {
@@ -2031,25 +2029,24 @@ private:
 
   /// Convert a value to the specified type
   py::object convert_to_type(const std::string& value, ColumnType type) {
-    libvroom::ExtractionConfig config;
-
     switch (type) {
     case ColumnType::INT64: {
-      auto result = libvroom::parse_integer<int64_t>(value.data(), value.size(), config);
+      auto result = libvroom::SIMDIntegerParser::parse_int64(value.data(), value.size());
       if (result.ok()) {
         return py::int_(result.get());
       }
       return py::none();
     }
     case ColumnType::FLOAT64: {
-      auto result = libvroom::parse_double(value.data(), value.size(), config);
+      auto result = libvroom::SIMDDoubleParser::parse_double(value.data(), value.size());
       if (result.ok()) {
         return py::float_(result.get());
       }
       return py::none();
     }
     case ColumnType::BOOL: {
-      auto result = libvroom::parse_bool(value.data(), value.size(), config);
+      libvroom::ExtractionConfig bool_config;
+      auto result = libvroom::parse_bool(value.data(), value.size(), bool_config);
       if (result.ok()) {
         return py::bool_(result.get());
       }
