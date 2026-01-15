@@ -2314,6 +2314,49 @@ public:
     }
 
     /**
+     * @brief Get a lazy column accessor for ALTREP-style deferred field access.
+     *
+     * Creates a LazyColumn that provides per-row access to a column without
+     * parsing the entire column upfront. Ideal for R's ALTREP pattern where
+     * columns are only parsed when accessed.
+     *
+     * @param col 0-based column index.
+     * @return LazyColumn accessor for the specified column.
+     *
+     * @example
+     * @code
+     * auto lazy_col = result.get_lazy_column(0);
+     * for (size_t i = 0; i < lazy_col.size(); ++i) {
+     *     // Access individual values on demand
+     *     std::string_view value = lazy_col[i];
+     * }
+     * @endcode
+     */
+    LazyColumn get_lazy_column(size_t col) const {
+      ensure_extractor();
+      if (!extractor_) {
+        throw std::runtime_error("Extractor not initialized");
+      }
+      return extractor_->get_lazy_column(col);
+    }
+
+    /**
+     * @brief Get a lazy column accessor by column name.
+     *
+     * @param name Column name (must match header exactly).
+     * @return LazyColumn accessor for the specified column.
+     * @throws std::out_of_range if column name is not found.
+     */
+    LazyColumn get_lazy_column(const std::string& name) const {
+      ensure_column_map();
+      auto it = column_map_.find(name);
+      if (it == column_map_.end()) {
+        throw std::out_of_range("Column not found: " + name);
+      }
+      return get_lazy_column(it->second);
+    }
+
+    /**
      * @brief Get the column headers.
      *
      * @return Vector of column names from the header row.

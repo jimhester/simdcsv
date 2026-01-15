@@ -13,6 +13,7 @@
 #include "error.h"
 #include "io_util.h"
 #include "mem_util.h"
+#include "value_extraction.h"
 
 #include <cstring>
 #include <limits>
@@ -98,6 +99,31 @@ struct libvroom_load_result {
   LoadResult cpp_result;
 
   libvroom_load_result(LoadResult&& r) : cpp_result(std::move(r)) {}
+};
+
+struct libvroom_lazy_column {
+  // Store references to the underlying data
+  const uint8_t* buf;
+  size_t buf_len;
+  const libvroom::ParseIndex* idx;
+  size_t col;
+  bool has_header;
+  libvroom::Dialect dialect;
+
+  // Cached row count
+  size_t num_rows;
+
+  libvroom_lazy_column(const uint8_t* buffer, size_t length, const libvroom::ParseIndex* index,
+                       size_t column, bool header, const libvroom::Dialect& d)
+      : buf(buffer), buf_len(length), idx(index), col(column), has_header(header), dialect(d),
+        num_rows(0) {
+    // Compute number of rows
+    if (idx->columns > 0) {
+      uint64_t total_fields = idx->total_indexes();
+      uint64_t total_rows = total_fields / idx->columns;
+      num_rows = has_header ? (total_rows > 0 ? total_rows - 1 : 0) : total_rows;
+    }
+  }
 };
 
 // Helper functions to convert between C and C++ types
@@ -1311,4 +1337,169 @@ const char* libvroom_type_hint_string(libvroom_type_hint_t type_hint) {
   default:
     return "unknown";
   }
+}
+
+// ============================================================================
+// FieldSpan Functions
+// ============================================================================
+
+libvroom_field_span_t libvroom_index_get_field_span(const libvroom_index_t* index,
+                                                    uint64_t global_field_idx) {
+  libvroom_field_span_t invalid_span = {LIBVROOM_FIELD_SPAN_INVALID, LIBVROOM_FIELD_SPAN_INVALID};
+
+  if (!index) {
+    return invalid_span;
+  }
+
+  libvroom::FieldSpan cpp_span = index->idx.get_field_span(global_field_idx);
+
+  if (!cpp_span.is_valid()) {
+    return invalid_span;
+  }
+
+  libvroom_field_span_t result;
+  result.start = cpp_span.start;
+  result.end = cpp_span.end;
+  return result;
+}
+
+libvroom_field_span_t libvroom_index_get_field_span_rc(const libvroom_index_t* index, uint64_t row,
+                                                       uint64_t col) {
+  libvroom_field_span_t invalid_span = {LIBVROOM_FIELD_SPAN_INVALID, LIBVROOM_FIELD_SPAN_INVALID};
+
+  if (!index) {
+    return invalid_span;
+  }
+
+  libvroom::FieldSpan cpp_span = index->idx.get_field_span(row, col);
+
+  if (!cpp_span.is_valid()) {
+    return invalid_span;
+  }
+
+  libvroom_field_span_t result;
+  result.start = cpp_span.start;
+  result.end = cpp_span.end;
+  return result;
+}
+
+// ============================================================================
+// Lazy Column Functions
+// ============================================================================
+
+libvroom_lazy_column_t* libvroom_lazy_column_create(const libvroom_buffer_t* buffer,
+                                                    const libvroom_index_t* index, size_t col,
+                                                    bool has_header,
+                                                    const libvroom_dialect_t* dialect) {
+  if (!buffer || !index) {
+    return nullptr;
+  }
+
+  // Check column index is valid
+  if (index->idx.columns > 0 && col >= index->idx.columns) {
+    return nullptr;
+  }
+
+  libvroom::Dialect cpp_dialect = dialect ? dialect->dialect : libvroom::Dialect::csv();
+
+  try {
+    return new libvroom_lazy_column(buffer->data.data(), buffer->original_length, &index->idx, col,
+                                    has_header, cpp_dialect);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+size_t libvroom_lazy_column_size(const libvroom_lazy_column_t* column) {
+  if (!column) {
+    return 0;
+  }
+  return column->num_rows;
+}
+
+bool libvroom_lazy_column_empty(const libvroom_lazy_column_t* column) {
+  if (!column) {
+    return true;
+  }
+  return column->num_rows == 0;
+}
+
+size_t libvroom_lazy_column_index(const libvroom_lazy_column_t* column) {
+  if (!column) {
+    return 0;
+  }
+  return column->col;
+}
+
+libvroom_field_span_t libvroom_lazy_column_get_bounds(const libvroom_lazy_column_t* column,
+                                                      size_t row) {
+  libvroom_field_span_t invalid_span = {LIBVROOM_FIELD_SPAN_INVALID, LIBVROOM_FIELD_SPAN_INVALID};
+
+  if (!column || row >= column->num_rows) {
+    return invalid_span;
+  }
+
+  // Adjust row for header
+  size_t actual_row = column->has_header ? row + 1 : row;
+  libvroom::FieldSpan cpp_span = column->idx->get_field_span(actual_row, column->col);
+
+  if (!cpp_span.is_valid()) {
+    return invalid_span;
+  }
+
+  libvroom_field_span_t result;
+  result.start = cpp_span.start;
+  result.end = cpp_span.end;
+  return result;
+}
+
+const char* libvroom_lazy_column_get_string(const libvroom_lazy_column_t* column, size_t row,
+                                            size_t* length) {
+  if (!column || row >= column->num_rows) {
+    if (length) {
+      *length = 0;
+    }
+    return nullptr;
+  }
+
+  // Get field span
+  size_t actual_row = column->has_header ? row + 1 : row;
+  libvroom::FieldSpan span = column->idx->get_field_span(actual_row, column->col);
+
+  if (!span.is_valid() || span.start >= column->buf_len) {
+    if (length) {
+      *length = 0;
+    }
+    return nullptr;
+  }
+
+  uint64_t start = span.start;
+  uint64_t end = std::min(span.end, static_cast<uint64_t>(column->buf_len));
+
+  // Handle CR in CRLF endings
+  if (end > start && column->buf[end - 1] == '\r') {
+    --end;
+  }
+
+  // Handle quoted fields - strip outer quotes
+  if (end > start && column->buf[start] == static_cast<uint8_t>(column->dialect.quote_char)) {
+    if (column->buf[end - 1] == static_cast<uint8_t>(column->dialect.quote_char)) {
+      ++start;
+      --end;
+    }
+  }
+
+  if (end < start) {
+    end = start;
+  }
+
+  if (length) {
+    *length = static_cast<size_t>(end - start);
+  }
+
+  return reinterpret_cast<const char*>(column->buf + start);
+}
+
+void libvroom_lazy_column_destroy(libvroom_lazy_column_t* column) {
+  delete column;
 }

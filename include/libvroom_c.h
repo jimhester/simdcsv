@@ -350,6 +350,15 @@ typedef struct libvroom_detection_result libvroom_detection_result_t;
  */
 typedef struct libvroom_column_config libvroom_column_config_t;
 
+/**
+ * @brief Opaque handle to a lazy column accessor.
+ *
+ * Created with libvroom_lazy_column_create(), destroyed with
+ * libvroom_lazy_column_destroy(). Provides ALTREP-style lazy access to a
+ * single column without parsing the entire file upfront.
+ */
+typedef struct libvroom_lazy_column libvroom_lazy_column_t;
+
 /** @} */ /* end of handles group */
 
 /**
@@ -419,6 +428,33 @@ typedef struct libvroom_parse_error {
    */
   const char* context;
 } libvroom_parse_error_t;
+
+/**
+ * @brief Represents a field's byte boundaries in the source buffer.
+ *
+ * FieldSpan provides the byte range for a single CSV field, enabling
+ * efficient value extraction without re-parsing the entire file.
+ *
+ * @note The `start` offset points to the first byte of the field content.
+ *       The `end` offset points to the delimiter/newline byte (exclusive),
+ *       so the field content is buf[start..end).
+ *
+ * @par Example
+ * @code
+ * // For CSV: "hello,world\n"
+ * //          ^     ^
+ * //          0     6
+ * // Field 0: {0, 5}   -> "hello"
+ * // Field 1: {6, 11}  -> "world"
+ * @endcode
+ */
+typedef struct libvroom_field_span {
+  /** @brief Byte offset of field start (inclusive). */
+  uint64_t start;
+
+  /** @brief Byte offset of field end (exclusive, at delimiter/newline). */
+  uint64_t end;
+} libvroom_field_span_t;
 
 /** @} */ /* end of structs group */
 
@@ -841,6 +877,92 @@ libvroom_error_t libvroom_index_write(const libvroom_index_t* index, const char*
  * @see libvroom_index_destroy() to free the returned index
  */
 libvroom_index_t* libvroom_index_read(const char* filename);
+
+/**
+ * @brief Sentinel value for invalid field span positions.
+ *
+ * Used in libvroom_field_span_t to indicate an invalid or unset position.
+ * Check with libvroom_field_span_is_valid() or compare start/end to this value.
+ */
+#define LIBVROOM_FIELD_SPAN_INVALID UINT64_MAX
+
+/**
+ * @brief Check if a field span is valid.
+ *
+ * A field span is valid if both start and end are not LIBVROOM_FIELD_SPAN_INVALID.
+ *
+ * @param span The field span to check.
+ * @return true if the span is valid, false otherwise.
+ */
+static inline bool libvroom_field_span_is_valid(libvroom_field_span_t span) {
+  return span.start != LIBVROOM_FIELD_SPAN_INVALID && span.end != LIBVROOM_FIELD_SPAN_INVALID;
+}
+
+/**
+ * @brief Get the length of a field span in bytes.
+ *
+ * @param span The field span to measure.
+ * @return Length in bytes, or 0 if the span is invalid.
+ */
+static inline uint64_t libvroom_field_span_length(libvroom_field_span_t span) {
+  return libvroom_field_span_is_valid(span) ? span.end - span.start : 0;
+}
+
+/**
+ * @brief Get field span by global field index.
+ *
+ * Iterates through threads in file order to find the field at the given
+ * global index. This is O(n_threads) in the worst case but avoids sorting.
+ *
+ * @param index The index to query. Must not be NULL.
+ * @param global_field_idx Zero-based index of the field across the entire file.
+ * @return FieldSpan with byte boundaries, or invalid span (LIBVROOM_FIELD_SPAN_INVALID)
+ *         if out of bounds or index is NULL.
+ *
+ * @note For the first field (global_field_idx == 0), the start position is
+ *       always 0 (beginning of file).
+ *
+ * @example
+ * @code
+ * // Get the 100th field in the file
+ * libvroom_field_span_t span = libvroom_index_get_field_span(index, 100);
+ * if (libvroom_field_span_is_valid(span)) {
+ *     const uint8_t* field_data = libvroom_buffer_data(buffer) + span.start;
+ *     size_t field_len = libvroom_field_span_length(span);
+ *     // Process field_data[0..field_len]
+ * }
+ * @endcode
+ */
+libvroom_field_span_t libvroom_index_get_field_span(const libvroom_index_t* index,
+                                                    uint64_t global_field_idx);
+
+/**
+ * @brief Get field span by row and column.
+ *
+ * Converts (row, col) to a global field index and retrieves the byte
+ * boundaries. The number of columns must have been set during parsing.
+ *
+ * @param index The index to query. Must not be NULL.
+ * @param row Zero-based row index.
+ * @param col Zero-based column index.
+ * @return FieldSpan with byte boundaries, or invalid span (LIBVROOM_FIELD_SPAN_INVALID)
+ *         if out of bounds or index is NULL.
+ *
+ * @note Row 0 is the first row (header if has_header is true during parsing).
+ *
+ * @example
+ * @code
+ * // Get the field at row 5, column 2
+ * libvroom_field_span_t span = libvroom_index_get_field_span_rc(index, 5, 2);
+ * if (libvroom_field_span_is_valid(span)) {
+ *     const uint8_t* field_data = libvroom_buffer_data(buffer) + span.start;
+ *     size_t field_len = libvroom_field_span_length(span);
+ *     // Process field_data[0..field_len]
+ * }
+ * @endcode
+ */
+libvroom_field_span_t libvroom_index_get_field_span_rc(const libvroom_index_t* index, uint64_t row,
+                                                       uint64_t col);
 
 /** @} */ /* end of index group */
 
@@ -1577,6 +1699,146 @@ void libvroom_column_config_destroy(libvroom_column_config_t* config);
 const char* libvroom_type_hint_string(libvroom_type_hint_t type_hint);
 
 /** @} */ /* end of column_config group */
+
+/**
+ * @defgroup lazy_column Lazy Column Access
+ * @brief Functions for ALTREP-style lazy column access.
+ *
+ * The LazyColumn API provides per-column lazy access to CSV data without
+ * parsing the entire file upfront. This enables R's ALTREP pattern where
+ * columns are only parsed when accessed.
+ *
+ * Key features:
+ * - **Random access**: O(n_threads) access to any row
+ * - **Byte range access**: Get raw byte ranges for deferred parsing
+ * - **Zero-copy views**: Returns views into the original buffer
+ *
+ * @{
+ */
+
+/**
+ * @brief Create a lazy column accessor.
+ *
+ * Creates a lazy accessor for a specific column in a parsed CSV file.
+ * The accessor provides random access to field values without requiring
+ * a full sort of the index.
+ *
+ * @param buffer The buffer containing CSV data. Must remain valid for the
+ *               lifetime of the lazy column.
+ * @param index The parsed index. Must remain valid for the lifetime of
+ *              the lazy column.
+ * @param col Column index (0-based).
+ * @param has_header Whether the CSV has a header row (affects row indexing).
+ * @param dialect CSV dialect for quote handling. May be NULL for default CSV.
+ * @return New lazy column handle on success, NULL on failure.
+ *         The caller owns the returned handle and must call
+ *         libvroom_lazy_column_destroy() to free it.
+ *
+ * @warning The buffer and index must remain valid for the lifetime of the
+ *          lazy column. Destroying either while the lazy column is in use
+ *          results in undefined behavior.
+ *
+ * @example
+ * @code
+ * // Parse CSV
+ * libvroom_error_t err = libvroom_parse(parser, buffer, index, errors, dialect);
+ *
+ * // Create lazy accessor for column 0
+ * libvroom_lazy_column_t* col = libvroom_lazy_column_create(
+ *     buffer, index, 0, true, dialect);
+ *
+ * // Access values lazily
+ * for (size_t i = 0; i < libvroom_lazy_column_size(col); ++i) {
+ *     libvroom_field_span_t span = libvroom_lazy_column_get_bounds(col, i);
+ *     // Process span...
+ * }
+ *
+ * libvroom_lazy_column_destroy(col);
+ * @endcode
+ */
+libvroom_lazy_column_t* libvroom_lazy_column_create(const libvroom_buffer_t* buffer,
+                                                    const libvroom_index_t* index, size_t col,
+                                                    bool has_header,
+                                                    const libvroom_dialect_t* dialect);
+
+/**
+ * @brief Get the number of data rows in the lazy column.
+ *
+ * @param column The lazy column to query. Must not be NULL.
+ * @return Number of rows (excludes header if has_header was true), or 0 if invalid.
+ */
+size_t libvroom_lazy_column_size(const libvroom_lazy_column_t* column);
+
+/**
+ * @brief Check if the lazy column is empty.
+ *
+ * @param column The lazy column to query. Must not be NULL.
+ * @return true if empty or invalid, false otherwise.
+ */
+bool libvroom_lazy_column_empty(const libvroom_lazy_column_t* column);
+
+/**
+ * @brief Get the column index.
+ *
+ * @param column The lazy column to query. Must not be NULL.
+ * @return 0-based column index, or 0 if invalid.
+ */
+size_t libvroom_lazy_column_index(const libvroom_lazy_column_t* column);
+
+/**
+ * @brief Get raw byte boundaries for a row.
+ *
+ * Returns the byte range in the source buffer for deferred parsing.
+ * This enables the ALTREP pattern where parsing happens only when
+ * the value is actually needed.
+ *
+ * @param column The lazy column to access. Must not be NULL.
+ * @param row Row index (0-based, excludes header).
+ * @return FieldSpan with start/end byte positions, or invalid span if out of bounds.
+ *
+ * @note Complexity: O(n_threads) due to ParseIndex::get_field_span()
+ *
+ * @example
+ * @code
+ * libvroom_field_span_t span = libvroom_lazy_column_get_bounds(col, row);
+ * if (libvroom_field_span_is_valid(span)) {
+ *     const uint8_t* data = libvroom_buffer_data(buffer) + span.start;
+ *     size_t len = libvroom_field_span_length(span);
+ *     // Parse data[0..len] on demand
+ * }
+ * @endcode
+ */
+libvroom_field_span_t libvroom_lazy_column_get_bounds(const libvroom_lazy_column_t* column,
+                                                      size_t row);
+
+/**
+ * @brief Get string value for a row.
+ *
+ * Returns a pointer to the field content. The returned pointer points into
+ * the original buffer and is only valid as long as the buffer remains valid.
+ * For quoted fields, the outer quotes are stripped.
+ *
+ * @param column The lazy column to access. Must not be NULL.
+ * @param row Row index (0-based, excludes header).
+ * @param[out] length Pointer to receive the string length. May be NULL.
+ * @return Pointer to field content, or NULL if row is out of bounds.
+ *         The pointer is valid until the buffer is destroyed.
+ *
+ * @warning The returned pointer is borrowed from the buffer. Do not free it.
+ */
+const char* libvroom_lazy_column_get_string(const libvroom_lazy_column_t* column, size_t row,
+                                            size_t* length);
+
+/**
+ * @brief Destroy a lazy column and free its resources.
+ *
+ * @param column The lazy column to destroy. May be NULL (no-op).
+ *
+ * @note This does not affect the underlying buffer or index.
+ */
+void libvroom_lazy_column_destroy(libvroom_lazy_column_t* column);
+
+/** @} */ /* end of lazy_column group */
 
 #ifdef __cplusplus
 }
