@@ -584,10 +584,12 @@ TEST_F(BranchlessParsingTest, ThreadSafetyStressTest) {
 
     // Verify no duplicate or out-of-order indices within each thread's slice
     // This catches races that cause threads to overwrite each other's positions
+    // Indexes are stored in contiguous per-thread regions at: thread_id * region_size
     for (int t = 0; t < n_threads; t++) {
       uint64_t prev = 0;
+      uint64_t* thread_base = idx.indexes + t * idx.region_size;
       for (uint64_t i = 0; i < idx.n_indexes[t]; i++) {
-        uint64_t pos = idx.indexes[t + i * n_threads];
+        uint64_t pos = thread_base[i];
         EXPECT_GT(pos, prev) << "Thread " << t << " index " << i
                              << ": positions should be strictly increasing";
         prev = pos;

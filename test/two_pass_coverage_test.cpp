@@ -97,15 +97,19 @@ TEST_F(IndexClassTest, WriteAndRead) {
   TwoPass parser;
   libvroom::ParseIndex original = parser.init(100, 2);
 
-  // Set values
+  // Set values using per-thread regions (region_size is set by init())
+  // Thread 0's indexes are at indexes[0..region_size-1]
+  // Thread 1's indexes are at indexes[region_size..2*region_size-1]
   original.columns = 10;
   original.n_indexes[0] = 3;
   original.n_indexes[1] = 2;
+  // Thread 0's indexes
   original.indexes[0] = 5;
   original.indexes[1] = 10;
   original.indexes[2] = 15;
-  original.indexes[3] = 20;
-  original.indexes[4] = 25;
+  // Thread 1's indexes (at region_size offset)
+  original.indexes[original.region_size + 0] = 20;
+  original.indexes[original.region_size + 1] = 25;
 
   // Write to file
   original.write(temp_filename);
@@ -118,6 +122,9 @@ TEST_F(IndexClassTest, WriteAndRead) {
   EXPECT_EQ(restored.n_threads, 2);
   EXPECT_EQ(restored.n_indexes[0], 3);
   EXPECT_EQ(restored.n_indexes[1], 2);
+  // After read, indexes are stored contiguously (region_size = 0)
+  // So all 5 indexes are at positions 0-4
+  EXPECT_EQ(restored.region_size, 0); // Deserialized layout is contiguous
   EXPECT_EQ(restored.indexes[0], 5);
   EXPECT_EQ(restored.indexes[1], 10);
   EXPECT_EQ(restored.indexes[2], 15);

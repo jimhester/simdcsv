@@ -58,9 +58,25 @@ ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex&
   for (uint16_t i = 0; i < idx_.n_threads; ++i)
     total_indexes += idx_.n_indexes[i];
   linear_indexes_.reserve(total_indexes);
-  for (uint16_t t = 0; t < idx_.n_threads; ++t)
-    for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j)
-      linear_indexes_.push_back(idx_.indexes[t + (j * idx_.n_threads)]);
+  // Read indexes handling two possible layouts:
+  // - region_size > 0: Per-thread regions at indexes[t * region_size]
+  // - region_size == 0: Contiguous layout from deserialization
+  if (idx_.region_size > 0) {
+    // Per-thread regions
+    for (uint16_t t = 0; t < idx_.n_threads; ++t) {
+      uint64_t* thread_base = idx_.indexes + t * idx_.region_size;
+      for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j)
+        linear_indexes_.push_back(thread_base[j]);
+    }
+  } else {
+    // Contiguous layout: thread 0 at offset 0, thread 1 at offset n_indexes[0], etc.
+    size_t offset = 0;
+    for (uint16_t t = 0; t < idx_.n_threads; ++t) {
+      for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j)
+        linear_indexes_.push_back(idx_.indexes[offset + j]);
+      offset += idx_.n_indexes[t];
+    }
+  }
   std::sort(linear_indexes_.begin(), linear_indexes_.end());
   size_t first_nl = 0;
   for (size_t i = 0; i < linear_indexes_.size(); ++i) {
