@@ -1864,8 +1864,47 @@ public:
 
   public:
     Result() = default;
-    Result(Result&&) = default;
-    Result& operator=(Result&&) = default;
+
+    // Custom move operations to reset the extractor (its idx_ptr_ would become dangling)
+    Result(Result&& other) noexcept
+        : idx(std::move(other.idx)), successful(other.successful), dialect(other.dialect),
+          detection(std::move(other.detection)), used_cache(other.used_cache),
+          cache_path(std::move(other.cache_path)), skip_(other.skip_), n_max_(other.n_max_),
+          skip_empty_rows_(other.skip_empty_rows_), buf_(other.buf_), len_(other.len_),
+          extractor_(nullptr), // Reset - will be recreated lazily with correct pointer
+          column_map_(std::move(other.column_map_)),
+          column_map_initialized_(other.column_map_initialized_),
+          error_collector_(std::move(other.error_collector_)),
+          extraction_config_(other.extraction_config_),
+          column_configs_(std::move(other.column_configs_)) {
+      other.buf_ = nullptr;
+      other.len_ = 0;
+    }
+
+    Result& operator=(Result&& other) noexcept {
+      if (this != &other) {
+        idx = std::move(other.idx);
+        successful = other.successful;
+        dialect = other.dialect;
+        detection = std::move(other.detection);
+        used_cache = other.used_cache;
+        cache_path = std::move(other.cache_path);
+        skip_ = other.skip_;
+        n_max_ = other.n_max_;
+        skip_empty_rows_ = other.skip_empty_rows_;
+        buf_ = other.buf_;
+        len_ = other.len_;
+        extractor_ = nullptr; // Reset - will be recreated lazily with correct pointer
+        column_map_ = std::move(other.column_map_);
+        column_map_initialized_ = other.column_map_initialized_;
+        error_collector_ = std::move(other.error_collector_);
+        extraction_config_ = other.extraction_config_;
+        column_configs_ = std::move(other.column_configs_);
+        other.buf_ = nullptr;
+        other.len_ = 0;
+      }
+      return *this;
+    }
 
     // Prevent copying - index contains raw pointers
     Result(const Result&) = delete;
