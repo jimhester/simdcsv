@@ -178,19 +178,35 @@ struct NullValueConfig {
   std::vector<std::string> null_values = {"", "NA", "N/A", "null", "NULL", "None", "NaN"};
   bool empty_is_null = false;
 
-  // Check if a value should be treated as null
+private:
+  // Lazily computed hash set for O(1) null value lookups
+  mutable std::unordered_set<std::string> null_set_;
+  mutable bool null_set_initialized_ = false;
+
+  void ensure_null_set() const {
+    if (!null_set_initialized_) {
+      null_set_.clear();
+      null_set_.insert(null_values.begin(), null_values.end());
+      null_set_initialized_ = true;
+    }
+  }
+
+public:
+  // Invalidate the cached set when null_values changes
+  void set_null_values(const std::vector<std::string>& values) {
+    null_values = values;
+    null_set_initialized_ = false;
+  }
+
+  // Check if a value should be treated as null - O(1) hash lookup
   bool is_null_value(const std::string& value) const {
-    // Check empty_is_null first
+    // Check empty_is_null first (fast path for empty strings)
     if (empty_is_null && value.empty()) {
       return true;
     }
-    // Check against null_values list
-    for (const auto& null_str : null_values) {
-      if (value == null_str) {
-        return true;
-      }
-    }
-    return false;
+    // Use hash set for O(1) lookup instead of O(n) linear scan
+    ensure_null_set();
+    return null_set_.find(value) != null_set_.end();
   }
 };
 
@@ -314,6 +330,8 @@ struct TableData {
   size_t translate_row_index(size_t filtered_index) const { return filtered_index + skip_rows_; }
 
   // Materialize all columns as strings for Arrow export
+  // Optimized: Uses efficient column-wise extraction from C++ library
+  // instead of row-by-row iteration (O(rows) per column vs O(rows*cols) total)
   void materialize_columns() {
     if (columns_materialized)
       return;
@@ -322,12 +340,25 @@ struct TableData {
     size_t n_rows = effective_num_rows();
     columns_data.resize(n_cols);
 
-    for (size_t col = 0; col < n_cols; ++col) {
-      size_t underlying_col = map_column_index(col);
-      columns_data[col].reserve(n_rows);
-      for (size_t row = 0; row < n_rows; ++row) {
-        auto r = result.row(translate_row_index(row));
-        columns_data[col].push_back(r.get_string(underlying_col));
+    // Fast path: No skip/limit, no column selection - use direct column extraction
+    if (skip_rows_ == 0 && !n_rows_ && selected_columns.empty()) {
+      for (size_t col = 0; col < n_cols; ++col) {
+        // Use the efficient column_string() method from C++ library
+        // This extracts entire columns without row-by-row overhead
+        columns_data[col] = result.column_string(col);
+      }
+    } else {
+      // Slow path: Need to apply skip_rows, n_rows, or column selection
+      // Still use column-wise extraction, but with filtering
+      for (size_t col = 0; col < n_cols; ++col) {
+        size_t underlying_col = map_column_index(col);
+        // Extract full column first, then slice
+        std::vector<std::string> full_col = result.column_string(underlying_col);
+        columns_data[col].reserve(n_rows);
+        size_t end_row = skip_rows_ + n_rows;
+        for (size_t row = skip_rows_; row < end_row && row < full_col.size(); ++row) {
+          columns_data[col].push_back(std::move(full_col[row]));
+        }
       }
     }
     columns_materialized = true;
@@ -947,18 +978,26 @@ public:
   std::vector<std::string> column_names() const { return data_->column_names; }
 
   // Get a single column as list of strings (respects skip_rows/n_rows and column selection)
+  // Optimized: Uses efficient column-wise extraction instead of row-by-row iteration
   std::vector<std::string> column(size_t index) const {
     if (index >= data_->effective_num_columns()) {
       throw py::index_error("Column index out of range");
     }
-    // Extract only the filtered rows with column mapping
     size_t underlying_idx = data_->map_column_index(index);
-    std::vector<std::string> result;
+
+    // Fast path: No skip/limit - use direct column extraction
+    if (data_->skip_rows_ == 0 && !data_->n_rows_) {
+      return data_->result.column_string(underlying_idx);
+    }
+
+    // Slow path: Need to apply skip_rows or n_rows
+    std::vector<std::string> full_col = data_->result.column_string(underlying_idx);
     size_t n = data_->effective_num_rows();
+    std::vector<std::string> result;
     result.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
-      auto r = data_->result.row(data_->translate_row_index(i));
-      result.push_back(r.get_string(underlying_idx));
+    size_t end_row = data_->skip_rows_ + n;
+    for (size_t i = data_->skip_rows_; i < end_row && i < full_col.size(); ++i) {
+      result.push_back(std::move(full_col[i]));
     }
     return result;
   }
