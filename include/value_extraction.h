@@ -1,6 +1,7 @@
 #ifndef LIBVROOM_VALUE_EXTRACTION_H
 #define LIBVROOM_VALUE_EXTRACTION_H
 
+#include "column_index.h"
 #include "common_defs.h"
 #include "dialect.h"
 #include "extraction_config.h"
@@ -857,11 +858,15 @@ private:
   size_t num_rows_ = 0;
   size_t num_columns_ = 0;
   bool has_header_ = true;
-  std::vector<uint64_t> linear_indexes_;
+  mutable std::vector<uint64_t> linear_indexes_;
+  mutable bool indexes_sorted_ = false;
 
   // Shared ownership members for buffer lifetime safety
   std::shared_ptr<const ParseIndex> shared_idx_;              // Owns ParseIndex when shared
   std::shared_ptr<const std::vector<uint8_t>> shared_buffer_; // Owns buffer when shared
+
+  // Lazy sorted index for byte_offset_to_location (avoids O(n log n) sort until needed)
+  mutable std::unique_ptr<LazySortedIndex> lazy_sorted_index_;
 
   // Cache of resolved configs (merged with global config) for fast lookup
   mutable std::unordered_map<size_t, ExtractionConfig> resolved_configs_;
@@ -872,10 +877,19 @@ private:
   std::string_view get_string_view_internal(size_t row, size_t col) const;
   size_t compute_field_index(size_t row, size_t col) const;
   std::string unescape_field(std::string_view field) const;
+
+  /**
+   * @brief Ensure linear_indexes_ is populated and sorted.
+   *
+   * This method lazily sorts the indexes on first access, deferring the
+   * O(n log n) cost until actually needed for row-oriented access.
+   */
+  void ensure_sorted() const;
+
   void recalculate_num_rows() {
-    size_t total_indexes = linear_indexes_.size();
+    uint64_t total_indexes = idx().total_indexes();
     if (total_indexes > 0 && num_columns_ > 0) {
-      size_t total_rows = total_indexes / num_columns_;
+      size_t total_rows = static_cast<size_t>(total_indexes / num_columns_);
       num_rows_ = has_header_ ? (total_rows > 0 ? total_rows - 1 : 0) : total_rows;
     }
   }

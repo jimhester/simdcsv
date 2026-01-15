@@ -334,6 +334,7 @@ set(VROOM_SOURCES
     src/branchless_state_machine.cpp
     src/simd_number_parsing.cpp
     src/utf8.cpp
+    src/column_index.cpp
 )
 
 # Add SIMD dispatch source for dynamic dispatch (runtime CPU detection)
@@ -681,6 +682,26 @@ add_dependencies(lazy_column_test copy_test_data)
 
 # Register lazy column tests with CTest
 gtest_discover_tests(lazy_column_test)
+
+# Column index test executable (tests lazy sorting and column-oriented storage)
+add_executable(column_index_test
+    test/column_index_test.cpp
+)
+
+target_link_libraries(column_index_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(column_index_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(column_index_test copy_test_data)
+
+# Register column index tests with CTest
+gtest_discover_tests(column_index_test)
 
 # Streaming parser test executable
 add_executable(streaming_test

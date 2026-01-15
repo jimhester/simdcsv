@@ -1864,8 +1864,44 @@ public:
 
   public:
     Result() = default;
-    Result(Result&&) = default;
-    Result& operator=(Result&&) = default;
+
+    // Custom move constructor: must reset extractor_ because it stores a pointer
+    // to idx which changes address when the Result is moved
+    Result(Result&& other) noexcept
+        : idx(std::move(other.idx)), successful(other.successful),
+          dialect(std::move(other.dialect)), detection(std::move(other.detection)),
+          used_cache(other.used_cache), cache_path(std::move(other.cache_path)), skip_(other.skip_),
+          n_max_(other.n_max_), skip_empty_rows_(other.skip_empty_rows_), buf_(other.buf_),
+          len_(other.len_), extractor_(nullptr), // Reset - idx pointer would be invalid
+          column_map_(std::move(other.column_map_)),
+          column_map_initialized_(other.column_map_initialized_),
+          error_collector_(std::move(other.error_collector_)),
+          extraction_config_(std::move(other.extraction_config_)),
+          column_configs_(std::move(other.column_configs_)) {}
+
+    // Custom move assignment: must reset extractor_ for same reason
+    Result& operator=(Result&& other) noexcept {
+      if (this != &other) {
+        idx = std::move(other.idx);
+        successful = other.successful;
+        dialect = std::move(other.dialect);
+        detection = std::move(other.detection);
+        used_cache = other.used_cache;
+        cache_path = std::move(other.cache_path);
+        skip_ = other.skip_;
+        n_max_ = other.n_max_;
+        skip_empty_rows_ = other.skip_empty_rows_;
+        buf_ = other.buf_;
+        len_ = other.len_;
+        extractor_.reset(); // Reset - idx pointer would be invalid
+        column_map_ = std::move(other.column_map_);
+        column_map_initialized_ = other.column_map_initialized_;
+        error_collector_ = std::move(other.error_collector_);
+        extraction_config_ = std::move(other.extraction_config_);
+        column_configs_ = std::move(other.column_configs_);
+      }
+      return *this;
+    }
 
     // Prevent copying - index contains raw pointers
     Result(const Result&) = delete;
