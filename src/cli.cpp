@@ -303,6 +303,7 @@ void printUsage(const char* prog) {
   cerr << "  --no-cache    Disable index caching (default)\n";
   cerr << "  -p, --progress  Show progress bar during parsing (auto-enabled for TTY)\n";
   cerr << "  --no-progress   Disable progress bar\n";
+  cerr << "  --max-errors <n>  Maximum errors to collect (default: 10000)\n";
   cerr << "  -h            Show this help message\n";
   cerr << "  -v            Show version information\n";
   cerr << "\nDialect Detection:\n";
@@ -371,14 +372,14 @@ struct CliCacheConfig {
 // If forced_encoding is not UNKNOWN, it overrides auto-detection
 // If cache_config is provided and enabled, enables index caching
 // If progress_callback is provided, it will be called during parsing
-ParseResult parseFile(const char* filename, int n_threads,
-                      const libvroom::Dialect& dialect = libvroom::Dialect::csv(),
-                      bool auto_detect = false,
-                      libvroom::EncodingResult* detected_encoding = nullptr,
-                      bool strict_mode = false,
-                      libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
-                      const CliCacheConfig* cache_config = nullptr,
-                      libvroom::ProgressCallback progress_callback = nullptr) {
+// If max_errors > 0, limits the number of errors collected (0 = use default)
+ParseResult
+parseFile(const char* filename, int n_threads,
+          const libvroom::Dialect& dialect = libvroom::Dialect::csv(), bool auto_detect = false,
+          libvroom::EncodingResult* detected_encoding = nullptr, bool strict_mode = false,
+          libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
+          const CliCacheConfig* cache_config = nullptr,
+          libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
   ParseResult result;
 
   try {
@@ -425,6 +426,11 @@ ParseResult parseFile(const char* filename, int n_threads,
   libvroom::ParseOptions options;
   if (!auto_detect) {
     options.dialect = dialect;
+  }
+
+  // Set max_errors limit if specified (0 = use default)
+  if (max_errors > 0) {
+    options.max_errors = max_errors;
   }
 
   // In strict mode, collect errors using PERMISSIVE mode to gather all issues
@@ -751,9 +757,9 @@ int cmdHead(const char* filename, int n_threads, size_t num_rows, bool has_heade
             bool strict_mode = false,
             libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
             const CliCacheConfig* cache_config = nullptr,
-            libvroom::ProgressCallback progress_callback = nullptr) {
+            libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config, progress_callback);
+                          forced_encoding, cache_config, progress_callback, max_errors);
   if (!result.success)
     return 1;
 
@@ -945,9 +951,9 @@ int cmdSample(const char* filename, int n_threads, size_t num_rows, bool has_hea
               unsigned int seed = 0, bool strict_mode = false,
               libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
               const CliCacheConfig* cache_config = nullptr,
-              libvroom::ProgressCallback progress_callback = nullptr) {
+              libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config, progress_callback);
+                          forced_encoding, cache_config, progress_callback, max_errors);
   if (!result.success)
     return 1;
 
@@ -1014,9 +1020,9 @@ int cmdSelect(const char* filename, int n_threads, const string& columns, bool h
               bool strict_mode = false,
               libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
               const CliCacheConfig* cache_config = nullptr,
-              libvroom::ProgressCallback progress_callback = nullptr) {
+              libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config, progress_callback);
+                          forced_encoding, cache_config, progress_callback, max_errors);
   if (!result.success)
     return 1;
 
@@ -1107,9 +1113,9 @@ int cmdInfo(const char* filename, int n_threads, bool has_header,
             bool strict_mode = false,
             libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
             const CliCacheConfig* cache_config = nullptr,
-            libvroom::ProgressCallback progress_callback = nullptr) {
+            libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config, progress_callback);
+                          forced_encoding, cache_config, progress_callback, max_errors);
   if (!result.success)
     return 1;
 
@@ -1147,9 +1153,9 @@ int cmdPretty(const char* filename, int n_threads, size_t num_rows, bool has_hea
               bool strict_mode = false,
               libvroom::Encoding forced_encoding = libvroom::Encoding::UNKNOWN,
               const CliCacheConfig* cache_config = nullptr,
-              libvroom::ProgressCallback progress_callback = nullptr) {
+              libvroom::ProgressCallback progress_callback = nullptr, size_t max_errors = 0) {
   auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
-                          forced_encoding, cache_config, progress_callback);
+                          forced_encoding, cache_config, progress_callback, max_errors);
   if (!result.success)
     return 1;
 
@@ -1656,8 +1662,9 @@ static std::vector<size_t> computeDistributedSampleIndices(size_t num_rows,
 int cmdSchema(const char* filename, int n_threads, bool has_header,
               const libvroom::Dialect& dialect, bool auto_detect, bool json_output,
               bool strict_mode, size_t sample_size, bool use_distributed_sampling,
-              size_t num_sample_locations, size_t rows_per_location) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+              size_t num_sample_locations, size_t rows_per_location, size_t max_errors = 0) {
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
+                          libvroom::Encoding::UNKNOWN, nullptr, nullptr, max_errors);
   if (!result.success)
     return 1;
 
@@ -1900,8 +1907,10 @@ int cmdConvert(const char* filename, const std::string& output_path, int n_threa
 // Command: stats - display statistical summary for each column
 int cmdStats(const char* filename, int n_threads, bool has_header, const libvroom::Dialect& dialect,
              bool auto_detect, bool json_output, bool strict_mode, size_t sample_size,
-             bool use_distributed_sampling, size_t num_sample_locations, size_t rows_per_location) {
-  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode);
+             bool use_distributed_sampling, size_t num_sample_locations, size_t rows_per_location,
+             size_t max_errors = 0) {
+  auto result = parseFile(filename, n_threads, dialect, auto_detect, nullptr, strict_mode,
+                          libvroom::Encoding::UNKNOWN, nullptr, nullptr, max_errors);
   if (!result.success)
     return 1;
 
@@ -2164,6 +2173,7 @@ int main(int argc, char* argv[]) {
   bool use_distributed_sampling = true; // Use distributed sampling by default
   size_t num_sample_locations = 100;    // Number of sample locations for distributed sampling
   size_t rows_per_location = 100;       // Rows per location for distributed sampling
+  size_t max_errors = 0;                // Maximum errors to collect (0 = use default of 10000)
   CliCacheConfig cache_config;          // Index caching configuration
   // Progress bar: auto-enabled for TTY by default, can be overridden by --progress/--no-progress
   bool progress_auto = true;     // Use automatic TTY detection
@@ -2323,6 +2333,34 @@ int main(int argc, char* argv[]) {
       }
       argc -= 2;
       --i;
+    } else if (strncmp(argv[i], "--max-errors=", 13) == 0) {
+      char* endptr;
+      long val = strtol(argv[i] + 13, &endptr, 10);
+      if (*endptr != '\0' || val < 0) {
+        cerr << "Error: Invalid max-errors value '" << (argv[i] + 13) << "'\n";
+        return 1;
+      }
+      max_errors = static_cast<size_t>(val);
+      // Remove --max-errors=... from argv by shifting remaining args
+      for (int j = i; j < argc - 1; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      --i;
+    } else if (strcmp(argv[i], "--max-errors") == 0 && i + 1 < argc) {
+      char* endptr;
+      long val = strtol(argv[i + 1], &endptr, 10);
+      if (*endptr != '\0' || val < 0) {
+        cerr << "Error: Invalid max-errors value '" << argv[i + 1] << "'\n";
+        return 1;
+      }
+      max_errors = static_cast<size_t>(val);
+      // Remove both --max-errors and its argument from argv
+      for (int j = i; j < argc - 2; ++j) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      --i;
     }
   }
 
@@ -2461,7 +2499,7 @@ int main(int argc, char* argv[]) {
     result = cmdCount(filename, n_threads, has_header, dialect, auto_detect);
   } else if (command == "head") {
     result = cmdHead(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
-                     forced_encoding, &cache_config, progress_cb);
+                     forced_encoding, &cache_config, progress_cb, max_errors);
     progress_bar.finish();
   } else if (command == "tail") {
     // Note: tail uses streaming API which doesn't support caching or progress yet
@@ -2469,7 +2507,7 @@ int main(int argc, char* argv[]) {
                      forced_encoding);
   } else if (command == "sample") {
     result = cmdSample(filename, n_threads, num_rows, has_header, dialect, auto_detect, random_seed,
-                       strict_mode, forced_encoding, &cache_config, progress_cb);
+                       strict_mode, forced_encoding, &cache_config, progress_cb, max_errors);
     progress_bar.finish();
   } else if (command == "select") {
     if (columns.empty()) {
@@ -2477,28 +2515,28 @@ int main(int argc, char* argv[]) {
       return 1;
     }
     result = cmdSelect(filename, n_threads, columns, has_header, dialect, auto_detect, strict_mode,
-                       forced_encoding, &cache_config, progress_cb);
+                       forced_encoding, &cache_config, progress_cb, max_errors);
     progress_bar.finish();
   } else if (command == "info") {
     result = cmdInfo(filename, n_threads, has_header, dialect, auto_detect, strict_mode,
-                     forced_encoding, &cache_config, progress_cb);
+                     forced_encoding, &cache_config, progress_cb, max_errors);
     progress_bar.finish();
   } else if (command == "pretty") {
     result = cmdPretty(filename, n_threads, num_rows, has_header, dialect, auto_detect, strict_mode,
-                       forced_encoding, &cache_config, progress_cb);
+                       forced_encoding, &cache_config, progress_cb, max_errors);
     progress_bar.finish();
   } else if (command == "dialect") {
     // Note: dialect command ignores -d, --strict, and -e flags since it's for detection
     (void)delimiter_specified; // Suppress unused warning
     result = cmdDialect(filename, json_output, force_output);
   } else if (command == "schema") {
-    result =
-        cmdSchema(filename, n_threads, has_header, dialect, auto_detect, json_output, strict_mode,
-                  sample_size, use_distributed_sampling, num_sample_locations, rows_per_location);
+    result = cmdSchema(filename, n_threads, has_header, dialect, auto_detect, json_output,
+                       strict_mode, sample_size, use_distributed_sampling, num_sample_locations,
+                       rows_per_location, max_errors);
   } else if (command == "stats") {
-    result =
-        cmdStats(filename, n_threads, has_header, dialect, auto_detect, json_output, strict_mode,
-                 sample_size, use_distributed_sampling, num_sample_locations, rows_per_location);
+    result = cmdStats(filename, n_threads, has_header, dialect, auto_detect, json_output,
+                      strict_mode, sample_size, use_distributed_sampling, num_sample_locations,
+                      rows_per_location, max_errors);
 #ifdef LIBVROOM_ENABLE_ARROW
   } else if (command == "convert") {
     result = cmdConvert(filename, output_path, n_threads, dialect, auto_detect, output_format,

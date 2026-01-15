@@ -499,6 +499,22 @@ struct ParseOptions {
   SizeLimits limits = SizeLimits::defaults();
 
   /**
+   * @brief Maximum number of errors to collect before suppressing.
+   *
+   * When parsing malformed files, error collection can consume significant
+   * memory if thousands of errors are generated (e.g., wrong delimiter causing
+   * field count errors on every row). This limit prevents memory exhaustion
+   * by stopping error collection after the limit is reached.
+   *
+   * Errors beyond the limit are counted but not stored. The count of suppressed
+   * errors is available via result.error_collector().suppressed_count() and
+   * is included in the error summary.
+   *
+   * Default: 10000 errors (ErrorCollector::DEFAULT_MAX_ERRORS)
+   */
+  size_t max_errors = ErrorCollector::DEFAULT_MAX_ERRORS;
+
+  /**
    * @brief Index caching configuration.
    *
    * When set (has_value()), the parser will attempt to load a cached index from
@@ -1872,6 +1888,9 @@ public:
    */
   Result parse(const uint8_t* buf, size_t len, const ParseOptions& options = ParseOptions{}) {
     Result result;
+
+    // Configure the internal error collector with the max_errors limit
+    result.error_collector().set_max_errors(options.max_errors);
 
     // Determine which error collector to use:
     // - If external collector provided, use it and copy errors to internal
