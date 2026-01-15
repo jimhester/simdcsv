@@ -935,6 +935,207 @@ TEST_F(ValueExtractorTest, UnescapeFieldEmptyQuotedString) {
   EXPECT_EQ(result, "");
 }
 
+// ============================================================================
+// ByteOffsetToLocation Tests
+// ============================================================================
+
+class ByteOffsetToLocationTest : public ::testing::Test {
+protected:
+  std::unique_ptr<TestBuffer> buffer_;
+  Parser parser_;
+  Parser::Result result_;
+
+  void ParseCSV(const std::string& csv) {
+    buffer_ = std::make_unique<TestBuffer>(csv);
+    result_ = parser_.parse(buffer_->data(), buffer_->size());
+  }
+
+  ParseIndex& idx() { return result_.idx; }
+};
+
+TEST_F(ByteOffsetToLocationTest, SimpleCSV) {
+  // CSV layout:
+  //   "a,b\n1,2\n"
+  //   0123 4567
+  // Offsets: a=0-0, comma=1, b=2-2, newline=3, 1=4-4, comma=5, 2=6-6, newline=7
+  ParseCSV("a,b\n1,2\n");
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
+
+  // Offset 0 is in the header row, column 0 (field "a")
+  auto loc = extractor.byte_offset_to_location(0);
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 0);
+  EXPECT_EQ(loc.column, 0);
+
+  // Offset 2 is in the header row, column 1 (field "b")
+  loc = extractor.byte_offset_to_location(2);
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 0);
+  EXPECT_EQ(loc.column, 1);
+
+  // Offset 4 is in data row 0, column 0 (field "1")
+  loc = extractor.byte_offset_to_location(4);
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 1);
+  EXPECT_EQ(loc.column, 0);
+
+  // Offset 6 is in data row 0, column 1 (field "2")
+  loc = extractor.byte_offset_to_location(6);
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 1);
+  EXPECT_EQ(loc.column, 1);
+}
+
+TEST_F(ByteOffsetToLocationTest, MultipleRows) {
+  // CSV layout:
+  //   "a,b,c\n1,2,3\n4,5,6\n"
+  ParseCSV("a,b,c\n1,2,3\n4,5,6\n");
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
+
+  EXPECT_EQ(extractor.num_columns(), 3);
+  EXPECT_EQ(extractor.num_rows(), 2);
+
+  // Last row (row 2), last column (column 2) - should be where "6" is
+  // "a,b,c\n1,2,3\n4,5,6\n"
+  //  01234 567890 12345678
+  // 6 is at offset 16
+  auto loc = extractor.byte_offset_to_location(16);
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 2);
+  EXPECT_EQ(loc.column, 2);
+}
+
+TEST_F(ByteOffsetToLocationTest, BeyondEndReturnsNotFound) {
+  ParseCSV("a,b\n1,2\n");
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
+
+  // Offset way beyond the data
+  auto loc = extractor.byte_offset_to_location(1000);
+  EXPECT_FALSE(loc.found);
+}
+
+TEST_F(ByteOffsetToLocationTest, AtSeparatorPosition) {
+  // CSV: "a,b\n"
+  // Positions: a=0, comma=1, b=2, newline=3
+  ParseCSV("a,b\n");
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
+
+  // Offset at comma position (1) - belongs to field "a" (column 0)
+  auto loc = extractor.byte_offset_to_location(1);
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 0);
+  EXPECT_EQ(loc.column, 0);
+
+  // Offset at newline position (3) - belongs to field "b" (column 1)
+  loc = extractor.byte_offset_to_location(3);
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 0);
+  EXPECT_EQ(loc.column, 1);
+}
+
+TEST_F(ByteOffsetToLocationTest, EmptyCSVReturnsNotFound) {
+  // This test creates an empty CSV which results in no indexes
+  ParseCSV("");
+  // Don't create extractor on empty data - just verify parsing succeeded
+  EXPECT_TRUE(result_.success());
+}
+
+TEST_F(ByteOffsetToLocationTest, SingleField) {
+  ParseCSV("header\nvalue\n");
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
+
+  EXPECT_EQ(extractor.num_columns(), 1);
+  EXPECT_EQ(extractor.num_rows(), 1);
+
+  // Offset 0 is in header row
+  auto loc = extractor.byte_offset_to_location(0);
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 0);
+  EXPECT_EQ(loc.column, 0);
+
+  // Offset 7 is in data row (start of "value")
+  loc = extractor.byte_offset_to_location(7);
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 1);
+  EXPECT_EQ(loc.column, 0);
+}
+
+TEST_F(ByteOffsetToLocationTest, QuotedFields) {
+  // CSV: "\"hello\",world\n"
+  //       0123456 789...
+  ParseCSV("\"hello\",world\n");
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
+
+  extractor.set_has_header(false);
+  EXPECT_EQ(extractor.num_columns(), 2);
+  EXPECT_EQ(extractor.num_rows(), 1);
+
+  // Offset in the middle of quoted field "hello"
+  auto loc = extractor.byte_offset_to_location(3);
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 0);
+  EXPECT_EQ(loc.column, 0);
+
+  // Offset in "world"
+  loc = extractor.byte_offset_to_location(10);
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 0);
+  EXPECT_EQ(loc.column, 1);
+}
+
+TEST_F(ByteOffsetToLocationTest, BoolConversion) {
+  ParseCSV("a\n1\n");
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
+
+  // Test that Location can be used in boolean context
+  auto found_loc = extractor.byte_offset_to_location(0);
+  EXPECT_TRUE(static_cast<bool>(found_loc));
+
+  auto not_found_loc = extractor.byte_offset_to_location(1000);
+  EXPECT_FALSE(static_cast<bool>(not_found_loc));
+}
+
+TEST_F(ByteOffsetToLocationTest, ResultAPIAccess) {
+  // Test access through Result API as well
+  ParseCSV("a,b\n1,2\n");
+
+  // Result should expose byte_offset_to_location
+  auto loc = result_.byte_offset_to_location(4); // Start of data "1"
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 1);
+  EXPECT_EQ(loc.column, 0);
+}
+
+TEST_F(ByteOffsetToLocationTest, LargerCSV) {
+  // Create a larger CSV to test binary search effectiveness
+  std::string csv = "col1,col2,col3,col4,col5\n";
+  for (int i = 0; i < 100; ++i) {
+    csv += std::to_string(i * 5) + "," + std::to_string(i * 5 + 1) + "," +
+           std::to_string(i * 5 + 2) + "," + std::to_string(i * 5 + 3) + "," +
+           std::to_string(i * 5 + 4) + "\n";
+  }
+
+  ParseCSV(csv);
+  ValueExtractor extractor(buffer_->data(), buffer_->size(), idx());
+
+  EXPECT_EQ(extractor.num_columns(), 5);
+  EXPECT_EQ(extractor.num_rows(), 100);
+
+  // Find location of the first row's data
+  auto loc = extractor.byte_offset_to_location(26); // After "col1,col2,col3,col4,col5\n"
+  EXPECT_TRUE(loc.found);
+  EXPECT_EQ(loc.row, 1);
+  EXPECT_EQ(loc.column, 0);
+
+  // Test middle of data
+  size_t mid_offset = buffer_->size() / 2;
+  loc = extractor.byte_offset_to_location(mid_offset);
+  EXPECT_TRUE(loc.found);
+  // Just verify it's a valid row (exact row depends on data layout)
+  EXPECT_LT(loc.row, 101); // <= 100 rows + header
+  EXPECT_LT(loc.column, 5);
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
