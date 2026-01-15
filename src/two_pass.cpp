@@ -143,6 +143,96 @@ void ParseIndex::read(const std::string& filename) {
   std::fclose(fp);
 }
 
+FieldSpan ParseIndex::get_field_span(uint64_t global_field_idx) const {
+  // The indexes array stores the byte positions of field separators (delimiters
+  // and newlines). To get a field's content:
+  // - Field 0: start = 0, end = indexes[0]
+  // - Field N: start = indexes[N-1] + 1, end = indexes[N]
+  //
+  // With multi-threaded parsing, indexes are stored in per-thread regions.
+  // We need to iterate through threads in file order to find the correct position.
+
+  if (!is_valid() || n_threads == 0) {
+    return FieldSpan(); // Invalid
+  }
+
+  // Handle special case: first field starts at position 0
+  if (global_field_idx == 0) {
+    // Find the first separator (end of first field)
+    auto view = thread_data(0);
+    if (view.empty()) {
+      return FieldSpan(); // No separators found
+    }
+    return FieldSpan(0, view[0]);
+  }
+
+  // Find which thread contains this field by iterating through thread counts
+  uint64_t fields_seen = 0;
+  for (uint16_t t = 0; t < n_threads; ++t) {
+    uint64_t thread_count = n_indexes[t];
+    if (fields_seen + thread_count > global_field_idx) {
+      // This thread contains our target field
+      uint64_t local_idx = global_field_idx - fields_seen;
+      auto view = thread_data(t);
+
+      // Get the end position (separator position) for this field
+      uint64_t end_pos = view[local_idx];
+
+      // Get the start position (position after previous separator)
+      uint64_t start_pos;
+      if (local_idx == 0) {
+        // First field in this thread's chunk
+        if (t == 0) {
+          // Very first field in the file
+          start_pos = 0;
+        } else {
+          // Start of this thread's chunk: position after last separator of previous thread
+          // Get the last separator from the previous thread
+          auto prev_view = thread_data(t - 1);
+          if (!prev_view.empty()) {
+            start_pos = prev_view[prev_view.size() - 1] + 1;
+          } else {
+            // Previous thread had no separators - use chunk_starts if available
+            // This shouldn't happen in well-formed CSVs, but handle gracefully
+            if (chunk_starts != nullptr) {
+              start_pos = chunk_starts[t];
+            } else {
+              return FieldSpan(); // Cannot determine start position
+            }
+          }
+        }
+      } else {
+        // Start is after the previous separator in this thread
+        start_pos = view[local_idx - 1] + 1;
+      }
+
+      return FieldSpan(start_pos, end_pos);
+    }
+    fields_seen += thread_count;
+  }
+
+  // Index out of bounds
+  return FieldSpan();
+}
+
+FieldSpan ParseIndex::get_field_span(uint64_t row, uint64_t col) const {
+  // Convert (row, col) to global field index
+  // Each row has 'columns' fields
+  if (columns == 0) {
+    return FieldSpan(); // Column count not set
+  }
+
+  // Validate column index
+  if (col >= columns) {
+    return FieldSpan(); // Column out of bounds
+  }
+
+  // Calculate global field index
+  uint64_t global_idx = row * columns + col;
+
+  return get_field_span(global_idx);
+}
+
 void ParseIndex::write(const std::string& filename, const SourceMetadata& source_meta) {
   // Write to temp file, then atomic rename for crash safety
   std::string temp_path = filename + ".tmp";
@@ -798,11 +888,22 @@ bool TwoPass::parse_speculate(const uint8_t* buf, ParseIndex& out, size_t len,
       // CRITICAL: Must update n_threads to 1 for correct stride in write()
       out.n_threads = 1;
       out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+      // Set chunk_starts for single-threaded case
+      if (out.chunk_starts != nullptr) {
+        out.chunk_starts[0] = 0;
+      }
       // Report full progress for single-threaded fallback
       if (progress && !progress(len)) {
         return false; // Cancelled
       }
       return true;
+    }
+  }
+
+  // Store chunk start positions for later use by get_field_span()
+  if (out.chunk_starts != nullptr) {
+    for (int i = 0; i < n_threads; ++i) {
+      out.chunk_starts[i] = chunk_pos[i];
     }
   }
 
@@ -914,11 +1015,22 @@ bool TwoPass::parse_two_pass(const uint8_t* buf, ParseIndex& out, size_t len,
       // CRITICAL: Must update n_threads to 1 for correct stride in write()
       out.n_threads = 1;
       out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+      // Set chunk_starts for single-threaded case
+      if (out.chunk_starts != nullptr) {
+        out.chunk_starts[0] = 0;
+      }
       // Report full progress for single-threaded fallback
       if (progress && !progress(len)) {
         return false; // Cancelled
       }
       return true;
+    }
+  }
+
+  // Store chunk start positions for later use by get_field_span()
+  if (out.chunk_starts != nullptr) {
+    for (int i = 0; i < n_threads; ++i) {
+      out.chunk_starts[i] = chunk_pos[i];
     }
   }
 
@@ -1043,8 +1155,19 @@ bool TwoPass::parse_branchless_with_errors(const uint8_t* buf, ParseIndex& out, 
       // Use SIMD-optimized version for better performance
       out.n_indexes[0] =
           second_pass_simd_branchless_with_errors(sm, buf, 0, len, out.indexes, 0, 1, &errors, len);
+      // Set chunk_starts for single-threaded case
+      if (out.chunk_starts != nullptr) {
+        out.chunk_starts[0] = 0;
+      }
       check_field_counts(buf, len, errors, delim, quote);
       return !errors.has_fatal_errors();
+    }
+  }
+
+  // Store chunk start positions for later use by get_field_span()
+  if (out.chunk_starts != nullptr) {
+    for (int i = 0; i < n_threads; ++i) {
+      out.chunk_starts[i] = chunk_pos[i];
     }
   }
 
@@ -1129,7 +1252,18 @@ bool TwoPass::parse_branchless(const uint8_t* buf, ParseIndex& out, size_t len,
     if (chunk_pos[i] == null_pos) {
       out.n_threads = 1;
       out.n_indexes[0] = second_pass_simd_branchless(sm, buf, 0, len, &out, 0);
+      // Set chunk_starts for single-threaded case
+      if (out.chunk_starts != nullptr) {
+        out.chunk_starts[0] = 0;
+      }
       return true;
+    }
+  }
+
+  // Store chunk start positions for later use by get_field_span()
+  if (out.chunk_starts != nullptr) {
+    for (int i = 0; i < n_threads; ++i) {
+      out.chunk_starts[i] = chunk_pos[i];
     }
   }
 
@@ -1167,6 +1301,10 @@ bool TwoPass::parse_branchless(const uint8_t* buf, ParseIndex& out, size_t len,
     // Reset the index and re-parse single-threaded
     out.n_threads = 1;
     out.n_indexes[0] = second_pass_simd_branchless(sm, buf, 0, len, &out, 0);
+    // Update chunk_starts for single-threaded fallback
+    if (out.chunk_starts != nullptr) {
+      out.chunk_starts[0] = 0;
+    }
   }
 
   return true;
@@ -1281,8 +1419,19 @@ bool TwoPass::parse_two_pass_with_errors(const uint8_t* buf, ParseIndex& out, si
       out.n_threads = 1;
       out.n_indexes[0] =
           second_pass_chunk(buf, 0, len, &out, 0, &errors, len, delim, quote, comment);
+      // Set chunk_starts for single-threaded case
+      if (out.chunk_starts != nullptr) {
+        out.chunk_starts[0] = 0;
+      }
       check_field_counts(buf, len, errors, delim, quote, comment);
       return !errors.has_fatal_errors();
+    }
+  }
+
+  // Store chunk start positions for later use by get_field_span()
+  if (out.chunk_starts != nullptr) {
+    for (int i = 0; i < n_threads; ++i) {
+      out.chunk_starts[i] = chunk_pos[i];
     }
   }
 
@@ -1579,6 +1728,15 @@ ParseIndex TwoPass::init(size_t len, size_t n_threads) {
   out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
   out.n_indexes = out.n_indexes_ptr_.get();
 
+  // Allocate chunk_starts array with RAII ownership
+  // This tracks where each thread's chunk starts in the source file
+  out.chunk_starts_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.chunk_starts = out.chunk_starts_ptr_.get();
+  // Initialize chunk_starts (will be set during parsing)
+  for (size_t i = 0; i < n_threads; ++i) {
+    out.chunk_starts[i] = 0;
+  }
+
   // Allocate space for contiguous per-thread index storage.
   // Each thread gets its own region of size region_size to avoid false sharing.
   size_t allocation_size;
@@ -1657,6 +1815,13 @@ ParseIndex TwoPass::init_safe(size_t len, size_t n_threads, ErrorCollector* erro
   out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
   out.n_indexes = out.n_indexes_ptr_.get();
 
+  // Allocate chunk_starts array with RAII ownership
+  out.chunk_starts_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.chunk_starts = out.chunk_starts_ptr_.get();
+  for (size_t i = 0; i < n_threads; ++i) {
+    out.chunk_starts[i] = 0;
+  }
+
   out.indexes_ptr_ = std::make_unique<uint64_t[]>(allocation_size);
   out.indexes = out.indexes_ptr_.get();
 
@@ -1677,6 +1842,13 @@ ParseIndex TwoPass::init_counted(uint64_t total_separators, size_t n_threads) {
   // Allocate n_indexes array with RAII ownership
   out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
   out.n_indexes = out.n_indexes_ptr_.get();
+
+  // Allocate chunk_starts array with RAII ownership
+  out.chunk_starts_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.chunk_starts = out.chunk_starts_ptr_.get();
+  for (size_t i = 0; i < n_threads; ++i) {
+    out.chunk_starts[i] = 0;
+  }
 
   // Allocate space for separator positions.
   // Add padding for speculative writes in the write() function (writes up to 8 extra).
@@ -1792,6 +1964,13 @@ ParseIndex TwoPass::init_counted_safe(uint64_t total_separators, size_t n_thread
   // Safe to allocate - use RAII to ensure proper cleanup
   out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
   out.n_indexes = out.n_indexes_ptr_.get();
+
+  // Allocate chunk_starts array with RAII ownership
+  out.chunk_starts_ptr_ = std::make_unique<uint64_t[]>(n_threads);
+  out.chunk_starts = out.chunk_starts_ptr_.get();
+  for (size_t i = 0; i < n_threads; ++i) {
+    out.chunk_starts[i] = 0;
+  }
 
   out.indexes_ptr_ = std::make_unique<uint64_t[]>(allocation_size);
   out.indexes = out.indexes_ptr_.get();
