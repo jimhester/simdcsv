@@ -342,6 +342,14 @@ typedef struct libvroom_error_collector libvroom_error_collector_t;
  */
 typedef struct libvroom_detection_result libvroom_detection_result_t;
 
+/**
+ * @brief Opaque handle to a column configuration map.
+ *
+ * Created with libvroom_column_config_create(), destroyed with
+ * libvroom_column_config_destroy(). Stores per-column extraction settings.
+ */
+typedef struct libvroom_column_config libvroom_column_config_t;
+
 /** @} */ /* end of handles group */
 
 /**
@@ -966,6 +974,61 @@ libvroom_parse_with_progress(libvroom_parser_t* parser, const libvroom_buffer_t*
 void libvroom_parser_destroy(libvroom_parser_t* parser);
 
 /**
+ * @brief Set per-column configuration for subsequent parse operations.
+ *
+ * The column configuration is stored on the parser and applied to all
+ * subsequent parse operations until cleared or overwritten. The configuration
+ * affects value extraction, not the parsing itself.
+ *
+ * @param parser The parser to configure. Must not be NULL.
+ * @param config The column configuration to use. May be NULL to clear.
+ * @return LIBVROOM_OK on success, error code on failure.
+ *
+ * @note The parser takes a copy of the configuration, so the original
+ *       can be modified or destroyed after this call.
+ *
+ * @example
+ * @code
+ * // Create column config
+ * libvroom_column_config_t* config = libvroom_column_config_create();
+ * libvroom_column_config_set_type_by_name(config, "id", LIBVROOM_TYPE_INTEGER);
+ * libvroom_column_config_set_type_by_name(config, "price", LIBVROOM_TYPE_DOUBLE);
+ *
+ * // Set on parser
+ * libvroom_parser_set_column_config(parser, config);
+ *
+ * // Parse - column configs are automatically applied
+ * libvroom_parse(parser, buffer, index, errors, dialect);
+ *
+ * // Cleanup
+ * libvroom_column_config_destroy(config);
+ * @endcode
+ *
+ * @see libvroom_column_config_create() for creating column configurations.
+ */
+libvroom_error_t libvroom_parser_set_column_config(libvroom_parser_t* parser,
+                                                   const libvroom_column_config_t* config);
+
+/**
+ * @brief Get the current per-column configuration from a parser.
+ *
+ * @param parser The parser to query. Must not be NULL.
+ * @return Pointer to the internal column config, or NULL if none is set.
+ *         The returned pointer is owned by the parser and must not be freed.
+ */
+const libvroom_column_config_t* libvroom_parser_get_column_config(const libvroom_parser_t* parser);
+
+/**
+ * @brief Clear the per-column configuration from a parser.
+ *
+ * Equivalent to calling libvroom_parser_set_column_config(parser, NULL).
+ *
+ * @param parser The parser to clear. Must not be NULL.
+ * @return LIBVROOM_OK on success, error code on failure.
+ */
+libvroom_error_t libvroom_parser_clear_column_config(libvroom_parser_t* parser);
+
+/**
  * @brief Row filtering options for parsing.
  *
  * These options control which rows are included in the parsed result:
@@ -1379,6 +1442,141 @@ libvroom_buffer_t* libvroom_load_result_to_buffer(const libvroom_load_result_t* 
 void libvroom_load_result_destroy(libvroom_load_result_t* result);
 
 /** @} */ /* end of encoding group */
+
+/**
+ * @defgroup column_config Per-Column Configuration
+ * @brief Functions for configuring per-column extraction settings.
+ *
+ * These functions allow specifying different extraction settings for
+ * individual columns, such as type hints, custom NA values, and boolean
+ * parsing rules. This is useful for CSVs with mixed formats or when
+ * automatic type detection needs to be overridden.
+ * @{
+ */
+
+/**
+ * @brief Type hints for per-column configuration.
+ *
+ * Used to override automatic type detection for specific columns.
+ */
+typedef enum libvroom_type_hint {
+  LIBVROOM_TYPE_AUTO = 0,     /**< Automatic type detection (default) */
+  LIBVROOM_TYPE_BOOLEAN = 1,  /**< Force interpretation as boolean */
+  LIBVROOM_TYPE_INTEGER = 2,  /**< Force interpretation as integer */
+  LIBVROOM_TYPE_DOUBLE = 3,   /**< Force interpretation as double/float */
+  LIBVROOM_TYPE_STRING = 4,   /**< Force interpretation as string (no conversion) */
+  LIBVROOM_TYPE_DATE = 5,     /**< Force interpretation as date */
+  LIBVROOM_TYPE_DATETIME = 6, /**< Force interpretation as datetime/timestamp */
+  LIBVROOM_TYPE_SKIP = 7      /**< Skip this column during extraction */
+} libvroom_type_hint_t;
+
+/**
+ * @brief Create a new empty column configuration map.
+ *
+ * @return New column config handle on success, NULL on failure.
+ *         The caller owns the returned handle and must call
+ *         libvroom_column_config_destroy() to free it.
+ */
+libvroom_column_config_t* libvroom_column_config_create(void);
+
+/**
+ * @brief Set a type hint for a column by index.
+ *
+ * @param config The column config handle. Must not be NULL.
+ * @param col_index 0-based column index.
+ * @param type_hint The type hint to set for this column.
+ * @return LIBVROOM_OK on success, error code on failure.
+ */
+libvroom_error_t libvroom_column_config_set_type_by_index(libvroom_column_config_t* config,
+                                                          size_t col_index,
+                                                          libvroom_type_hint_t type_hint);
+
+/**
+ * @brief Set a type hint for a column by name.
+ *
+ * @param config The column config handle. Must not be NULL.
+ * @param col_name Column name (case-sensitive). Must not be NULL.
+ * @param type_hint The type hint to set for this column.
+ * @return LIBVROOM_OK on success, error code on failure.
+ */
+libvroom_error_t libvroom_column_config_set_type_by_name(libvroom_column_config_t* config,
+                                                         const char* col_name,
+                                                         libvroom_type_hint_t type_hint);
+
+/**
+ * @brief Set custom NA values for a column by index.
+ *
+ * @param config The column config handle. Must not be NULL.
+ * @param col_index 0-based column index.
+ * @param na_values Array of null-terminated strings to treat as NA.
+ * @param num_values Number of strings in the na_values array.
+ * @return LIBVROOM_OK on success, error code on failure.
+ *
+ * @note The strings are copied, so the caller may free them after this call.
+ */
+libvroom_error_t libvroom_column_config_set_na_values_by_index(libvroom_column_config_t* config,
+                                                               size_t col_index,
+                                                               const char** na_values,
+                                                               size_t num_values);
+
+/**
+ * @brief Set custom NA values for a column by name.
+ *
+ * @param config The column config handle. Must not be NULL.
+ * @param col_name Column name (case-sensitive). Must not be NULL.
+ * @param na_values Array of null-terminated strings to treat as NA.
+ * @param num_values Number of strings in the na_values array.
+ * @return LIBVROOM_OK on success, error code on failure.
+ *
+ * @note The strings are copied, so the caller may free them after this call.
+ */
+libvroom_error_t libvroom_column_config_set_na_values_by_name(libvroom_column_config_t* config,
+                                                              const char* col_name,
+                                                              const char** na_values,
+                                                              size_t num_values);
+
+/**
+ * @brief Get the type hint for a column by index.
+ *
+ * @param config The column config handle. Must not be NULL.
+ * @param col_index 0-based column index.
+ * @return The type hint for the column, or LIBVROOM_TYPE_AUTO if not set.
+ */
+libvroom_type_hint_t
+libvroom_column_config_get_type_by_index(const libvroom_column_config_t* config, size_t col_index);
+
+/**
+ * @brief Check if any column configurations are set.
+ *
+ * @param config The column config handle. Must not be NULL.
+ * @return true if no configurations are set, false otherwise.
+ */
+bool libvroom_column_config_empty(const libvroom_column_config_t* config);
+
+/**
+ * @brief Clear all column configurations.
+ *
+ * @param config The column config handle. Must not be NULL.
+ */
+void libvroom_column_config_clear(libvroom_column_config_t* config);
+
+/**
+ * @brief Destroy a column configuration map and free its resources.
+ *
+ * @param config The column config handle to destroy. May be NULL (no-op).
+ */
+void libvroom_column_config_destroy(libvroom_column_config_t* config);
+
+/**
+ * @brief Convert a type hint enum to its string representation.
+ *
+ * @param type_hint The type hint to convert.
+ * @return Static string name of the type hint (e.g., "integer", "double").
+ *         The returned string is statically allocated and should not be freed.
+ */
+const char* libvroom_type_hint_string(libvroom_type_hint_t type_hint);
+
+/** @} */ /* end of column_config group */
 
 #ifdef __cplusplus
 }

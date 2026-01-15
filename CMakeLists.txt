@@ -642,6 +642,26 @@ add_dependencies(value_extraction_test copy_test_data)
 # Register value extraction tests with CTest
 gtest_discover_tests(value_extraction_test)
 
+# Column config test executable
+add_executable(column_config_test
+    test/column_config_test.cpp
+)
+
+target_link_libraries(column_config_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(column_config_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_dependencies(column_config_test copy_test_data)
+
+# Register column config tests with CTest
+gtest_discover_tests(column_config_test)
+
 # Streaming parser test executable
 add_executable(streaming_test
     test/streaming_test.cpp

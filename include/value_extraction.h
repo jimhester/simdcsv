@@ -261,6 +261,21 @@ public:
                  const Dialect& dialect = Dialect::csv(),
                  const ExtractionConfig& config = ExtractionConfig::defaults());
 
+  /**
+   * Constructor with per-column configuration support.
+   *
+   * @param buf Pointer to the CSV data buffer
+   * @param len Length of the buffer
+   * @param idx Parsed index containing field positions
+   * @param dialect CSV dialect settings
+   * @param config Global extraction configuration (fallback for columns without overrides)
+   * @param column_configs Per-column configuration overrides
+   *
+   * @note Name-based column configs are resolved automatically after the header is read.
+   */
+  ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex& idx, const Dialect& dialect,
+                 const ExtractionConfig& config, const ColumnConfigMap& column_configs);
+
   size_t num_rows() const { return num_rows_; }
   size_t num_columns() const { return num_columns_; }
   bool has_header() const { return has_header_; }
@@ -274,15 +289,29 @@ public:
   std::string_view get_string_view(size_t row, size_t col) const;
   std::string get_string(size_t row, size_t col) const;
 
+  /**
+   * Get a typed value from a cell, using per-column config if available.
+   *
+   * This method checks for per-column configuration overrides and applies them
+   * when extracting and parsing the value. If no override exists for the column,
+   * the global config is used.
+   *
+   * @tparam T The type to extract (int32_t, int64_t, double, bool)
+   * @param row Row index (0-based, excludes header if has_header is true)
+   * @param col Column index (0-based)
+   * @return ExtractResult containing the parsed value or error/NA status
+   */
   template <typename T> ExtractResult<T> get(size_t row, size_t col) const {
     auto sv = get_string_view_internal(row, col);
+    const ExtractionConfig& effective_config = get_effective_config(col);
+
     // LCOV_EXCL_BR_START - if constexpr branches are compile-time only
     if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, int32_t>) {
-      return parse_integer_simd<T>(sv.data(), sv.size(), config_);
+      return parse_integer_simd<T>(sv.data(), sv.size(), effective_config);
     } else if constexpr (std::is_same_v<T, double>) {
-      return parse_double_simd(sv.data(), sv.size(), config_);
+      return parse_double_simd(sv.data(), sv.size(), effective_config);
     } else if constexpr (std::is_same_v<T, bool>) {
-      return parse_bool(sv.data(), sv.size(), config_);
+      return parse_bool(sv.data(), sv.size(), effective_config);
     } else {
       static_assert(!std::is_same_v<T, T>, "Unsupported type");
     }
@@ -312,6 +341,82 @@ public:
   bool get_field_bounds(size_t row, size_t col, size_t& start, size_t& end) const;
   const ExtractionConfig& config() const { return config_; }
   void set_config(const ExtractionConfig& config) { config_ = config; }
+
+  // =========================================================================
+  // Per-column configuration API
+  // =========================================================================
+
+  /**
+   * Get the column configuration map.
+   */
+  const ColumnConfigMap& column_configs() const { return column_configs_; }
+
+  /**
+   * Set the column configuration map.
+   * Name-based configs are resolved when headers are available.
+   */
+  void set_column_configs(const ColumnConfigMap& configs) {
+    column_configs_ = configs;
+    resolved_configs_.clear(); // Clear cache when configs change
+    resolve_column_configs();
+  }
+
+  /**
+   * Set configuration for a specific column by index.
+   * @param col_index 0-based column index
+   * @param config Configuration to apply
+   */
+  void set_column_config(size_t col_index, const ColumnConfig& config) {
+    column_configs_.set(col_index, config);
+    // Update resolved config cache for this column
+    if (config.has_overrides()) {
+      resolved_configs_[col_index] = config.merge_with(config_);
+    } else {
+      resolved_configs_.erase(col_index);
+    }
+  }
+
+  /**
+   * Set configuration for a specific column by name.
+   * The name is resolved to an index using the header row.
+   * @param col_name Column name (case-sensitive)
+   * @param config Configuration to apply
+   */
+  void set_column_config(const std::string& col_name, const ColumnConfig& config) {
+    column_configs_.set(col_name, config);
+    resolve_column_configs(); // Re-resolve to update the index
+  }
+
+  /**
+   * Get the per-column configuration for a specific column.
+   * @param col_index 0-based column index
+   * @return Pointer to column config, or nullptr if no override exists
+   */
+  const ColumnConfig* get_column_config(size_t col_index) const {
+    return column_configs_.get(col_index);
+  }
+
+  /**
+   * Get the type hint for a specific column.
+   * @param col_index 0-based column index
+   * @return The type hint, or TypeHint::AUTO if none is set
+   */
+  TypeHint get_type_hint(size_t col_index) const {
+    const ColumnConfig* config = column_configs_.get(col_index);
+    if (config && config->type_hint.has_value()) {
+      return *config->type_hint;
+    }
+    return TypeHint::AUTO;
+  }
+
+  /**
+   * Check if a column should be skipped during extraction.
+   * @param col_index 0-based column index
+   * @return true if the column has TypeHint::SKIP
+   */
+  bool should_skip_column(size_t col_index) const {
+    return get_type_hint(col_index) == TypeHint::SKIP;
+  }
 
   /**
    * @brief Result of a byte offset to (row, column) lookup.
@@ -367,10 +472,14 @@ private:
   const ParseIndex& idx_;
   Dialect dialect_;
   ExtractionConfig config_;
+  ColumnConfigMap column_configs_;
   size_t num_rows_ = 0;
   size_t num_columns_ = 0;
   bool has_header_ = true;
   std::vector<uint64_t> linear_indexes_;
+
+  // Cache of resolved configs (merged with global config) for fast lookup
+  mutable std::unordered_map<size_t, ExtractionConfig> resolved_configs_;
 
   std::string_view get_string_view_internal(size_t row, size_t col) const;
   size_t compute_field_index(size_t row, size_t col) const;
@@ -381,6 +490,51 @@ private:
       size_t total_rows = total_indexes / num_columns_;
       num_rows_ = has_header_ ? (total_rows > 0 ? total_rows - 1 : 0) : total_rows;
     }
+  }
+
+  /**
+   * Get the effective extraction config for a column.
+   * Returns the merged per-column config if one exists, otherwise the global config.
+   */
+  const ExtractionConfig& get_effective_config(size_t col) const {
+    // Check cache first
+    auto it = resolved_configs_.find(col);
+    if (it != resolved_configs_.end()) {
+      return it->second;
+    }
+
+    // Check if there's a per-column config
+    const ColumnConfig* col_config = column_configs_.get(col);
+    if (col_config && col_config->has_overrides()) {
+      // Merge and cache
+      resolved_configs_[col] = col_config->merge_with(config_);
+      return resolved_configs_[col];
+    }
+
+    // No override, use global config
+    return config_;
+  }
+
+  /**
+   * Resolve name-based column configs to indices using header names.
+   */
+  void resolve_column_configs() {
+    if (!has_header_ || column_configs_.by_name().empty()) {
+      return;
+    }
+
+    // Build name-to-index map from headers
+    std::unordered_map<std::string, size_t> name_to_index;
+    auto headers = get_header();
+    for (size_t i = 0; i < headers.size(); ++i) {
+      name_to_index[headers[i]] = i;
+    }
+
+    // Resolve names to indices
+    column_configs_.resolve_names(name_to_index);
+
+    // Clear resolved config cache since indices may have changed
+    resolved_configs_.clear();
   }
 };
 
