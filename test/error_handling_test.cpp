@@ -417,14 +417,14 @@ TEST(ErrorCollectorTest, MergeSortedWithSuppression) {
   EXPECT_EQ(main_collector.suppressed_count(), 1); // c1's suppressed error
 }
 
-TEST(ErrorCollectorTest, MergeFromEmptyCollectorWithFatal) {
+TEST(ErrorCollectorTest, MergeFromCollectorWithFatal) {
   ErrorCollector main_collector(ErrorMode::PERMISSIVE, 10);
 
-  // Other collector has no errors but has fatal flag set (from a cleared error)
+  // Other collector has a fatal error and a recoverable error
   ErrorCollector other(ErrorMode::PERMISSIVE, 2);
   other.add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL, 1, 1, 10, "Fatal error");
   other.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
-                  "Suppressed");
+                  "Recoverable error");
 
   EXPECT_TRUE(other.has_fatal_errors());
   EXPECT_EQ(other.suppressed_count(), 0);
@@ -434,6 +434,30 @@ TEST(ErrorCollectorTest, MergeFromEmptyCollectorWithFatal) {
 
   EXPECT_TRUE(main_collector.has_fatal_errors());
   EXPECT_EQ(main_collector.error_count(), 2);
+}
+
+TEST(ErrorCollectorTest, SuppressedFatalErrorStillSetsHasFatal) {
+  // When a FATAL error is suppressed due to error limit, has_fatal_ should still be set
+  // so that should_stop() works correctly
+  ErrorCollector collector(ErrorMode::PERMISSIVE, 2);
+
+  // Fill up to the limit with recoverable errors
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 1, 1, 10,
+                      "Error 1");
+  collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 2, 1, 20,
+                      "Error 2");
+
+  EXPECT_EQ(collector.error_count(), 2);
+  EXPECT_TRUE(collector.at_error_limit());
+  EXPECT_FALSE(collector.has_fatal_errors());
+
+  // Now add a fatal error - it will be suppressed but has_fatal_ should still be set
+  collector.add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::FATAL, 3, 1, 30, "Fatal error");
+
+  EXPECT_EQ(collector.error_count(), 2);      // Still 2 (fatal was suppressed)
+  EXPECT_EQ(collector.suppressed_count(), 1); // One suppressed
+  EXPECT_TRUE(collector.has_fatal_errors());  // But has_fatal_ is set!
+  EXPECT_TRUE(collector.should_stop());       // And should_stop() works
 }
 
 TEST(ErrorCollectorTest, DefaultMaxErrors) {

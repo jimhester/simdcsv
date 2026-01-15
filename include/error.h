@@ -230,19 +230,22 @@ public:
    * Errors are only added if the collection has not reached max_errors_.
    * If the limit is reached, the error is not stored but suppressed_count_
    * is incremented to track how many errors were dropped.
-   * If a FATAL error is added, has_fatal_ is set to true.
+   * If a FATAL error is encountered, has_fatal_ is set to true regardless
+   * of whether the error is stored or suppressed (to ensure should_stop()
+   * works correctly even when fatal errors are suppressed).
    *
    * @param error The ParseError to add
    */
   void add_error(const ParseError& error) {
+    // Always track fatal errors, even if suppressed, so should_stop() works correctly
+    if (error.severity == ErrorSeverity::FATAL) {
+      has_fatal_ = true;
+    }
     if (errors_.size() >= max_errors_) {
       ++suppressed_count_;
       return;
     }
     errors_.push_back(error);
-    if (error.severity == ErrorSeverity::FATAL) {
-      has_fatal_ = true;
-    }
   }
 
   /**
