@@ -88,9 +88,10 @@ constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
  * newlines) found during CSV parsing. These positions enable efficient random
  * access to individual fields without re-parsing the entire file.
  *
- * When using multi-threaded parsing, field positions are interleaved across
- * threads. For example, with 4 threads: thread 0 stores positions at indices 0,
- * 4, 8, ...; thread 1 stores at indices 1, 5, 9, ...; and so on.
+ * When using multi-threaded parsing, field positions are stored in contiguous
+ * per-thread regions to avoid false sharing. Each thread writes to its own
+ * region: indexes[thread_id * region_size ... thread_id * region_size + count - 1].
+ * Use n_indexes[thread_id] to get the count for each thread.
  *
  * @note This class is move-only. Copy operations are deleted to prevent
  * accidental expensive copies of large index arrays.
@@ -111,9 +112,9 @@ constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
  * auto result = parser.parse(buffer, length);
  *
  * // Access field positions from result.idx
- * // For single-threaded: positions are at result.idx.indexes[0],
- * result.idx.indexes[1], ...
- * // For multi-threaded: use stride of result.idx.n_threads
+ * // For single-threaded: positions are at result.idx.indexes[0..n_indexes[0]-1]
+ * // For multi-threaded: thread t's positions are at
+ * //   indexes[t * region_size .. t * region_size + n_indexes[t] - 1]
  * @endcode
  */
 class ParseIndex {
@@ -125,13 +126,19 @@ public:
   /// Changed from uint8_t to uint16_t to support systems with >255 cores.
   uint16_t n_threads{0};
 
+  /// Size of each thread's contiguous index region. Used for per-thread
+  /// storage to avoid false sharing. Each thread writes to:
+  ///   indexes[thread_id * region_size .. thread_id * region_size + n_indexes[thread_id] - 1]
+  uint64_t region_size{0};
+
   /// Array of size n_threads containing the count of indexes found by each
   /// thread.
   /// @note This is a raw pointer accessor for compatibility; memory is managed
   /// by n_indexes_ptr_.
   uint64_t* n_indexes{nullptr};
 
-  /// Array of field separator positions (byte offsets). Interleaved by thread.
+  /// Array of field separator positions (byte offsets). Stored in contiguous
+  /// per-thread regions: thread t's data is at indexes[t * region_size].
   /// @note This is a raw pointer accessor for compatibility; memory is managed
   /// by indexes_ptr_.
   uint64_t* indexes{nullptr};
@@ -148,8 +155,9 @@ public:
    * state.
    */
   ParseIndex(ParseIndex&& other) noexcept
-      : columns(other.columns), n_threads(other.n_threads), n_indexes(other.n_indexes),
-        indexes(other.indexes), n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
+      : columns(other.columns), n_threads(other.n_threads), region_size(other.region_size),
+        n_indexes(other.n_indexes), indexes(other.indexes),
+        n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
         indexes_ptr_(std::move(other.indexes_ptr_)), mmap_buffer_(std::move(other.mmap_buffer_)) {
     other.n_indexes = nullptr;
     other.indexes = nullptr;
@@ -168,6 +176,7 @@ public:
     if (this != &other) {
       columns = other.columns;
       n_threads = other.n_threads;
+      region_size = other.region_size;
       n_indexes = other.n_indexes;
       indexes = other.indexes;
       n_indexes_ptr_ = std::move(other.n_indexes_ptr_);
@@ -517,6 +526,10 @@ public:
     uint64_t base = 0;
     const uint8_t* data = buf + start;
 
+    // Calculate per-thread base pointer for contiguous storage.
+    // Each thread writes to its own region to avoid false sharing.
+    uint64_t* thread_base = out->indexes + thread_id * out->region_size;
+
     for (; idx < len; idx += 64) {
       libvroom_prefetch(data + idx + 128);
       size_t remaining = len - idx;
@@ -536,7 +549,7 @@ public:
       uint64_t end_mask = compute_line_ending_mask_simple(in, mask);
       uint64_t field_sep = (end_mask | sep) & ~quote_mask;
 
-      n_indexes += write(out->indexes + thread_id, base, start + idx, out->n_threads, field_sep);
+      n_indexes += write(thread_base, base, start + idx, out->n_threads, field_sep);
     }
 
     // Check if we ended at a record boundary:
@@ -570,13 +583,15 @@ public:
    * @param start Start position in buffer
    * @param end End position in buffer
    * @param out Index structure to store results
-   * @param thread_id Thread ID for interleaved storage
+   * @param thread_id Thread ID for contiguous per-thread storage
    * @return Number of field separators found
    */
   static uint64_t second_pass_simd_branchless(const BranchlessStateMachine& sm, const uint8_t* buf,
                                               size_t start, size_t end, ParseIndex* out,
                                               size_t thread_id) {
-    return libvroom::second_pass_simd_branchless(sm, buf, start, end, out->indexes, thread_id,
+    // Calculate per-thread base pointer for contiguous storage
+    uint64_t* thread_base = out->indexes + thread_id * out->region_size;
+    return libvroom::second_pass_simd_branchless(sm, buf, start, end, thread_base, thread_id,
                                                  out->n_threads);
   }
 
@@ -593,15 +608,17 @@ public:
    * @param start Start position in buffer
    * @param end End position in buffer
    * @param out Index structure to store results
-   * @param thread_id Thread ID for interleaved storage
+   * @param thread_id Thread ID for contiguous per-thread storage
    * @return SecondPassResult with count and boundary status
    */
   static SecondPassResult second_pass_simd_branchless_with_state(const BranchlessStateMachine& sm,
                                                                  const uint8_t* buf, size_t start,
                                                                  size_t end, ParseIndex* out,
                                                                  size_t thread_id) {
-    auto result = libvroom::second_pass_simd_branchless_with_state(
-        sm, buf, start, end, out->indexes, thread_id, out->n_threads);
+    // Calculate per-thread base pointer for contiguous storage
+    uint64_t* thread_base = out->indexes + thread_id * out->region_size;
+    auto result = libvroom::second_pass_simd_branchless_with_state(sm, buf, start, end, thread_base,
+                                                                   thread_id, out->n_threads);
     return {result.n_indexes, result.at_record_boundary};
   }
 
@@ -715,9 +732,12 @@ public:
     return {in, ErrorCode::INTERNAL_ERROR}; // LCOV_EXCL_LINE - unreachable
   }
 
+  // Add a position to the index array using contiguous per-thread storage.
+  // The caller must initialize i to thread_id * region_size, then this function
+  // increments by 1 for each call.
   really_inline static size_t add_position(ParseIndex* out, size_t i, size_t pos) {
     out->indexes[i] = pos;
-    return i + out->n_threads;
+    return i + 1; // Contiguous: increment by 1, not n_threads
   }
 
   // Default context size for error messages (characters before/after error

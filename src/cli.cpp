@@ -232,11 +232,25 @@ private:
     }
     merged_indexes_.reserve(total);
 
-    // Collect all indexes
-    for (int t = 0; t < idx_.n_threads; ++t) {
-      for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j) {
-        auto ii = t + (j * idx_.n_threads);
-        merged_indexes_.push_back(idx_.indexes[ii]);
+    // Collect all indexes handling two possible layouts:
+    // - region_size > 0: Per-thread regions at indexes[t * region_size]
+    // - region_size == 0: Contiguous layout from deserialization
+    if (idx_.region_size > 0) {
+      // Per-thread regions
+      for (int t = 0; t < idx_.n_threads; ++t) {
+        uint64_t* thread_base = idx_.indexes + t * idx_.region_size;
+        for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j) {
+          merged_indexes_.push_back(thread_base[j]);
+        }
+      }
+    } else {
+      // Contiguous layout: thread 0 at offset 0, thread 1 at offset n_indexes[0], etc.
+      size_t offset = 0;
+      for (int t = 0; t < idx_.n_threads; ++t) {
+        for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j) {
+          merged_indexes_.push_back(idx_.indexes[offset + j]);
+        }
+        offset += idx_.n_indexes[t];
       }
     }
 

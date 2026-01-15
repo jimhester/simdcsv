@@ -52,13 +52,27 @@ void ParseIndex::write(const std::string& filename) {
     std::fclose(fp);
     throw std::runtime_error("error writing index");
   }
-  size_t total_size = 0;
-  for (uint16_t i = 0; i < n_threads; ++i) {
-    total_size += n_indexes[i];
-  }
-  if (std::fwrite(indexes, sizeof(uint64_t), total_size, fp) != total_size) {
-    std::fclose(fp);
-    throw std::runtime_error("error writing index2");
+
+  // Write indexes: linearize from per-thread regions to contiguous format.
+  // region_size > 0 means per-thread regions, region_size == 0 means already contiguous.
+  for (uint16_t t = 0; t < n_threads; ++t) {
+    uint64_t* thread_base = (region_size > 0) ? (indexes + t * region_size) : nullptr;
+    if (region_size > 0) {
+      if (std::fwrite(thread_base, sizeof(uint64_t), n_indexes[t], fp) != n_indexes[t]) {
+        std::fclose(fp);
+        throw std::runtime_error("error writing index2");
+      }
+    } else {
+      // Already contiguous: compute offset for this thread
+      size_t offset = 0;
+      for (uint16_t i = 0; i < t; ++i) {
+        offset += n_indexes[i];
+      }
+      if (std::fwrite(indexes + offset, sizeof(uint64_t), n_indexes[t], fp) != n_indexes[t]) {
+        std::fclose(fp);
+        throw std::runtime_error("error writing index2");
+      }
+    }
   }
 
   std::fclose(fp);
@@ -122,6 +136,10 @@ void ParseIndex::read(const std::string& filename) {
     throw std::runtime_error("error reading index2");
   }
 
+  // Deserialized indexes are stored contiguously, not in per-thread regions.
+  // Set region_size = 0 to indicate this layout to readers.
+  region_size = 0;
+
   std::fclose(fp);
 }
 
@@ -154,14 +172,27 @@ void ParseIndex::write(const std::string& filename, const SourceMetadata& source
   if (n_threads > 0 && n_indexes != nullptr) {
     success = success && (std::fwrite(n_indexes, sizeof(uint64_t), n_threads, fp) == n_threads);
 
-    // Write indexes array
-    size_t total_indexes = 0;
-    for (uint16_t i = 0; i < n_threads; ++i) {
-      total_indexes += n_indexes[i];
-    }
-    if (total_indexes > 0 && indexes != nullptr) {
-      success =
-          success && (std::fwrite(indexes, sizeof(uint64_t), total_indexes, fp) == total_indexes);
+    // Write indexes array: linearize from per-thread regions to contiguous format.
+    // region_size > 0 means per-thread regions, region_size == 0 means already contiguous.
+    if (indexes != nullptr) {
+      for (uint16_t t = 0; t < n_threads && success; ++t) {
+        if (n_indexes[t] == 0)
+          continue;
+        if (region_size > 0) {
+          // Per-thread regions: write from thread's region
+          uint64_t* thread_base = indexes + t * region_size;
+          success = success &&
+                    (std::fwrite(thread_base, sizeof(uint64_t), n_indexes[t], fp) == n_indexes[t]);
+        } else {
+          // Already contiguous: compute offset for this thread
+          size_t offset = 0;
+          for (uint16_t i = 0; i < t; ++i) {
+            offset += n_indexes[i];
+          }
+          success = success && (std::fwrite(indexes + offset, sizeof(uint64_t), n_indexes[t], fp) ==
+                                n_indexes[t]);
+        }
+      }
     }
   }
 
@@ -530,7 +561,8 @@ uint64_t TwoPass::second_pass_chunk(const uint8_t* buf, size_t start, size_t end
                                     char delimiter, char quote_char, char comment_char) {
   uint64_t pos = start;
   size_t n_indexes = 0;
-  size_t i = thread_id;
+  // Use contiguous per-thread storage: start at thread_id * region_size
+  size_t i = thread_id * out->region_size;
   csv_state s = RECORD_START;
   bool at_line_start = true; // Track if we're at the start of a line
 
@@ -644,7 +676,8 @@ uint64_t TwoPass::second_pass_chunk_throwing(const uint8_t* buf, size_t start, s
                                              char quote_char, char comment_char) {
   uint64_t pos = start;
   size_t n_indexes = 0;
-  size_t i = thread_id;
+  // Use contiguous per-thread storage: start at thread_id * region_size
+  size_t i = thread_id * out->region_size;
   csv_state s = RECORD_START;
   bool at_line_start = true; // Track if we're at the start of a line
 
@@ -922,9 +955,11 @@ TwoPass::branchless_chunk_result TwoPass::second_pass_branchless_chunk_with_erro
     size_t thread_id, size_t total_len, ErrorMode mode) {
   branchless_chunk_result result;
   result.errors.set_mode(mode);
+  // Calculate per-thread base pointer for contiguous storage
+  uint64_t* thread_base = out->indexes + thread_id * out->region_size;
   // Use SIMD-optimized version for better performance
   result.n_indexes = second_pass_simd_branchless_with_errors(
-      sm, buf, start, end, out->indexes, thread_id, out->n_threads, &result.errors, total_len);
+      sm, buf, start, end, thread_base, thread_id, out->n_threads, &result.errors, total_len);
   return result;
 }
 
@@ -1537,18 +1572,22 @@ ParseIndex TwoPass::init(size_t len, size_t n_threads) {
     n_threads = 1;
   out.n_threads = n_threads;
 
+  // Set region size for contiguous per-thread storage
+  out.region_size = len + 8;
+
   // Allocate n_indexes array with RAII ownership
   out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
   out.n_indexes = out.n_indexes_ptr_.get();
 
-  // Allocate space for interleaved index storage.
+  // Allocate space for contiguous per-thread index storage.
+  // Each thread gets its own region of size region_size to avoid false sharing.
   size_t allocation_size;
   if (n_threads == 1) {
     // Single-threaded: simple allocation with padding for speculative writes
     allocation_size = len + 8;
   } else {
-    // Multi-threaded: need space for interleaved storage
-    allocation_size = (len + 8) * n_threads;
+    // Multi-threaded: contiguous per-thread regions
+    allocation_size = out.region_size * n_threads;
   }
 
   // Allocate indexes array with RAII ownership
@@ -1565,6 +1604,9 @@ ParseIndex TwoPass::init_safe(size_t len, size_t n_threads, ErrorCollector* erro
     n_threads = 1;
   out.n_threads = n_threads;
 
+  // Set region size for contiguous per-thread storage
+  out.region_size = len + 8;
+
   // Calculate allocation size with overflow checking
   size_t allocation_size;
   bool overflow = false;
@@ -1578,14 +1620,14 @@ ParseIndex TwoPass::init_safe(size_t len, size_t n_threads, ErrorCollector* erro
       allocation_size = len + 8;
     }
   } else {
-    // Multi-threaded: need space for interleaved storage
-    // allocation_size = (len + 8) * n_threads
+    // Multi-threaded: contiguous per-thread regions
+    // allocation_size = region_size * n_threads
     size_t len_plus_8;
     if (len > std::numeric_limits<size_t>::max() - 8) {
       overflow = true;
     } else {
       len_plus_8 = len + 8;
-      // Check (len + 8) * n_threads for overflow
+      // Check region_size * n_threads for overflow
       if (len_plus_8 > std::numeric_limits<size_t>::max() / n_threads) {
         overflow = true;
       } else {
@@ -1628,6 +1670,10 @@ ParseIndex TwoPass::init_counted(uint64_t total_separators, size_t n_threads) {
     n_threads = 1;
   out.n_threads = n_threads;
 
+  // Set region size for contiguous per-thread storage.
+  // Each thread may get all separators in the worst case.
+  out.region_size = total_separators + 8;
+
   // Allocate n_indexes array with RAII ownership
   out.n_indexes_ptr_ = std::make_unique<uint64_t[]>(n_threads);
   out.n_indexes = out.n_indexes_ptr_.get();
@@ -1635,11 +1681,8 @@ ParseIndex TwoPass::init_counted(uint64_t total_separators, size_t n_threads) {
   // Allocate space for separator positions.
   // Add padding for speculative writes in the write() function (writes up to 8 extra).
   //
-  // For multi-threaded interleaved storage, thread i writes to positions:
-  //   indexes[i], indexes[i + n_threads], indexes[i + 2*n_threads], ...
-  // So the maximum index written by any thread is:
-  //   (max_separators_for_any_thread - 1) * n_threads + (n_threads - 1)
-  // = max_separators_for_any_thread * n_threads - 1
+  // With contiguous per-thread storage, thread i writes to positions:
+  //   indexes[i * region_size], indexes[i * region_size + 1], ...
   //
   // Since we don't know exact per-thread distribution until after chunking,
   // we conservatively assume all separators could end up in one thread's chunk.
@@ -1649,10 +1692,9 @@ ParseIndex TwoPass::init_counted(uint64_t total_separators, size_t n_threads) {
     // Single-threaded: simple allocation with padding
     allocation_size = total_separators + 8;
   } else {
-    // Multi-threaded: worst case is all separators in one chunk
-    // Allocation: (total_separators + 8) * n_threads
-    // This handles the interleaved storage requirement
-    allocation_size = (total_separators + 8) * n_threads;
+    // Multi-threaded: contiguous per-thread regions
+    // Allocation: region_size * n_threads
+    allocation_size = out.region_size * n_threads;
   }
 
   // Allocate indexes array with RAII ownership
@@ -1699,6 +1741,10 @@ ParseIndex TwoPass::init_counted_safe(uint64_t total_separators, size_t n_thread
     // Quotes but no len provided - use conservative 2x multiplier
     safe_separators = total_separators * 2 + n_quotes;
   }
+
+  // Set region size for contiguous per-thread storage
+  out.region_size = safe_separators + 8;
+
   size_t allocation_size;
   bool overflow = false;
 
@@ -1710,8 +1756,8 @@ ParseIndex TwoPass::init_counted_safe(uint64_t total_separators, size_t n_thread
       allocation_size = static_cast<size_t>(safe_separators) + 8;
     }
   } else {
-    // Multi-threaded: (safe_separators + 8) * n_threads
-    // Worst case: all separators in one chunk need interleaved storage
+    // Multi-threaded: contiguous per-thread regions
+    // region_size * n_threads
     size_t sep_plus_8;
     if (safe_separators > std::numeric_limits<size_t>::max() - 8) {
       overflow = true;
