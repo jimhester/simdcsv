@@ -83,6 +83,79 @@ using SecondPassProgressCallback = std::function<bool(size_t bytes_processed)>;
 constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
 
 /**
+ * @brief Represents a field's byte boundaries in the source buffer.
+ *
+ * FieldSpan provides the byte range for a single CSV field, enabling
+ * efficient value extraction without re-parsing the entire file.
+ *
+ * @note The `start` offset points to the first byte of the field content.
+ *       The `end` offset points to the delimiter/newline byte (exclusive),
+ *       so the field content is buf[start..end).
+ *
+ * @example
+ * @code
+ * // For CSV: "hello,world\n"
+ * //          ^     ^
+ * //          0     6
+ * // Field 0: FieldSpan{0, 5}   -> "hello"
+ * // Field 1: FieldSpan{6, 11}  -> "world"
+ * @endcode
+ */
+struct FieldSpan {
+  uint64_t start; ///< Byte offset of field start (inclusive)
+  uint64_t end;   ///< Byte offset of field end (exclusive, at delimiter/newline)
+
+  /// Default constructor, creates an invalid span.
+  FieldSpan() : start(null_pos), end(null_pos) {}
+
+  /// Construct with explicit start and end positions.
+  FieldSpan(uint64_t start, uint64_t end) : start(start), end(end) {}
+
+  /// Check if this span is valid.
+  bool is_valid() const { return start != null_pos && end != null_pos; }
+
+  /// Get the length of the field in bytes.
+  uint64_t length() const { return is_valid() ? end - start : 0; }
+};
+
+/**
+ * @brief Read-only view into a contiguous array of uint64_t values.
+ *
+ * This is a lightweight, non-owning view similar to std::span<const uint64_t>
+ * but available in C++17. Used to provide O(1) access to per-thread index
+ * regions without copying.
+ *
+ * @note This view does not own the data it points to. The caller must ensure
+ *       the underlying data remains valid for the lifetime of the view.
+ */
+struct IndexView {
+  const uint64_t* data_; ///< Pointer to the first element
+  size_t size_;          ///< Number of elements
+
+  /// Default constructor, creates an empty view.
+  IndexView() : data_(nullptr), size_(0) {}
+
+  /// Construct a view over [data, data + size).
+  IndexView(const uint64_t* data, size_t size) : data_(data), size_(size) {}
+
+  /// Get pointer to the first element.
+  const uint64_t* data() const { return data_; }
+
+  /// Get the number of elements.
+  size_t size() const { return size_; }
+
+  /// Check if the view is empty.
+  bool empty() const { return size_ == 0; }
+
+  /// Access element at index i (no bounds checking).
+  const uint64_t& operator[](size_t i) const { return data_[i]; }
+
+  /// Iterator support for range-based for loops.
+  const uint64_t* begin() const { return data_; }
+  const uint64_t* end() const { return data_ + size_; }
+};
+
+/**
  * @brief Result structure containing parsed CSV field positions.
  *
  * The ParseIndex class stores the byte offsets of field separators (commas and
@@ -144,6 +217,13 @@ public:
   /// by indexes_ptr_.
   uint64_t* indexes{nullptr};
 
+  /// Array of size n_threads containing the starting byte offset of each
+  /// thread's chunk in the source file. Used for computing field start
+  /// positions across thread boundaries.
+  /// @note This is a raw pointer accessor for compatibility; memory is managed
+  /// by chunk_starts_ptr_.
+  uint64_t* chunk_starts{nullptr};
+
   /// Default constructor. Creates an empty, uninitialized index.
   ParseIndex() = default;
 
@@ -157,14 +237,17 @@ public:
    */
   ParseIndex(ParseIndex&& other) noexcept
       : columns(other.columns), n_threads(other.n_threads), region_size(other.region_size),
-        n_indexes(other.n_indexes), indexes(other.indexes),
+        n_indexes(other.n_indexes), indexes(other.indexes), chunk_starts(other.chunk_starts),
         n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
-        indexes_ptr_(std::move(other.indexes_ptr_)), mmap_buffer_(std::move(other.mmap_buffer_)),
-        buffer_(std::move(other.buffer_)), n_indexes_shared_(std::move(other.n_indexes_shared_)),
+        indexes_ptr_(std::move(other.indexes_ptr_)),
+        chunk_starts_ptr_(std::move(other.chunk_starts_ptr_)),
+        mmap_buffer_(std::move(other.mmap_buffer_)), buffer_(std::move(other.buffer_)),
+        n_indexes_shared_(std::move(other.n_indexes_shared_)),
         indexes_shared_(std::move(other.indexes_shared_)),
         mmap_buffer_shared_(std::move(other.mmap_buffer_shared_)) {
     other.n_indexes = nullptr;
     other.indexes = nullptr;
+    other.chunk_starts = nullptr;
   }
 
   /**
@@ -183,8 +266,10 @@ public:
       region_size = other.region_size;
       n_indexes = other.n_indexes;
       indexes = other.indexes;
+      chunk_starts = other.chunk_starts;
       n_indexes_ptr_ = std::move(other.n_indexes_ptr_);
       indexes_ptr_ = std::move(other.indexes_ptr_);
+      chunk_starts_ptr_ = std::move(other.chunk_starts_ptr_);
       mmap_buffer_ = std::move(other.mmap_buffer_);
       buffer_ = std::move(other.buffer_);
       n_indexes_shared_ = std::move(other.n_indexes_shared_);
@@ -192,6 +277,7 @@ public:
       mmap_buffer_shared_ = std::move(other.mmap_buffer_shared_);
       other.n_indexes = nullptr;
       other.indexes = nullptr;
+      other.chunk_starts = nullptr;
     }
     return *this;
   }
@@ -266,6 +352,109 @@ public:
    * @return true if the index data is memory-mapped (from from_mmap()).
    */
   bool is_mmap_backed() const { return mmap_buffer_ != nullptr; }
+
+  /**
+   * @brief Get O(1) read-only access to a thread's index region.
+   *
+   * Returns a view into the contiguous region of field separator positions
+   * written by the specified thread. Each thread's indexes are in sorted
+   * order within that thread's region (file order within its chunk).
+   *
+   * @param t Thread ID (0 to n_threads - 1).
+   * @return IndexView of the thread's field separator positions.
+   *
+   * @note For region_size == 0 (contiguous/deserialized layout), this computes
+   *       the offset by summing n_indexes[0..t-1].
+   *
+   * @example
+   * @code
+   * for (uint16_t t = 0; t < idx.n_threads; ++t) {
+   *   auto view = idx.thread_data(t);
+   *   for (size_t i = 0; i < view.size(); ++i) {
+   *     std::cout << "Thread " << t << " separator at " << view[i] << "\n";
+   *   }
+   * }
+   * @endcode
+   */
+  IndexView thread_data(uint16_t t) const {
+    if (t >= n_threads || indexes == nullptr || n_indexes == nullptr) {
+      return IndexView(); // Empty view
+    }
+    if (region_size > 0) {
+      // Per-thread regions: direct O(1) access
+      return IndexView(indexes + t * region_size, n_indexes[t]);
+    } else {
+      // Contiguous layout (deserialized): compute offset by summing prior counts
+      size_t offset = 0;
+      for (uint16_t i = 0; i < t; ++i) {
+        offset += n_indexes[i];
+      }
+      return IndexView(indexes + offset, n_indexes[t]);
+    }
+  }
+
+  /**
+   * @brief Get total number of field separators across all threads.
+   *
+   * @return Sum of n_indexes[0..n_threads-1].
+   */
+  uint64_t total_indexes() const {
+    if (n_indexes == nullptr || n_threads == 0)
+      return 0;
+    uint64_t total = 0;
+    for (uint16_t t = 0; t < n_threads; ++t) {
+      total += n_indexes[t];
+    }
+    return total;
+  }
+
+  /**
+   * @brief Get field span by global field index without sorting.
+   *
+   * Iterates through threads in file order to find the field at the given
+   * global index. This is O(n_threads) in the worst case but avoids the
+   * O(n log n) sorting required by ValueExtractor.
+   *
+   * @param global_field_idx Zero-based index of the field across the entire file.
+   * @return FieldSpan with byte boundaries, or invalid span if out of bounds.
+   *
+   * @note For the first field (global_field_idx == 0), the start position is
+   *       always 0 (beginning of file).
+   *
+   * @example
+   * @code
+   * // Get the 100th field in the file
+   * FieldSpan span = idx.get_field_span(100);
+   * if (span.is_valid()) {
+   *   std::string_view field(buf + span.start, span.length());
+   * }
+   * @endcode
+   */
+  FieldSpan get_field_span(uint64_t global_field_idx) const;
+
+  /**
+   * @brief Get field span by row and column without sorting.
+   *
+   * Converts (row, col) to a global field index and delegates to the
+   * global field index overload. The number of columns must be set
+   * (idx.columns > 0) for this method to work.
+   *
+   * @param row Zero-based row index.
+   * @param col Zero-based column index.
+   * @return FieldSpan with byte boundaries, or invalid span if out of bounds.
+   *
+   * @note Row 0 is the first data row (or header if has_header is false).
+   *
+   * @example
+   * @code
+   * // Get the field at row 5, column 2
+   * FieldSpan span = idx.get_field_span(5, 2);
+   * if (span.is_valid()) {
+   *   std::string_view field(buf + span.start, span.length());
+   * }
+   * @endcode
+   */
+  FieldSpan get_field_span(uint64_t row, uint64_t col) const;
 
   /**
    * @brief Destructor. Releases allocated index arrays via RAII.
@@ -394,6 +583,9 @@ private:
   /// RAII owner for indexes array. Memory freed automatically on destruction.
   /// Null when using mmap-backed data or shared ownership.
   std::unique_ptr<uint64_t[]> indexes_ptr_;
+
+  /// RAII owner for chunk_starts array. Memory freed automatically on destruction.
+  std::unique_ptr<uint64_t[]> chunk_starts_ptr_;
 
   /// Memory-mapped buffer for mmap-backed indexes.
   /// When set, n_indexes and indexes point directly into this buffer's data.
