@@ -125,7 +125,8 @@ def main():
     print("PERFORMANCE REGRESSION CHECK")
     print("=" * 70)
     print(f"Regression threshold: {REGRESSION_THRESHOLD * 100:.0f}%")
-    print(f"Benchmarks found: {len(current)}")
+    print(f"Benchmarks in current results: {len(current)}")
+    print(f"Current benchmarks: {sorted(current.keys())}")
     print()
 
     if baseline is None:
@@ -144,6 +145,23 @@ def main():
             print()
             print("Skipping baseline save (not a main branch push).")
     else:
+        print(f"Benchmarks in baseline: {len(baseline)}")
+        print(f"Baseline benchmarks: {sorted(baseline.keys())}")
+        print()
+
+        # Check for benchmark name mismatches
+        current_names = set(current.keys())
+        baseline_names = set(baseline.keys())
+        only_in_current = current_names - baseline_names
+        only_in_baseline = baseline_names - current_names
+        if only_in_current or only_in_baseline:
+            print("WARNING: Benchmark name mismatch detected!")
+            if only_in_current:
+                print(f"  Benchmarks only in current (new): {sorted(only_in_current)}")
+            if only_in_baseline:
+                print(f"  Benchmarks only in baseline (removed): {sorted(only_in_baseline)}")
+            print()
+
         regressions, improvements, unchanged, skipped = compare_benchmarks(baseline, current)
 
         if skipped:

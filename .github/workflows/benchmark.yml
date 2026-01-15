@@ -73,9 +73,11 @@ jobs:
       id: cache-benchmark
       with:
         path: baseline_benchmark.json
-        key: benchmark-baseline-${{ runner.os }}-main
+        # Cache key includes version to allow resetting baseline when benchmarks change
+        # Increment version (v2, v3, etc.) when benchmark names or methodology changes
+        key: benchmark-baseline-v2-${{ runner.os }}-main
         restore-keys: |
-          benchmark-baseline-${{ runner.os }}-main
+          benchmark-baseline-v2-${{ runner.os }}-main
 
     - name: Compare benchmarks and detect regression
       id: compare
@@ -86,7 +88,8 @@ jobs:
       if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
       with:
         path: baseline_benchmark.json
-        key: benchmark-baseline-${{ runner.os }}-main
+        # Must match the key used in restore step above
+        key: benchmark-baseline-v2-${{ runner.os }}-main
 
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4
