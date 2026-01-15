@@ -58,24 +58,26 @@ ValueExtractor::ValueExtractor(const uint8_t* buf, size_t len, const ParseIndex&
   for (uint16_t i = 0; i < idx_.n_threads; ++i)
     total_indexes += idx_.n_indexes[i];
   linear_indexes_.reserve(total_indexes);
-  // Read indexes handling two possible layouts:
-  // - region_size > 0: Per-thread regions at indexes[t * region_size]
-  // - region_size == 0: Contiguous layout from deserialization
-  if (idx_.region_size > 0) {
-    // Per-thread regions
-    for (uint16_t t = 0; t < idx_.n_threads; ++t) {
-      uint64_t* thread_base = idx_.indexes + t * idx_.region_size;
-      for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j)
-        linear_indexes_.push_back(thread_base[j]);
+  // Read indexes handling three possible layouts:
+  // - region_offsets != nullptr: Right-sized per-thread regions (from init_counted_per_thread)
+  // - region_size > 0: Uniform per-thread regions at indexes[t * region_size]
+  // - region_size == 0 && region_offsets == nullptr: Contiguous from deserialization
+  for (uint16_t t = 0; t < idx_.n_threads; ++t) {
+    uint64_t* thread_base;
+    if (idx_.region_offsets != nullptr) {
+      thread_base = idx_.indexes + idx_.region_offsets[t];
+    } else if (idx_.region_size > 0) {
+      thread_base = idx_.indexes + t * idx_.region_size;
+    } else {
+      // Contiguous layout: compute offset for this thread
+      size_t offset = 0;
+      for (uint16_t i = 0; i < t; ++i) {
+        offset += idx_.n_indexes[i];
+      }
+      thread_base = idx_.indexes + offset;
     }
-  } else {
-    // Contiguous layout: thread 0 at offset 0, thread 1 at offset n_indexes[0], etc.
-    size_t offset = 0;
-    for (uint16_t t = 0; t < idx_.n_threads; ++t) {
-      for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j)
-        linear_indexes_.push_back(idx_.indexes[offset + j]);
-      offset += idx_.n_indexes[t];
-    }
+    for (uint64_t j = 0; j < idx_.n_indexes[t]; ++j)
+      linear_indexes_.push_back(thread_base[j]);
   }
   std::sort(linear_indexes_.begin(), linear_indexes_.end());
   size_t first_nl = 0;
