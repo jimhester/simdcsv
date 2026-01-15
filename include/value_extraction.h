@@ -70,7 +70,7 @@ class LazyColumnIterator;
 class LazyColumn {
 public:
   /**
-   * @brief Construct a lazy column accessor.
+   * @brief Construct a lazy column accessor with bounds validation.
    *
    * @param buf Pointer to the CSV data buffer
    * @param len Length of the buffer in bytes
@@ -79,12 +79,22 @@ public:
    * @param has_header Whether the CSV has a header row (affects row indexing)
    * @param dialect CSV dialect for quote handling
    * @param config Extraction configuration for parsing
+   * @param validate_bounds If true (default), validates col < idx.columns
+   *
+   * @throws std::out_of_range if validate_bounds is true and col >= idx.columns
    */
   LazyColumn(const uint8_t* buf, size_t len, const ParseIndex& idx, size_t col, bool has_header,
              const Dialect& dialect = Dialect::csv(),
-             const ExtractionConfig& config = ExtractionConfig::defaults())
+             const ExtractionConfig& config = ExtractionConfig::defaults(),
+             bool validate_bounds = true)
       : buf_(buf), len_(len), idx_(&idx), col_(col), has_header_(has_header), dialect_(dialect),
         config_(config) {
+    // Validate column bounds if requested
+    if (validate_bounds && col >= idx_->columns) {
+      throw std::out_of_range("LazyColumn: column index " + std::to_string(col) +
+                              " out of range (columns = " + std::to_string(idx_->columns) + ")");
+    }
+
     // Compute number of rows
     if (idx_->columns > 0) {
       uint64_t total_fields = idx_->total_indexes();
@@ -302,7 +312,10 @@ inline LazyColumn::Iterator LazyColumn::end() const {
 }
 
 /**
- * @brief Factory function to create a LazyColumn from a ParseIndex.
+ * @brief Factory function to create a LazyColumn from a ParseIndex with bounds validation.
+ *
+ * Validates that the column index is within bounds before construction,
+ * providing a clear error message if the column index is invalid.
  *
  * @param buf Pointer to the CSV data buffer
  * @param len Length of the buffer
@@ -312,12 +325,43 @@ inline LazyColumn::Iterator LazyColumn::end() const {
  * @param dialect CSV dialect settings
  * @param config Extraction configuration
  * @return LazyColumn for the specified column
+ * @throws std::out_of_range if col >= idx.columns
+ *
+ * @see make_lazy_column_unchecked() for performance-critical scenarios where
+ *      bounds checking has already been performed
  */
 inline LazyColumn make_lazy_column(const uint8_t* buf, size_t len, const ParseIndex& idx,
                                    size_t col, bool has_header = true,
                                    const Dialect& dialect = Dialect::csv(),
                                    const ExtractionConfig& config = ExtractionConfig::defaults()) {
-  return LazyColumn(buf, len, idx, col, has_header, dialect, config);
+  return LazyColumn(buf, len, idx, col, has_header, dialect, config, true);
+}
+
+/**
+ * @brief Factory function to create a LazyColumn without bounds validation.
+ *
+ * This variant skips column bounds validation for performance-critical scenarios
+ * where the caller has already validated the column index. Using an invalid
+ * column index results in undefined behavior (typically empty/invalid spans).
+ *
+ * @param buf Pointer to the CSV data buffer
+ * @param len Length of the buffer
+ * @param idx Reference to the parsed index
+ * @param col Column index (0-based)
+ * @param has_header Whether the CSV has a header row
+ * @param dialect CSV dialect settings
+ * @param config Extraction configuration
+ * @return LazyColumn for the specified column
+ *
+ * @note Only use this when you have already validated col < idx.columns
+ *
+ * @see make_lazy_column() for the validated version
+ */
+inline LazyColumn
+make_lazy_column_unchecked(const uint8_t* buf, size_t len, const ParseIndex& idx, size_t col,
+                           bool has_header = true, const Dialect& dialect = Dialect::csv(),
+                           const ExtractionConfig& config = ExtractionConfig::defaults()) {
+  return LazyColumn(buf, len, idx, col, has_header, dialect, config, false);
 }
 
 template <typename IntType>
