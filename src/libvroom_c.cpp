@@ -715,6 +715,57 @@ void libvroom_parser_destroy(libvroom_parser_t* parser) {
   delete parser;
 }
 
+libvroom_error_t libvroom_parse_filtered(libvroom_parser_t* parser, const libvroom_buffer_t* buffer,
+                                         libvroom_index_t* index,
+                                         libvroom_error_collector_t* errors,
+                                         const libvroom_dialect_t* dialect,
+                                         const libvroom_row_filter_options_t* filter) {
+  if (!parser || !buffer || !index)
+    return LIBVROOM_ERROR_NULL_POINTER;
+
+  try {
+    libvroom::Dialect d = dialect ? dialect->dialect : libvroom::Dialect::csv();
+
+    // Configure parser with the number of threads from the index
+    parser->parser.set_num_threads(index->num_threads);
+
+    // Build parse options
+    libvroom::ParseOptions options;
+    options.dialect = d;
+    if (errors) {
+      options.errors = &errors->collector;
+    }
+
+    // Apply row filtering options if provided
+    if (filter) {
+      options.skip = filter->skip;
+      options.n_max = filter->n_max;
+      options.comment = filter->comment;
+      options.skip_empty_rows = filter->skip_empty_rows;
+    }
+
+    // Parse using the unified Parser API
+    // Use original_length (not padded data.size()) for correct parsing
+    auto result = parser->parser.parse(buffer->data.data(), buffer->original_length, options);
+
+    // Move the index from the result
+    index->idx = std::move(result.idx);
+
+    if (errors && errors->collector.has_fatal_errors()) {
+      const auto& errs = errors->collector.errors();
+      for (const auto& e : errs) {
+        if (e.severity == libvroom::ErrorSeverity::FATAL) {
+          return to_c_error(e.code);
+        }
+      }
+    }
+
+    return result.success() ? LIBVROOM_OK : LIBVROOM_ERROR_INTERNAL;
+  } catch (...) {
+    return LIBVROOM_ERROR_INTERNAL;
+  }
+}
+
 // Dialect Detection
 libvroom_detection_result_t* libvroom_detect_dialect(const libvroom_buffer_t* buffer) {
   if (!buffer)
