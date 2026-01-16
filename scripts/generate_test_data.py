@@ -16,9 +16,15 @@ If output_dir is not specified, defaults to benchmark/test_data/
 """
 
 import argparse
+import csv
+import json
 import random
 import string
+import urllib.request
+import ssl
 from pathlib import Path
+from typing import Optional
+from urllib.error import URLError, HTTPError
 
 
 def random_string(min_len: int = 5, max_len: int = 20) -> str:
@@ -405,6 +411,423 @@ def generate_type_widening_test(output_path: Path, nrows: int = 1_000_000) -> No
     print(f"  Done: {output_path / 'type_widening_test.csv'}")
 
 
+# Real-world CSV corpus URLs for H4/H5 validation
+# Each entry: (name, url, description, source)
+CORPUS_URLS = [
+    # data.gov sources (publicly accessible CSV files >10MB)
+    ("nyc_311_service_requests",
+     "https://data.cityofnewyork.us/api/views/erm2-nwe9/rows.csv?accessType=DOWNLOAD",
+     "NYC 311 Service Requests", "data.gov"),
+    ("chicago_crimes",
+     "https://data.cityofchicago.org/api/views/ijzp-q8t2/rows.csv?accessType=DOWNLOAD",
+     "Chicago Crimes Dataset", "data.gov"),
+    ("la_parking_citations",
+     "https://data.lacity.org/api/views/wjz9-h9np/rows.csv?accessType=DOWNLOAD",
+     "LA Parking Citations", "data.gov"),
+    ("austin_311",
+     "https://data.austintexas.gov/api/views/xwdj-i9he/rows.csv?accessType=DOWNLOAD",
+     "Austin 311 Service Requests", "data.gov"),
+    ("sf_fire_incidents",
+     "https://data.sfgov.org/api/views/wr8u-xric/rows.csv?accessType=DOWNLOAD",
+     "SF Fire Department Incidents", "data.gov"),
+
+    # UCI ML Repository (direct CSV downloads)
+    ("adult_income",
+     "https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data",
+     "Adult Income Dataset", "UCI"),
+    ("covertype",
+     "https://archive.ics.uci.edu/ml/machine-learning-databases/covtype/covtype.data.gz",
+     "Forest Covertype Dataset", "UCI"),
+    ("poker_hand",
+     "https://archive.ics.uci.edu/ml/machine-learning-databases/poker/poker-hand-training-true.data",
+     "Poker Hand Dataset", "UCI"),
+    ("higgs",
+     "https://archive.ics.uci.edu/ml/machine-learning-databases/00280/HIGGS.csv.gz",
+     "HIGGS Physics Dataset", "UCI"),
+    ("kdd_cup",
+     "https://archive.ics.uci.edu/ml/machine-learning-databases/kddcup99-mld/kddcup.data.gz",
+     "KDD Cup 1999 Dataset", "UCI"),
+]
+
+
+def download_file(url: str, output_path: Path, max_size_mb: int = 100) -> Optional[Path]:
+    """
+    Download a file from URL with progress reporting.
+
+    Args:
+        url: URL to download
+        output_path: Path to save the file
+        max_size_mb: Maximum file size to download in MB
+
+    Returns:
+        Path to downloaded file, or None if failed
+    """
+    try:
+        # Create SSL context that doesn't verify certificates (for some gov sites)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        print(f"  Downloading from {url[:60]}...")
+
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+
+        with urllib.request.urlopen(req, context=ctx, timeout=60) as response:
+            # Check content length
+            content_length = response.headers.get('Content-Length')
+            if content_length:
+                size_mb = int(content_length) / (1024 * 1024)
+                if size_mb > max_size_mb:
+                    print(f"  Skipping: file too large ({size_mb:.1f}MB > {max_size_mb}MB)")
+                    return None
+                print(f"  Size: {size_mb:.1f}MB")
+
+            # Download with progress
+            with open(output_path, 'wb') as f:
+                downloaded = 0
+                block_size = 8192
+                while True:
+                    buffer = response.read(block_size)
+                    if not buffer:
+                        break
+                    downloaded += len(buffer)
+                    f.write(buffer)
+
+                    # Check max size during download
+                    if downloaded > max_size_mb * 1024 * 1024:
+                        print(f"  Truncating at {max_size_mb}MB")
+                        break
+
+        print(f"  Downloaded: {output_path.name} ({downloaded / (1024*1024):.1f}MB)")
+        return output_path
+
+    except (URLError, HTTPError) as e:
+        print(f"  Failed to download: {e}")
+        return None
+    except Exception as e:
+        print(f"  Error: {e}")
+        return None
+
+
+def download_corpus(output_path: Path, max_files: int = 10) -> list[Path]:
+    """
+    Download real-world CSV corpus for H4/H5 validation.
+
+    Args:
+        output_path: Directory to save files
+        max_files: Maximum number of files to download
+
+    Returns:
+        List of successfully downloaded file paths
+    """
+    corpus_dir = output_path / "corpus"
+    corpus_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Downloading real-world CSV corpus to {corpus_dir}...")
+    print(f"Target: up to {max_files} files from data.gov, UCI ML Repository")
+    print()
+
+    downloaded = []
+    for name, url, description, source in CORPUS_URLS[:max_files]:
+        print(f"[{source}] {description}")
+
+        # Determine file extension
+        if url.endswith('.gz'):
+            file_path = corpus_dir / f"{name}.csv.gz"
+        else:
+            file_path = corpus_dir / f"{name}.csv"
+
+        # Skip if already exists
+        if file_path.exists():
+            size_mb = file_path.stat().st_size / (1024 * 1024)
+            print(f"  Already exists: {file_path.name} ({size_mb:.1f}MB)")
+            downloaded.append(file_path)
+            continue
+
+        result = download_file(url, file_path)
+        if result:
+            downloaded.append(result)
+        print()
+
+    print(f"Downloaded {len(downloaded)} files")
+    return downloaded
+
+
+def analyze_csv_for_escapes(file_path: Path, sample_rows: int = 100000) -> dict:
+    """
+    Analyze a CSV file for escape sequences (H4 validation).
+
+    Args:
+        file_path: Path to CSV file
+        sample_rows: Number of rows to sample
+
+    Returns:
+        Dictionary with escape analysis results
+    """
+    import gzip
+
+    results = {
+        'file': file_path.name,
+        'total_fields': 0,
+        'quoted_fields': 0,
+        'escaped_fields': 0,  # Fields with "" escape sequences
+        'fields_with_commas': 0,
+        'fields_with_newlines': 0,
+        'rows_sampled': 0,
+    }
+
+    try:
+        # Handle gzipped files
+        if str(file_path).endswith('.gz'):
+            f = gzip.open(file_path, 'rt', encoding='utf-8', errors='replace')
+        else:
+            f = open(file_path, 'r', encoding='utf-8', errors='replace')
+
+        with f:
+            reader = csv.reader(f)
+            for i, row in enumerate(reader):
+                if i >= sample_rows:
+                    break
+
+                results['rows_sampled'] = i + 1
+
+                for field in row:
+                    results['total_fields'] += 1
+
+                    # Check for patterns requiring quoting/escaping
+                    if ',' in field:
+                        results['fields_with_commas'] += 1
+                    if '\n' in field or '\r' in field:
+                        results['fields_with_newlines'] += 1
+                    if '"' in field:
+                        results['escaped_fields'] += 1
+
+    except Exception as e:
+        results['error'] = str(e)
+
+    # Calculate percentages
+    if results['total_fields'] > 0:
+        results['escape_ratio'] = results['escaped_fields'] / results['total_fields']
+        results['comma_ratio'] = results['fields_with_commas'] / results['total_fields']
+        results['newline_ratio'] = results['fields_with_newlines'] / results['total_fields']
+        results['needs_processing_ratio'] = (
+            results['escaped_fields'] + results['fields_with_commas'] +
+            results['fields_with_newlines']
+        ) / results['total_fields']
+
+    return results
+
+
+def analyze_csv_for_types(file_path: Path, sample_rows: int = 10000) -> dict:
+    """
+    Analyze a CSV file for type patterns (H5 validation).
+
+    Args:
+        file_path: Path to CSV file
+        sample_rows: Number of initial rows to sample for type inference
+
+    Returns:
+        Dictionary with type analysis results
+    """
+    import gzip
+    import re
+
+    int_pattern = re.compile(r'^-?\d+$')
+    float_pattern = re.compile(r'^-?\d+\.\d+$')
+
+    results = {
+        'file': file_path.name,
+        'columns': 0,
+        'rows_analyzed': 0,
+        'type_changes': [],  # Columns that changed type after sample
+        'initial_types': {},  # Column -> inferred type from sample
+        'final_types': {},  # Column -> final type after full scan
+    }
+
+    try:
+        if str(file_path).endswith('.gz'):
+            f = gzip.open(file_path, 'rt', encoding='utf-8', errors='replace')
+        else:
+            f = open(file_path, 'r', encoding='utf-8', errors='replace')
+
+        with f:
+            reader = csv.reader(f)
+
+            # Skip header
+            try:
+                header = next(reader)
+                results['columns'] = len(header)
+            except StopIteration:
+                return results
+
+            # Track types per column: 'int', 'float', 'string'
+            col_types = ['int'] * results['columns']  # Start assuming int
+            col_sample_types = [None] * results['columns']
+
+            for i, row in enumerate(reader):
+                results['rows_analyzed'] = i + 1
+
+                for col_idx, field in enumerate(row):
+                    if col_idx >= results['columns']:
+                        continue
+
+                    field = field.strip()
+                    if not field:
+                        continue
+
+                    # Determine field type
+                    if int_pattern.match(field):
+                        field_type = 'int'
+                    elif float_pattern.match(field):
+                        field_type = 'float'
+                    else:
+                        field_type = 'string'
+
+                    # Update column type (can only widen: int -> float -> string)
+                    current_type = col_types[col_idx]
+                    if current_type == 'int' and field_type in ('float', 'string'):
+                        col_types[col_idx] = field_type
+                    elif current_type == 'float' and field_type == 'string':
+                        col_types[col_idx] = 'string'
+
+                # Record types at sample boundary
+                if i == sample_rows - 1:
+                    col_sample_types = col_types.copy()
+                    results['initial_types'] = {
+                        f'col_{j}': t for j, t in enumerate(col_sample_types)
+                    }
+
+                # Limit full scan for performance
+                if i >= sample_rows * 10:
+                    break
+
+            results['final_types'] = {f'col_{j}': t for j, t in enumerate(col_types)}
+
+            # Find type changes after sample window
+            if col_sample_types[0] is not None:
+                for col_idx in range(min(len(col_sample_types), len(col_types))):
+                    if col_sample_types[col_idx] != col_types[col_idx]:
+                        results['type_changes'].append({
+                            'column': col_idx,
+                            'initial': col_sample_types[col_idx],
+                            'final': col_types[col_idx],
+                        })
+
+    except Exception as e:
+        results['error'] = str(e)
+
+    return results
+
+
+def analyze_corpus(corpus_dir: Path) -> dict:
+    """
+    Analyze all CSV files in corpus directory for H4/H5 validation.
+
+    Args:
+        corpus_dir: Directory containing corpus CSV files
+
+    Returns:
+        Dictionary with aggregated analysis results
+    """
+    print(f"\nAnalyzing corpus in {corpus_dir}...")
+
+    results = {
+        'h4_escape_analysis': [],
+        'h5_type_analysis': [],
+        'summary': {
+            'total_files': 0,
+            'total_fields_analyzed': 0,
+            'avg_escape_ratio': 0,
+            'files_with_type_changes': 0,
+        }
+    }
+
+    csv_files = list(corpus_dir.glob('*.csv')) + list(corpus_dir.glob('*.csv.gz'))
+
+    for file_path in csv_files:
+        print(f"\n  Analyzing {file_path.name}...")
+
+        # H4 analysis
+        h4_result = analyze_csv_for_escapes(file_path)
+        results['h4_escape_analysis'].append(h4_result)
+
+        # H5 analysis
+        h5_result = analyze_csv_for_types(file_path)
+        results['h5_type_analysis'].append(h5_result)
+
+        results['summary']['total_files'] += 1
+        results['summary']['total_fields_analyzed'] += h4_result.get('total_fields', 0)
+
+        if h5_result.get('type_changes'):
+            results['summary']['files_with_type_changes'] += 1
+
+        # Print per-file summary
+        escape_pct = h4_result.get('escape_ratio', 0) * 100
+        needs_proc_pct = h4_result.get('needs_processing_ratio', 0) * 100
+        type_changes = len(h5_result.get('type_changes', []))
+
+        print(f"    H4: {escape_pct:.2f}% escaped, {needs_proc_pct:.2f}% need processing")
+        print(f"    H5: {type_changes} type changes after sample window")
+
+    # Calculate summary statistics
+    if results['h4_escape_analysis']:
+        total_escape_ratio = sum(
+            r.get('escape_ratio', 0) for r in results['h4_escape_analysis']
+        ) / len(results['h4_escape_analysis'])
+        results['summary']['avg_escape_ratio'] = total_escape_ratio
+
+    return results
+
+
+def print_corpus_report(results: dict) -> None:
+    """Print formatted report of corpus analysis results."""
+    print("\n" + "=" * 70)
+    print("CORPUS ANALYSIS REPORT - H4/H5 Validation")
+    print("=" * 70)
+
+    summary = results['summary']
+
+    print(f"\nFiles analyzed: {summary['total_files']}")
+    print(f"Total fields analyzed: {summary['total_fields_analyzed']:,}")
+
+    print("\n--- H4: Zero-copy String Extraction Viability ---")
+    print("\nPer-file escape sequence analysis:")
+    print(f"{'File':<35} {'Rows':<10} {'Fields':<12} {'Escape%':<10} {'NeedProc%':<10}")
+    print("-" * 77)
+
+    for r in results['h4_escape_analysis']:
+        name = r['file'][:32] + '...' if len(r['file']) > 35 else r['file']
+        rows = r.get('rows_sampled', 0)
+        fields = r.get('total_fields', 0)
+        escape_pct = r.get('escape_ratio', 0) * 100
+        need_proc_pct = r.get('needs_processing_ratio', 0) * 100
+        print(f"{name:<35} {rows:<10,} {fields:<12,} {escape_pct:<10.2f} {need_proc_pct:<10.2f}")
+
+    avg_escape = summary['avg_escape_ratio'] * 100
+    print(f"\nAverage escape ratio: {avg_escape:.2f}%")
+    print(f"H4 Hypothesis: >80% fields need no escape processing")
+    print(f"Result: {100 - avg_escape:.1f}% fields are escape-free")
+    if avg_escape < 20:
+        print(">>> H4 CONFIRMED: Zero-copy viable for majority of fields")
+    else:
+        print(">>> H4 REFUTED: Significant escape processing required")
+
+    print("\n--- H5: Type Widening Frequency ---")
+    print(f"\nFiles with type changes after sample: {summary['files_with_type_changes']}/{summary['total_files']}")
+
+    type_change_pct = summary['files_with_type_changes'] / max(summary['total_files'], 1) * 100
+    print(f"Type change rate: {type_change_pct:.1f}%")
+    print(f"H5 Hypothesis: <5% of files require type widening")
+    if type_change_pct < 5:
+        print(">>> H5 CONFIRMED: Type widening is rare")
+    elif type_change_pct < 20:
+        print(">>> H5 PARTIALLY CONFIRMED: Type widening is uncommon")
+    else:
+        print(">>> H5 REFUTED: Type widening is common")
+
+    print("\n" + "=" * 70)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate test data files for hypothesis-driven benchmarks"
@@ -446,6 +869,23 @@ def main():
         action="store_true",
         help="Generate all H4/H5 test data (taxi + type widening)"
     )
+    parser.add_argument(
+        "--corpus",
+        action="store_true",
+        help="Download real-world CSV corpus for H4/H5 validation"
+    )
+    parser.add_argument(
+        "--analyze-corpus",
+        type=str,
+        metavar="DIR",
+        help="Analyze existing CSV corpus directory for H4/H5"
+    )
+    parser.add_argument(
+        "--corpus-max-files",
+        type=int,
+        default=10,
+        help="Maximum number of corpus files to download (default: 10)"
+    )
 
     args = parser.parse_args()
 
@@ -462,6 +902,34 @@ def main():
 
     if args.matrix_only:
         generate_variable_sizes(output_path)
+        return
+
+    # Handle corpus download and analysis
+    if args.analyze_corpus:
+        corpus_dir = Path(args.analyze_corpus)
+        if not corpus_dir.exists():
+            print(f"Error: Corpus directory not found: {corpus_dir}")
+            return
+        results = analyze_corpus(corpus_dir)
+        print_corpus_report(results)
+        # Save results to JSON
+        results_file = output_path / "corpus_analysis.json"
+        with open(results_file, 'w') as f:
+            json.dump(results, f, indent=2, default=str)
+        print(f"\nResults saved to: {results_file}")
+        return
+
+    if args.corpus:
+        downloaded = download_corpus(output_path, args.corpus_max_files)
+        if downloaded:
+            corpus_dir = output_path / "corpus"
+            results = analyze_corpus(corpus_dir)
+            print_corpus_report(results)
+            # Save results to JSON
+            results_file = output_path / "corpus_analysis.json"
+            with open(results_file, 'w') as f:
+                json.dump(results, f, indent=2, default=str)
+            print(f"\nResults saved to: {results_file}")
         return
 
     if args.taxi or args.all_h4h5:
