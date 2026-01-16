@@ -2798,6 +2798,80 @@ public:
       }
     }
 
+    // Create second-pass progress callback that wraps the progress tracker
+    SecondPassProgressCallback second_pass_progress = nullptr;
+    if (progress_tracker.has_callback()) {
+      second_pass_progress = [&progress_tracker](size_t bytes_processed) {
+        return progress_tracker.add_second_pass_progress(bytes_processed);
+      };
+    }
+
+    // =======================================================================
+    // Fast Path Detection
+    // =======================================================================
+    // Performance optimization (issue #443, #591): Use fast path when:
+    // 1. Explicit dialect is provided (skips detection overhead)
+    // 2. No external error collector requested (options.errors == nullptr)
+    //
+    // For multi-threaded fast path (issue #591), use optimized per-thread
+    // allocation that dramatically reduces memory usage and improves scaling.
+    bool use_fast_path = options.errors == nullptr && options.dialect.has_value() &&
+                         (options.algorithm == ParseAlgorithm::AUTO ||
+                          options.algorithm == ParseAlgorithm::SPECULATIVE);
+
+    // =======================================================================
+    // Multi-threaded Fast Path (Issue #591 optimization)
+    // =======================================================================
+    // For multi-threaded parsing with explicit dialect and no error collection,
+    // use the optimized parse_optimized() method which:
+    // 1. Finds chunk boundaries in parallel
+    // 2. Counts separators per-chunk (not total file)
+    // 3. Allocates right-sized per-thread regions (~N total vs T*N)
+    // 4. Parses chunks in parallel
+    //
+    // This avoids the redundant first pass and dramatically reduces memory.
+    if (use_fast_path && num_threads_ > 1) {
+      try {
+        result.idx =
+            parser_.parse_optimized(buf, len, num_threads_, result.dialect, second_pass_progress);
+        result.successful = result.idx.indexes != nullptr;
+      } catch (const std::exception& e) {
+        collector->add_error(ErrorCode::INTERNAL_ERROR, ErrorSeverity::FATAL, 0, 0, 0, e.what());
+        result.successful = false;
+      }
+
+      // Skip the normal allocation and parsing paths below
+      if (result.successful || !result.idx.indexes) {
+        // Store buffer reference and row filtering options
+        result.set_buffer(buf, len, options.skip, options.n_max, options.skip_empty_rows);
+        result.set_extraction_options(options.extraction_config, options.column_configs);
+
+        // Set column count in index
+        if (result.successful && result.idx.columns == 0) {
+          result.idx.columns = result.num_columns();
+        }
+
+        // Compact index for O(1) field access
+        if (result.successful) {
+          result.idx.compact();
+        }
+
+        // Report completion
+        if (options.progress_callback && result.successful) {
+          options.progress_callback(len, len);
+        }
+
+        // Handle caching for optimized path
+        if (can_use_cache && result.successful && !result.cache_path.empty()) {
+          IndexCache::write_atomic(result.cache_path, result.idx, options.source_path);
+          // Note: Cache write failures are silently ignored in optimized path
+          // (consistent with how they're handled elsewhere)
+        }
+
+        return result;
+      }
+    }
+
     // =======================================================================
     // First Pass: Count separators with granular progress
     // =======================================================================
@@ -2858,31 +2932,16 @@ public:
       return result;
     }
 
-    // Parse with error collection - never throw for parse errors
-    //
+    // =======================================================================
+    // Parse with the appropriate algorithm
+    // =======================================================================
     // Design principle: The error-collecting variants (_with_errors) do
     // comprehensive validation (field counts, quote checking, etc.), while
     // the fast-path variants only check for fatal quote errors.
     //
-    // Performance optimization (issue #443): Use the fast path (parse_speculate)
-    // by default when:
-    // 1. Explicit dialect is provided (skips detection overhead)
-    // 2. No external error collector requested (options.errors == nullptr)
-    //
     // When an external error collector is explicitly provided, we use the
     // comprehensive validation path to detect issues like inconsistent field
     // counts and duplicate column names.
-    bool use_fast_path = options.errors == nullptr && options.dialect.has_value() &&
-                         (options.algorithm == ParseAlgorithm::AUTO ||
-                          options.algorithm == ParseAlgorithm::SPECULATIVE);
-
-    // Create second-pass progress callback that wraps the progress tracker
-    SecondPassProgressCallback second_pass_progress = nullptr;
-    if (progress_tracker.has_callback()) {
-      second_pass_progress = [&progress_tracker](size_t bytes_processed) {
-        return progress_tracker.add_second_pass_progress(bytes_processed);
-      };
-    }
 
     try {
       if (!options.dialect.has_value()) {
@@ -2892,7 +2951,7 @@ public:
                                                options.detection_options);
         result.dialect = result.detection.dialect;
       } else if (use_fast_path) {
-        // Fast path: speculative parsing without comprehensive validation
+        // Single-threaded fast path: speculative parsing without comprehensive validation
         // This path achieves ~370 MB/s vs ~205 MB/s with validation (issue #443)
         // Note: This path does NOT detect inconsistent field counts or
         // duplicate column names - use an explicit error collector if needed

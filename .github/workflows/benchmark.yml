@@ -66,6 +66,8 @@ jobs:
         ccache -s
 
     # Run HEAD benchmark first (current PR/commit)
+    # Multi-thread benchmarks (BM_ParserMultiThread/1, /4, /8) are critical for detecting
+    # issue #591-type regressions where multi-threaded parsing gets slower with more threads.
     - name: Run benchmark (HEAD)
       timeout-minutes: 5
       run: |
@@ -73,7 +75,7 @@ jobs:
         # Use taskset for CPU affinity (pin to CPU 0) and nice for scheduling priority
         # This reduces variance from CPU migration and context switching
         sudo nice -n -5 taskset -c 0 ./build/libvroom_benchmark \
-          --benchmark_filter="BM_RawFirstPass$|BM_RawTwoPassComplete|BM_ParserWithExplicitDialect|BM_ParserBranchless|BM_ParserSpeculative|BM_ParserMultiThread/1$|BM_ParserMultiThread/4$" \
+          --benchmark_filter="BM_RawFirstPass$|BM_RawTwoPassComplete|BM_ParserWithExplicitDialect|BM_ParserBranchless|BM_ParserSpeculative|BM_ParserMultiThread/1$|BM_ParserMultiThread/4$|BM_ParserMultiThread/8$" \
           --benchmark_repetitions=5 \
           --benchmark_min_time=0.5s \
           --benchmark_out=build/head_results.json \
@@ -100,7 +102,7 @@ jobs:
         echo "=== Benchmarking BASE commit ==="
         # Use same CPU affinity and priority settings for fair comparison
         sudo nice -n -5 taskset -c 0 ./build/libvroom_benchmark \
-          --benchmark_filter="BM_RawFirstPass$|BM_RawTwoPassComplete|BM_ParserWithExplicitDialect|BM_ParserBranchless|BM_ParserSpeculative|BM_ParserMultiThread/1$|BM_ParserMultiThread/4$" \
+          --benchmark_filter="BM_RawFirstPass$|BM_RawTwoPassComplete|BM_ParserWithExplicitDialect|BM_ParserBranchless|BM_ParserSpeculative|BM_ParserMultiThread/1$|BM_ParserMultiThread/4$|BM_ParserMultiThread/8$" \
           --benchmark_repetitions=5 \
           --benchmark_min_time=0.5s \
           --benchmark_out=build/base_results.json \

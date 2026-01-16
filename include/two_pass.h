@@ -1261,6 +1261,29 @@ public:
              const Dialect& dialect = Dialect::csv(),
              const SecondPassProgressCallback& progress = nullptr);
 
+  /**
+   * @brief Parse a CSV buffer with optimized per-thread memory allocation.
+   *
+   * This method combines chunk boundary detection, per-chunk separator counting,
+   * and parsing into a single operation that allocates only the memory needed
+   * for each thread's actual separator count. This dramatically reduces memory
+   * usage for multi-threaded parsing compared to the default worst-case allocation.
+   *
+   * Memory savings: For N separators evenly distributed across T threads:
+   * - Default: T * N (each thread gets space for all separators)
+   * - Optimized: ~N (each thread gets space for its ~N/T separators)
+   *
+   * @param buf Input buffer
+   * @param len Buffer length
+   * @param n_threads Number of threads to use for parsing
+   * @param dialect CSV dialect settings
+   * @param progress Optional progress callback (called after each chunk completes)
+   * @return ParseIndex with parsed data and optimized memory allocation
+   */
+  ParseIndex parse_optimized(const uint8_t* buf, size_t len, size_t n_threads,
+                             const Dialect& dialect = Dialect::csv(),
+                             const SecondPassProgressCallback& progress = nullptr);
+
   // Result from multi-threaded branchless parsing with error collection
   struct branchless_chunk_result {
     uint64_t n_indexes;
