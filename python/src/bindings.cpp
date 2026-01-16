@@ -1122,6 +1122,15 @@ public:
   // Check if the index is compacted for O(1) access
   bool is_flat() const { return data_->result.is_flat(); }
 
+  // Convert byte offset to row/column location
+  py::object byte_offset_to_location(size_t byte_offset) const {
+    auto loc = data_->result.byte_offset_to_location(byte_offset);
+    if (loc.found) {
+      return py::make_tuple(loc.row, loc.column);
+    }
+    return py::none();
+  }
+
 private:
   std::shared_ptr<TableData> data_;
 };
@@ -2614,6 +2623,33 @@ Returns
 -------
 bool
     True if the index has O(1) field access, False otherwise.
+)doc")
+      .def("byte_offset_to_location", &Table::byte_offset_to_location, py::arg("byte_offset"),
+           R"doc(
+Convert a byte offset to row/column location.
+
+Given a byte offset into the CSV data, returns the row and column indices
+of the field containing that byte offset. This is useful for mapping error
+positions (reported as byte offsets) back to logical row/column locations.
+
+Parameters
+----------
+byte_offset : int
+    Byte offset into the CSV data.
+
+Returns
+-------
+tuple[int, int] or None
+    A tuple of (row, column) if the byte offset is within the indexed data,
+    or None if the byte offset is beyond all indexed fields.
+
+Examples
+--------
+>>> table = vroom_csv.read_csv("data.csv")
+>>> loc = table.byte_offset_to_location(150)
+>>> if loc:
+...     row, col = loc
+...     print(f"Byte 150 is at row {row}, column {col}")
 )doc");
 
   // RowIterator class for streaming row-by-row iteration

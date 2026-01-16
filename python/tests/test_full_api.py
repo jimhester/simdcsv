@@ -336,3 +336,61 @@ class TestDialectWithReadCsv:
         assert table.num_rows == 2
         assert table.num_columns == 3
         assert table.column_names == ["name", "age", "city"]
+
+
+class TestByteOffsetToLocation:
+    """Tests for byte_offset_to_location method."""
+
+    def test_byte_offset_to_location_basic(self, simple_csv):
+        """Test converting byte offset to row/column location."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(simple_csv)
+
+        # Test byte offset 0 (start of first field)
+        loc = table.byte_offset_to_location(0)
+        assert loc is not None
+        row, col = loc
+        assert row == 0
+        assert col == 0
+
+    def test_byte_offset_to_location_middle(self, simple_csv):
+        """Test byte offset in the middle of the file."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(simple_csv)
+
+        # Test a byte offset somewhere in the second row
+        # CSV: "name,age,city\nAlice,30,New York\nBob,25,Los Angeles\nCharlie,35,Chicago\n"
+        # The header is "name,age,city\n" = 14 bytes (0-13)
+        # Row 1 starts at byte 14
+        loc = table.byte_offset_to_location(14)
+        assert loc is not None
+        row, col = loc
+        assert row == 1  # Second row (first data row, 0-indexed)
+
+    def test_byte_offset_to_location_beyond_data(self, simple_csv):
+        """Test byte offset beyond the data returns None."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(simple_csv)
+
+        # Test byte offset beyond the file
+        loc = table.byte_offset_to_location(10000)
+        assert loc is None
+
+    def test_byte_offset_to_location_last_field(self, simple_csv):
+        """Test byte offset in the last field."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(simple_csv)
+
+        # Get the last field position by computing the approximate offset
+        # The file is about 60+ bytes, so test a byte near the end
+        content = "name,age,city\nAlice,30,New York\nBob,25,Los Angeles\nCharlie,35,Chicago\n"
+        last_row_offset = content.rfind("Charlie")
+        loc = table.byte_offset_to_location(last_row_offset)
+        assert loc is not None
+        row, col = loc
+        assert row == 3  # Fourth row (third data row, 0-indexed)
+        assert col == 0  # First column (name column)
