@@ -1076,6 +1076,7 @@ set(BENCHMARK_SOURCES
     benchmark/number_parsing_benchmarks.cpp
     benchmark/error_collection_benchmark.cpp
     benchmark/parser_overhead_benchmarks.cpp
+    benchmark/row_reconstruction_benchmarks.cpp
     benchmark/end_to_end_benchmarks.cpp
 )
 
