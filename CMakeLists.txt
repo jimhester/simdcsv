@@ -1058,6 +1058,24 @@ target_include_directories(buffer_lifetime_test PRIVATE
 # Register buffer lifetime tests with CTest
 gtest_discover_tests(buffer_lifetime_test)
 
+# Column escape tracking test executable
+add_executable(column_escape_test
+    test/column_escape_test.cpp
+)
+
+target_link_libraries(column_escape_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(column_escape_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Register column escape tests with CTest
+gtest_discover_tests(column_escape_test)
+
 # Arrow output test (only if Arrow is enabled)
 if(LIBVROOM_ENABLE_ARROW)
     add_executable(arrow_output_test test/arrow_output_test.cpp)

@@ -746,6 +746,34 @@ public:
   std::vector<std::string_view> extract_column_string_view(size_t col) const;
   std::vector<std::string> extract_column_string(size_t col) const;
 
+  /**
+   * @brief Check if a column allows zero-copy string extraction.
+   *
+   * Returns true if the column has no escape sequences, meaning strings can be
+   * extracted without copying/unescaping. This information is only available
+   * after compute_column_escape_info() has been called on the ParseIndex.
+   *
+   * @param col Column index (0 to num_columns - 1).
+   * @return true if zero-copy extraction is possible, false otherwise.
+   */
+  bool column_allows_zero_copy(size_t col) const { return idx().column_allows_zero_copy(col); }
+
+  /**
+   * @brief Compute per-column escape info for the underlying ParseIndex.
+   *
+   * This analyzes each column to determine which have quoted fields and which
+   * have escape sequences. Call this before using column_allows_zero_copy() or
+   * the fast-path extraction optimizations.
+   *
+   * @note This method modifies the underlying ParseIndex's escape info state.
+   *       It's safe to call multiple times (idempotent).
+   */
+  void compute_column_escape_info() {
+    // Cast away const since compute_column_escape_info is logically const
+    // (it only adds cached metadata, doesn't change the index structure)
+    const_cast<ParseIndex&>(idx()).compute_column_escape_info(buf_, len_, dialect_.quote_char);
+  }
+
   template <typename T> std::vector<std::optional<T>> extract_column(size_t col) const {
     std::vector<std::optional<T>> result;
     result.reserve(num_rows_);
