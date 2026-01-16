@@ -76,13 +76,13 @@ struct BenchmarkBuffer {
 
   explicit BenchmarkBuffer(const std::string& content) {
     len = content.size();
-    data = libvroom::allocate_padded_buffer(len, 64);
+    data = allocate_padded_buffer(len, 64);
     std::memcpy(data, content.data(), len);
   }
 
   ~BenchmarkBuffer() {
     if (data)
-      libvroom::aligned_free(data);
+      aligned_free(data);
   }
 
   BenchmarkBuffer(const BenchmarkBuffer&) = delete;
@@ -103,8 +103,8 @@ static void BM_CSVToArrowTable(benchmark::State& state) {
   opts.infer_types = true;
 
   for (auto _ : state) {
-    libvroom::two_pass parser;
-    libvroom::index idx = parser.init(buffer.len, 1);
+    libvroom::TwoPass parser;
+    libvroom::ParseIndex idx = parser.init(buffer.len, 1);
     parser.parse(buffer.data, idx, buffer.len);
 
     libvroom::ArrowConverter converter(opts);
@@ -135,8 +135,8 @@ static void BM_ArrowToFeather(benchmark::State& state) {
   BenchmarkBuffer buffer(csv_data);
 
   // Parse and convert once outside the benchmark loop
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.len, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.len, 1);
   parser.parse(buffer.data, idx, buffer.len);
 
   libvroom::ArrowConvertOptions opts;
@@ -181,8 +181,8 @@ static void BM_ArrowToParquet(benchmark::State& state) {
   BenchmarkBuffer buffer(csv_data);
 
   // Parse and convert once outside the benchmark loop
-  libvroom::two_pass parser;
-  libvroom::index idx = parser.init(buffer.len, 1);
+  libvroom::TwoPass parser;
+  libvroom::ParseIndex idx = parser.init(buffer.len, 1);
   parser.parse(buffer.data, idx, buffer.len);
 
   libvroom::ArrowConvertOptions opts;
