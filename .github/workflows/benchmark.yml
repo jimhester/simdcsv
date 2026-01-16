@@ -25,7 +25,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake build-essential ccache
+        sudo apt-get install -y cmake build-essential ccache jq
 
     - name: Cache ccache
       uses: actions/cache@v4
@@ -127,14 +127,7 @@ jobs:
       run: |
         echo "=== No baseline commit available for comparison ==="
         echo "HEAD benchmark completed successfully."
-        python3 -c "
-import json
-with open('build/head_results.json') as f:
-    data = json.load(f)
-for b in data.get('benchmarks', []):
-    if not b.get('aggregate_name'):
-        print(f\"  {b['name']}: {b['real_time']:.2f} ns\")
-"
+        jq -r '.benchmarks[] | select(.aggregate_name == null) | "  \(.name): \(.real_time | tostring | .[0:10]) ns"' build/head_results.json
 
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4
