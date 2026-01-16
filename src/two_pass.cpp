@@ -145,6 +145,11 @@ void ParseIndex::read(const std::string& filename) {
   // Set region_size = 0 to indicate this layout to readers.
   region_size = 0;
 
+  // Deserialized data is already in flat file-order format, so point
+  // flat_indexes directly at it for O(1) access without calling compact()
+  flat_indexes = indexes;
+  flat_indexes_count = total_size;
+
   std::fclose(fp);
 }
 
@@ -153,13 +158,23 @@ FieldSpan ParseIndex::get_field_span(uint64_t global_field_idx) const {
   // and newlines). To get a field's content:
   // - Field 0: start = 0, end = indexes[0]
   // - Field N: start = indexes[N-1] + 1, end = indexes[N]
-  //
-  // With multi-threaded parsing, indexes are stored in per-thread regions.
-  // We need to iterate through threads in file order to find the correct position.
 
   if (!is_valid() || n_threads == 0) {
     return FieldSpan(); // Invalid
   }
+
+  // O(1) path: Use flat index if available
+  if (is_flat()) {
+    if (global_field_idx >= flat_indexes_count) {
+      return FieldSpan(); // Out of bounds
+    }
+    uint64_t end_pos = flat_indexes[global_field_idx];
+    uint64_t start_pos = (global_field_idx == 0) ? 0 : flat_indexes[global_field_idx - 1] + 1;
+    return FieldSpan(start_pos, end_pos);
+  }
+
+  // O(n_threads) fallback: iterate through per-thread regions
+  // (Used when compact() hasn't been called or for single-threaded parsing)
 
   // Handle special case: first field starts at position 0
   if (global_field_idx == 0) {
@@ -236,6 +251,72 @@ FieldSpan ParseIndex::get_field_span(uint64_t row, uint64_t col) const {
   uint64_t global_idx = row * columns + col;
 
   return get_field_span(global_idx);
+}
+
+void ParseIndex::compact() {
+  // Idempotent: skip if already compacted
+  if (is_flat()) {
+    return;
+  }
+
+  // Must have valid data
+  if (!is_valid() || n_threads == 0) {
+    return;
+  }
+
+  // Calculate total number of separators
+  uint64_t total = total_indexes();
+  if (total == 0) {
+    return;
+  }
+
+  // Allocate flat index array
+  flat_indexes_ptr_ = std::make_unique<uint64_t[]>(total);
+  flat_indexes = flat_indexes_ptr_.get();
+  flat_indexes_count = total;
+
+  // For single-threaded parsing, the indexes are already in file order
+  // Just copy them directly
+  if (n_threads == 1) {
+    auto view = thread_data(0);
+    std::copy(view.begin(), view.end(), flat_indexes);
+    return;
+  }
+
+  // For multi-threaded parsing, we need to merge the per-thread arrays
+  // in file order. Each thread's chunk is in a contiguous byte range,
+  // and within each chunk, separators are already sorted by position.
+  //
+  // Strategy: Since chunks are non-overlapping and ordered by chunk_starts,
+  // we can merge by interleaving based on chunk positions.
+  //
+  // Note: Thread 0 always starts at byte 0, then thread 1, etc.
+  // The separators within each thread's data are already in ascending order.
+
+  // Build a list of (chunk_start, thread_id) pairs and sort by chunk_start
+  // to determine the order in which to merge threads
+  std::vector<std::pair<uint64_t, uint16_t>> thread_order;
+  thread_order.reserve(n_threads);
+
+  for (uint16_t t = 0; t < n_threads; ++t) {
+    if (n_indexes[t] > 0) {
+      // Get the first separator position for this thread to determine ordering
+      auto view = thread_data(t);
+      uint64_t first_sep = view[0];
+      thread_order.emplace_back(first_sep, t);
+    }
+  }
+
+  // Sort threads by their first separator position (file order)
+  std::sort(thread_order.begin(), thread_order.end());
+
+  // Now merge all threads' data in order
+  uint64_t write_idx = 0;
+  for (const auto& [first_sep, t] : thread_order) {
+    auto view = thread_data(t);
+    std::copy(view.begin(), view.end(), flat_indexes + write_idx);
+    write_idx += view.size();
+  }
 }
 
 void ParseIndex::write(const std::string& filename, const SourceMetadata& source_meta) {
@@ -417,6 +498,11 @@ ParseIndex ParseIndex::from_mmap(const std::string& cache_path, const SourceMeta
 
   // Set indexes to point directly into mmap'd data
   result.indexes = const_cast<uint64_t*>(reinterpret_cast<const uint64_t*>(data + offset));
+
+  // Mmap'd data is already in flat file-order format, so point
+  // flat_indexes directly at it for O(1) access without calling compact()
+  result.flat_indexes = result.indexes;
+  result.flat_indexes_count = total_indexes;
 
   // Transfer mmap ownership to the ParseIndex
   result.mmap_buffer_ = std::move(mmap);
@@ -2152,6 +2238,7 @@ std::shared_ptr<const ParseIndex> ParseIndex::share() {
   shared->columns = columns;
   shared->n_threads = n_threads;
   shared->region_size = region_size;
+  shared->flat_indexes_count = flat_indexes_count;
 
   // Share the buffer reference (if set)
   shared->buffer_ = buffer_;
@@ -2163,15 +2250,23 @@ std::shared_ptr<const ParseIndex> ParseIndex::share() {
       mmap_buffer_shared_ = std::move(mmap_buffer_);
     }
     shared->mmap_buffer_shared_ = mmap_buffer_shared_;
-    // n_indexes and indexes already point into mmap'd memory
+    // n_indexes, indexes, and flat_indexes already point into mmap'd memory
     shared->n_indexes = n_indexes;
     shared->indexes = indexes;
+    shared->flat_indexes = flat_indexes;
   } else if (n_indexes_shared_ || indexes_shared_) {
     // Already using shared ownership - just copy the shared_ptrs
+    // But check if flat_indexes_ptr_ was created after the first share() call
+    // (e.g., compact() called after share()) - convert it to shared if needed
+    if (flat_indexes_ptr_) {
+      flat_indexes_shared_ = std::shared_ptr<uint64_t[]>(flat_indexes_ptr_.release());
+    }
     shared->n_indexes_shared_ = n_indexes_shared_;
     shared->indexes_shared_ = indexes_shared_;
+    shared->flat_indexes_shared_ = flat_indexes_shared_;
     shared->n_indexes = n_indexes;
     shared->indexes = indexes;
+    shared->flat_indexes = flat_indexes;
   } else if (n_indexes_ptr_ || indexes_ptr_) {
     // Convert unique_ptr to shared_ptr for sharing
     if (n_indexes_ptr_) {
@@ -2180,14 +2275,20 @@ std::shared_ptr<const ParseIndex> ParseIndex::share() {
     if (indexes_ptr_) {
       indexes_shared_ = std::shared_ptr<uint64_t[]>(indexes_ptr_.release());
     }
+    if (flat_indexes_ptr_) {
+      flat_indexes_shared_ = std::shared_ptr<uint64_t[]>(flat_indexes_ptr_.release());
+    }
     shared->n_indexes_shared_ = n_indexes_shared_;
     shared->indexes_shared_ = indexes_shared_;
+    shared->flat_indexes_shared_ = flat_indexes_shared_;
     shared->n_indexes = n_indexes;
     shared->indexes = indexes;
+    shared->flat_indexes = flat_indexes;
   } else {
     // No data to share - empty index
     shared->n_indexes = nullptr;
     shared->indexes = nullptr;
+    shared->flat_indexes = nullptr;
   }
 
   return shared;

@@ -3183,6 +3183,222 @@ TEST_F(FieldSpanTest, GetFieldSpanMultiThreaded) {
   EXPECT_EQ(field100, "field50");
 }
 
+// ============================================================================
+// FLAT INDEX / COMPACT TESTS - O(1) field access
+// ============================================================================
+
+class FlatIndexTest : public ::testing::Test {
+protected:
+  static std::vector<uint8_t> makeBuffer(const std::string& s) {
+    return std::vector<uint8_t>(s.begin(), s.end());
+  }
+};
+
+TEST_F(FlatIndexTest, CompactSingleThread) {
+  std::string content = "a,b,c\n1,2,3\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  idx.columns = 3;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Before compact: is_flat() should be false
+  EXPECT_FALSE(idx.is_flat());
+
+  // Compact the index
+  idx.compact();
+
+  // After compact: is_flat() should be true
+  EXPECT_TRUE(idx.is_flat());
+  EXPECT_EQ(idx.flat_indexes_count, idx.total_indexes());
+
+  // Verify field access still works correctly after compact
+  FieldSpan span0 = idx.get_field_span(0, 0);
+  EXPECT_TRUE(span0.is_valid());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf.data() + span0.start), span0.length()),
+            "a");
+
+  FieldSpan span12 = idx.get_field_span(1, 2);
+  EXPECT_TRUE(span12.is_valid());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf.data() + span12.start), span12.length()),
+            "3");
+}
+
+TEST_F(FlatIndexTest, CompactMultiThread) {
+  // Create larger content to ensure multi-threaded parsing
+  std::string content;
+  for (int i = 0; i < 200; i++) {
+    content += "field" + std::to_string(i) + ",value" + std::to_string(i) + "\n";
+  }
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 4);
+  idx.columns = 2;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Before compact: is_flat() should be false
+  EXPECT_FALSE(idx.is_flat());
+
+  // Verify that all threads have indexes
+  uint64_t total_before = idx.total_indexes();
+  EXPECT_GT(total_before, 0);
+
+  // Compact the index
+  idx.compact();
+
+  // After compact: is_flat() should be true
+  EXPECT_TRUE(idx.is_flat());
+  EXPECT_EQ(idx.flat_indexes_count, total_before);
+
+  // Verify field access still works correctly
+  // Test first field
+  FieldSpan span0 = idx.get_field_span(0);
+  EXPECT_TRUE(span0.is_valid());
+  std::string field0(reinterpret_cast<const char*>(buf.data() + span0.start), span0.length());
+  EXPECT_EQ(field0, "field0");
+
+  // Test field in middle
+  FieldSpan span100 = idx.get_field_span(100);
+  EXPECT_TRUE(span100.is_valid());
+  std::string field100(reinterpret_cast<const char*>(buf.data() + span100.start), span100.length());
+  EXPECT_EQ(field100, "field50"); // Row 50, column 0
+
+  // Test by row/column
+  FieldSpan span_50_1 = idx.get_field_span(50, 1);
+  EXPECT_TRUE(span_50_1.is_valid());
+  std::string field_50_1(reinterpret_cast<const char*>(buf.data() + span_50_1.start),
+                         span_50_1.length());
+  EXPECT_EQ(field_50_1, "value50");
+}
+
+TEST_F(FlatIndexTest, CompactIdempotent) {
+  std::string content = "a,b,c\n1,2,3\n4,5,6\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 2);
+  idx.columns = 3;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Compact multiple times - should be idempotent
+  idx.compact();
+  uint64_t* first_ptr = idx.flat_indexes;
+  uint64_t first_count = idx.flat_indexes_count;
+
+  idx.compact();
+  uint64_t* second_ptr = idx.flat_indexes;
+  uint64_t second_count = idx.flat_indexes_count;
+
+  // Should be the same pointer - no re-allocation
+  EXPECT_EQ(first_ptr, second_ptr);
+  EXPECT_EQ(first_count, second_count);
+
+  // Verify data is still correct
+  FieldSpan span = idx.get_field_span(2, 1);
+  EXPECT_TRUE(span.is_valid());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf.data() + span.start), span.length()),
+            "5");
+}
+
+TEST_F(FlatIndexTest, CompactEmptyIndex) {
+  ParseIndex idx;
+  // Compact on empty index should not crash
+  idx.compact();
+  EXPECT_FALSE(idx.is_flat());
+}
+
+TEST_F(FlatIndexTest, CompactPreservesOriginalIndexes) {
+  std::string content = "a,b\nc,d\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 2);
+  idx.columns = 2;
+  parser.parse(buf.data(), idx, content.size());
+
+  uint64_t total_before = idx.total_indexes();
+
+  idx.compact();
+
+  // Original indexes should still be accessible via thread_data()
+  uint64_t total_after = 0;
+  for (uint16_t t = 0; t < idx.n_threads; t++) {
+    auto view = idx.thread_data(t);
+    total_after += view.size();
+  }
+  EXPECT_EQ(total_before, total_after);
+}
+
+TEST_F(FlatIndexTest, FlatIndexConsistency) {
+  // Test that flat index produces same results as per-thread access
+  std::string content;
+  for (int i = 0; i < 50; i++) {
+    content += "row" + std::to_string(i) + ",data" + std::to_string(i) + ",extra\n";
+  }
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 4);
+  idx.columns = 3;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Get field spans before compact (using O(n_threads) path)
+  std::vector<FieldSpan> spans_before;
+  for (uint64_t i = 0; i < idx.total_indexes(); i++) {
+    spans_before.push_back(idx.get_field_span(i));
+  }
+
+  // Compact
+  idx.compact();
+
+  // Get field spans after compact (using O(1) path)
+  std::vector<FieldSpan> spans_after;
+  for (uint64_t i = 0; i < idx.total_indexes(); i++) {
+    spans_after.push_back(idx.get_field_span(i));
+  }
+
+  // Results should be identical
+  ASSERT_EQ(spans_before.size(), spans_after.size());
+  for (size_t i = 0; i < spans_before.size(); i++) {
+    EXPECT_EQ(spans_before[i].start, spans_after[i].start) << "Mismatch at index " << i;
+    EXPECT_EQ(spans_before[i].end, spans_after[i].end) << "Mismatch at index " << i;
+  }
+}
+
+TEST_F(FlatIndexTest, DeserializedIndexIsFlat) {
+  // Create and parse
+  std::string content = "a,b,c\n1,2,3\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 2);
+  idx.columns = 3;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Write to file
+  std::string temp_file = "test_flat_index.bin";
+  idx.write(temp_file);
+
+  // Read back
+  ParseIndex idx2 = parser.init(content.size(), 2);
+  idx2.columns = 3;
+  idx2.read(temp_file);
+
+  // Deserialized index should automatically be flat
+  EXPECT_TRUE(idx2.is_flat());
+
+  // Verify field access works
+  FieldSpan span = idx2.get_field_span(1, 2);
+  EXPECT_TRUE(span.is_valid());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(buf.data() + span.start), span.length()),
+            "3");
+
+  // Cleanup
+  std::remove(temp_file.c_str());
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

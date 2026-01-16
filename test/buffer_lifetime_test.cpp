@@ -227,3 +227,42 @@ TEST_F(BufferLifetimeTest, SharedIndexPreservesMetadata) {
   EXPECT_EQ(shared->n_threads, original_n_threads);
   EXPECT_EQ(shared->region_size, original_region_size);
 }
+
+// Test: share() correctly handles compact() called after first share()
+// This tests an edge case where:
+// 1. First share() converts unique_ptr to shared_ptr
+// 2. compact() is called, creating new flat_indexes_ptr_
+// 3. Second share() must correctly convert flat_indexes_ptr_ to shared
+TEST_F(BufferLifetimeTest, ShareAfterCompactPreservesFlatIndex) {
+  auto buffer = make_buffer("name,value,extra\ntest,42,x\nalpha,99,y\n");
+
+  Parser parser(2);
+  auto result = parser.parse(buffer->data(), buffer->size() - 64);
+  result.idx.set_buffer(buffer);
+
+  // First share() - converts to shared ownership
+  auto shared1 = result.idx.share();
+  EXPECT_TRUE(result.idx.is_shared());
+  EXPECT_FALSE(result.idx.is_flat()); // Not yet compacted
+
+  // Compact after sharing
+  result.idx.compact();
+  EXPECT_TRUE(result.idx.is_flat());
+
+  // Second share() - must correctly handle flat_indexes_ptr_
+  auto shared2 = result.idx.share();
+  EXPECT_TRUE(shared2->is_flat());
+  EXPECT_EQ(shared2->flat_indexes_count, result.idx.flat_indexes_count);
+
+  // Verify field access still works on the shared copy
+  // after original is destroyed
+  {
+    // Move original away to destroy it
+    ParseIndex moved = std::move(result.idx);
+  }
+
+  // shared2 should still have valid flat index
+  // (would crash with use-after-free if bug exists)
+  FieldSpan span = shared2->get_field_span(0, 0);
+  EXPECT_TRUE(span.is_valid());
+}

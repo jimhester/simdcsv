@@ -1116,6 +1116,12 @@ public:
     return get_lazy_column(logical_idx);
   }
 
+  // Compact the index for O(1) field access
+  void compact() { data_->result.compact(); }
+
+  // Check if the index is compacted for O(1) access
+  bool is_flat() const { return data_->result.is_flat(); }
+
 private:
   std::shared_ptr<TableData> data_;
 };
@@ -2417,12 +2423,15 @@ implementing R's ALTREP pattern where columns are only parsed when
 accessed.
 
 Key features:
-- **Random access**: O(n_threads) access to any row via indexing
+- **Random access**: O(1) access to any row via indexing (after table.compact())
 - **Byte range access**: get_bounds() returns raw byte ranges for deferred parsing
 - **Zero-copy views**: Returns views into the original buffer
 
 Note: The underlying buffer and index must remain valid for the lifetime
 of the LazyColumn.
+
+Performance tip: Call table.compact() before creating LazyColumns for O(1)
+random access. Without compaction, access is O(n_threads) per field.
 
 Examples
 --------
@@ -2574,7 +2583,48 @@ Examples
       .def("get_lazy_column", &Table::get_lazy_column, py::arg("index"),
            "Get a LazyColumn for lazy per-row access to a column by index")
       .def("get_lazy_column", &Table::get_lazy_column_by_name, py::arg("name"),
-           "Get a LazyColumn for lazy per-row access to a column by name");
+           "Get a LazyColumn for lazy per-row access to a column by name")
+      // Index optimization
+      .def("compact", &Table::compact, R"doc(
+Compact the index for O(1) field access.
+
+After parsing, field separators are stored in per-thread regions which
+require O(n_threads) iteration to find a specific field. This method
+consolidates all separators into a single flat array sorted by file order,
+enabling O(1) random access.
+
+This is particularly beneficial for ALTREP-style lazy column access where
+fields are accessed randomly via get_lazy_column().
+
+Note: This method is idempotent - calling it multiple times has no effect
+after the first successful call.
+
+Note: Tables loaded from cache files are automatically in flat format
+and don't need explicit compaction.
+
+Examples
+--------
+>>> import vroom_csv
+>>> table = vroom_csv.read_csv("large_file.csv")
+>>> table.compact()  # Enable O(1) random access
+>>> lazy_col = table.get_lazy_column(0)
+>>> value = lazy_col[100000]  # O(1) instead of O(n_threads)
+)doc")
+      .def("is_flat", &Table::is_flat, R"doc(
+Check if the index has been compacted for O(1) access.
+
+Returns True if the index is in flat format (either from calling
+compact() or from loading a cached index file).
+
+Returns
+-------
+bool
+    True if the index has O(1) field access, False otherwise.
+
+See Also
+--------
+compact : Convert an index to flat format
+)doc");
 
   // RowIterator class for streaming row-by-row iteration
   py::class_<RowIterator>(m, "RowIterator", R"doc(
