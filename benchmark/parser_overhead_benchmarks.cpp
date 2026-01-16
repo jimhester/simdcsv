@@ -342,6 +342,32 @@ static void BM_ParserMultiThread(benchmark::State& state) {
 }
 BENCHMARK(BM_ParserMultiThread)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Unit(benchmark::kMillisecond);
 
+/**
+ * @brief Benchmark 11b: Raw TwoPass with optimized per-thread allocation (issue #591)
+ *
+ * This benchmark compares the original worst-case allocation (BM_RawTwoPassMultiThread)
+ * with the new optimized per-thread allocation. For N separators and T threads:
+ * - Original: allocates T * N (each thread gets space for all separators)
+ * - Optimized: allocates ~N (each thread gets space for its ~N/T separators)
+ */
+static void BM_RawTwoPassOptimized(benchmark::State& state) {
+  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
+  int n_threads = static_cast<int>(state.range(0));
+  libvroom::TwoPass parser;
+
+  for (auto _ : state) {
+    // Use the optimized method that does per-thread allocation
+    auto idx =
+        parser.parse_optimized(buffer.data(), buffer.size, n_threads, libvroom::Dialect::csv());
+    benchmark::DoNotOptimize(idx);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+  state.counters["Threads"] = static_cast<double>(n_threads);
+  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
+}
+BENCHMARK(BM_RawTwoPassOptimized)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Unit(benchmark::kMillisecond);
+
 // ============================================================================
 // FILE SIZE SCALING
 // ============================================================================

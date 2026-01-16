@@ -1165,6 +1165,146 @@ bool TwoPass::parse(const uint8_t* buf, ParseIndex& out, size_t len, const Diale
   return parse_speculate(buf, out, len, dialect, progress);
 }
 
+ParseIndex TwoPass::parse_optimized(const uint8_t* buf, size_t len, size_t n_threads,
+                                    const Dialect& dialect,
+                                    const SecondPassProgressCallback& progress) {
+  ParseIndex out;
+  char delim = dialect.delimiter;
+  char quote = dialect.quote_char;
+
+  // Ensure at least 1 thread
+  if (n_threads == 0)
+    n_threads = 1;
+
+  // Single-threaded fast path - no need for per-thread allocation
+  if (n_threads == 1) {
+    // Count separators first
+    auto stats = first_pass_simd(buf, 0, len, quote, delim);
+    out = init_counted(stats.n_separators, 1);
+    out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+    if (progress && !progress(len)) {
+      // Cancelled, but return what we have
+    }
+    return out;
+  }
+
+  // Multi-threaded path with optimized per-thread allocation
+  size_t chunk_size = len / n_threads;
+
+  // If chunk size is too small, fall back to single-threaded
+  if (chunk_size < 64) {
+    auto stats = first_pass_simd(buf, 0, len, quote, delim);
+    out = init_counted(stats.n_separators, 1);
+    out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+    if (progress && !progress(len)) {
+      // Cancelled
+    }
+    return out;
+  }
+
+  // Phase 1: Find chunk boundaries using speculative first pass
+  std::vector<uint64_t> chunk_pos(n_threads + 1);
+  std::vector<std::future<Stats>> first_pass_fut(n_threads);
+
+  for (size_t i = 0; i < n_threads; ++i) {
+    first_pass_fut[i] = std::async(std::launch::async, [buf, chunk_size, i, delim, quote]() {
+      return first_pass_speculate(buf, chunk_size * i, chunk_size * (i + 1), delim, quote);
+    });
+  }
+
+  auto st0 = first_pass_fut[0].get();
+  chunk_pos[0] = 0;
+  for (size_t i = 1; i < n_threads; ++i) {
+    auto st = first_pass_fut[i].get();
+    chunk_pos[i] = st.n_quotes == 0 ? st.first_even_nl : st.first_odd_nl;
+  }
+  chunk_pos[n_threads] = len;
+
+  // Safety check: if any chunk_pos is null_pos, fall back to single-threaded
+  for (size_t i = 1; i < n_threads; ++i) {
+    if (chunk_pos[i] == null_pos) {
+      auto stats = first_pass_simd(buf, 0, len, quote, delim);
+      out = init_counted(stats.n_separators, 1);
+      out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+      if (out.chunk_starts != nullptr) {
+        out.chunk_starts[0] = 0;
+      }
+      if (progress && !progress(len)) {
+        // Cancelled
+      }
+      return out;
+    }
+  }
+
+  // Phase 2: Count separators in each actual chunk (in parallel)
+  std::vector<std::future<Stats>> count_fut(n_threads);
+  for (size_t i = 0; i < n_threads; ++i) {
+    count_fut[i] = std::async(std::launch::async, [buf, &chunk_pos, i, delim, quote]() {
+      return first_pass_simd(buf, chunk_pos[i], chunk_pos[i + 1], quote, delim);
+    });
+  }
+
+  std::vector<uint64_t> per_thread_counts(n_threads);
+  for (size_t i = 0; i < n_threads; ++i) {
+    auto stats = count_fut[i].get();
+    per_thread_counts[i] = stats.n_separators;
+  }
+
+  // Phase 3: Allocate with per-thread right-sizing
+  out = init_counted_per_thread(per_thread_counts, n_threads);
+
+  // Store chunk start positions
+  if (out.chunk_starts != nullptr) {
+    for (size_t i = 0; i < n_threads; ++i) {
+      out.chunk_starts[i] = chunk_pos[i];
+    }
+  }
+
+  // Phase 4: Second pass - parse each chunk (in parallel)
+  std::vector<std::future<SecondPassResult>> second_pass_fut(n_threads);
+  for (size_t i = 0; i < n_threads; ++i) {
+    second_pass_fut[i] = std::async(std::launch::async, [buf, &out, &chunk_pos, i, delim, quote]() {
+      return second_pass_simd_with_state(buf, chunk_pos[i], chunk_pos[i + 1], &out, i, delim,
+                                         quote);
+    });
+  }
+
+  // Collect results
+  std::vector<SecondPassResult> results(n_threads);
+  bool speculation_valid = true;
+  bool cancelled = false;
+
+  for (size_t i = 0; i < n_threads; ++i) {
+    results[i] = second_pass_fut[i].get();
+    out.n_indexes[i] = results[i].n_indexes;
+
+    // Report progress
+    if (progress && !cancelled) {
+      size_t chunk_bytes = chunk_pos[i + 1] - chunk_pos[i];
+      if (!progress(chunk_bytes)) {
+        cancelled = true;
+      }
+    }
+
+    // Validate speculation (all chunks except last must end at record boundary)
+    if (i < n_threads - 1 && !results[i].at_record_boundary) {
+      speculation_valid = false;
+    }
+  }
+
+  // If speculation failed, fall back to single-threaded (rare)
+  if (!speculation_valid) {
+    auto stats = first_pass_simd(buf, 0, len, quote, delim);
+    out = init_counted(stats.n_separators, 1);
+    out.n_indexes[0] = second_pass_simd(buf, 0, len, &out, 0, delim, quote);
+    if (out.chunk_starts != nullptr) {
+      out.chunk_starts[0] = 0;
+    }
+  }
+
+  return out;
+}
+
 TwoPass::branchless_chunk_result TwoPass::second_pass_branchless_chunk_with_errors(
     const BranchlessStateMachine& sm, const uint8_t* buf, size_t start, size_t end, ParseIndex* out,
     size_t thread_id, size_t total_len, ErrorMode mode) {
