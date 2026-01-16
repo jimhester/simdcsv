@@ -1292,21 +1292,43 @@ ParseIndex TwoPass::parse_optimized(const uint8_t* buf, size_t len, size_t n_thr
     return out;
   }
 
-  // Phase 1: Find chunk boundaries using speculative first pass
+  // Phase 1: MERGED first pass - find boundaries AND count separators in one scan
+  // This eliminates the redundant second scan that was previously required.
+  // We use first_pass_simd() which returns both boundary info (first_even_nl,
+  // first_odd_nl) and separator counts in a single SIMD pass.
   std::vector<uint64_t> chunk_pos(n_threads + 1);
   std::vector<std::future<Stats>> first_pass_fut(n_threads);
 
   for (size_t i = 0; i < n_threads; ++i) {
-    first_pass_fut[i] = std::async(std::launch::async, [buf, chunk_size, i, delim, quote]() {
-      return first_pass_speculate(buf, chunk_size * i, chunk_size * (i + 1), delim, quote);
-    });
+    // For the last thread, scan to the end of the file (len) instead of chunk_size * (i + 1)
+    // to handle the case when len is not evenly divisible by n_threads
+    size_t scan_end = (i == n_threads - 1) ? len : chunk_size * (i + 1);
+    first_pass_fut[i] =
+        std::async(std::launch::async, [buf, chunk_size, i, scan_end, delim, quote]() {
+          return first_pass_simd(buf, chunk_size * i, scan_end, quote, delim);
+        });
   }
 
-  auto st0 = first_pass_fut[0].get();
+  // Collect Phase 1 results - boundaries AND separator counts
+  std::vector<Stats> phase1_stats(n_threads);
   chunk_pos[0] = 0;
-  for (size_t i = 1; i < n_threads; ++i) {
-    auto st = first_pass_fut[i].get();
-    chunk_pos[i] = st.n_quotes == 0 ? st.first_even_nl : st.first_odd_nl;
+
+  // Track cumulative quote count to determine the starting quote state for each chunk.
+  // - If cumulative quotes before chunk i is even: we start UNQUOTED, use first_even_nl
+  // - If cumulative quotes before chunk i is odd: we start QUOTED, use first_odd_nl
+  // This replaces the backward-scanning approach of first_pass_speculate().
+  uint64_t cumulative_quotes = 0;
+
+  for (size_t i = 0; i < n_threads; ++i) {
+    phase1_stats[i] = first_pass_fut[i].get();
+
+    if (i > 0) {
+      // Use cumulative quote count from previous chunks to determine starting state
+      bool start_unquoted = (cumulative_quotes % 2 == 0);
+      chunk_pos[i] = start_unquoted ? phase1_stats[i].first_even_nl : phase1_stats[i].first_odd_nl;
+    }
+
+    cumulative_quotes += phase1_stats[i].n_quotes;
   }
   chunk_pos[n_threads] = len;
 
@@ -1326,21 +1348,27 @@ ParseIndex TwoPass::parse_optimized(const uint8_t* buf, size_t len, size_t n_thr
     }
   }
 
-  // Phase 2: Count separators in each actual chunk (in parallel)
-  std::vector<std::future<Stats>> count_fut(n_threads);
+  // Phase 2: Parallel separator counting for actual chunk boundaries.
+  // Since actual boundaries (chunk_pos) differ from uniform boundaries used in
+  // Phase 1, we re-scan actual chunks to get exact per-thread separator counts.
+  // This is necessary because boundary adjustment can't account for quote state
+  // changes at arbitrary byte positions - only newline-aligned boundaries have
+  // known quote state (always unquoted).
+  std::vector<std::future<uint64_t>> count_fut(n_threads);
   for (size_t i = 0; i < n_threads; ++i) {
-    count_fut[i] = std::async(std::launch::async, [buf, &chunk_pos, i, delim, quote]() {
-      return first_pass_simd(buf, chunk_pos[i], chunk_pos[i + 1], quote, delim);
+    count_fut[i] = std::async(std::launch::async, [buf, &chunk_pos, i, quote, delim]() {
+      auto stats = first_pass_simd(buf, chunk_pos[i], chunk_pos[i + 1], quote, delim);
+      return stats.n_separators;
     });
   }
 
+  // Collect exact per-thread separator counts
   std::vector<uint64_t> per_thread_counts(n_threads);
   for (size_t i = 0; i < n_threads; ++i) {
-    auto stats = count_fut[i].get();
-    per_thread_counts[i] = stats.n_separators;
+    per_thread_counts[i] = count_fut[i].get();
   }
 
-  // Phase 3: Allocate with per-thread right-sizing
+  // Phase 3: Allocate with per-thread right-sizing using exact counts
   out = init_counted_per_thread(per_thread_counts, n_threads);
 
   // Store chunk start positions
