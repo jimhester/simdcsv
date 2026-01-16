@@ -1096,6 +1096,7 @@ set(BENCHMARK_SOURCES
     benchmark/row_reconstruction_benchmarks.cpp
     benchmark/end_to_end_benchmarks.cpp
     benchmark/transpose_benchmarks.cpp
+    benchmark/hypothesis_benchmarks.cpp
 )
 
 # Add external parser benchmarks if any external parser is enabled
