@@ -36,8 +36,8 @@ protected:
   ArrowConvertResult parseAndConvert(const std::string& csv,
                                      const ArrowConvertOptions& opts = ArrowConvertOptions()) {
     TestBuffer buf(csv);
-    two_pass parser;
-    index idx = parser.init(buf.len, 1);
+    TwoPass parser;
+    ParseIndex idx = parser.init(buf.len, 1);
     parser.parse(buf.data, idx, buf.len);
     ArrowConverter converter(opts);
     return converter.convert(buf.data, buf.len, idx);
@@ -961,6 +961,193 @@ TEST_F(ArrowOutputTest, DistributedSamplingConfigurable) {
   EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
 }
 
+// =============================================================================
+// Fast-Path Type Detection Tests (Issue #614)
+// =============================================================================
+
+TEST_F(ArrowOutputTest, FastPathStringStartingWithLetter) {
+  // Strings starting with letters (not t/f/y/n/i) should be detected as STRING
+  // immediately without attempting any parsing
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("value\nhello\nworld\nabc\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::STRING);
+}
+
+TEST_F(ArrowOutputTest, FastPathInfValue) {
+  // Values starting with 'i' should try double (for "inf")
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("value\ninf\nInf\n1.5\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::DOUBLE);
+}
+
+TEST_F(ArrowOutputTest, FastPathNanValue) {
+  // Values starting with 'n' should try boolean then double (for "nan")
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("value\nnan\nNaN\n1.5\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::DOUBLE);
+}
+
+TEST_F(ArrowOutputTest, FastPathDigitsSkipBoolean) {
+  // Values starting with digits 2-9 should skip boolean check entirely
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("value\n42\n99\n7\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
+TEST_F(ArrowOutputTest, FastPathNegativeNumbers) {
+  // Values starting with '-' should try numeric, skip boolean
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("value\n-42\n-3.14\n-99\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::DOUBLE);
+}
+
+TEST_F(ArrowOutputTest, FastPathDecimalNumbers) {
+  // Values starting with '.' should try numeric
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("value\n.5\n.25\n.99\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::DOUBLE);
+}
+
+TEST_F(ArrowOutputTest, FastPathZeroOneAsBoolean) {
+  // Values "0" and "1" alone should be detected as boolean
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("value\n0\n1\n1\n0\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::BOOL);
+}
+
+TEST_F(ArrowOutputTest, FastPathZeroOneWithOtherDigits) {
+  // Values starting with 0/1 but continuing should be numeric
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("value\n10\n01\n100\n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
+TEST_F(ArrowOutputTest, FastPathWhitespaceHandling) {
+  // Values with leading whitespace should still be detected correctly
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+  auto result = parseAndConvert("value\n  42  \n  true  \n  hello  \n", opts);
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  // Mixed types should become STRING
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::STRING);
+}
+
+// =============================================================================
+// Schema Bypass Optimization Tests (Issue #614)
+// =============================================================================
+
+TEST_F(ArrowOutputTest, SchemaBypassWithExplicitTypes) {
+  // When user provides explicit types for all columns, inference should be skipped
+  std::vector<ColumnSpec> columns = {
+      {"id", ColumnType::INT64}, {"value", ColumnType::DOUBLE}, {"name", ColumnType::STRING}};
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+
+  std::string csv = "id,value,name\n1,3.14,Alice\n2,2.71,Bob\n";
+  TestBuffer buf(csv);
+  TwoPass parser;
+  ParseIndex idx = parser.init(buf.len, 1);
+  parser.parse(buf.data, idx, buf.len);
+
+  ArrowConverter converter(columns, opts);
+  auto result = converter.convert(buf.data, buf.len, idx);
+
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+  EXPECT_EQ(result.schema->field(1)->type()->id(), arrow::Type::DOUBLE);
+  EXPECT_EQ(result.schema->field(2)->type()->id(), arrow::Type::STRING);
+}
+
+TEST_F(ArrowOutputTest, SchemaBypassPartialTypes) {
+  // When user provides types for some columns, only those should skip inference
+  std::vector<ColumnSpec> columns = {{"id", ColumnType::INT64},
+                                     {"value", ColumnType::AUTO}, // AUTO means infer this column
+                                     {"name", ColumnType::STRING}};
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+
+  std::string csv = "id,value,name\n1,3.14,Alice\n2,2.71,Bob\n";
+  TestBuffer buf(csv);
+  TwoPass parser;
+  ParseIndex idx = parser.init(buf.len, 1);
+  parser.parse(buf.data, idx, buf.len);
+
+  ArrowConverter converter(columns, opts);
+  auto result = converter.convert(buf.data, buf.len, idx);
+
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);  // Explicit
+  EXPECT_EQ(result.schema->field(1)->type()->id(), arrow::Type::DOUBLE); // Inferred
+  EXPECT_EQ(result.schema->field(2)->type()->id(), arrow::Type::STRING); // Explicit
+}
+
+TEST_F(ArrowOutputTest, SchemaBypassWithArrowType) {
+  // When user provides arrow_type, that should skip inference
+  std::vector<ColumnSpec> columns;
+  ColumnSpec spec1;
+  spec1.name = "id";
+  spec1.arrow_type = arrow::int32(); // Explicit Arrow type
+  columns.push_back(spec1);
+
+  ColumnSpec spec2;
+  spec2.name = "value";
+  spec2.type = ColumnType::DOUBLE;
+  columns.push_back(spec2);
+
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+
+  std::string csv = "id,value\n1,3.14\n2,2.71\n";
+  TestBuffer buf(csv);
+  TwoPass parser;
+  ParseIndex idx = parser.init(buf.len, 1);
+  parser.parse(buf.data, idx, buf.len);
+
+  ArrowConverter converter(columns, opts);
+  auto result = converter.convert(buf.data, buf.len, idx);
+
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT32);  // User's arrow_type
+  EXPECT_EQ(result.schema->field(1)->type()->id(), arrow::Type::DOUBLE); // User's ColumnType
+}
+
+TEST_F(ArrowOutputTest, SchemaBypassCorrectConversion) {
+  // Verify that data is converted correctly according to user-specified types
+  // even when the data might infer differently (e.g., "0" and "1" as INT64 not BOOLEAN)
+  std::vector<ColumnSpec> columns = {{"value", ColumnType::INT64}};
+  ArrowConvertOptions opts;
+  opts.infer_types = true;
+
+  std::string csv = "value\n0\n1\n0\n1\n";
+  TestBuffer buf(csv);
+  TwoPass parser;
+  ParseIndex idx = parser.init(buf.len, 1);
+  parser.parse(buf.data, idx, buf.len);
+
+  ArrowConverter converter(columns, opts);
+  auto result = converter.convert(buf.data, buf.len, idx);
+
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  // User specified INT64, so should be INT64 even though inference would give BOOLEAN
+  EXPECT_EQ(result.schema->field(0)->type()->id(), arrow::Type::INT64);
+}
+
 #ifdef LIBVROOM_ENABLE_PARQUET
 TEST_F(ArrowOutputTest, RoundTripParquet) {
   // Parse CSV to Arrow table
@@ -978,13 +1165,12 @@ TEST_F(ArrowOutputTest, RoundTripParquet) {
   auto input_result = arrow::io::ReadableFile::Open(tmp_path);
   ASSERT_TRUE(input_result.ok()) << input_result.status().ToString();
 
-  std::unique_ptr<parquet::arrow::FileReader> parquet_reader;
-  auto status =
-      parquet::arrow::OpenFile(*input_result, arrow::default_memory_pool(), &parquet_reader);
-  ASSERT_TRUE(status.ok()) << status.ToString();
+  auto reader_result = parquet::arrow::OpenFile(*input_result, arrow::default_memory_pool());
+  ASSERT_TRUE(reader_result.ok()) << reader_result.status().ToString();
+  auto parquet_reader = std::move(*reader_result);
 
   std::shared_ptr<arrow::Table> read_table;
-  status = parquet_reader->ReadTable(&read_table);
+  auto status = parquet_reader->ReadTable(&read_table);
   ASSERT_TRUE(status.ok()) << status.ToString();
 
   // Verify dimensions
