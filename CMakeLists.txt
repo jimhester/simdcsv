@@ -622,6 +622,23 @@ target_include_directories(quote_mask_test PRIVATE
 
 gtest_discover_tests(quote_mask_test)
 
+# Column-major index test executable
+add_executable(column_major_test
+    test/column_major_test.cpp
+)
+
+target_link_libraries(column_major_test PRIVATE
+    vroom
+    GTest::gtest_main
+    pthread
+)
+
+target_include_directories(column_major_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+gtest_discover_tests(column_major_test)
+
 # Value extraction test executable
 add_executable(value_extraction_test
     test/value_extraction_test.cpp

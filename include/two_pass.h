@@ -244,6 +244,16 @@ public:
   /// Set when flat_indexes is populated.
   uint64_t flat_indexes_count{0};
 
+  /// Column-major index array for efficient column-oriented access (ALTREP, Arrow).
+  /// When populated (via compact_column_major()), enables O(1) column access:
+  /// col_indexes[col * num_rows() + row] gives the byte position of field (row, col).
+  /// @note This is a raw pointer accessor; memory is managed by col_indexes_ptr_.
+  uint64_t* col_indexes{nullptr};
+
+  /// Total number of fields in the column-major index.
+  /// Should equal flat_indexes_count when both are populated.
+  uint64_t col_indexes_count{0};
+
   /// Default constructor. Creates an empty, uninitialized index.
   ParseIndex() = default;
 
@@ -259,16 +269,18 @@ public:
       : columns(other.columns), n_threads(other.n_threads), region_size(other.region_size),
         n_indexes(other.n_indexes), indexes(other.indexes), chunk_starts(other.chunk_starts),
         region_offsets(other.region_offsets), flat_indexes(other.flat_indexes),
-        flat_indexes_count(other.flat_indexes_count),
-        n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
+        flat_indexes_count(other.flat_indexes_count), col_indexes(other.col_indexes),
+        col_indexes_count(other.col_indexes_count), n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
         indexes_ptr_(std::move(other.indexes_ptr_)),
         chunk_starts_ptr_(std::move(other.chunk_starts_ptr_)),
         region_offsets_ptr_(std::move(other.region_offsets_ptr_)),
         flat_indexes_ptr_(std::move(other.flat_indexes_ptr_)),
+        col_indexes_ptr_(std::move(other.col_indexes_ptr_)),
         mmap_buffer_(std::move(other.mmap_buffer_)), buffer_(std::move(other.buffer_)),
         n_indexes_shared_(std::move(other.n_indexes_shared_)),
         indexes_shared_(std::move(other.indexes_shared_)),
         flat_indexes_shared_(std::move(other.flat_indexes_shared_)),
+        col_indexes_shared_(std::move(other.col_indexes_shared_)),
         mmap_buffer_shared_(std::move(other.mmap_buffer_shared_)) {
     other.n_indexes = nullptr;
     other.indexes = nullptr;
@@ -276,6 +288,8 @@ public:
     other.region_offsets = nullptr;
     other.flat_indexes = nullptr;
     other.flat_indexes_count = 0;
+    other.col_indexes = nullptr;
+    other.col_indexes_count = 0;
   }
 
   /**
@@ -298,16 +312,20 @@ public:
       region_offsets = other.region_offsets;
       flat_indexes = other.flat_indexes;
       flat_indexes_count = other.flat_indexes_count;
+      col_indexes = other.col_indexes;
+      col_indexes_count = other.col_indexes_count;
       n_indexes_ptr_ = std::move(other.n_indexes_ptr_);
       indexes_ptr_ = std::move(other.indexes_ptr_);
       chunk_starts_ptr_ = std::move(other.chunk_starts_ptr_);
       region_offsets_ptr_ = std::move(other.region_offsets_ptr_);
       flat_indexes_ptr_ = std::move(other.flat_indexes_ptr_);
+      col_indexes_ptr_ = std::move(other.col_indexes_ptr_);
       mmap_buffer_ = std::move(other.mmap_buffer_);
       buffer_ = std::move(other.buffer_);
       n_indexes_shared_ = std::move(other.n_indexes_shared_);
       indexes_shared_ = std::move(other.indexes_shared_);
       flat_indexes_shared_ = std::move(other.flat_indexes_shared_);
+      col_indexes_shared_ = std::move(other.col_indexes_shared_);
       mmap_buffer_shared_ = std::move(other.mmap_buffer_shared_);
       other.n_indexes = nullptr;
       other.indexes = nullptr;
@@ -315,6 +333,8 @@ public:
       other.region_offsets = nullptr;
       other.flat_indexes = nullptr;
       other.flat_indexes_count = 0;
+      other.col_indexes = nullptr;
+      other.col_indexes_count = 0;
     }
     return *this;
   }
@@ -426,6 +446,126 @@ public:
    * @endcode
    */
   void compact();
+
+  /**
+   * @brief Compact and transpose to column-major layout for ALTREP/Arrow access.
+   *
+   * Consolidates per-thread separator positions into a column-major array
+   * optimized for column-at-a-time access patterns (R ALTREP, Arrow conversion).
+   *
+   * Layout: col_indexes[col * num_rows() + row] = byte position of field (row, col)
+   *
+   * This method uses multi-threaded row-first transpose for optimal cache
+   * performance based on benchmarking (see issue #599).
+   *
+   * Memory usage: 8 bytes per field separator (same as compact(), different layout).
+   *
+   * @param n_threads Number of threads for parallel transpose (0 = use parsing threads).
+   *
+   * @note This method is idempotent - calling it multiple times has no effect
+   *       after the first successful call.
+   *
+   * @note Unlike compact(), this method does NOT preserve the row-major flat_indexes.
+   *       Use compact() if you need row-major access, or compact_column_major() for
+   *       column-major access. The two layouts use the same memory (not additive).
+   *
+   * @example
+   * @code
+   * auto result = parser.parse(buf, len);
+   * result.idx.compact_column_major();  // Enable O(1) column access
+   *
+   * // Get column 5's data for all rows
+   * const uint64_t* col5 = result.idx.column(5);
+   * for (size_t row = 0; row < result.idx.num_rows(); ++row) {
+   *   uint64_t field_end = col5[row];
+   *   // ...
+   * }
+   * @endcode
+   */
+  void compact_column_major(size_t n_threads = 0);
+
+  /**
+   * @brief Check if column-major index is available.
+   *
+   * @return true if compact_column_major() has been called successfully.
+   */
+  bool is_column_major() const { return col_indexes != nullptr && col_indexes_count > 0; }
+
+  /**
+   * @brief Get the number of rows in the parsed CSV.
+   *
+   * @return Number of rows (total_indexes / columns), or 0 if columns is 0.
+   */
+  uint64_t num_rows() const {
+    if (columns == 0)
+      return 0;
+    return total_indexes() / columns;
+  }
+
+  /**
+   * @brief Get O(1) access to a column's field positions.
+   *
+   * Returns a pointer to the start of the column's data in the column-major index.
+   * The returned pointer is valid for num_rows() consecutive uint64_t values.
+   *
+   * @param col Column index (0 to columns - 1).
+   * @return Pointer to column data, or nullptr if column-major index not available
+   *         or col is out of bounds.
+   *
+   * @note Requires compact_column_major() to have been called first.
+   *
+   * @example
+   * @code
+   * result.idx.compact_column_major();
+   * const uint64_t* col0 = result.idx.column(0);
+   * for (size_t r = 0; r < result.idx.num_rows(); ++r) {
+   *   uint64_t end_pos = col0[r];
+   *   uint64_t start_pos = (r == 0 && 0 == 0) ? 0 : col0[r-1] + 1;
+   *   // Field bytes are at buf[start_pos..end_pos)
+   * }
+   * @endcode
+   */
+  const uint64_t* column(size_t col) const {
+    if (!is_column_major() || col >= columns)
+      return nullptr;
+    return &col_indexes[col * num_rows()];
+  }
+
+  /**
+   * @brief Get field positions for a single row (O(cols) operation).
+   *
+   * Extracts field positions for all columns in a row from the column-major index.
+   * This is an O(columns) operation with strided memory access, suitable for
+   * occasional row access (CLI head/tail, type detection) but not for bulk row
+   * iteration.
+   *
+   * @param row Row index (0 to num_rows() - 1).
+   * @param[out] out Vector to receive field positions. Will be resized to columns.
+   * @return true if successful, false if row is out of bounds or index not available.
+   *
+   * @note Requires compact_column_major() to have been called first.
+   *
+   * @example
+   * @code
+   * result.idx.compact_column_major();
+   * std::vector<uint64_t> row_fields;
+   * if (result.idx.get_row_fields(0, row_fields)) {
+   *   for (size_t col = 0; col < row_fields.size(); ++col) {
+   *     // row_fields[col] is the end position of field (0, col)
+   *   }
+   * }
+   * @endcode
+   */
+  bool get_row_fields(size_t row, std::vector<uint64_t>& out) const {
+    if (!is_column_major() || row >= num_rows())
+      return false;
+    out.resize(columns);
+    uint64_t nrows = num_rows();
+    for (size_t col = 0; col < columns; ++col) {
+      out[col] = col_indexes[col * nrows + row];
+    }
+    return true;
+  }
 
   /**
    * @brief Get O(1) read-only access to a thread's index region.
@@ -671,6 +811,10 @@ private:
   /// Null when using mmap-backed data or shared ownership.
   std::unique_ptr<uint64_t[]> flat_indexes_ptr_;
 
+  /// RAII owner for col_indexes array (column-major layout).
+  /// Memory freed automatically on destruction.
+  std::unique_ptr<uint64_t[]> col_indexes_ptr_;
+
   /// Memory-mapped buffer for mmap-backed indexes.
   /// When set, n_indexes and indexes point directly into this buffer's data.
   std::unique_ptr<MmapBuffer> mmap_buffer_;
@@ -691,6 +835,10 @@ private:
   /// Shared owner for flat_indexes array (used when share() is called).
   /// When set, flat_indexes_ptr_ is null and this manages the memory.
   std::shared_ptr<uint64_t[]> flat_indexes_shared_;
+
+  /// Shared owner for col_indexes array (used when share() is called).
+  /// When set, col_indexes_ptr_ is null and this manages the memory.
+  std::shared_ptr<uint64_t[]> col_indexes_shared_;
 
   /// Shared reference to mmap buffer for shared ParseIndex instances.
   std::shared_ptr<MmapBuffer> mmap_buffer_shared_;
