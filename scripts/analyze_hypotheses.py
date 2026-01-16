@@ -37,7 +37,7 @@ class BenchmarkResult:
                         'RowsPerSec', 'Fields', 'Size_MB', 'TypeChanges',
                         'SampleRows', 'EscapeCount', 'TotalFields',
                         'EscapeRatio_Input', 'ActualEscapeRatio', 'IsFlat',
-                        'TotalCols', 'ColsIterated', 'FieldsAccessed'}
+                        'TotalCols', 'ColsIterated', 'FieldsAccessed', 'Stage'}
         counters = {k: v for k, v in data.items() if k in counter_keys}
 
         return cls(
@@ -432,6 +432,204 @@ def analyze_h5(results: list[BenchmarkResult]) -> dict:
     return analysis
 
 
+def analyze_h2(results: list[BenchmarkResult]) -> dict:
+    """
+    Analyze H2: Arrow Builder API is the primary bottleneck.
+
+    Confirms H2 if: Arrow conversion time >> parse time (ratio > 2x)
+    Refutes H2 if: Arrow conversion time is comparable to parse time
+
+    Compares:
+    - Parse-only baseline
+    - Parse + field extraction
+    - Parse + direct buffer simulation
+    - Parse + Builder pattern simulation
+    - (Optional) Full Arrow Builders conversion
+    """
+    parse_only = group_by_prefix(results, 'BM_H2_ParseOnly')
+    parse_extract = group_by_prefix(results, 'BM_H2_ParseAndExtract')
+    direct_buffer = group_by_prefix(results, 'BM_H2_DirectBufferSimulation')
+    builder_pattern = group_by_prefix(results, 'BM_H2_BuilderPatternOverhead')
+    arrow_full = group_by_prefix(results, 'BM_H2_ArrowBuilders_Full')
+    arrow_no_inf = group_by_prefix(results, 'BM_H2_ArrowBuilders_NoInference')
+    type_inf_only = group_by_prefix(results, 'BM_H2_TypeInferenceOnly')
+
+    analysis = {
+        'hypothesis': 'H2',
+        'description': 'Arrow Builder API is the primary bottleneck (not index layout)',
+        'comparisons': [],
+        'confirmed': None,
+        'details': [],
+        'has_arrow_benchmarks': len(arrow_full) > 0,
+    }
+
+    # Group by (rows, cols) configuration
+    configs = {}
+    for r in parse_only:
+        rows = int(r.counters.get('Rows', 0))
+        cols = int(r.counters.get('Cols', 0))
+        key = (rows, cols)
+        if key not in configs:
+            configs[key] = {}
+        configs[key]['parse_only'] = r.real_time
+
+    for r in parse_extract:
+        rows = int(r.counters.get('Rows', 0))
+        cols = int(r.counters.get('Cols', 0))
+        key = (rows, cols)
+        if key in configs:
+            configs[key]['parse_extract'] = r.real_time
+
+    for r in direct_buffer:
+        rows = int(r.counters.get('Rows', 0))
+        cols = int(r.counters.get('Cols', 0))
+        key = (rows, cols)
+        if key in configs:
+            configs[key]['direct_buffer'] = r.real_time
+
+    for r in builder_pattern:
+        rows = int(r.counters.get('Rows', 0))
+        cols = int(r.counters.get('Cols', 0))
+        key = (rows, cols)
+        if key in configs:
+            configs[key]['builder_pattern'] = r.real_time
+
+    for r in arrow_full:
+        rows = int(r.counters.get('Rows', 0))
+        cols = int(r.counters.get('Cols', 0))
+        key = (rows, cols)
+        if key in configs:
+            configs[key]['arrow_full'] = r.real_time
+
+    for r in arrow_no_inf:
+        rows = int(r.counters.get('Rows', 0))
+        cols = int(r.counters.get('Cols', 0))
+        key = (rows, cols)
+        if key in configs:
+            configs[key]['arrow_no_inference'] = r.real_time
+
+    for r in type_inf_only:
+        rows = int(r.counters.get('Rows', 0))
+        cols = int(r.counters.get('Cols', 0))
+        key = (rows, cols)
+        if key in configs:
+            configs[key]['type_inference'] = r.real_time
+
+    # Analyze each configuration
+    arrow_overhead_ratios = []
+    builder_overhead_ratios = []
+
+    for (rows, cols), times in sorted(configs.items()):
+        parse_time = times.get('parse_only', 0)
+        if parse_time == 0:
+            continue
+
+        analysis['details'].append(f"\n### {rows:,} rows × {cols} columns:")
+
+        # Parse only (baseline)
+        analysis['details'].append(f"  Parse only: {parse_time:.2f}ms")
+
+        # Parse + extraction overhead
+        if 'parse_extract' in times:
+            extract_time = times['parse_extract']
+            extract_overhead = extract_time / parse_time if parse_time > 0 else 0
+            analysis['details'].append(
+                f"  Parse + extract: {extract_time:.2f}ms ({extract_overhead:.2f}x parse)"
+            )
+
+        # Direct buffer simulation
+        if 'direct_buffer' in times:
+            direct_time = times['direct_buffer']
+            direct_ratio = direct_time / parse_time if parse_time > 0 else 0
+            analysis['details'].append(
+                f"  Direct buffer: {direct_time:.2f}ms ({direct_ratio:.2f}x parse)"
+            )
+
+        # Builder pattern simulation
+        if 'builder_pattern' in times:
+            builder_time = times['builder_pattern']
+            builder_ratio = builder_time / parse_time if parse_time > 0 else 0
+            builder_overhead_ratios.append(builder_ratio)
+            # Compare to direct buffer
+            if 'direct_buffer' in times:
+                direct_time = times['direct_buffer']
+                builder_vs_direct = builder_time / direct_time if direct_time > 0 else 0
+                analysis['details'].append(
+                    f"  Builder pattern: {builder_time:.2f}ms ({builder_ratio:.2f}x parse, "
+                    f"{builder_vs_direct:.2f}x direct buffer)"
+                )
+            else:
+                analysis['details'].append(
+                    f"  Builder pattern: {builder_time:.2f}ms ({builder_ratio:.2f}x parse)"
+                )
+
+        # Full Arrow (if available)
+        if 'arrow_full' in times:
+            arrow_time = times['arrow_full']
+            arrow_ratio = arrow_time / parse_time if parse_time > 0 else 0
+            arrow_overhead_ratios.append(arrow_ratio)
+            analysis['details'].append(
+                f"  Arrow Builders (full): {arrow_time:.2f}ms ({arrow_ratio:.2f}x parse)"
+            )
+
+        # Arrow without inference
+        if 'arrow_no_inference' in times:
+            arrow_no_inf_time = times['arrow_no_inference']
+            arrow_no_inf_ratio = arrow_no_inf_time / parse_time if parse_time > 0 else 0
+            analysis['details'].append(
+                f"  Arrow (no inference): {arrow_no_inf_time:.2f}ms ({arrow_no_inf_ratio:.2f}x parse)"
+            )
+
+        # Type inference only
+        if 'type_inference' in times:
+            type_inf_time = times['type_inference']
+            type_inf_ratio = type_inf_time / parse_time if parse_time > 0 else 0
+            analysis['details'].append(
+                f"  Type inference only: {type_inf_time:.2f}ms ({type_inf_ratio:.2f}x parse)"
+            )
+
+        analysis['comparisons'].append({
+            'rows': rows, 'cols': cols, **times
+        })
+
+    # Evaluate hypothesis
+    # H2 confirmed if Arrow conversion is significantly slower than parsing
+    # Using builder pattern as proxy if Arrow not available
+    if arrow_overhead_ratios:
+        avg_arrow_overhead = sum(arrow_overhead_ratios) / len(arrow_overhead_ratios)
+        analysis['avg_arrow_overhead_ratio'] = avg_arrow_overhead
+        # Confirmed if Arrow adds >2x overhead compared to parse-only
+        analysis['confirmed'] = avg_arrow_overhead > 2.0
+        analysis['details'].append(
+            f"\nAverage Arrow/parse ratio: {avg_arrow_overhead:.2f}x"
+        )
+        if analysis['confirmed']:
+            analysis['details'].append(
+                "Conclusion: Arrow Builder API IS a significant bottleneck (>2x parse time)"
+            )
+        else:
+            analysis['details'].append(
+                "Conclusion: Arrow Builder API is NOT the primary bottleneck (<2x parse time)"
+            )
+    elif builder_overhead_ratios:
+        avg_builder_overhead = sum(builder_overhead_ratios) / len(builder_overhead_ratios)
+        analysis['avg_builder_overhead_ratio'] = avg_builder_overhead
+        # Can only partially evaluate without real Arrow benchmarks
+        analysis['details'].append(
+            f"\nAverage Builder pattern/parse ratio: {avg_builder_overhead:.2f}x"
+        )
+        analysis['details'].append(
+            "Note: Full Arrow benchmarks not available. Build with -DLIBVROOM_ENABLE_ARROW=ON "
+            "and re-run to get complete H2 analysis."
+        )
+    else:
+        analysis['details'].append(
+            "Insufficient data to evaluate H2. Run H2 benchmarks first."
+        )
+
+    return analysis
+
+
 def format_report_markdown(analyses: list[dict]) -> str:
     """Format analysis results as Markdown."""
     lines = ["# Hypothesis Benchmark Results\n"]
@@ -511,12 +709,13 @@ def main():
 
     # Run analyses
     analyses = [
-        analyze_h6(results),
-        analyze_h7(results),
         analyze_h1(results),
+        analyze_h2(results),
         analyze_h3(results),
         analyze_h4(results),
         analyze_h5(results),
+        analyze_h6(results),
+        analyze_h7(results),
     ]
 
     # Format and output

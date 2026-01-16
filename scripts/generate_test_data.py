@@ -414,7 +414,7 @@ def generate_type_widening_test(output_path: Path, nrows: int = 1_000_000) -> No
 # Real-world CSV corpus URLs for H4/H5 validation
 # Each entry: (name, url, description, source)
 CORPUS_URLS = [
-    # data.gov sources (publicly accessible CSV files >10MB)
+    # data.gov sources (publicly accessible CSV files)
     ("nyc_311_service_requests",
      "https://data.cityofnewyork.us/api/views/erm2-nwe9/rows.csv?accessType=DOWNLOAD",
      "NYC 311 Service Requests", "data.gov"),
@@ -430,6 +430,21 @@ CORPUS_URLS = [
     ("sf_fire_incidents",
      "https://data.sfgov.org/api/views/wr8u-xric/rows.csv?accessType=DOWNLOAD",
      "SF Fire Department Incidents", "data.gov"),
+    ("seattle_911",
+     "https://data.seattle.gov/api/views/kzjm-xkqj/rows.csv?accessType=DOWNLOAD",
+     "Seattle 911 Calls", "data.gov"),
+    ("boston_311",
+     "https://data.boston.gov/api/views/awu8-dc52/rows.csv?accessType=DOWNLOAD",
+     "Boston 311 Service Requests", "data.gov"),
+    ("denver_crime",
+     "https://data.denvergov.org/api/views/sn6e-2k9e/rows.csv?accessType=DOWNLOAD",
+     "Denver Crime Statistics", "data.gov"),
+    ("philadelphia_crime",
+     "https://phl.carto.com/api/v2/sql?q=SELECT+*+FROM+incidents_part1_part2&format=csv",
+     "Philadelphia Crime Incidents", "data.gov"),
+    ("nyc_taxi_zones",
+     "https://data.cityofnewyork.us/api/views/755u-8jsi/rows.csv?accessType=DOWNLOAD",
+     "NYC Taxi Zone Lookup", "data.gov"),
 
     # UCI ML Repository (direct CSV downloads)
     ("adult_income",
@@ -447,7 +462,51 @@ CORPUS_URLS = [
     ("kdd_cup",
      "https://archive.ics.uci.edu/ml/machine-learning-databases/kddcup99-mld/kddcup.data.gz",
      "KDD Cup 1999 Dataset", "UCI"),
+    ("skin_segmentation",
+     "https://archive.ics.uci.edu/ml/machine-learning-databases/00229/Skin_NonSkin.txt",
+     "Skin Segmentation Dataset", "UCI"),
+    ("shuttle",
+     "https://archive.ics.uci.edu/ml/machine-learning-databases/statlog/shuttle/shuttle.trn.Z",
+     "Statlog Shuttle Dataset", "UCI"),
+    ("letter_recognition",
+     "https://archive.ics.uci.edu/ml/machine-learning-databases/letter-recognition/letter-recognition.data",
+     "Letter Recognition Dataset", "UCI"),
+    ("magic_gamma",
+     "https://archive.ics.uci.edu/ml/machine-learning-databases/magic/magic04.data",
+     "MAGIC Gamma Telescope Dataset", "UCI"),
+    ("susy",
+     "https://archive.ics.uci.edu/ml/machine-learning-databases/00279/SUSY.csv.gz",
+     "SUSY Physics Dataset", "UCI"),
+
+    # Kaggle / other public datasets (direct download URLs)
+    ("global_temperature",
+     "https://raw.githubusercontent.com/datasets/global-temp/master/data/monthly.csv",
+     "Global Temperature Data", "Kaggle"),
+    ("country_codes",
+     "https://raw.githubusercontent.com/datasets/country-codes/master/data/country-codes.csv",
+     "Country Codes Dataset", "Kaggle"),
+    ("airport_codes",
+     "https://raw.githubusercontent.com/datasets/airport-codes/master/data/airport-codes.csv",
+     "Airport Codes Dataset", "Kaggle"),
+    ("world_cities",
+     "https://raw.githubusercontent.com/datasets/world-cities/master/data/world-cities.csv",
+     "World Cities Dataset", "Kaggle"),
+    ("s_and_p_500",
+     "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv",
+     "S&P 500 Companies", "Kaggle"),
+    ("population",
+     "https://raw.githubusercontent.com/datasets/population/master/data/population.csv",
+     "World Population Data", "Kaggle"),
+    ("covid_data",
+     "https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/owid-covid-data.csv",
+     "Our World in Data COVID-19", "Kaggle"),
+    ("github_languages",
+     "https://raw.githubusercontent.com/github/linguist/master/lib/linguist/languages.yml",
+     "GitHub Programming Languages", "Kaggle"),
 ]
+
+# Path to CleverCSV corpus (optional, for additional diverse CSVs)
+CLEVERCSV_CORPUS_PATH = Path.home() / "p" / "CSV_Wrangling" / "urls_github.json"
 
 
 def download_file(url: str, output_path: Path, max_size_mb: int = 100) -> Optional[Path]:
@@ -509,13 +568,73 @@ def download_file(url: str, output_path: Path, max_size_mb: int = 100) -> Option
         return None
 
 
-def download_corpus(output_path: Path, max_files: int = 10) -> list[Path]:
+def download_clevercsv_sample(output_path: Path, num_files: int = 50) -> list[Path]:
+    """
+    Download a random sample of CSVs from the CleverCSV corpus.
+
+    These are diverse, real-world CSVs from GitHub repositories.
+
+    Args:
+        output_path: Directory to save files
+        num_files: Number of files to sample
+
+    Returns:
+        List of successfully downloaded file paths
+    """
+    import json
+    import random
+
+    if not CLEVERCSV_CORPUS_PATH.exists():
+        print(f"CleverCSV corpus not found at {CLEVERCSV_CORPUS_PATH}")
+        return []
+
+    corpus_dir = output_path / "corpus" / "clevercsv"
+    corpus_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Sampling {num_files} files from CleverCSV corpus...")
+
+    # Load all URLs
+    urls = []
+    with open(CLEVERCSV_CORPUS_PATH, 'r') as f:
+        for line in f:
+            try:
+                entry = json.loads(line.strip())
+                if 'urls' in entry and entry['urls']:
+                    urls.append((entry['md5'], entry['urls'][0]))
+            except json.JSONDecodeError:
+                continue
+
+    print(f"  Found {len(urls)} CSVs in corpus")
+
+    # Random sample
+    random.seed(42)  # Reproducible sampling
+    sample = random.sample(urls, min(num_files, len(urls)))
+
+    downloaded = []
+    for i, (md5, url) in enumerate(sample):
+        print(f"  [{i+1}/{len(sample)}] {md5[:8]}...")
+        file_path = corpus_dir / f"{md5}.csv"
+
+        if file_path.exists():
+            downloaded.append(file_path)
+            continue
+
+        result = download_file(url, file_path, max_size_mb=10)  # Smaller limit for GitHub CSVs
+        if result:
+            downloaded.append(result)
+
+    print(f"Downloaded {len(downloaded)} CleverCSV files")
+    return downloaded
+
+
+def download_corpus(output_path: Path, max_files: int = 30, include_clevercsv: bool = True) -> list[Path]:
     """
     Download real-world CSV corpus for H4/H5 validation.
 
     Args:
         output_path: Directory to save files
-        max_files: Maximum number of files to download
+        max_files: Maximum number of files to download from CORPUS_URLS
+        include_clevercsv: Also sample from CleverCSV corpus if available
 
     Returns:
         List of successfully downloaded file paths
@@ -524,7 +643,8 @@ def download_corpus(output_path: Path, max_files: int = 10) -> list[Path]:
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Downloading real-world CSV corpus to {corpus_dir}...")
-    print(f"Target: up to {max_files} files from data.gov, UCI ML Repository")
+    print(f"Target: up to {max_files} files from data.gov, UCI ML Repository, Kaggle")
+    print(f"Available sources: {len(CORPUS_URLS)} URLs")
     print()
 
     downloaded = []
@@ -532,8 +652,10 @@ def download_corpus(output_path: Path, max_files: int = 10) -> list[Path]:
         print(f"[{source}] {description}")
 
         # Determine file extension
-        if url.endswith('.gz'):
+        if url.endswith('.gz') or url.endswith('.Z'):
             file_path = corpus_dir / f"{name}.csv.gz"
+        elif url.endswith('.yml'):
+            file_path = corpus_dir / f"{name}.yml"
         else:
             file_path = corpus_dir / f"{name}.csv"
 
@@ -549,7 +671,15 @@ def download_corpus(output_path: Path, max_files: int = 10) -> list[Path]:
             downloaded.append(result)
         print()
 
-    print(f"Downloaded {len(downloaded)} files")
+    print(f"Downloaded {len(downloaded)} files from main corpus")
+
+    # Optionally add CleverCSV samples
+    if include_clevercsv and CLEVERCSV_CORPUS_PATH.exists():
+        print()
+        clevercsv_files = download_clevercsv_sample(output_path, num_files=50)
+        downloaded.extend(clevercsv_files)
+
+    print(f"\nTotal corpus: {len(downloaded)} files")
     return downloaded
 
 
@@ -742,7 +872,8 @@ def analyze_corpus(corpus_dir: Path) -> dict:
         }
     }
 
-    csv_files = list(corpus_dir.glob('*.csv')) + list(corpus_dir.glob('*.csv.gz'))
+    # Recursively find all CSV files (including in subdirectories like clevercsv/)
+    csv_files = list(corpus_dir.glob('**/*.csv')) + list(corpus_dir.glob('**/*.csv.gz'))
 
     for file_path in csv_files:
         print(f"\n  Analyzing {file_path.name}...")
@@ -883,8 +1014,13 @@ def main():
     parser.add_argument(
         "--corpus-max-files",
         type=int,
-        default=10,
-        help="Maximum number of corpus files to download (default: 10)"
+        default=30,
+        help="Maximum number of corpus files to download from main sources (default: 30)"
+    )
+    parser.add_argument(
+        "--no-clevercsv",
+        action="store_true",
+        help="Skip CleverCSV corpus sampling (faster, but fewer diverse files)"
     )
 
     args = parser.parse_args()
@@ -920,7 +1056,11 @@ def main():
         return
 
     if args.corpus:
-        downloaded = download_corpus(output_path, args.corpus_max_files)
+        downloaded = download_corpus(
+            output_path,
+            max_files=args.corpus_max_files,
+            include_clevercsv=not args.no_clevercsv
+        )
         if downloaded:
             corpus_dir = output_path / "corpus"
             results = analyze_corpus(corpus_dir)

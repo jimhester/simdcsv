@@ -988,3 +988,304 @@ BENCHMARK(BM_FullPipeline_ColMajor)
     ->Apply(H1_Arguments)
     ->Unit(benchmark::kMillisecond)
     ->UseRealTime();
+
+// ============================================================================
+// H2: Arrow Builder API Bottleneck Analysis
+// ============================================================================
+//
+// This hypothesis tests whether Arrow Builder API is the primary bottleneck
+// compared to index layout. We compare:
+// 1. Parse-only time (baseline)
+// 2. Parse + field extraction (without Arrow)
+// 3. Parse + Arrow conversion (full Builders path)
+// 4. Direct buffer writes (simulating zero-copy approach)
+//
+// If H2 is true: Arrow conversion time >> parse time
+// If H2 is false: Arrow conversion time is comparable to parse time
+
+/**
+ * @brief Baseline: Parse only, no conversion.
+ *
+ * Measures the raw parsing throughput without any value extraction.
+ */
+static void BM_H2_ParseOnly(benchmark::State& state) {
+  size_t rows = static_cast<size_t>(state.range(0));
+  size_t cols = static_cast<size_t>(state.range(1));
+
+  auto& cached = get_or_create_csv(rows, cols);
+  libvroom::Parser parser(4);
+
+  for (auto _ : state) {
+    auto result = parser.parse(cached.buffer.data(), cached.actual_size);
+    result.compact();
+    benchmark::DoNotOptimize(result);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(cached.actual_size * state.iterations()));
+  state.counters["Rows"] = static_cast<double>(rows);
+  state.counters["Cols"] = static_cast<double>(cols);
+  state.counters["Stage"] = 0; // Parse only
+}
+
+/**
+ * @brief Parse + field extraction without conversion.
+ *
+ * Measures time to extract all field values as string_views.
+ * This is the minimum work needed to access all data.
+ */
+static void BM_H2_ParseAndExtract(benchmark::State& state) {
+  size_t rows = static_cast<size_t>(state.range(0));
+  size_t cols = static_cast<size_t>(state.range(1));
+
+  auto& cached = get_or_create_csv(rows, cols);
+  libvroom::Parser parser(4);
+
+  for (auto _ : state) {
+    auto result = parser.parse(cached.buffer.data(), cached.actual_size);
+    result.compact();
+
+    // Extract all fields as string_views (simulating minimum extraction cost)
+    const uint8_t* buf = cached.buffer.data();
+    uint64_t sum = 0;
+    for (size_t row = 0; row < rows; ++row) {
+      for (size_t col = 0; col < cols; ++col) {
+        auto span = result.idx.get_field_span(row, col);
+        if (span.is_valid()) {
+          // Access the field data (forces memory access)
+          sum += buf[span.start];
+        }
+      }
+    }
+    benchmark::DoNotOptimize(sum);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(cached.actual_size * state.iterations()));
+  state.counters["Rows"] = static_cast<double>(rows);
+  state.counters["Cols"] = static_cast<double>(cols);
+  state.counters["Stage"] = 1; // Parse + extract
+}
+
+/**
+ * @brief Simulate direct buffer construction (zero-copy ideal).
+ *
+ * This benchmark simulates what a direct buffer approach would cost:
+ * pre-allocated arrays with direct writes instead of Builder appends.
+ * Uses pre-allocated std::vector instead of Arrow Builders.
+ */
+static void BM_H2_DirectBufferSimulation(benchmark::State& state) {
+  size_t rows = static_cast<size_t>(state.range(0));
+  size_t cols = static_cast<size_t>(state.range(1));
+
+  auto& cached = get_or_create_csv(rows, cols);
+  libvroom::Parser parser(4);
+
+  // Pre-allocate output buffers (simulating direct Arrow buffer construction)
+  std::vector<std::vector<int64_t>> int_columns(cols);
+  for (auto& col : int_columns) {
+    col.resize(rows);
+  }
+
+  for (auto _ : state) {
+    auto result = parser.parse(cached.buffer.data(), cached.actual_size);
+    result.compact();
+
+    const uint8_t* buf = cached.buffer.data();
+
+    // Direct buffer writes (no Builder overhead)
+    for (size_t row = 0; row < rows; ++row) {
+      for (size_t col = 0; col < cols; ++col) {
+        auto span = result.idx.get_field_span(row, col);
+        if (span.is_valid()) {
+          // Simulate type conversion and direct write
+          // This is the minimum cost for populating typed arrays
+          int_columns[col][row] = static_cast<int64_t>(span.start);
+        }
+      }
+    }
+    benchmark::DoNotOptimize(int_columns);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(cached.actual_size * state.iterations()));
+  state.counters["Rows"] = static_cast<double>(rows);
+  state.counters["Cols"] = static_cast<double>(cols);
+  state.counters["Stage"] = 2; // Direct buffer
+}
+
+/**
+ * @brief Simulate per-element Builder overhead.
+ *
+ * This benchmark isolates the cost of the Builder append pattern:
+ * calling a function per element vs direct array assignment.
+ */
+static void BM_H2_BuilderPatternOverhead(benchmark::State& state) {
+  size_t rows = static_cast<size_t>(state.range(0));
+  size_t cols = static_cast<size_t>(state.range(1));
+
+  auto& cached = get_or_create_csv(rows, cols);
+  libvroom::Parser parser(4);
+
+  // Simulate Builder with a vector that grows (like Arrow Builders)
+  auto result = parser.parse(cached.buffer.data(), cached.actual_size);
+  result.compact();
+
+  for (auto _ : state) {
+    // Simulate Builder pattern: clear and re-append
+    std::vector<std::vector<int64_t>> builder_columns(cols);
+    for (auto& col : builder_columns) {
+      col.reserve(rows); // Reserve like Arrow Builders do
+    }
+
+    const uint8_t* buf = cached.buffer.data();
+
+    // Builder-style appends (function call per element)
+    for (size_t row = 0; row < rows; ++row) {
+      for (size_t col = 0; col < cols; ++col) {
+        auto span = result.idx.get_field_span(row, col);
+        if (span.is_valid()) {
+          // Append pattern (like Builder.Append())
+          builder_columns[col].push_back(static_cast<int64_t>(span.start));
+        }
+      }
+    }
+    benchmark::DoNotOptimize(builder_columns);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(cached.actual_size * state.iterations()));
+  state.counters["Rows"] = static_cast<double>(rows);
+  state.counters["Cols"] = static_cast<double>(cols);
+  state.counters["Stage"] = 3; // Builder pattern
+}
+
+// H2 registration
+static void H2_Arguments(benchmark::internal::Benchmark* b) {
+  // {rows, cols}
+  b->Args({10000, 10});
+  b->Args({100000, 10});
+  b->Args({1000000, 10});
+  b->Args({100000, 100});
+}
+
+BENCHMARK(BM_H2_ParseOnly)->Apply(H2_Arguments)->Unit(benchmark::kMillisecond)->UseRealTime();
+
+BENCHMARK(BM_H2_ParseAndExtract)->Apply(H2_Arguments)->Unit(benchmark::kMillisecond)->UseRealTime();
+
+BENCHMARK(BM_H2_DirectBufferSimulation)
+    ->Apply(H2_Arguments)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
+
+BENCHMARK(BM_H2_BuilderPatternOverhead)
+    ->Apply(H2_Arguments)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
+
+#ifdef LIBVROOM_ENABLE_ARROW
+#include "arrow_output.h"
+
+/**
+ * @brief Full Arrow conversion via ArrowConverter (Builders path).
+ *
+ * This measures the actual Arrow conversion including type inference
+ * and Builder-based column construction.
+ */
+static void BM_H2_ArrowBuilders_Full(benchmark::State& state) {
+  size_t rows = static_cast<size_t>(state.range(0));
+  size_t cols = static_cast<size_t>(state.range(1));
+
+  auto& cached = get_or_create_csv(rows, cols);
+
+  libvroom::ArrowConvertOptions opts;
+  opts.infer_types = true;
+
+  for (auto _ : state) {
+    libvroom::TwoPass tp;
+    libvroom::ParseIndex idx = tp.init(cached.actual_size, 4);
+    tp.parse(cached.buffer.data(), idx, cached.actual_size);
+
+    libvroom::ArrowConverter converter(opts);
+    auto result = converter.convert(cached.buffer.data(), cached.actual_size, idx);
+    benchmark::DoNotOptimize(result);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(cached.actual_size * state.iterations()));
+  state.counters["Rows"] = static_cast<double>(rows);
+  state.counters["Cols"] = static_cast<double>(cols);
+  state.counters["Stage"] = 4; // Full Arrow
+}
+
+/**
+ * @brief Arrow conversion without type inference.
+ *
+ * Measures Arrow Builders cost when types are pre-specified (no inference).
+ */
+static void BM_H2_ArrowBuilders_NoInference(benchmark::State& state) {
+  size_t rows = static_cast<size_t>(state.range(0));
+  size_t cols = static_cast<size_t>(state.range(1));
+
+  auto& cached = get_or_create_csv(rows, cols);
+
+  libvroom::ArrowConvertOptions opts;
+  opts.infer_types = false; // Skip type inference, treat all as strings
+
+  for (auto _ : state) {
+    libvroom::TwoPass tp;
+    libvroom::ParseIndex idx = tp.init(cached.actual_size, 4);
+    tp.parse(cached.buffer.data(), idx, cached.actual_size);
+
+    libvroom::ArrowConverter converter(opts);
+    auto result = converter.convert(cached.buffer.data(), cached.actual_size, idx);
+    benchmark::DoNotOptimize(result);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(cached.actual_size * state.iterations()));
+  state.counters["Rows"] = static_cast<double>(rows);
+  state.counters["Cols"] = static_cast<double>(cols);
+  state.counters["Stage"] = 5; // Arrow no inference
+}
+
+/**
+ * @brief Type inference only (no column building).
+ *
+ * Isolates the cost of type inference from the Builder cost.
+ */
+static void BM_H2_TypeInferenceOnly(benchmark::State& state) {
+  size_t rows = static_cast<size_t>(state.range(0));
+  size_t cols = static_cast<size_t>(state.range(1));
+
+  auto& cached = get_or_create_csv(rows, cols);
+
+  // Parse once
+  libvroom::TwoPass tp;
+  libvroom::ParseIndex idx = tp.init(cached.actual_size, 4);
+  tp.parse(cached.buffer.data(), idx, cached.actual_size);
+
+  libvroom::ArrowConvertOptions opts;
+  opts.infer_types = true;
+  libvroom::ArrowConverter converter(opts);
+
+  for (auto _ : state) {
+    auto types = converter.infer_types(cached.buffer.data(), cached.actual_size, idx);
+    benchmark::DoNotOptimize(types);
+  }
+
+  state.counters["Rows"] = static_cast<double>(rows);
+  state.counters["Cols"] = static_cast<double>(cols);
+  state.counters["Stage"] = 6; // Type inference only
+}
+
+BENCHMARK(BM_H2_ArrowBuilders_Full)
+    ->Apply(H2_Arguments)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
+
+BENCHMARK(BM_H2_ArrowBuilders_NoInference)
+    ->Apply(H2_Arguments)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
+
+BENCHMARK(BM_H2_TypeInferenceOnly)
+    ->Apply(H2_Arguments)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
+
+#endif // LIBVROOM_ENABLE_ARROW
