@@ -244,6 +244,18 @@ public:
   /// Set when flat_indexes is populated.
   uint64_t flat_indexes_count{0};
 
+  /// Column-major index array for cache-friendly column iteration.
+  /// When populated (via build_column_index()), enables perfect cache locality
+  /// for ALTREP-style column-at-a-time access patterns.
+  /// Layout: col_indexes[col * nrows + row] = byte offset of field end (separator)
+  /// @note This is a raw pointer accessor for compatibility; memory is managed
+  /// by col_indexes_ptr_.
+  uint64_t* col_indexes{nullptr};
+
+  /// Number of data rows (set when col_indexes is populated).
+  /// This is computed as total_indexes / columns during build_column_index().
+  uint64_t nrows{0};
+
   /// Default constructor. Creates an empty, uninitialized index.
   ParseIndex() = default;
 
@@ -259,16 +271,18 @@ public:
       : columns(other.columns), n_threads(other.n_threads), region_size(other.region_size),
         n_indexes(other.n_indexes), indexes(other.indexes), chunk_starts(other.chunk_starts),
         region_offsets(other.region_offsets), flat_indexes(other.flat_indexes),
-        flat_indexes_count(other.flat_indexes_count),
-        n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
+        flat_indexes_count(other.flat_indexes_count), col_indexes(other.col_indexes),
+        nrows(other.nrows), n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
         indexes_ptr_(std::move(other.indexes_ptr_)),
         chunk_starts_ptr_(std::move(other.chunk_starts_ptr_)),
         region_offsets_ptr_(std::move(other.region_offsets_ptr_)),
         flat_indexes_ptr_(std::move(other.flat_indexes_ptr_)),
+        col_indexes_ptr_(std::move(other.col_indexes_ptr_)),
         mmap_buffer_(std::move(other.mmap_buffer_)), buffer_(std::move(other.buffer_)),
         n_indexes_shared_(std::move(other.n_indexes_shared_)),
         indexes_shared_(std::move(other.indexes_shared_)),
         flat_indexes_shared_(std::move(other.flat_indexes_shared_)),
+        col_indexes_shared_(std::move(other.col_indexes_shared_)),
         mmap_buffer_shared_(std::move(other.mmap_buffer_shared_)) {
     other.n_indexes = nullptr;
     other.indexes = nullptr;
@@ -276,6 +290,8 @@ public:
     other.region_offsets = nullptr;
     other.flat_indexes = nullptr;
     other.flat_indexes_count = 0;
+    other.col_indexes = nullptr;
+    other.nrows = 0;
   }
 
   /**
@@ -298,16 +314,20 @@ public:
       region_offsets = other.region_offsets;
       flat_indexes = other.flat_indexes;
       flat_indexes_count = other.flat_indexes_count;
+      col_indexes = other.col_indexes;
+      nrows = other.nrows;
       n_indexes_ptr_ = std::move(other.n_indexes_ptr_);
       indexes_ptr_ = std::move(other.indexes_ptr_);
       chunk_starts_ptr_ = std::move(other.chunk_starts_ptr_);
       region_offsets_ptr_ = std::move(other.region_offsets_ptr_);
       flat_indexes_ptr_ = std::move(other.flat_indexes_ptr_);
+      col_indexes_ptr_ = std::move(other.col_indexes_ptr_);
       mmap_buffer_ = std::move(other.mmap_buffer_);
       buffer_ = std::move(other.buffer_);
       n_indexes_shared_ = std::move(other.n_indexes_shared_);
       indexes_shared_ = std::move(other.indexes_shared_);
       flat_indexes_shared_ = std::move(other.flat_indexes_shared_);
+      col_indexes_shared_ = std::move(other.col_indexes_shared_);
       mmap_buffer_shared_ = std::move(other.mmap_buffer_shared_);
       other.n_indexes = nullptr;
       other.indexes = nullptr;
@@ -315,6 +335,8 @@ public:
       other.region_offsets = nullptr;
       other.flat_indexes = nullptr;
       other.flat_indexes_count = 0;
+      other.col_indexes = nullptr;
+      other.nrows = 0;
     }
     return *this;
   }
@@ -398,6 +420,13 @@ public:
   bool is_flat() const { return flat_indexes != nullptr && flat_indexes_count > 0; }
 
   /**
+   * @brief Check if this index has a column-major index for cache-friendly column iteration.
+   *
+   * @return true if the column-major index has been built (via build_column_index()).
+   */
+  bool is_column_major() const { return col_indexes != nullptr && nrows > 0; }
+
+  /**
    * @brief Compact the per-thread index regions into a flat array for O(1) access.
    *
    * After parsing, field separators are stored in per-thread regions which
@@ -426,6 +455,79 @@ public:
    * @endcode
    */
   void compact();
+
+  /**
+   * @brief Build a column-major index for cache-friendly column iteration.
+   *
+   * Reorganizes the field positions into column-major order for optimal cache
+   * locality when iterating through columns sequentially (ALTREP-style access).
+   * The row-major flat index provides O(1) random access, but column iteration
+   * has poor cache locality. The column-major index stores positions grouped
+   * by column: col_indexes[col * nrows + row] = separator position.
+   *
+   * Memory usage: 8 bytes per field (additional allocation, independent of flat index).
+   *
+   * Threading strategy: Build is parallel by columns - each thread transposes
+   * a subset of columns with no write contention.
+   *
+   * @param n_threads Number of threads to use for building (default: 1).
+   *
+   * @note This method is idempotent - calling it multiple times has no effect
+   *       after the first successful call.
+   *
+   * @note Requires columns to be set (via parsing with header detection) and
+   *       will call compact() internally if the flat index is not available.
+   *
+   * @example
+   * @code
+   * auto result = parser.parse(buf, len);
+   *
+   * // Build column-major index for ALTREP-style iteration
+   * result.idx.build_column_index();
+   *
+   * // Now column iteration is cache-friendly
+   * for (size_t col = 0; col < result.idx.columns; ++col) {
+   *   auto col_view = result.idx.column_data(col);
+   *   for (size_t row = 0; row < col_view.size(); ++row) {
+   *     // Sequential memory access within column
+   *   }
+   * }
+   * @endcode
+   *
+   * @see is_column_major() to check if the column-major index is available
+   * @see column_data() for O(1) access to column separator positions
+   */
+  void build_column_index(size_t n_threads = 1);
+
+  /**
+   * @brief Get O(1) read-only access to a column's separator positions.
+   *
+   * Returns a view into the column-major index for the specified column.
+   * Each entry in the view is the byte offset of that row's field separator
+   * (delimiter or newline) for this column.
+   *
+   * @param col Column index (0 to columns - 1).
+   * @return IndexView of the column's separator positions, one per row.
+   *         Empty view if column-major index not built or col out of bounds.
+   *
+   * @note Requires build_column_index() to have been called first.
+   *
+   * @example
+   * @code
+   * result.idx.build_column_index();
+   * auto col_view = result.idx.column_data(2);  // Get column 2
+   * for (size_t row = 0; row < col_view.size(); ++row) {
+   *   uint64_t sep_pos = col_view[row];
+   *   // Compute field boundaries from separator positions
+   * }
+   * @endcode
+   */
+  IndexView column_data(uint64_t col) const {
+    if (!is_column_major() || col >= columns) {
+      return IndexView(); // Empty view
+    }
+    return IndexView(col_indexes + col * nrows, nrows);
+  }
 
   /**
    * @brief Get O(1) read-only access to a thread's index region.
@@ -671,6 +773,10 @@ private:
   /// Null when using mmap-backed data or shared ownership.
   std::unique_ptr<uint64_t[]> flat_indexes_ptr_;
 
+  /// RAII owner for col_indexes array. Memory freed automatically on destruction.
+  /// Null when using shared ownership.
+  std::unique_ptr<uint64_t[]> col_indexes_ptr_;
+
   /// Memory-mapped buffer for mmap-backed indexes.
   /// When set, n_indexes and indexes point directly into this buffer's data.
   std::unique_ptr<MmapBuffer> mmap_buffer_;
@@ -691,6 +797,10 @@ private:
   /// Shared owner for flat_indexes array (used when share() is called).
   /// When set, flat_indexes_ptr_ is null and this manages the memory.
   std::shared_ptr<uint64_t[]> flat_indexes_shared_;
+
+  /// Shared owner for col_indexes array (used when share() is called).
+  /// When set, col_indexes_ptr_ is null and this manages the memory.
+  std::shared_ptr<uint64_t[]> col_indexes_shared_;
 
   /// Shared reference to mmap buffer for shared ParseIndex instances.
   std::shared_ptr<MmapBuffer> mmap_buffer_shared_;

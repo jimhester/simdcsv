@@ -319,6 +319,82 @@ void ParseIndex::compact() {
   }
 }
 
+void ParseIndex::build_column_index(size_t num_threads) {
+  // Idempotent: skip if already built
+  if (is_column_major()) {
+    return;
+  }
+
+  // Must have column count set
+  if (columns == 0) {
+    return;
+  }
+
+  // Ensure flat index is available (calls compact() if needed)
+  if (!is_flat()) {
+    compact();
+    if (!is_flat()) {
+      return; // compact() failed
+    }
+  }
+
+  // Calculate number of rows
+  // flat_indexes_count = nrows * columns (each field has one separator)
+  if (flat_indexes_count % columns != 0) {
+    return; // Data integrity check - should be evenly divisible
+  }
+  nrows = flat_indexes_count / columns;
+  if (nrows == 0) {
+    return;
+  }
+
+  // Allocate column-major index array
+  col_indexes_ptr_ = std::make_unique<uint64_t[]>(flat_indexes_count);
+  col_indexes = col_indexes_ptr_.get();
+
+  // Transpose from row-major to column-major layout
+  // flat_indexes[row * columns + col] -> col_indexes[col * nrows + row]
+  //
+  // Threading strategy: Each thread handles a subset of columns.
+  // No write contention since each thread writes to disjoint memory regions.
+  if (num_threads <= 1 || columns <= 1) {
+    // Single-threaded transpose
+    for (uint64_t row = 0; row < nrows; ++row) {
+      for (uint64_t col = 0; col < columns; ++col) {
+        col_indexes[col * nrows + row] = flat_indexes[row * columns + col];
+      }
+    }
+  } else {
+    // Multi-threaded transpose: parallel by columns
+    std::vector<std::future<void>> futures;
+    futures.reserve(num_threads);
+
+    uint64_t cols_per_thread = (columns + num_threads - 1) / num_threads;
+
+    for (size_t t = 0; t < num_threads; ++t) {
+      uint64_t col_start = t * cols_per_thread;
+      uint64_t col_end = std::min(col_start + cols_per_thread, columns);
+
+      if (col_start >= columns) {
+        break;
+      }
+
+      futures.emplace_back(std::async(std::launch::async, [this, col_start, col_end]() {
+        for (uint64_t col = col_start; col < col_end; ++col) {
+          for (uint64_t row = 0; row < nrows; ++row) {
+            col_indexes[col * nrows + row] = flat_indexes[row * columns + col];
+          }
+        }
+      }));
+    }
+
+    // Wait for all threads to complete
+    for (auto& f : futures) {
+      f.get();
+    }
+  }
+}
+
 void ParseIndex::write(const std::string& filename, const SourceMetadata& source_meta) {
   // Write to temp file, then atomic rename for crash safety
   std::string temp_path = filename + ".tmp";
@@ -2379,6 +2455,7 @@ std::shared_ptr<const ParseIndex> ParseIndex::share() {
   shared->n_threads = n_threads;
   shared->region_size = region_size;
   shared->flat_indexes_count = flat_indexes_count;
+  shared->nrows = nrows;
 
   // Share the buffer reference (if set)
   shared->buffer_ = buffer_;
@@ -2394,6 +2471,7 @@ std::shared_ptr<const ParseIndex> ParseIndex::share() {
     shared->n_indexes = n_indexes;
     shared->indexes = indexes;
     shared->flat_indexes = flat_indexes;
+    // Note: col_indexes is always dynamically allocated, handle separately below
   } else if (n_indexes_shared_ || indexes_shared_) {
     // Already using shared ownership - just copy the shared_ptrs
     // But check if flat_indexes_ptr_ was created after the first share() call
@@ -2429,6 +2507,17 @@ std::shared_ptr<const ParseIndex> ParseIndex::share() {
     shared->n_indexes = nullptr;
     shared->indexes = nullptr;
     shared->flat_indexes = nullptr;
+  }
+
+  // Handle col_indexes separately (always dynamically allocated, never mmap'd)
+  if (col_indexes_ptr_) {
+    col_indexes_shared_ = std::shared_ptr<uint64_t[]>(col_indexes_ptr_.release());
+  }
+  if (col_indexes_shared_) {
+    shared->col_indexes_shared_ = col_indexes_shared_;
+    shared->col_indexes = col_indexes;
+  } else {
+    shared->col_indexes = nullptr;
   }
 
   return shared;

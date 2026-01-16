@@ -2100,6 +2100,42 @@ public:
      */
     bool is_flat() const { return idx.is_flat(); }
 
+    /**
+     * @brief Build a column-major index for cache-friendly column iteration.
+     *
+     * Reorganizes the field positions into column-major order for optimal cache
+     * locality when iterating through columns sequentially (ALTREP-style access).
+     *
+     * @param n_threads Number of threads to use for building (default: 1).
+     *
+     * @see is_column_major() to check if the column-major index is available
+     * @see column_data() for O(1) access to column separator positions
+     */
+    void build_column_index(size_t n_threads = 1) { idx.build_column_index(n_threads); }
+
+    /**
+     * @brief Check if the index has a column-major layout for cache-friendly iteration.
+     *
+     * Returns true if the column-major index has been built via build_column_index().
+     *
+     * @return true if the index has column-major layout, false otherwise.
+     *
+     * @see build_column_index() to build the column-major layout
+     */
+    bool is_column_major() const { return idx.is_column_major(); }
+
+    /**
+     * @brief Get the number of data rows from the index.
+     *
+     * Returns the number of rows computed during build_column_index().
+     * This is calculated as total_indexes / columns.
+     *
+     * @return Number of data rows, or 0 if column-major index not built.
+     *
+     * @note This is distinct from num_rows() which applies row filtering.
+     */
+    uint64_t index_nrows() const { return idx.nrows; }
+
     // =====================================================================
     // Row/Column Iteration API
     // =====================================================================

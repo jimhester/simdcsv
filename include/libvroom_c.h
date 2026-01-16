@@ -889,6 +889,75 @@ void libvroom_index_compact(libvroom_index_t* index);
 bool libvroom_index_is_flat(const libvroom_index_t* index);
 
 /**
+ * @brief Build a column-major index for cache-friendly column iteration.
+ *
+ * Reorganizes the field positions into column-major order for optimal cache
+ * locality when iterating through columns sequentially (ALTREP-style access).
+ * The row-major flat index provides O(1) random access, but column iteration
+ * has poor cache locality. The column-major index stores positions grouped
+ * by column for perfect sequential memory access during column iteration.
+ *
+ * Memory usage: 8 bytes per field (additional allocation, independent of flat index).
+ *
+ * @param index The index to build the column-major layout for. Must be non-null.
+ * @param n_threads Number of threads to use for building (1 for single-threaded).
+ *
+ * @note This function is idempotent - calling it multiple times has no effect
+ *       after the first successful call.
+ *
+ * @note Requires columns to be set (via parsing with header detection) and
+ *       will call compact internally if the flat index is not available.
+ *
+ * @example
+ * @code
+ * // Parse a CSV file
+ * libvroom_index_t* index = libvroom_index_create(len, 4);
+ * libvroom_parse_auto(parser, buf, len, index, errors, NULL, NULL);
+ *
+ * // Build column-major index for ALTREP-style iteration
+ * libvroom_index_build_column_index(index, 4);
+ *
+ * // Now column iteration is cache-friendly
+ * uint64_t nrows = libvroom_index_get_nrows(index);
+ * for (uint64_t col = 0; col < libvroom_index_get_columns(index); ++col) {
+ *   for (uint64_t row = 0; row < nrows; ++row) {
+ *     // Access fields sequentially within the column
+ *   }
+ * }
+ * @endcode
+ *
+ * @see libvroom_index_is_column_major() to check if the column-major index is available
+ * @see libvroom_index_get_nrows() to get the number of rows
+ */
+void libvroom_index_build_column_index(libvroom_index_t* index, size_t n_threads);
+
+/**
+ * @brief Check if the index has a column-major layout for cache-friendly iteration.
+ *
+ * Returns true if the column-major index has been built (either from calling
+ * libvroom_index_build_column_index() or from loading a cached index with column data).
+ *
+ * @param index The index to check. Must be non-null.
+ * @return true if the index has column-major layout, false otherwise.
+ *
+ * @see libvroom_index_build_column_index() to build the column-major layout
+ */
+bool libvroom_index_is_column_major(const libvroom_index_t* index);
+
+/**
+ * @brief Get the number of data rows in the index.
+ *
+ * Returns the number of rows computed during build_column_index().
+ * This is calculated as total_indexes / columns.
+ *
+ * @param index The index to query. Must be non-null.
+ * @return Number of data rows, or 0 if column-major index not built.
+ *
+ * @see libvroom_index_build_column_index() to build the column-major layout
+ */
+uint64_t libvroom_index_get_nrows(const libvroom_index_t* index);
+
+/**
  * @brief Serialize an index to a binary file.
  *
  * Writes the index structure to disk for later retrieval, avoiding the need

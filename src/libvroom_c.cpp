@@ -511,6 +511,24 @@ bool libvroom_index_is_flat(const libvroom_index_t* index) {
   return index->idx.is_flat();
 }
 
+void libvroom_index_build_column_index(libvroom_index_t* index, size_t n_threads) {
+  if (index) {
+    index->idx.build_column_index(n_threads);
+  }
+}
+
+bool libvroom_index_is_column_major(const libvroom_index_t* index) {
+  if (!index)
+    return false;
+  return index->idx.is_column_major();
+}
+
+uint64_t libvroom_index_get_nrows(const libvroom_index_t* index) {
+  if (!index)
+    return 0;
+  return index->idx.nrows;
+}
+
 libvroom_error_t libvroom_index_write(const libvroom_index_t* index, const char* filename) {
   if (!index || !filename)
     return LIBVROOM_ERROR_NULL_POINTER;

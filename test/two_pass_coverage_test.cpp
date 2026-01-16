@@ -3399,6 +3399,242 @@ TEST_F(FlatIndexTest, DeserializedIndexIsFlat) {
   std::remove(temp_file.c_str());
 }
 
+// =============================================================================
+// ColumnMajorIndexTest - Tests for column-major index layout
+// =============================================================================
+
+class ColumnMajorIndexTest : public ::testing::Test {
+protected:
+  static std::vector<uint8_t> makeBuffer(const std::string& s) {
+    return std::vector<uint8_t>(s.begin(), s.end());
+  }
+};
+
+TEST_F(ColumnMajorIndexTest, BuildColumnIndexSingleThread) {
+  std::string content = "a,b,c\n1,2,3\n4,5,6\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  idx.columns = 3;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Before build_column_index: is_column_major() should be false
+  EXPECT_FALSE(idx.is_column_major());
+  EXPECT_EQ(idx.nrows, 0u);
+
+  // Build column-major index (single-threaded)
+  idx.build_column_index(1);
+
+  // After build_column_index: is_column_major() should be true
+  EXPECT_TRUE(idx.is_column_major());
+  EXPECT_EQ(idx.nrows, 3u); // 3 rows: header + 2 data rows
+
+  // Verify column_data returns valid views
+  auto col0 = idx.column_data(0);
+  EXPECT_EQ(col0.size(), 3u);
+  EXPECT_FALSE(col0.empty());
+
+  auto col1 = idx.column_data(1);
+  EXPECT_EQ(col1.size(), 3u);
+
+  auto col2 = idx.column_data(2);
+  EXPECT_EQ(col2.size(), 3u);
+
+  // Out-of-bounds column should return empty view
+  auto col_invalid = idx.column_data(3);
+  EXPECT_TRUE(col_invalid.empty());
+}
+
+TEST_F(ColumnMajorIndexTest, BuildColumnIndexMultiThread) {
+  // Create larger content to exercise multi-threading
+  std::string content;
+  for (int i = 0; i < 100; i++) {
+    content += "field" + std::to_string(i) + ",value" + std::to_string(i) + ",extra" +
+               std::to_string(i) + "\n";
+  }
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 4);
+  idx.columns = 3;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Build column-major index with multiple threads
+  idx.build_column_index(4);
+
+  EXPECT_TRUE(idx.is_column_major());
+  EXPECT_EQ(idx.nrows, 100u);
+
+  // Verify each column has correct size
+  for (uint64_t col = 0; col < 3; ++col) {
+    auto col_view = idx.column_data(col);
+    EXPECT_EQ(col_view.size(), 100u);
+  }
+}
+
+TEST_F(ColumnMajorIndexTest, BuildColumnIndexIdempotent) {
+  std::string content = "a,b,c\n1,2,3\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  idx.columns = 3;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Build multiple times - should be idempotent
+  idx.build_column_index(1);
+  uint64_t* first_ptr = idx.col_indexes;
+  uint64_t first_nrows = idx.nrows;
+
+  idx.build_column_index(1);
+  uint64_t* second_ptr = idx.col_indexes;
+  uint64_t second_nrows = idx.nrows;
+
+  // Should be the same pointer - no re-allocation
+  EXPECT_EQ(first_ptr, second_ptr);
+  EXPECT_EQ(first_nrows, second_nrows);
+}
+
+TEST_F(ColumnMajorIndexTest, BuildColumnIndexEmptyIndex) {
+  ParseIndex idx;
+  // build_column_index on empty index should not crash
+  idx.build_column_index(1);
+  EXPECT_FALSE(idx.is_column_major());
+  EXPECT_EQ(idx.nrows, 0u);
+}
+
+TEST_F(ColumnMajorIndexTest, BuildColumnIndexZeroColumns) {
+  std::string content = "a,b,c\n1,2,3\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  // Don't set columns - should be 0
+  parser.parse(buf.data(), idx, content.size());
+
+  // build_column_index should handle columns == 0 gracefully
+  idx.build_column_index(1);
+  EXPECT_FALSE(idx.is_column_major());
+}
+
+TEST_F(ColumnMajorIndexTest, ColumnDataConsistency) {
+  // Test that column-major index produces correct data for all columns
+  std::string content = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  idx.columns = 3;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Build column-major index
+  idx.build_column_index(1);
+  EXPECT_EQ(idx.nrows, 4u);
+
+  // Verify column 0 data (a, 1, 4, 7)
+  auto col0 = idx.column_data(0);
+  EXPECT_EQ(col0.size(), 4u);
+
+  // The column_data returns separator positions, which should match
+  // the flat_indexes positions for each column
+  for (uint64_t row = 0; row < idx.nrows; ++row) {
+    uint64_t col_sep = col0[row];
+    uint64_t flat_sep = idx.flat_indexes[row * idx.columns + 0];
+    EXPECT_EQ(col_sep, flat_sep) << "Mismatch at row " << row;
+  }
+
+  // Verify column 1 data (b, 2, 5, 8)
+  auto col1 = idx.column_data(1);
+  for (uint64_t row = 0; row < idx.nrows; ++row) {
+    uint64_t col_sep = col1[row];
+    uint64_t flat_sep = idx.flat_indexes[row * idx.columns + 1];
+    EXPECT_EQ(col_sep, flat_sep) << "Mismatch at row " << row;
+  }
+
+  // Verify column 2 data (c, 3, 6, 9)
+  auto col2 = idx.column_data(2);
+  for (uint64_t row = 0; row < idx.nrows; ++row) {
+    uint64_t col_sep = col2[row];
+    uint64_t flat_sep = idx.flat_indexes[row * idx.columns + 2];
+    EXPECT_EQ(col_sep, flat_sep) << "Mismatch at row " << row;
+  }
+}
+
+TEST_F(ColumnMajorIndexTest, BuildCallsCompactIfNeeded) {
+  std::string content = "a,b,c\n1,2,3\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 2);
+  idx.columns = 3;
+  parser.parse(buf.data(), idx, content.size());
+
+  // Don't call compact() explicitly
+  EXPECT_FALSE(idx.is_flat());
+
+  // build_column_index should call compact() internally
+  idx.build_column_index(1);
+
+  // Both should now be true
+  EXPECT_TRUE(idx.is_flat());
+  EXPECT_TRUE(idx.is_column_major());
+}
+
+TEST_F(ColumnMajorIndexTest, MoveConstructorPreservesColumnIndex) {
+  std::string content = "a,b\n1,2\n3,4\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  idx.columns = 2;
+  parser.parse(buf.data(), idx, content.size());
+  idx.build_column_index(1);
+
+  // Verify before move
+  EXPECT_TRUE(idx.is_column_major());
+  EXPECT_EQ(idx.nrows, 3u);
+  uint64_t* orig_col_indexes = idx.col_indexes;
+
+  // Move construct
+  ParseIndex idx2(std::move(idx));
+
+  // Original should be empty
+  EXPECT_FALSE(idx.is_column_major());
+  EXPECT_EQ(idx.col_indexes, nullptr);
+  EXPECT_EQ(idx.nrows, 0u);
+
+  // New should have the data
+  EXPECT_TRUE(idx2.is_column_major());
+  EXPECT_EQ(idx2.col_indexes, orig_col_indexes);
+  EXPECT_EQ(idx2.nrows, 3u);
+}
+
+TEST_F(ColumnMajorIndexTest, MoveAssignmentPreservesColumnIndex) {
+  std::string content = "a,b\n1,2\n";
+  auto buf = makeBuffer(content);
+
+  TwoPass parser;
+  ParseIndex idx = parser.init(content.size(), 1);
+  idx.columns = 2;
+  parser.parse(buf.data(), idx, content.size());
+  idx.build_column_index(1);
+
+  uint64_t* orig_col_indexes = idx.col_indexes;
+
+  // Move assign
+  ParseIndex idx2;
+  idx2 = std::move(idx);
+
+  // Original should be empty
+  EXPECT_FALSE(idx.is_column_major());
+  EXPECT_EQ(idx.col_indexes, nullptr);
+
+  // New should have the data
+  EXPECT_TRUE(idx2.is_column_major());
+  EXPECT_EQ(idx2.col_indexes, orig_col_indexes);
+}
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

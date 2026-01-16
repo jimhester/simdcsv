@@ -1122,6 +1122,15 @@ public:
   // Check if the index is compacted for O(1) access
   bool is_flat() const { return data_->result.is_flat(); }
 
+  // Build column-major index for cache-friendly column iteration
+  void build_column_index(size_t n_threads = 1) { data_->result.build_column_index(n_threads); }
+
+  // Check if the index has column-major layout
+  bool is_column_major() const { return data_->result.is_column_major(); }
+
+  // Get number of rows (set after build_column_index)
+  uint64_t nrows() const { return data_->result.index_nrows(); }
+
 private:
   std::shared_ptr<TableData> data_;
 };
@@ -2614,6 +2623,53 @@ Returns
 -------
 bool
     True if the index has O(1) field access, False otherwise.
+)doc")
+      // Column-major index for ALTREP-style access
+      .def("build_column_index", &Table::build_column_index, py::arg("n_threads") = 1, R"doc(
+Build a column-major index for cache-friendly column iteration.
+
+Reorganizes the field positions into column-major order for optimal cache
+locality when iterating through columns sequentially (ALTREP-style access).
+The row-major flat index provides O(1) random access, but column iteration
+has poor cache locality. The column-major index stores positions grouped
+by column for perfect sequential memory access during column iteration.
+
+Parameters
+----------
+n_threads : int, optional
+    Number of threads to use for building (default: 1).
+
+Note: This method is idempotent - calling it multiple times has no effect.
+
+Examples
+--------
+>>> import vroom_csv
+>>> table = vroom_csv.read_csv("large_file.csv")
+>>> table.build_column_index(4)  # Build with 4 threads
+>>> table.is_column_major()
+True
+>>> print(f"Rows: {table.nrows()}")
+)doc")
+      .def("is_column_major", &Table::is_column_major, R"doc(
+Check if the index has column-major layout for cache-friendly iteration.
+
+Returns True if the column-major index has been built via build_column_index().
+
+Returns
+-------
+bool
+    True if the index has column-major layout, False otherwise.
+)doc")
+      .def("nrows", &Table::nrows, R"doc(
+Get the number of data rows.
+
+Returns the number of rows computed during build_column_index().
+Returns 0 if column-major index has not been built.
+
+Returns
+-------
+int
+    Number of data rows, or 0 if column-major index not built.
 )doc");
 
   // RowIterator class for streaming row-by-row iteration
