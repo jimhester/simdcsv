@@ -18,6 +18,10 @@ This project is authored by Jim Hester, the original author of [vroom](https://g
 
 libvroom is still experimental and pre-1.0. **Breaking changes are acceptable** when they improve performance, correctness, or API design. Strive to make the optimum performance choice even if it requires breaking changes. Don't add backwards-compatibility shims or deprecated code paths—just make the change cleanly.
 
+## Performance improvements
+
+When making potential performance improvments do not just use intuition and assume something will improve performance. Use prof to find hot spots in the current code, generate hypotheses on the potential issue and changes which could improve performance. Then test those hypothesis with benchmarks.
+
 ## Build Commands
 
 ```bash
