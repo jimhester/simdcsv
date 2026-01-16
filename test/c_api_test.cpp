@@ -1991,6 +1991,55 @@ TEST_F(CAPITest, IndexGetFieldSpanRowCol) {
 }
 
 // ============================================================================
+// Index Compact Tests - O(1) field access
+// ============================================================================
+
+TEST_F(CAPITest, IndexCompact) {
+  // CSV: "a,b,c\n1,2,3\n"
+  const uint8_t data[] = "a,b,c\n1,2,3\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 2);
+  libvroom_dialect_t* dialect = libvroom_dialect_create(',', '"', '"', true);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, dialect);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // After parsing: index is automatically compacted
+  EXPECT_TRUE(libvroom_index_is_flat(index));
+
+  // Calling compact again is idempotent (no-op)
+  libvroom_index_compact(index);
+
+  // Still flat after redundant compact call
+  EXPECT_TRUE(libvroom_index_is_flat(index));
+
+  // Field access should still work correctly
+  libvroom_field_span_t span0 = libvroom_index_get_field_span_rc(index, 0, 0);
+  EXPECT_TRUE(libvroom_field_span_is_valid(span0));
+  EXPECT_EQ(span0.start, 0u);
+  EXPECT_EQ(span0.end, 1u); // "a" = 1 char
+
+  libvroom_field_span_t span12 = libvroom_index_get_field_span_rc(index, 1, 2);
+  EXPECT_TRUE(libvroom_field_span_is_valid(span12));
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, IndexCompactNullPointer) {
+  // Compact on null index should not crash
+  libvroom_index_compact(nullptr);
+
+  // is_flat on null should return false
+  EXPECT_FALSE(libvroom_index_is_flat(nullptr));
+}
+
+// ============================================================================
 // LazyColumn Tests
 // ============================================================================
 

@@ -1116,6 +1116,12 @@ public:
     return get_lazy_column(logical_idx);
   }
 
+  // Compact the index for O(1) field access
+  void compact() { data_->result.compact(); }
+
+  // Check if the index is compacted for O(1) access
+  bool is_flat() const { return data_->result.is_flat(); }
+
 private:
   std::shared_ptr<TableData> data_;
 };
@@ -2417,12 +2423,14 @@ implementing R's ALTREP pattern where columns are only parsed when
 accessed.
 
 Key features:
-- **Random access**: O(n_threads) access to any row via indexing
+- **Random access**: O(1) access to any row via indexing
 - **Byte range access**: get_bounds() returns raw byte ranges for deferred parsing
 - **Zero-copy views**: Returns views into the original buffer
 
 Note: The underlying buffer and index must remain valid for the lifetime
 of the LazyColumn.
+
+Note: Parsed tables automatically have O(1) field access (is_flat() returns True).
 
 Examples
 --------
@@ -2574,7 +2582,39 @@ Examples
       .def("get_lazy_column", &Table::get_lazy_column, py::arg("index"),
            "Get a LazyColumn for lazy per-row access to a column by index")
       .def("get_lazy_column", &Table::get_lazy_column_by_name, py::arg("name"),
-           "Get a LazyColumn for lazy per-row access to a column by name");
+           "Get a LazyColumn for lazy per-row access to a column by name")
+      // Index optimization
+      .def("compact", &Table::compact, R"doc(
+Compact the index for O(1) field access (no-op for parsed tables).
+
+Since version 0.x, parsing automatically compacts the index for O(1)
+random field access. This method is now a no-op for freshly parsed tables,
+but is retained for:
+1. API compatibility
+2. Explicitly compacting indexes constructed via the low-level TwoPass API
+
+Note: This method is idempotent - calling it multiple times has no effect.
+
+Examples
+--------
+>>> import vroom_csv
+>>> table = vroom_csv.read_csv("large_file.csv")
+>>> table.is_flat()  # Already True after parsing
+True
+>>> lazy_col = table.get_lazy_column(0)
+>>> value = lazy_col[100000]  # O(1) access
+)doc")
+      .def("is_flat", &Table::is_flat, R"doc(
+Check if the index has O(1) field access.
+
+Returns True if the index is in flat format. After parsing with the
+standard API, this always returns True as compaction is automatic.
+
+Returns
+-------
+bool
+    True if the index has O(1) field access, False otherwise.
+)doc");
 
   // RowIterator class for streaming row-by-row iteration
   py::class_<RowIterator>(m, "RowIterator", R"doc(

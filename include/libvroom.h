@@ -2054,6 +2054,52 @@ public:
       return total;
     }
 
+    /**
+     * @brief Compact the index for O(1) field access.
+     *
+     * After parsing, field separators are stored in per-thread regions which
+     * require O(n_threads) iteration to find a specific field. This method
+     * consolidates all separators into a single flat array sorted by file order,
+     * enabling O(1) random access.
+     *
+     * This is particularly beneficial for ALTREP-style lazy column access where
+     * fields are accessed randomly. For sequential column extraction, the
+     * performance improvement is less significant.
+     *
+     * @note This method is idempotent - calling it multiple times has no effect
+     *       after the first successful call.
+     *
+     * @note Results loaded from cache are automatically in flat format and
+     *       don't need explicit compaction.
+     *
+     * @example
+     * @code
+     * auto result = parser.parse(buf, len);
+     *
+     * // Compact for O(1) random access
+     * result.compact();
+     *
+     * // Now LazyColumn access is O(1) per field
+     * auto lazy_col = result.get_lazy_column(0);
+     * auto value = lazy_col[1000];  // O(1) instead of O(n_threads)
+     * @endcode
+     *
+     * @see is_flat() to check if the index is already compacted
+     */
+    void compact() { idx.compact(); }
+
+    /**
+     * @brief Check if the index has been compacted for O(1) access.
+     *
+     * Returns true if the index is in flat format (either from calling
+     * compact() or from loading a cached index).
+     *
+     * @return true if the index has O(1) field access, false otherwise.
+     *
+     * @see compact() to convert an index to flat format
+     */
+    bool is_flat() const { return idx.is_flat(); }
+
     // =====================================================================
     // Row/Column Iteration API
     // =====================================================================
@@ -2905,6 +2951,13 @@ public:
     // =======================================================================
     if (result.successful && result.idx.columns == 0) {
       result.idx.columns = result.num_columns();
+    }
+
+    // =======================================================================
+    // Compact Index for O(1) Field Access
+    // =======================================================================
+    if (result.successful) {
+      result.idx.compact();
     }
 
     // =======================================================================

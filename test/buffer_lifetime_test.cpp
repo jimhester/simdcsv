@@ -227,3 +227,45 @@ TEST_F(BufferLifetimeTest, SharedIndexPreservesMetadata) {
   EXPECT_EQ(shared->n_threads, original_n_threads);
   EXPECT_EQ(shared->region_size, original_region_size);
 }
+
+// Test: share() preserves flat index after automatic compaction
+// Parsing now automatically compacts the index, so we verify that:
+// 1. The index is already flat after parsing
+// 2. share() preserves the flat index
+// 3. Field access works on shared copies after original is destroyed
+TEST_F(BufferLifetimeTest, ShareAfterCompactPreservesFlatIndex) {
+  auto buffer = make_buffer("name,value,extra\ntest,42,x\nalpha,99,y\n");
+
+  Parser parser(2);
+  auto result = parser.parse(buffer->data(), buffer->size() - 64);
+  result.idx.set_buffer(buffer);
+
+  // Index is automatically compacted after parsing
+  EXPECT_TRUE(result.idx.is_flat());
+
+  // First share() - converts to shared ownership
+  auto shared1 = result.idx.share();
+  EXPECT_TRUE(result.idx.is_shared());
+  EXPECT_TRUE(shared1->is_flat());
+
+  // Calling compact() again is idempotent (does nothing)
+  result.idx.compact();
+  EXPECT_TRUE(result.idx.is_flat());
+
+  // Second share() - should preserve flat index
+  auto shared2 = result.idx.share();
+  EXPECT_TRUE(shared2->is_flat());
+  EXPECT_EQ(shared2->flat_indexes_count, result.idx.flat_indexes_count);
+
+  // Verify field access still works on the shared copy
+  // after original is destroyed
+  {
+    // Move original away to destroy it
+    ParseIndex moved = std::move(result.idx);
+  }
+
+  // shared2 should still have valid flat index
+  // (would crash with use-after-free if bug exists)
+  FieldSpan span = shared2->get_field_span(0, 0);
+  EXPECT_TRUE(span.is_valid());
+}

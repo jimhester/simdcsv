@@ -837,6 +837,58 @@ const uint64_t* libvroom_index_positions(const libvroom_index_t* index);
 void libvroom_index_destroy(libvroom_index_t* index);
 
 /**
+ * @brief Compact the index for O(1) field access.
+ *
+ * After parsing, field separators are stored in per-thread regions which
+ * require O(n_threads) iteration to find a specific field. This function
+ * consolidates all separators into a single flat array sorted by file order,
+ * enabling O(1) random access.
+ *
+ * This is particularly beneficial for ALTREP-style lazy column access where
+ * fields are accessed randomly and individually.
+ *
+ * Memory usage: No additional memory allocation - reorganizes existing data.
+ *
+ * @param index The index to compact. Must be non-null.
+ *
+ * @note This function is idempotent - calling it multiple times has no effect
+ *       after the first successful call.
+ *
+ * @note Indexes loaded from cache files (via libvroom_index_read()) are
+ *       automatically in flat format and don't need explicit compaction.
+ *
+ * @example
+ * @code
+ * // Parse a CSV file
+ * libvroom_index_t* index = libvroom_index_create(len, 4);
+ * libvroom_parse_auto(parser, buf, len, index, errors, NULL, NULL);
+ *
+ * // Before compact: O(n_threads) per field access
+ * // After compact: O(1) per field access
+ * libvroom_index_compact(index);
+ *
+ * // Now field access is O(1)
+ * libvroom_field_span_t span = libvroom_index_get_field_span_rc(index, 1000, 0);
+ * @endcode
+ *
+ * @see libvroom_index_is_flat() to check if the index is already compacted
+ */
+void libvroom_index_compact(libvroom_index_t* index);
+
+/**
+ * @brief Check if the index has been compacted for O(1) access.
+ *
+ * Returns true if the index is in flat format (either from calling
+ * libvroom_index_compact() or from loading a cached index).
+ *
+ * @param index The index to check. Must be non-null.
+ * @return true if the index has O(1) field access, false otherwise.
+ *
+ * @see libvroom_index_compact() to convert an index to flat format
+ */
+bool libvroom_index_is_flat(const libvroom_index_t* index);
+
+/**
  * @brief Serialize an index to a binary file.
  *
  * Writes the index structure to disk for later retrieval, avoiding the need

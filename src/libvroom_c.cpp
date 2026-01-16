@@ -499,6 +499,18 @@ void libvroom_index_destroy(libvroom_index_t* index) {
   delete index;
 }
 
+void libvroom_index_compact(libvroom_index_t* index) {
+  if (index) {
+    index->idx.compact();
+  }
+}
+
+bool libvroom_index_is_flat(const libvroom_index_t* index) {
+  if (!index)
+    return false;
+  return index->idx.is_flat();
+}
+
 libvroom_error_t libvroom_index_write(const libvroom_index_t* index, const char* filename) {
   if (!index || !filename)
     return LIBVROOM_ERROR_NULL_POINTER;
