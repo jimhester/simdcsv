@@ -456,6 +456,23 @@ typedef struct libvroom_field_span {
   uint64_t end;
 } libvroom_field_span_t;
 
+/**
+ * @brief Result of byte offset to location conversion.
+ *
+ * Contains the row and column indices corresponding to a byte offset,
+ * and a flag indicating whether the location was found.
+ */
+typedef struct libvroom_location {
+  /** @brief 0-based row index. */
+  size_t row;
+
+  /** @brief 0-based column index. */
+  size_t column;
+
+  /** @brief true if the byte offset was found within a valid field. */
+  bool found;
+} libvroom_location_t;
+
 /** @} */ /* end of structs group */
 
 /**
@@ -1015,6 +1032,36 @@ libvroom_field_span_t libvroom_index_get_field_span(const libvroom_index_t* inde
  */
 libvroom_field_span_t libvroom_index_get_field_span_rc(const libvroom_index_t* index, uint64_t row,
                                                        uint64_t col);
+
+/**
+ * @brief Convert a byte offset to row/column location.
+ *
+ * Given a byte offset into the CSV data, finds which row and column
+ * contain that byte offset. This is useful for error reporting, where
+ * you have a byte position and need to report the logical location.
+ *
+ * @param index The index to query. Must not be NULL and must be populated.
+ * @param byte_offset Byte offset into the CSV data.
+ * @return libvroom_location_t with row, column, and found flag.
+ *         If the byte offset is beyond all indexed fields, found will be false.
+ *
+ * @note Complexity: O(n) where n is the total number of fields. This is
+ *       designed for occasional use (e.g., error reporting), not for
+ *       high-frequency access patterns.
+ *
+ * @example
+ * @code
+ * // Find which row/column contains byte offset 150
+ * libvroom_location_t loc = libvroom_index_byte_offset_to_location(index, 150);
+ * if (loc.found) {
+ *     printf("Byte 150 is at row %zu, column %zu\n", loc.row, loc.column);
+ * } else {
+ *     printf("Byte 150 is beyond the indexed data\n");
+ * }
+ * @endcode
+ */
+libvroom_location_t libvroom_index_byte_offset_to_location(const libvroom_index_t* index,
+                                                            size_t byte_offset);
 
 /** @} */ /* end of index group */
 

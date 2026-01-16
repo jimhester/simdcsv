@@ -1991,6 +1991,102 @@ TEST_F(CAPITest, IndexGetFieldSpanRowCol) {
 }
 
 // ============================================================================
+// Byte Offset to Location Tests
+// ============================================================================
+
+TEST_F(CAPITest, ByteOffsetToLocationBasic) {
+  // CSV: "a,b,c\n1,2,3\n"
+  //       0123456789...
+  // Row 0 (header): a,b,c
+  //   - Field 0: start=0, end=1 (a,)
+  //   - Field 1: start=2, end=3 (b,)
+  //   - Field 2: start=4, end=5 (c\n)
+  // Row 1 (data): 1,2,3
+  //   - Field 3: start=6, end=7 (1,)
+  //   - Field 4: start=8, end=9 (2,)
+  //   - Field 5: start=10, end=11 (3\n)
+  const uint8_t data[] = "a,b,c\n1,2,3\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+  libvroom_dialect_t* dialect = libvroom_dialect_create(',', '"', '"', true);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, dialect);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Test byte offset 0 (start of first field "a")
+  libvroom_location_t loc0 = libvroom_index_byte_offset_to_location(index, 0);
+  EXPECT_TRUE(loc0.found);
+  EXPECT_EQ(loc0.row, 0u);
+  EXPECT_EQ(loc0.column, 0u);
+
+  // Test byte offset 2 (start of second field "b")
+  libvroom_location_t loc2 = libvroom_index_byte_offset_to_location(index, 2);
+  EXPECT_TRUE(loc2.found);
+  EXPECT_EQ(loc2.row, 0u);
+  EXPECT_EQ(loc2.column, 1u);
+
+  // Test byte offset 6 (start of first data row field "1")
+  libvroom_location_t loc6 = libvroom_index_byte_offset_to_location(index, 6);
+  EXPECT_TRUE(loc6.found);
+  EXPECT_EQ(loc6.row, 1u);
+  EXPECT_EQ(loc6.column, 0u);
+
+  // Test byte offset 10 (start of last field "3")
+  libvroom_location_t loc10 = libvroom_index_byte_offset_to_location(index, 10);
+  EXPECT_TRUE(loc10.found);
+  EXPECT_EQ(loc10.row, 1u);
+  EXPECT_EQ(loc10.column, 2u);
+
+  libvroom_dialect_destroy(dialect);
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, ByteOffsetToLocationBeyondData) {
+  const uint8_t data[] = "a,b\n1,2\n";
+  size_t len = sizeof(data) - 1;
+
+  libvroom_buffer_t* buffer = libvroom_buffer_create(data, len);
+  libvroom_parser_t* parser = libvroom_parser_create();
+  libvroom_index_t* index = libvroom_index_create(len, 1);
+
+  libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, nullptr);
+  EXPECT_EQ(err, LIBVROOM_OK);
+
+  // Test byte offset beyond the data
+  libvroom_location_t loc_beyond = libvroom_index_byte_offset_to_location(index, 1000);
+  EXPECT_FALSE(loc_beyond.found);
+
+  libvroom_index_destroy(index);
+  libvroom_parser_destroy(parser);
+  libvroom_buffer_destroy(buffer);
+}
+
+TEST_F(CAPITest, ByteOffsetToLocationNullPointer) {
+  // Test null index pointer
+  libvroom_location_t loc_null = libvroom_index_byte_offset_to_location(nullptr, 0);
+  EXPECT_FALSE(loc_null.found);
+  EXPECT_EQ(loc_null.row, 0u);
+  EXPECT_EQ(loc_null.column, 0u);
+}
+
+TEST_F(CAPITest, ByteOffsetToLocationEmptyIndex) {
+  // Create an unpopulated index
+  libvroom_index_t* index = libvroom_index_create(100, 1);
+  ASSERT_NE(index, nullptr);
+
+  // Should return not found for unpopulated index
+  libvroom_location_t loc = libvroom_index_byte_offset_to_location(index, 0);
+  EXPECT_FALSE(loc.found);
+
+  libvroom_index_destroy(index);
+}
+
+// ============================================================================
 // Index Compact Tests - O(1) field access
 // ============================================================================
 

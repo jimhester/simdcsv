@@ -1395,6 +1395,44 @@ libvroom_field_span_t libvroom_index_get_field_span_rc(const libvroom_index_t* i
   return result;
 }
 
+libvroom_location_t libvroom_index_byte_offset_to_location(const libvroom_index_t* index,
+                                                            size_t byte_offset) {
+  libvroom_location_t not_found = {0, 0, false};
+
+  if (!index) {
+    return not_found;
+  }
+
+  // Use the ValueExtractor's byte_offset_to_location logic directly
+  // Since we don't have a ValueExtractor here, implement the logic inline
+  uint64_t total_indexes = index->idx.total_indexes();
+  size_t num_columns = index->idx.columns;
+
+  if (total_indexes == 0 || num_columns == 0) {
+    return not_found;
+  }
+
+  // Linear search through fields to find which one contains the byte offset
+  for (uint64_t i = 0; i < total_indexes; ++i) {
+    libvroom::FieldSpan span = index->idx.get_field_span(i);
+    if (!span.is_valid())
+      continue;
+
+    // Check if byte_offset falls within this field's bounds
+    if (byte_offset <= span.end) {
+      // Found the field containing this byte offset
+      libvroom_location_t result;
+      result.row = i / num_columns;
+      result.column = i % num_columns;
+      result.found = true;
+      return result;
+    }
+  }
+
+  // Byte offset is beyond the last field
+  return not_found;
+}
+
 // ============================================================================
 // Lazy Column Functions
 // ============================================================================
