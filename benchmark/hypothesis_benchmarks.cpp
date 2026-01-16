@@ -14,15 +14,21 @@
  *
  * Each benchmark is designed to discriminate between hypotheses and guide
  * implementation decisions.
+ *
+ * IMPORTANT: H6 benchmarks use TwoPass API directly to avoid Parser's
+ * auto-compaction behavior.
  */
 
 #include "libvroom.h"
 
 #include "common_defs.h"
 #include "mem_util.h"
+#include "two_pass.h"
 
 #include <benchmark/benchmark.h>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <map>
 #include <memory>
@@ -195,9 +201,13 @@ CachedCSV& get_or_create_csv(size_t rows, size_t cols, const std::string& type_p
 // ============================================================================
 // H6: compact() is Required for O(1) Field Access
 // ============================================================================
+//
+// IMPORTANT: These benchmarks use TwoPass API directly instead of Parser
+// because Parser::parse() auto-compacts the index. TwoPass::parse() does NOT
+// auto-compact, allowing us to measure the true difference.
 
 /**
- * @brief Benchmark field access WITHOUT compact().
+ * @brief Benchmark field access WITHOUT compact() using TwoPass API.
  *
  * Without compact(), field access is O(n_threads) as it must search
  * through per-thread regions.
@@ -208,26 +218,32 @@ static void BM_H6_FieldAccess_NoCompact(benchmark::State& state) {
   int n_threads = static_cast<int>(state.range(2));
 
   auto& cached = get_or_create_csv(rows, cols);
-  libvroom::Parser parser(n_threads);
 
-  // Parse once outside the benchmark
-  auto result = parser.parse(cached.buffer.data(), cached.actual_size);
-  // Deliberately NOT calling compact()
+  // Use TwoPass directly to avoid Parser's auto-compaction
+  libvroom::TwoPass tp;
+  libvroom::ParseIndex idx = tp.init(cached.actual_size, static_cast<size_t>(n_threads));
+  tp.parse(cached.buffer.data(), idx, cached.actual_size);
+  // Index is NOT compacted - flat_indexes should be empty
+  // Set columns to enable num_rows() calculation
+  idx.columns = cols;
+
+  size_t actual_rows = idx.num_rows();
 
   // Access pattern: iterate all fields in column 0
   for (auto _ : state) {
-    for (size_t row = 0; row < rows; ++row) {
-      auto span = result.idx.get_field_span(row, 0);
+    for (size_t row = 0; row < actual_rows; ++row) {
+      auto span = idx.get_field_span(row, 0);
       benchmark::DoNotOptimize(span);
     }
     benchmark::ClobberMemory();
   }
 
-  state.counters["Rows"] = static_cast<double>(rows);
+  state.counters["Rows"] = static_cast<double>(actual_rows);
   state.counters["Cols"] = static_cast<double>(cols);
   state.counters["Threads"] = static_cast<double>(n_threads);
-  state.counters["RowsPerSec"] =
-      benchmark::Counter(static_cast<double>(rows), benchmark::Counter::kIsIterationInvariantRate);
+  state.counters["IsFlat"] = static_cast<double>(idx.is_flat() ? 1 : 0);
+  state.counters["RowsPerSec"] = benchmark::Counter(static_cast<double>(actual_rows),
+                                                    benchmark::Counter::kIsIterationInvariantRate);
 }
 
 /**
@@ -241,26 +257,32 @@ static void BM_H6_FieldAccess_WithCompact(benchmark::State& state) {
   int n_threads = static_cast<int>(state.range(2));
 
   auto& cached = get_or_create_csv(rows, cols);
-  libvroom::Parser parser(n_threads);
 
-  // Parse and compact once outside the benchmark
-  auto result = parser.parse(cached.buffer.data(), cached.actual_size);
-  result.compact();
+  // Use TwoPass directly and explicitly compact
+  libvroom::TwoPass tp;
+  libvroom::ParseIndex idx = tp.init(cached.actual_size, static_cast<size_t>(n_threads));
+  tp.parse(cached.buffer.data(), idx, cached.actual_size);
+  // Set columns to enable num_rows() calculation
+  idx.columns = cols;
+  idx.compact(); // Explicitly compact to flat index
+
+  size_t actual_rows = idx.num_rows();
 
   // Access pattern: iterate all fields in column 0
   for (auto _ : state) {
-    for (size_t row = 0; row < rows; ++row) {
-      auto span = result.idx.get_field_span(row, 0);
+    for (size_t row = 0; row < actual_rows; ++row) {
+      auto span = idx.get_field_span(row, 0);
       benchmark::DoNotOptimize(span);
     }
     benchmark::ClobberMemory();
   }
 
-  state.counters["Rows"] = static_cast<double>(rows);
+  state.counters["Rows"] = static_cast<double>(actual_rows);
   state.counters["Cols"] = static_cast<double>(cols);
   state.counters["Threads"] = static_cast<double>(n_threads);
-  state.counters["RowsPerSec"] =
-      benchmark::Counter(static_cast<double>(rows), benchmark::Counter::kIsIterationInvariantRate);
+  state.counters["IsFlat"] = static_cast<double>(idx.is_flat() ? 1 : 0);
+  state.counters["RowsPerSec"] = benchmark::Counter(static_cast<double>(actual_rows),
+                                                    benchmark::Counter::kIsIterationInvariantRate);
 }
 
 /**
@@ -273,14 +295,20 @@ static void BM_H6_RandomAccess_NoCompact(benchmark::State& state) {
   size_t num_accesses = 10000;
 
   auto& cached = get_or_create_csv(rows, cols);
-  libvroom::Parser parser(n_threads);
 
-  auto result = parser.parse(cached.buffer.data(), cached.actual_size);
-  // NOT calling compact()
+  // Use TwoPass directly to avoid Parser's auto-compaction
+  libvroom::TwoPass tp;
+  libvroom::ParseIndex idx = tp.init(cached.actual_size, static_cast<size_t>(n_threads));
+  tp.parse(cached.buffer.data(), idx, cached.actual_size);
+  // Index is NOT compacted
+  // Set columns to enable num_rows() calculation
+  idx.columns = cols;
+
+  size_t actual_rows = idx.num_rows();
 
   // Pre-generate random access pattern
   std::mt19937_64 rng(42);
-  std::uniform_int_distribution<size_t> row_dist(0, rows - 1);
+  std::uniform_int_distribution<size_t> row_dist(0, actual_rows - 1);
   std::uniform_int_distribution<size_t> col_dist(0, cols - 1);
 
   std::vector<std::pair<size_t, size_t>> access_pattern(num_accesses);
@@ -290,7 +318,7 @@ static void BM_H6_RandomAccess_NoCompact(benchmark::State& state) {
 
   for (auto _ : state) {
     for (const auto& [row, col] : access_pattern) {
-      auto span = result.idx.get_field_span(row, col);
+      auto span = idx.get_field_span(row, col);
       benchmark::DoNotOptimize(span);
     }
     benchmark::ClobberMemory();
@@ -298,6 +326,7 @@ static void BM_H6_RandomAccess_NoCompact(benchmark::State& state) {
 
   state.counters["Accesses"] = static_cast<double>(num_accesses);
   state.counters["Threads"] = static_cast<double>(n_threads);
+  state.counters["IsFlat"] = static_cast<double>(idx.is_flat() ? 1 : 0);
   state.counters["AccessesPerSec"] = benchmark::Counter(
       static_cast<double>(num_accesses), benchmark::Counter::kIsIterationInvariantRate);
 }
@@ -312,13 +341,19 @@ static void BM_H6_RandomAccess_WithCompact(benchmark::State& state) {
   size_t num_accesses = 10000;
 
   auto& cached = get_or_create_csv(rows, cols);
-  libvroom::Parser parser(n_threads);
 
-  auto result = parser.parse(cached.buffer.data(), cached.actual_size);
-  result.compact();
+  // Use TwoPass directly and explicitly compact
+  libvroom::TwoPass tp;
+  libvroom::ParseIndex idx = tp.init(cached.actual_size, static_cast<size_t>(n_threads));
+  tp.parse(cached.buffer.data(), idx, cached.actual_size);
+  // Set columns to enable num_rows() calculation
+  idx.columns = cols;
+  idx.compact(); // Explicitly compact
+
+  size_t actual_rows = idx.num_rows();
 
   std::mt19937_64 rng(42);
-  std::uniform_int_distribution<size_t> row_dist(0, rows - 1);
+  std::uniform_int_distribution<size_t> row_dist(0, actual_rows - 1);
   std::uniform_int_distribution<size_t> col_dist(0, cols - 1);
 
   std::vector<std::pair<size_t, size_t>> access_pattern(num_accesses);
@@ -328,7 +363,7 @@ static void BM_H6_RandomAccess_WithCompact(benchmark::State& state) {
 
   for (auto _ : state) {
     for (const auto& [row, col] : access_pattern) {
-      auto span = result.idx.get_field_span(row, col);
+      auto span = idx.get_field_span(row, col);
       benchmark::DoNotOptimize(span);
     }
     benchmark::ClobberMemory();
@@ -336,6 +371,7 @@ static void BM_H6_RandomAccess_WithCompact(benchmark::State& state) {
 
   state.counters["Accesses"] = static_cast<double>(num_accesses);
   state.counters["Threads"] = static_cast<double>(n_threads);
+  state.counters["IsFlat"] = static_cast<double>(idx.is_flat() ? 1 : 0);
   state.counters["AccessesPerSec"] = benchmark::Counter(
       static_cast<double>(num_accesses), benchmark::Counter::kIsIterationInvariantRate);
 }
@@ -600,6 +636,108 @@ BENCHMARK(BM_H1_ColMajor_ColumnIteration)
     ->UseRealTime();
 
 BENCHMARK(BM_H1_TransposeOnly)->Apply(H1_Arguments)->Unit(benchmark::kMillisecond)->UseRealTime();
+
+/**
+ * @brief Full pipeline: parse + compact + iterate N columns (row-major).
+ *
+ * This benchmark measures the total cost of iterating multiple columns
+ * with row-major layout to establish break-even point with column-major.
+ */
+static void BM_H1_FullPipeline_RowMajor_MultiCol(benchmark::State& state) {
+  size_t rows = static_cast<size_t>(state.range(0));
+  size_t total_cols = static_cast<size_t>(state.range(1));
+  size_t cols_to_iterate = static_cast<size_t>(state.range(2));
+
+  auto& cached = get_or_create_csv(rows, total_cols);
+  libvroom::Parser parser(4);
+
+  for (auto _ : state) {
+    auto result = parser.parse(cached.buffer.data(), cached.actual_size);
+    result.compact(); // Row-major
+
+    // Iterate cols_to_iterate columns
+    uint64_t sum = 0;
+    for (size_t col = 0; col < cols_to_iterate; ++col) {
+      for (size_t row = 0; row < rows; ++row) {
+        auto span = result.idx.get_field_span(row, col);
+        sum += span.start;
+      }
+    }
+    benchmark::DoNotOptimize(sum);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(cached.actual_size * state.iterations()));
+  state.counters["Rows"] = static_cast<double>(rows);
+  state.counters["TotalCols"] = static_cast<double>(total_cols);
+  state.counters["ColsIterated"] = static_cast<double>(cols_to_iterate);
+  state.counters["FieldsAccessed"] = static_cast<double>(rows * cols_to_iterate);
+}
+
+/**
+ * @brief Full pipeline: parse + transpose + iterate N columns (column-major).
+ *
+ * This benchmark measures the total cost including transpose overhead
+ * to find when column-major layout pays off.
+ */
+static void BM_H1_FullPipeline_ColMajor_MultiCol(benchmark::State& state) {
+  size_t rows = static_cast<size_t>(state.range(0));
+  size_t total_cols = static_cast<size_t>(state.range(1));
+  size_t cols_to_iterate = static_cast<size_t>(state.range(2));
+
+  auto& cached = get_or_create_csv(rows, total_cols);
+  libvroom::Parser parser(4);
+
+  for (auto _ : state) {
+    auto result = parser.parse(cached.buffer.data(), cached.actual_size);
+    result.idx.compact_column_major(4); // Column-major transpose
+
+    // Iterate cols_to_iterate columns (contiguous access per column)
+    uint64_t sum = 0;
+    if (result.idx.col_indexes) {
+      for (size_t col = 0; col < cols_to_iterate; ++col) {
+        const uint64_t* col_data = result.idx.column(col);
+        if (col_data) {
+          for (size_t row = 0; row < rows; ++row) {
+            sum += col_data[row];
+          }
+        }
+      }
+    }
+    benchmark::DoNotOptimize(sum);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(cached.actual_size * state.iterations()));
+  state.counters["Rows"] = static_cast<double>(rows);
+  state.counters["TotalCols"] = static_cast<double>(total_cols);
+  state.counters["ColsIterated"] = static_cast<double>(cols_to_iterate);
+  state.counters["FieldsAccessed"] = static_cast<double>(rows * cols_to_iterate);
+}
+
+// H1 Break-even registration - vary columns iterated to find break-even
+static void H1_BreakEven_Arguments(benchmark::internal::Benchmark* b) {
+  // (rows, total_cols, cols_to_iterate)
+  // Test 1M rows x 10 cols, iterating 1, 2, 5, 10 columns
+  b->Args({1000000, 10, 1});
+  b->Args({1000000, 10, 2});
+  b->Args({1000000, 10, 5});
+  b->Args({1000000, 10, 10});
+  // Test 100K rows x 100 cols, iterating various amounts
+  b->Args({100000, 100, 1});
+  b->Args({100000, 100, 5});
+  b->Args({100000, 100, 10});
+  b->Args({100000, 100, 50});
+  b->Args({100000, 100, 100});
+}
+
+BENCHMARK(BM_H1_FullPipeline_RowMajor_MultiCol)
+    ->Apply(H1_BreakEven_Arguments)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
+
+BENCHMARK(BM_H1_FullPipeline_ColMajor_MultiCol)
+    ->Apply(H1_BreakEven_Arguments)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
 
 // ============================================================================
 // H3: Synchronization Barrier Overhead

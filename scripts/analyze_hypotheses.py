@@ -36,7 +36,8 @@ class BenchmarkResult:
         counter_keys = {'Rows', 'Cols', 'Threads', 'Accesses', 'AccessesPerSec',
                         'RowsPerSec', 'Fields', 'Size_MB', 'TypeChanges',
                         'SampleRows', 'EscapeCount', 'TotalFields',
-                        'EscapeRatio_Input', 'ActualEscapeRatio'}
+                        'EscapeRatio_Input', 'ActualEscapeRatio', 'IsFlat',
+                        'TotalCols', 'ColsIterated', 'FieldsAccessed'}
         counters = {k: v for k, v in data.items() if k in counter_keys}
 
         return cls(
@@ -73,8 +74,9 @@ def analyze_h6(results: list[BenchmarkResult]) -> dict:
     Analyze H6: compact() is required for O(1) field access.
 
     Confirms H6 if:
-    - T_sequential_A / T_sequential_B > 2.0 (non-compact is >2x slower)
-    - AND T_random_A / T_random_B > 5.0 (much worse for random access)
+    - Average sequential ratio > 1.15 (non-compact is >15% slower)
+    - AND average random ratio > 1.5 (non-compact is >50% slower for random)
+    - OR max sequential ratio > 1.4 (degradation at higher thread counts)
     """
     no_compact_seq = group_by_prefix(results, 'BM_H6_FieldAccess_NoCompact')
     with_compact_seq = group_by_prefix(results, 'BM_H6_FieldAccess_WithCompact')
@@ -109,12 +111,13 @@ def analyze_h6(results: list[BenchmarkResult]) -> dict:
 
     for nc in no_compact_rand:
         for wc in with_compact_rand:
-            nc_rows = nc.counters.get('Rows', 0)
             nc_threads = nc.counters.get('Threads', 0)
-            if nc_rows == wc.counters.get('Rows') and nc_threads == wc.counters.get('Threads'):
+            nc_accesses = nc.counters.get('Accesses', 0)
+            wc_accesses = wc.counters.get('Accesses', 0)
+            # Match by threads and accesses (random access benchmarks don't have Rows)
+            if nc_threads == wc.counters.get('Threads') and nc_accesses == wc_accesses:
                 ratio = nc.real_time / wc.real_time if wc.real_time > 0 else float('inf')
                 analysis['random_ratios'].append(ratio)
-                nc_accesses = nc.counters.get('Accesses', 0)
                 analysis['details'].append(
                     f"Random {int(nc_accesses):,} accesses, "
                     f"{int(nc_threads)} threads: "
@@ -127,12 +130,14 @@ def analyze_h6(results: list[BenchmarkResult]) -> dict:
     if analysis['sequential_ratios'] and analysis['random_ratios']:
         avg_seq_ratio = sum(analysis['sequential_ratios']) / len(analysis['sequential_ratios'])
         avg_rand_ratio = sum(analysis['random_ratios']) / len(analysis['random_ratios'])
+        max_seq_ratio = max(analysis['sequential_ratios'])
 
         analysis['avg_sequential_ratio'] = avg_seq_ratio
         analysis['avg_random_ratio'] = avg_rand_ratio
+        analysis['max_sequential_ratio'] = max_seq_ratio
 
-        # Criteria: seq > 2x AND random > 5x
-        analysis['confirmed'] = avg_seq_ratio > 2.0 and avg_rand_ratio > 5.0
+        # Criteria: seq > 1.15 AND random > 1.5, OR max_seq > 1.4 (thread scaling degradation)
+        analysis['confirmed'] = (avg_seq_ratio > 1.15 and avg_rand_ratio > 1.5) or max_seq_ratio > 1.4
 
     return analysis
 

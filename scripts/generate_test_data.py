@@ -263,6 +263,148 @@ def generate_threading_test(output_path: Path) -> None:
     print(f"  Done: {output_path / 'threading_500mb.csv'} ({current_size / (1024*1024):.1f}MB, {row_count:,} rows)")
 
 
+def generate_nyc_taxi_synthetic(output_path: Path, nrows: int = 1_000_000) -> None:
+    """
+    Generate synthetic NYC Taxi-like data with realistic column types.
+
+    This synthetic data mimics the NYC Taxi schema with:
+    - Integer IDs (VendorID, passenger_count, etc.)
+    - Floating point amounts (fare_amount, trip_distance, etc.)
+    - Timestamps (pickup/dropoff datetime)
+    - Location IDs (PULocationID, DOLocationID)
+    - Payment types and rate codes
+
+    Useful for H4 (escape sequences - rare in numeric data) and
+    H5 (type widening - decimal amounts that may need int->float).
+    """
+    print(f"Generating nyc_taxi_synthetic.csv ({nrows:,} rows)...")
+
+    headers = [
+        "VendorID", "tpep_pickup_datetime", "tpep_dropoff_datetime",
+        "passenger_count", "trip_distance", "RatecodeID",
+        "store_and_fwd_flag", "PULocationID", "DOLocationID",
+        "payment_type", "fare_amount", "extra", "mta_tax",
+        "tip_amount", "tolls_amount", "improvement_surcharge",
+        "total_amount", "congestion_surcharge"
+    ]
+
+    with open(output_path / "nyc_taxi_synthetic.csv", "w") as f:
+        f.write(",".join(headers) + "\n")
+
+        base_date = "2024-01-15 "
+
+        for i in range(nrows):
+            # Realistic NYC taxi data distributions
+            vendor_id = random.choice([1, 2])
+            hour = random.randint(0, 23)
+            minute = random.randint(0, 59)
+            pickup_time = f"{base_date}{hour:02d}:{minute:02d}:00"
+            duration_mins = max(1, int(random.gauss(15, 10)))
+            dropoff_hour = (hour + duration_mins // 60) % 24
+            dropoff_minute = (minute + duration_mins % 60) % 60
+            dropoff_time = f"{base_date}{dropoff_hour:02d}:{dropoff_minute:02d}:00"
+
+            passenger_count = random.choices([1, 2, 3, 4, 5, 6], weights=[70, 15, 8, 4, 2, 1])[0]
+            trip_distance = max(0.1, random.gauss(3.0, 2.5))
+            ratecode_id = random.choices([1, 2, 3, 4, 5, 6], weights=[90, 5, 2, 1, 1, 1])[0]
+            store_and_fwd = random.choice(["N", "Y"]) if random.random() < 0.01 else "N"
+            pu_location = random.randint(1, 265)
+            do_location = random.randint(1, 265)
+            payment_type = random.choices([1, 2, 3, 4], weights=[70, 25, 3, 2])[0]
+
+            # Fare calculations
+            base_fare = 3.0
+            per_mile = 2.5
+            fare_amount = base_fare + (trip_distance * per_mile)
+            extra = random.choice([0.0, 0.5, 1.0, 2.5]) if random.random() < 0.3 else 0.0
+            mta_tax = 0.5
+            tip_amount = round(fare_amount * random.uniform(0, 0.3), 2) if payment_type == 1 else 0.0
+            tolls_amount = round(random.uniform(0, 10), 2) if random.random() < 0.1 else 0.0
+            improvement_surcharge = 0.3
+            congestion_surcharge = 2.5 if pu_location <= 90 else 0.0
+            total_amount = fare_amount + extra + mta_tax + tip_amount + tolls_amount + improvement_surcharge + congestion_surcharge
+
+            row = [
+                str(vendor_id),
+                pickup_time,
+                dropoff_time,
+                str(passenger_count),
+                f"{trip_distance:.2f}",
+                str(ratecode_id),
+                store_and_fwd,
+                str(pu_location),
+                str(do_location),
+                str(payment_type),
+                f"{fare_amount:.2f}",
+                f"{extra:.2f}",
+                f"{mta_tax:.2f}",
+                f"{tip_amount:.2f}",
+                f"{tolls_amount:.2f}",
+                f"{improvement_surcharge:.2f}",
+                f"{total_amount:.2f}",
+                f"{congestion_surcharge:.2f}"
+            ]
+            f.write(",".join(row) + "\n")
+
+            if (i + 1) % 100000 == 0:
+                print(f"  {i + 1:,} rows written...")
+
+    print(f"  Done: {output_path / 'nyc_taxi_synthetic.csv'}")
+
+
+def generate_type_widening_test(output_path: Path, nrows: int = 1_000_000) -> None:
+    """
+    Generate test data for H5: Type widening detection.
+
+    Creates a file where some columns start as integers but contain
+    floats later, simulating real-world type inference challenges.
+
+    Column layout:
+    - col0: Always integer
+    - col1: Integer until row 50K, then floats (widening needed after sample)
+    - col2: Integer until row 500K, then floats (late widening)
+    - col3: Always float
+    - col4: Integer with occasional floats (sparse widening)
+    """
+    print(f"Generating type_widening_test.csv ({nrows:,} rows)...")
+
+    headers = ["always_int", "early_widen", "late_widen", "always_float", "sparse_widen"]
+
+    with open(output_path / "type_widening_test.csv", "w") as f:
+        f.write(",".join(headers) + "\n")
+
+        for i in range(nrows):
+            always_int = random.randint(0, 1000000)
+
+            # Early widening: ints for first 50K rows, then floats
+            if i < 50000:
+                early_widen = str(random.randint(0, 1000))
+            else:
+                early_widen = f"{random.uniform(0, 1000):.2f}"
+
+            # Late widening: ints for first 500K rows, then floats
+            if i < 500000:
+                late_widen = str(random.randint(0, 1000))
+            else:
+                late_widen = f"{random.uniform(0, 1000):.2f}"
+
+            always_float = f"{random.uniform(-1000, 1000):.4f}"
+
+            # Sparse widening: 99% ints, 1% floats randomly distributed
+            if random.random() < 0.01:
+                sparse_widen = f"{random.uniform(0, 1000):.2f}"
+            else:
+                sparse_widen = str(random.randint(0, 1000))
+
+            row = [str(always_int), early_widen, late_widen, always_float, sparse_widen]
+            f.write(",".join(row) + "\n")
+
+            if (i + 1) % 100000 == 0:
+                print(f"  {i + 1:,} rows written...")
+
+    print(f"  Done: {output_path / 'type_widening_test.csv'}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate test data files for hypothesis-driven benchmarks"
@@ -289,6 +431,21 @@ def main():
         default=42,
         help="Random seed for reproducibility (default: 42)"
     )
+    parser.add_argument(
+        "--taxi",
+        action="store_true",
+        help="Generate NYC Taxi-like synthetic data for H4/H5 testing"
+    )
+    parser.add_argument(
+        "--h5",
+        action="store_true",
+        help="Generate type widening test data for H5 testing"
+    )
+    parser.add_argument(
+        "--all-h4h5",
+        action="store_true",
+        help="Generate all H4/H5 test data (taxi + type widening)"
+    )
 
     args = parser.parse_args()
 
@@ -306,6 +463,19 @@ def main():
     if args.matrix_only:
         generate_variable_sizes(output_path)
         return
+
+    if args.taxi or args.all_h4h5:
+        generate_nyc_taxi_synthetic(output_path)
+        print()
+
+    if args.h5 or args.all_h4h5:
+        generate_type_widening_test(output_path)
+        print()
+
+    if args.taxi or args.h5 or args.all_h4h5:
+        # If only generating H4/H5 data, return early
+        if not (args.small or args.matrix_only):
+            return
 
     # Generate standard test files
     generate_narrow_1m(output_path)
