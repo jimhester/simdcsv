@@ -2007,13 +2007,13 @@ TEST_F(CAPITest, IndexCompact) {
   libvroom_error_t err = libvroom_parse(parser, buffer, index, nullptr, dialect);
   EXPECT_EQ(err, LIBVROOM_OK);
 
-  // Before compact: should not be flat
-  EXPECT_FALSE(libvroom_index_is_flat(index));
+  // After parsing: index is automatically compacted
+  EXPECT_TRUE(libvroom_index_is_flat(index));
 
-  // Compact the index
+  // Calling compact again is idempotent (no-op)
   libvroom_index_compact(index);
 
-  // After compact: should be flat
+  // Still flat after redundant compact call
   EXPECT_TRUE(libvroom_index_is_flat(index));
 
   // Field access should still work correctly

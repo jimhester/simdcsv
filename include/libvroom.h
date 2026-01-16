@@ -2954,6 +2954,13 @@ public:
     }
 
     // =======================================================================
+    // Compact Index for O(1) Field Access
+    // =======================================================================
+    if (result.successful) {
+      result.idx.compact();
+    }
+
+    // =======================================================================
     // Write Cache on Miss (if caching enabled and parse successful)
     // =======================================================================
     if (can_use_cache && result.successful && !result.cache_path.empty()) {

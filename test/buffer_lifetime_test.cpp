@@ -228,11 +228,11 @@ TEST_F(BufferLifetimeTest, SharedIndexPreservesMetadata) {
   EXPECT_EQ(shared->region_size, original_region_size);
 }
 
-// Test: share() correctly handles compact() called after first share()
-// This tests an edge case where:
-// 1. First share() converts unique_ptr to shared_ptr
-// 2. compact() is called, creating new flat_indexes_ptr_
-// 3. Second share() must correctly convert flat_indexes_ptr_ to shared
+// Test: share() preserves flat index after automatic compaction
+// Parsing now automatically compacts the index, so we verify that:
+// 1. The index is already flat after parsing
+// 2. share() preserves the flat index
+// 3. Field access works on shared copies after original is destroyed
 TEST_F(BufferLifetimeTest, ShareAfterCompactPreservesFlatIndex) {
   auto buffer = make_buffer("name,value,extra\ntest,42,x\nalpha,99,y\n");
 
@@ -240,16 +240,19 @@ TEST_F(BufferLifetimeTest, ShareAfterCompactPreservesFlatIndex) {
   auto result = parser.parse(buffer->data(), buffer->size() - 64);
   result.idx.set_buffer(buffer);
 
+  // Index is automatically compacted after parsing
+  EXPECT_TRUE(result.idx.is_flat());
+
   // First share() - converts to shared ownership
   auto shared1 = result.idx.share();
   EXPECT_TRUE(result.idx.is_shared());
-  EXPECT_FALSE(result.idx.is_flat()); // Not yet compacted
+  EXPECT_TRUE(shared1->is_flat());
 
-  // Compact after sharing
+  // Calling compact() again is idempotent (does nothing)
   result.idx.compact();
   EXPECT_TRUE(result.idx.is_flat());
 
-  // Second share() - must correctly handle flat_indexes_ptr_
+  // Second share() - should preserve flat index
   auto shared2 = result.idx.share();
   EXPECT_TRUE(shared2->is_flat());
   EXPECT_EQ(shared2->flat_indexes_count, result.idx.flat_indexes_count);
