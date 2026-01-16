@@ -1727,7 +1727,9 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
                size_t num_threads = 1, std::optional<bool> memory_map = std::nullopt,
                std::optional<PyProgressCallback> progress = std::nullopt,
                std::optional<std::string> sampling_strategy = std::nullopt,
-               size_t sample_locations = 100, size_t rows_per_location = 100) {
+               size_t sample_locations = 100, size_t rows_per_location = 100,
+               std::optional<std::string> comment = std::nullopt,
+               bool skip_empty_rows = false) {
   auto data = std::make_shared<TableData>();
 
   // Configure null value handling
@@ -1822,6 +1824,17 @@ Table read_csv(const std::string& path, std::optional<std::string> delimiter = s
       }
     };
   }
+
+  // Set comment character (if provided)
+  if (comment) {
+    if (comment->length() != 1) {
+      throw py::value_error("comment must be a single character");
+    }
+    options.comment = (*comment)[0];
+  }
+
+  // Set skip_empty_rows option
+  options.skip_empty_rows = skip_empty_rows;
 
   // Parse
   libvroom::Parser parser(num_threads);
@@ -2682,7 +2695,8 @@ Examples
         py::arg("empty_is_null") = true, py::arg("dtype") = py::none(), py::arg("num_threads") = 1,
         py::arg("memory_map") = py::none(), py::arg("progress") = py::none(),
         py::arg("sampling_strategy") = py::none(), py::arg("sample_locations") = 100,
-        py::arg("rows_per_location") = 100,
+        py::arg("rows_per_location") = 100, py::arg("comment") = py::none(),
+        py::arg("skip_empty_rows") = false,
         R"doc(
 Read a CSV file and return a Table object.
 
@@ -2757,6 +2771,13 @@ rows_per_location : int, default 100
     Number of contiguous rows to sample at each location for distributed
     sampling. Only used when sampling_strategy="distributed". Total samples
     will be approximately sample_locations * rows_per_location (10,000 by default).
+comment : str, optional
+    A single character that marks comment lines. Lines starting with this
+    character are skipped during parsing. If not specified, no comment
+    handling is performed.
+skip_empty_rows : bool, default False
+    If True, rows containing only whitespace are skipped during parsing.
+    This is useful for files that contain blank lines between data rows.
 
 Returns
 -------
@@ -2826,6 +2847,12 @@ Examples
 
 >>> # Custom distributed sampling configuration
 >>> table = vroom_csv.read_csv("data.csv", sample_locations=50, rows_per_location=200)
+
+>>> # Skip comment lines starting with #
+>>> table = vroom_csv.read_csv("data.csv", comment="#")
+
+>>> # Skip empty/blank lines
+>>> table = vroom_csv.read_csv("data.csv", skip_empty_rows=True)
 
 >>> # Convert to Polars
 >>> import polars as pl

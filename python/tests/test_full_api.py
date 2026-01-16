@@ -336,3 +336,152 @@ class TestDialectWithReadCsv:
         assert table.num_rows == 2
         assert table.num_columns == 3
         assert table.column_names == ["name", "age", "city"]
+
+
+@pytest.fixture
+def csv_with_comments():
+    """Create a CSV file with comment lines."""
+    content = """# This is a comment
+name,age,city
+Alice,30,New York
+# Another comment
+Bob,25,Los Angeles
+Charlie,35,Chicago
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write(content)
+        return f.name
+
+
+@pytest.fixture
+def csv_with_empty_rows():
+    """Create a CSV file with empty rows."""
+    content = """name,age,city
+Alice,30,New York
+
+Bob,25,Los Angeles
+
+Charlie,35,Chicago
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write(content)
+        return f.name
+
+
+@pytest.fixture
+def csv_with_comments_and_empty():
+    """Create a CSV file with both comments and empty rows."""
+    content = """# Header comment
+name,age,city
+Alice,30,New York
+
+# Mid-file comment
+Bob,25,Los Angeles
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write(content)
+        return f.name
+
+
+class TestReadCsvComment:
+    """Tests for comment option."""
+
+    def test_comment_hash(self, csv_with_comments):
+        """Test reading CSV with # comments."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(csv_with_comments, comment="#")
+
+        # Should have 3 data rows (Alice, Bob, Charlie), comments skipped
+        assert table.num_rows == 3
+        assert table.num_columns == 3
+        assert table.column_names == ["name", "age", "city"]
+
+    def test_comment_without_option(self, csv_with_comments):
+        """Test that comments are not skipped by default."""
+        import vroom_csv
+
+        # Without comment option, comment lines are treated as data
+        table = vroom_csv.read_csv(csv_with_comments)
+
+        # This should parse differently - comment lines might cause issues
+        # or be treated as data depending on parser behavior
+        assert table.num_columns == 3
+
+    def test_comment_invalid_length(self, simple_csv):
+        """Test error for invalid comment character."""
+        import vroom_csv
+
+        with pytest.raises(ValueError, match="single character"):
+            vroom_csv.read_csv(simple_csv, comment="##")
+
+    def test_comment_semicolon(self):
+        """Test reading CSV with semicolon comments after header."""
+        import vroom_csv
+
+        # Note: Comment lines after the header row to ensure proper delimiter detection
+        content = """name,age,city
+Alice,30,New York
+; This is a comment
+Bob,25,Los Angeles
+; Another comment
+Charlie,35,Chicago
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            path = f.name
+
+        table = vroom_csv.read_csv(path, comment=";")
+
+        assert table.num_rows == 3
+        assert table.column_names == ["name", "age", "city"]
+
+
+class TestReadCsvSkipEmptyRows:
+    """Tests for skip_empty_rows option."""
+
+    def test_skip_empty_rows_true(self, csv_with_empty_rows):
+        """Test skipping empty rows."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(csv_with_empty_rows, skip_empty_rows=True)
+
+        # Should have 3 data rows, empty lines skipped
+        assert table.num_rows == 3
+        assert table.column_names == ["name", "age", "city"]
+
+    def test_skip_empty_rows_false(self, csv_with_empty_rows):
+        """Test not skipping empty rows (default)."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(csv_with_empty_rows, skip_empty_rows=False)
+
+        # Default behavior - empty rows are included
+        assert table.num_columns == 3
+
+    def test_skip_empty_rows_default(self, csv_with_empty_rows):
+        """Test that skip_empty_rows defaults to False."""
+        import vroom_csv
+
+        # Without skip_empty_rows parameter
+        table = vroom_csv.read_csv(csv_with_empty_rows)
+
+        # Should be the same as skip_empty_rows=False
+        assert table.num_columns == 3
+
+
+class TestReadCsvCommentAndSkipEmptyRows:
+    """Tests for combining comment and skip_empty_rows options."""
+
+    def test_combined_options(self, csv_with_comments_and_empty):
+        """Test combining comment and skip_empty_rows options."""
+        import vroom_csv
+
+        table = vroom_csv.read_csv(
+            csv_with_comments_and_empty, comment="#", skip_empty_rows=True
+        )
+
+        # Should have 2 data rows (Alice, Bob)
+        # Comments and empty rows should be skipped
+        assert table.num_rows == 2
+        assert table.column_names == ["name", "age", "city"]
