@@ -1076,6 +1076,7 @@ set(BENCHMARK_SOURCES
     benchmark/number_parsing_benchmarks.cpp
     benchmark/error_collection_benchmark.cpp
     benchmark/parser_overhead_benchmarks.cpp
+    benchmark/row_reconstruction_benchmarks.cpp
 )
 
 # Add external parser benchmarks if any external parser is enabled
