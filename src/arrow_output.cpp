@@ -7,16 +7,20 @@
 #include "two_pass.h"
 
 #include <algorithm>
+#include <arrow/array.h>
+#include <arrow/buffer.h>
 #include <arrow/builder.h>
 #include <arrow/io/file.h>
 #include <arrow/ipc/writer.h>
 #include <arrow/table.h>
+#include <arrow/util/bit_util.h>
 #include <cassert>
 #include <cctype>
 #include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 
@@ -439,67 +443,263 @@ std::shared_ptr<arrow::Schema> ArrowConverter::build_schema(const std::vector<st
 arrow::Result<std::shared_ptr<arrow::Array>>
 ArrowConverter::build_string_column(const uint8_t* buf, const std::vector<FieldRange>& ranges,
                                     const Dialect& dialect) {
-  arrow::StringBuilder builder(options_.memory_pool);
-  ARROW_RETURN_NOT_OK(builder.Reserve(static_cast<int64_t>(ranges.size())));
+  const int64_t n = static_cast<int64_t>(ranges.size());
+  if (n == 0) {
+    return arrow::MakeEmptyArray(arrow::utf8());
+  }
+
+  // Get memory pool (default if not specified)
+  arrow::MemoryPool* pool =
+      options_.memory_pool ? options_.memory_pool : arrow::default_memory_pool();
+
+  // First pass: calculate total data size and identify nulls
+  int64_t total_data_bytes = 0;
+  int64_t null_count = 0;
   for (const auto& range : ranges) {
     auto cell = extract_field(buf, range.start, range.end, dialect);
-    if (is_null_value(cell))
-      ARROW_RETURN_NOT_OK(builder.AppendNull());
-    else
-      ARROW_RETURN_NOT_OK(builder.Append(std::string(cell)));
+    if (is_null_value(cell)) {
+      null_count++;
+    } else {
+      total_data_bytes += static_cast<int64_t>(cell.size());
+    }
   }
-  return builder.Finish();
+
+  // Check for overflow: Arrow utf8 type uses int32_t offsets
+  if (total_data_bytes > static_cast<int64_t>(std::numeric_limits<int32_t>::max())) {
+    return arrow::Status::Invalid("Total string data size (", total_data_bytes,
+                                  " bytes) exceeds int32 offset limit for Arrow utf8 type");
+  }
+
+  // Check for allocation overflow: (n + 1) * sizeof(int32_t)
+  constexpr int64_t max_offsets = std::numeric_limits<int64_t>::max() / sizeof(int32_t) - 1;
+  if (n > max_offsets) {
+    return arrow::Status::Invalid("Too many strings (", n, ") for offset buffer allocation");
+  }
+
+  // Allocate buffers directly
+  // Offsets buffer: (n + 1) int32 values
+  ARROW_ASSIGN_OR_RAISE(auto offsets_buffer,
+                        arrow::AllocateBuffer((n + 1) * sizeof(int32_t), pool));
+  int32_t* offsets = reinterpret_cast<int32_t*>(offsets_buffer->mutable_data());
+
+  // Data buffer for string content
+  ARROW_ASSIGN_OR_RAISE(auto data_buffer, arrow::AllocateBuffer(total_data_bytes, pool));
+  uint8_t* data = data_buffer->mutable_data();
+
+  // Validity bitmap (if any nulls)
+  std::shared_ptr<arrow::Buffer> validity_buffer;
+  uint8_t* validity = nullptr;
+  if (null_count > 0) {
+    const int64_t validity_bytes = arrow::bit_util::BytesForBits(n);
+    ARROW_ASSIGN_OR_RAISE(validity_buffer, arrow::AllocateBuffer(validity_bytes, pool));
+    validity = validity_buffer->mutable_data();
+    // Initialize to all valid (1s)
+    std::memset(validity, 0xFF, static_cast<size_t>(validity_bytes));
+  }
+
+  // Second pass: copy data directly and fill offsets
+  int32_t current_offset = 0;
+  offsets[0] = 0;
+  int64_t data_pos = 0;
+
+  for (int64_t i = 0; i < n; ++i) {
+    auto cell = extract_field(buf, ranges[static_cast<size_t>(i)].start,
+                              ranges[static_cast<size_t>(i)].end, dialect);
+    if (is_null_value(cell)) {
+      // Mark as null in validity bitmap
+      if (validity) {
+        arrow::bit_util::ClearBit(validity, i);
+      }
+      // Offset stays the same for null values
+      offsets[i + 1] = current_offset;
+    } else {
+      // Copy string data directly with memcpy
+      const int32_t str_len = static_cast<int32_t>(cell.size());
+      if (str_len > 0) {
+        std::memcpy(data + data_pos, cell.data(), static_cast<size_t>(str_len));
+        data_pos += str_len;
+      }
+      current_offset += str_len;
+      offsets[i + 1] = current_offset;
+    }
+  }
+
+  // Create StringArray from buffers using ArrayData
+  auto array_data = arrow::ArrayData::Make(
+      arrow::utf8(), n,
+      {std::move(validity_buffer), std::move(offsets_buffer), std::move(data_buffer)}, null_count);
+
+  return arrow::MakeArray(array_data);
 }
 
 arrow::Result<std::shared_ptr<arrow::Array>>
 ArrowConverter::build_int64_column(const uint8_t* buf, const std::vector<FieldRange>& ranges,
                                    const Dialect& dialect) {
-  arrow::Int64Builder builder(options_.memory_pool);
-  ARROW_RETURN_NOT_OK(builder.Reserve(static_cast<int64_t>(ranges.size())));
-  for (const auto& range : ranges) {
-    auto cell = extract_field(buf, range.start, range.end, dialect);
-    if (is_null_value(cell))
-      ARROW_RETURN_NOT_OK(builder.AppendNull());
-    else if (auto v = parse_int64(cell))
-      ARROW_RETURN_NOT_OK(builder.Append(*v));
-    else
-      ARROW_RETURN_NOT_OK(builder.AppendNull());
+  const int64_t n = static_cast<int64_t>(ranges.size());
+  if (n == 0) {
+    return arrow::MakeEmptyArray(arrow::int64());
   }
-  return builder.Finish();
+
+  // Get memory pool
+  arrow::MemoryPool* pool =
+      options_.memory_pool ? options_.memory_pool : arrow::default_memory_pool();
+
+  // Check for allocation overflow: n * sizeof(int64_t)
+  constexpr int64_t max_elements = std::numeric_limits<int64_t>::max() / sizeof(int64_t);
+  if (n > max_elements) {
+    return arrow::Status::Invalid("Too many elements (", n, ") for int64 buffer allocation");
+  }
+
+  // Allocate data buffer
+  ARROW_ASSIGN_OR_RAISE(auto data_buffer, arrow::AllocateBuffer(n * sizeof(int64_t), pool));
+  int64_t* data = reinterpret_cast<int64_t*>(data_buffer->mutable_data());
+
+  // Allocate validity bitmap
+  const int64_t validity_bytes = arrow::bit_util::BytesForBits(n);
+  ARROW_ASSIGN_OR_RAISE(auto validity_buffer, arrow::AllocateBuffer(validity_bytes, pool));
+  uint8_t* validity = validity_buffer->mutable_data();
+  // Initialize to all valid (1s)
+  std::memset(validity, 0xFF, static_cast<size_t>(validity_bytes));
+
+  // Single pass: parse values directly into buffer
+  int64_t null_count = 0;
+  for (int64_t i = 0; i < n; ++i) {
+    auto cell = extract_field(buf, ranges[static_cast<size_t>(i)].start,
+                              ranges[static_cast<size_t>(i)].end, dialect);
+    if (is_null_value(cell)) {
+      arrow::bit_util::ClearBit(validity, i);
+      data[i] = 0; // Zero fill nulls
+      null_count++;
+    } else if (auto v = parse_int64(cell)) {
+      data[i] = *v;
+    } else {
+      // Parse failure -> null
+      arrow::bit_util::ClearBit(validity, i);
+      data[i] = 0;
+      null_count++;
+    }
+  }
+
+  // Create Int64Array from buffers
+  std::shared_ptr<arrow::Buffer> validity_result =
+      null_count > 0 ? std::move(validity_buffer) : nullptr;
+  auto array_data = arrow::ArrayData::Make(
+      arrow::int64(), n, {std::move(validity_result), std::move(data_buffer)}, null_count);
+
+  return arrow::MakeArray(array_data);
 }
 
 arrow::Result<std::shared_ptr<arrow::Array>>
 ArrowConverter::build_double_column(const uint8_t* buf, const std::vector<FieldRange>& ranges,
                                     const Dialect& dialect) {
-  arrow::DoubleBuilder builder(options_.memory_pool);
-  ARROW_RETURN_NOT_OK(builder.Reserve(static_cast<int64_t>(ranges.size())));
-  for (const auto& range : ranges) {
-    auto cell = extract_field(buf, range.start, range.end, dialect);
-    if (is_null_value(cell))
-      ARROW_RETURN_NOT_OK(builder.AppendNull());
-    else if (auto v = parse_double(cell))
-      ARROW_RETURN_NOT_OK(builder.Append(*v));
-    else
-      ARROW_RETURN_NOT_OK(builder.AppendNull());
+  const int64_t n = static_cast<int64_t>(ranges.size());
+  if (n == 0) {
+    return arrow::MakeEmptyArray(arrow::float64());
   }
-  return builder.Finish();
+
+  // Get memory pool
+  arrow::MemoryPool* pool =
+      options_.memory_pool ? options_.memory_pool : arrow::default_memory_pool();
+
+  // Check for allocation overflow: n * sizeof(double)
+  constexpr int64_t max_elements = std::numeric_limits<int64_t>::max() / sizeof(double);
+  if (n > max_elements) {
+    return arrow::Status::Invalid("Too many elements (", n, ") for double buffer allocation");
+  }
+
+  // Allocate data buffer
+  ARROW_ASSIGN_OR_RAISE(auto data_buffer, arrow::AllocateBuffer(n * sizeof(double), pool));
+  double* data = reinterpret_cast<double*>(data_buffer->mutable_data());
+
+  // Allocate validity bitmap
+  const int64_t validity_bytes = arrow::bit_util::BytesForBits(n);
+  ARROW_ASSIGN_OR_RAISE(auto validity_buffer, arrow::AllocateBuffer(validity_bytes, pool));
+  uint8_t* validity = validity_buffer->mutable_data();
+  // Initialize to all valid (1s)
+  std::memset(validity, 0xFF, static_cast<size_t>(validity_bytes));
+
+  // Single pass: parse values directly into buffer
+  int64_t null_count = 0;
+  for (int64_t i = 0; i < n; ++i) {
+    auto cell = extract_field(buf, ranges[static_cast<size_t>(i)].start,
+                              ranges[static_cast<size_t>(i)].end, dialect);
+    if (is_null_value(cell)) {
+      arrow::bit_util::ClearBit(validity, i);
+      data[i] = 0.0; // Zero fill nulls
+      null_count++;
+    } else if (auto v = parse_double(cell)) {
+      data[i] = *v;
+    } else {
+      // Parse failure -> null
+      arrow::bit_util::ClearBit(validity, i);
+      data[i] = 0.0;
+      null_count++;
+    }
+  }
+
+  // Create DoubleArray from buffers
+  std::shared_ptr<arrow::Buffer> validity_result =
+      null_count > 0 ? std::move(validity_buffer) : nullptr;
+  auto array_data = arrow::ArrayData::Make(
+      arrow::float64(), n, {std::move(validity_result), std::move(data_buffer)}, null_count);
+
+  return arrow::MakeArray(array_data);
 }
 
 arrow::Result<std::shared_ptr<arrow::Array>>
 ArrowConverter::build_boolean_column(const uint8_t* buf, const std::vector<FieldRange>& ranges,
                                      const Dialect& dialect) {
-  arrow::BooleanBuilder builder(options_.memory_pool);
-  ARROW_RETURN_NOT_OK(builder.Reserve(static_cast<int64_t>(ranges.size())));
-  for (const auto& range : ranges) {
-    auto cell = extract_field(buf, range.start, range.end, dialect);
-    if (is_null_value(cell))
-      ARROW_RETURN_NOT_OK(builder.AppendNull());
-    else if (auto v = parse_boolean(cell))
-      ARROW_RETURN_NOT_OK(builder.Append(*v));
-    else
-      ARROW_RETURN_NOT_OK(builder.AppendNull());
+  const int64_t n = static_cast<int64_t>(ranges.size());
+  if (n == 0) {
+    return arrow::MakeEmptyArray(arrow::boolean());
   }
-  return builder.Finish();
+
+  // Get memory pool
+  arrow::MemoryPool* pool =
+      options_.memory_pool ? options_.memory_pool : arrow::default_memory_pool();
+
+  // Allocate data buffer (packed bits)
+  const int64_t data_bytes = arrow::bit_util::BytesForBits(n);
+  ARROW_ASSIGN_OR_RAISE(auto data_buffer, arrow::AllocateBuffer(data_bytes, pool));
+  uint8_t* data = data_buffer->mutable_data();
+  // Initialize to all zeros (false)
+  std::memset(data, 0, static_cast<size_t>(data_bytes));
+
+  // Allocate validity bitmap
+  const int64_t validity_bytes = arrow::bit_util::BytesForBits(n);
+  ARROW_ASSIGN_OR_RAISE(auto validity_buffer, arrow::AllocateBuffer(validity_bytes, pool));
+  uint8_t* validity = validity_buffer->mutable_data();
+  // Initialize to all valid (1s)
+  std::memset(validity, 0xFF, static_cast<size_t>(validity_bytes));
+
+  // Single pass: parse values and set bits directly
+  int64_t null_count = 0;
+  for (int64_t i = 0; i < n; ++i) {
+    auto cell = extract_field(buf, ranges[static_cast<size_t>(i)].start,
+                              ranges[static_cast<size_t>(i)].end, dialect);
+    if (is_null_value(cell)) {
+      arrow::bit_util::ClearBit(validity, i);
+      // Data bit already 0 (false) from memset
+      null_count++;
+    } else if (auto v = parse_boolean(cell)) {
+      if (*v) {
+        arrow::bit_util::SetBit(data, i);
+      }
+      // false values already have bit cleared from memset
+    } else {
+      // Parse failure -> null
+      arrow::bit_util::ClearBit(validity, i);
+      null_count++;
+    }
+  }
+
+  // Create BooleanArray from buffers
+  std::shared_ptr<arrow::Buffer> validity_result =
+      null_count > 0 ? std::move(validity_buffer) : nullptr;
+  auto array_data = arrow::ArrayData::Make(
+      arrow::boolean(), n, {std::move(validity_result), std::move(data_buffer)}, null_count);
+
+  return arrow::MakeArray(array_data);
 }
 
 arrow::Result<std::shared_ptr<arrow::Array>>

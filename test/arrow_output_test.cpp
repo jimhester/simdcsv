@@ -36,8 +36,8 @@ protected:
   ArrowConvertResult parseAndConvert(const std::string& csv,
                                      const ArrowConvertOptions& opts = ArrowConvertOptions()) {
     TestBuffer buf(csv);
-    two_pass parser;
-    index idx = parser.init(buf.len, 1);
+    TwoPass parser;
+    ParseIndex idx = parser.init(buf.len, 1);
     parser.parse(buf.data, idx, buf.len);
     ArrowConverter converter(opts);
     return converter.convert(buf.data, buf.len, idx);
@@ -978,13 +978,12 @@ TEST_F(ArrowOutputTest, RoundTripParquet) {
   auto input_result = arrow::io::ReadableFile::Open(tmp_path);
   ASSERT_TRUE(input_result.ok()) << input_result.status().ToString();
 
-  std::unique_ptr<parquet::arrow::FileReader> parquet_reader;
-  auto status =
-      parquet::arrow::OpenFile(*input_result, arrow::default_memory_pool(), &parquet_reader);
-  ASSERT_TRUE(status.ok()) << status.ToString();
+  auto reader_result = parquet::arrow::OpenFile(*input_result, arrow::default_memory_pool());
+  ASSERT_TRUE(reader_result.ok()) << reader_result.status().ToString();
+  auto parquet_reader = std::move(*reader_result);
 
   std::shared_ptr<arrow::Table> read_table;
-  status = parquet_reader->ReadTable(&read_table);
+  auto status = parquet_reader->ReadTable(&read_table);
   ASSERT_TRUE(status.ok()) << status.ToString();
 
   // Verify dimensions
