@@ -250,6 +250,43 @@ TEST_F(ArrowOutputTest, QuotedWithCommas) {
   EXPECT_EQ(result.num_rows, 1);
 }
 
+TEST_F(ArrowOutputTest, QuotedWithEscapedQuotes) {
+  // Test RFC 4180 escaped quotes: "" inside quoted field means literal "
+  auto result = parseAndConvert("name,quote\n\"John\",\"He said \"\"Hello\"\"\"\n");
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.num_columns, 2);
+  EXPECT_EQ(result.num_rows, 1);
+
+  // Verify the escaped quotes are properly unescaped
+  auto col = result.table->column(1);
+  ASSERT_EQ(col->type()->id(), arrow::Type::STRING);
+  auto string_array = std::static_pointer_cast<arrow::StringArray>(col->chunk(0));
+  EXPECT_EQ(string_array->GetString(0), "He said \"Hello\"");
+}
+
+TEST_F(ArrowOutputTest, QuotedWithMultipleEscapes) {
+  // Multiple escaped quotes in one field
+  auto result = parseAndConvert("text\n\"\"\"quoted\"\" and \"\"more\"\"\"\n");
+  ASSERT_TRUE(result.ok()) << result.error_message;
+
+  auto col = result.table->column(0);
+  auto string_array = std::static_pointer_cast<arrow::StringArray>(col->chunk(0));
+  EXPECT_EQ(string_array->GetString(0), "\"quoted\" and \"more\"");
+}
+
+TEST_F(ArrowOutputTest, MixedQuotedAndUnquoted) {
+  // Mix of unquoted, quoted without escapes, and quoted with escapes
+  auto result = parseAndConvert("text\nunquoted\n\"quoted\"\n\"has \"\"escape\"\"\"\n");
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.num_rows, 3);
+
+  auto col = result.table->column(0);
+  auto string_array = std::static_pointer_cast<arrow::StringArray>(col->chunk(0));
+  EXPECT_EQ(string_array->GetString(0), "unquoted");
+  EXPECT_EQ(string_array->GetString(1), "quoted");
+  EXPECT_EQ(string_array->GetString(2), "has \"escape\"");
+}
+
 // Special double values
 TEST_F(ArrowOutputTest, SpecialDoubleValues) {
   ArrowConvertOptions opts;
