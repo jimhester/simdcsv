@@ -83,6 +83,29 @@ using SecondPassProgressCallback = std::function<bool(size_t bytes_processed)>;
 constexpr static uint64_t null_pos = std::numeric_limits<uint64_t>::max();
 
 /**
+ * @brief Per-column escape sequence information for fast-path extraction.
+ *
+ * Tracks whether any field in a column contains quotes or escape sequences.
+ * This enables zero-copy string extraction for the majority of fields that
+ * are escape-free (96.4% of fields in typical CSV files per corpus analysis).
+ *
+ * Usage:
+ * - If !has_quotes: All fields are unquoted, direct string_view extraction
+ * - If has_quotes && !has_escapes: Strip outer quotes only, no copy needed
+ * - If has_escapes: Full escape processing required (doubled quotes, etc.)
+ */
+struct ColumnEscapeInfo {
+  bool has_quotes{false};  ///< Any field in column was quoted
+  bool has_escapes{false}; ///< Any field had escape sequences (doubled quotes)
+
+  /// Check if this column requires escape processing
+  bool needs_unescape() const { return has_escapes; }
+
+  /// Check if this column allows zero-copy extraction (may need quote stripping)
+  bool allows_zero_copy() const { return !has_escapes; }
+};
+
+/**
  * @brief Represents a field's byte boundaries in the source buffer.
  *
  * FieldSpan provides the byte range for a single CSV field, enabling
@@ -254,6 +277,12 @@ public:
   /// Should equal flat_indexes_count when both are populated.
   uint64_t col_indexes_count{0};
 
+  /// Per-column escape info for fast-path extraction.
+  /// Array of size `columns` indicating which columns have quotes/escapes.
+  /// Populated during parsing when columns is known.
+  /// @note This is a raw pointer accessor; memory is managed by col_escape_info_ptr_.
+  ColumnEscapeInfo* col_escape_info{nullptr};
+
   /// Default constructor. Creates an empty, uninitialized index.
   ParseIndex() = default;
 
@@ -270,12 +299,14 @@ public:
         n_indexes(other.n_indexes), indexes(other.indexes), chunk_starts(other.chunk_starts),
         region_offsets(other.region_offsets), flat_indexes(other.flat_indexes),
         flat_indexes_count(other.flat_indexes_count), col_indexes(other.col_indexes),
-        col_indexes_count(other.col_indexes_count), n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
+        col_indexes_count(other.col_indexes_count), col_escape_info(other.col_escape_info),
+        n_indexes_ptr_(std::move(other.n_indexes_ptr_)),
         indexes_ptr_(std::move(other.indexes_ptr_)),
         chunk_starts_ptr_(std::move(other.chunk_starts_ptr_)),
         region_offsets_ptr_(std::move(other.region_offsets_ptr_)),
         flat_indexes_ptr_(std::move(other.flat_indexes_ptr_)),
         col_indexes_ptr_(std::move(other.col_indexes_ptr_)),
+        col_escape_info_ptr_(std::move(other.col_escape_info_ptr_)),
         mmap_buffer_(std::move(other.mmap_buffer_)), buffer_(std::move(other.buffer_)),
         n_indexes_shared_(std::move(other.n_indexes_shared_)),
         indexes_shared_(std::move(other.indexes_shared_)),
@@ -290,6 +321,7 @@ public:
     other.flat_indexes_count = 0;
     other.col_indexes = nullptr;
     other.col_indexes_count = 0;
+    other.col_escape_info = nullptr;
   }
 
   /**
@@ -314,12 +346,14 @@ public:
       flat_indexes_count = other.flat_indexes_count;
       col_indexes = other.col_indexes;
       col_indexes_count = other.col_indexes_count;
+      col_escape_info = other.col_escape_info;
       n_indexes_ptr_ = std::move(other.n_indexes_ptr_);
       indexes_ptr_ = std::move(other.indexes_ptr_);
       chunk_starts_ptr_ = std::move(other.chunk_starts_ptr_);
       region_offsets_ptr_ = std::move(other.region_offsets_ptr_);
       flat_indexes_ptr_ = std::move(other.flat_indexes_ptr_);
       col_indexes_ptr_ = std::move(other.col_indexes_ptr_);
+      col_escape_info_ptr_ = std::move(other.col_escape_info_ptr_);
       mmap_buffer_ = std::move(other.mmap_buffer_);
       buffer_ = std::move(other.buffer_);
       n_indexes_shared_ = std::move(other.n_indexes_shared_);
@@ -335,6 +369,7 @@ public:
       other.flat_indexes_count = 0;
       other.col_indexes = nullptr;
       other.col_indexes_count = 0;
+      other.col_escape_info = nullptr;
     }
     return *this;
   }
@@ -490,6 +525,69 @@ public:
    * @return true if compact_column_major() has been called successfully.
    */
   bool is_column_major() const { return col_indexes != nullptr && col_indexes_count > 0; }
+
+  /**
+   * @brief Check if per-column escape info is available.
+   *
+   * @return true if compute_column_escape_info() has been called or info was
+   *         populated during parsing.
+   */
+  bool has_escape_info() const { return col_escape_info != nullptr && columns > 0; }
+
+  /**
+   * @brief Get escape info for a specific column.
+   *
+   * @param col Column index (0 to columns - 1).
+   * @return Pointer to ColumnEscapeInfo for the column, or nullptr if not available.
+   */
+  const ColumnEscapeInfo* get_escape_info(size_t col) const {
+    if (!has_escape_info() || col >= columns)
+      return nullptr;
+    return &col_escape_info[col];
+  }
+
+  /**
+   * @brief Check if a column allows zero-copy extraction.
+   *
+   * Returns true if the column has no escape sequences, meaning values can be
+   * extracted as string_views directly from the buffer (possibly with quote stripping).
+   *
+   * @param col Column index (0 to columns - 1).
+   * @return true if zero-copy extraction is possible, false if escape processing needed.
+   *         Returns false if escape info is not available (conservative default).
+   */
+  bool column_allows_zero_copy(size_t col) const {
+    const ColumnEscapeInfo* info = get_escape_info(col);
+    return info != nullptr && info->allows_zero_copy();
+  }
+
+  /**
+   * @brief Compute per-column escape info by scanning the buffer.
+   *
+   * Scans each field in the CSV to determine which columns have quoted fields
+   * and which have escape sequences. This information enables fast-path
+   * extraction for the 96%+ of columns that don't need escape processing.
+   *
+   * Call this method after parsing to populate escape info. The method uses
+   * the column-major index if available (O(cols) scans), otherwise falls back
+   * to the flat index or per-thread regions.
+   *
+   * @param buf Pointer to the CSV data buffer
+   * @param len Length of the buffer
+   * @param dialect Dialect to use for quote/escape character detection
+   *
+   * @note This method is idempotent - calling it multiple times has no effect
+   *       after the first successful call.
+   */
+  void compute_column_escape_info(const uint8_t* buf, size_t len, char quote_char = '"');
+
+  /**
+   * @brief Initialize empty escape info array.
+   *
+   * Allocates the escape info array based on the current column count.
+   * Called internally during parsing setup.
+   */
+  void init_column_escape_info();
 
   /**
    * @brief Get the number of rows in the parsed CSV.
@@ -814,6 +912,10 @@ private:
   /// RAII owner for col_indexes array (column-major layout).
   /// Memory freed automatically on destruction.
   std::unique_ptr<uint64_t[]> col_indexes_ptr_;
+
+  /// RAII owner for col_escape_info array.
+  /// Memory freed automatically on destruction.
+  std::unique_ptr<ColumnEscapeInfo[]> col_escape_info_ptr_;
 
   /// Memory-mapped buffer for mmap-backed indexes.
   /// When set, n_indexes and indexes point directly into this buffer's data.

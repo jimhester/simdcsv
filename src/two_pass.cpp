@@ -409,6 +409,133 @@ void ParseIndex::compact_column_major(size_t requested_threads) {
   flat_indexes_count = 0;
 }
 
+void ParseIndex::init_column_escape_info() {
+  // Skip if no columns or already initialized
+  if (columns == 0 || col_escape_info != nullptr) {
+    return;
+  }
+
+  // Allocate and zero-initialize the escape info array
+  col_escape_info_ptr_ = std::make_unique<ColumnEscapeInfo[]>(columns);
+  col_escape_info = col_escape_info_ptr_.get();
+
+  // Initialize all columns to escape-free (default constructor does this)
+  for (uint64_t col = 0; col < columns; ++col) {
+    col_escape_info[col] = ColumnEscapeInfo{};
+  }
+}
+
+void ParseIndex::compute_column_escape_info(const uint8_t* buf, size_t len, char quote_char) {
+  // Skip if already computed or invalid state
+  if (has_escape_info() || !is_valid() || columns == 0) {
+    return;
+  }
+
+  // Initialize the array
+  init_column_escape_info();
+  if (!has_escape_info()) {
+    return; // Allocation failed
+  }
+
+  uint64_t nrows = num_rows();
+  if (nrows == 0) {
+    return;
+  }
+
+  uint8_t q = static_cast<uint8_t>(quote_char);
+
+  // Scan each field to detect quotes and escapes
+  // Use column-major index if available for cache-friendly column scans
+  if (is_column_major()) {
+    for (uint64_t col = 0; col < columns; ++col) {
+      const uint64_t* col_data = column(col);
+      if (!col_data)
+        continue;
+
+      ColumnEscapeInfo& info = col_escape_info[col];
+
+      for (uint64_t row = 0; row < nrows && !info.has_escapes; ++row) {
+        uint64_t end_pos = col_data[row];
+        uint64_t start_pos;
+        if (row == 0 && col == 0) {
+          start_pos = 0;
+        } else if (col == 0) {
+          // First column: previous field is LAST column of PREVIOUS row
+          const uint64_t* last_col = column(columns - 1);
+          start_pos = last_col[row - 1] + 1;
+        } else {
+          // Get previous column's end position for this row
+          const uint64_t* prev_col = column(col - 1);
+          start_pos = prev_col[row] + 1;
+        }
+
+        // Bounds check
+        if (start_pos >= len || end_pos > len || start_pos > end_pos) {
+          continue;
+        }
+
+        // Check if field is quoted
+        if (buf[start_pos] == q) {
+          info.has_quotes = true;
+
+          // Look for doubled quotes (escape sequences)
+          // A doubled quote is "" inside a quoted field
+          for (size_t i = start_pos + 1; i + 1 < end_pos; ++i) {
+            if (buf[i] == q && buf[i + 1] == q) {
+              info.has_escapes = true;
+              break; // Found escape, no need to continue this column
+            }
+          }
+        }
+      }
+    }
+  } else {
+    // Fall back to row-major iteration using flat index or get_field_span
+    compact(); // Ensure flat index is available
+
+    if (!is_flat()) {
+      return; // Cannot proceed without flat index
+    }
+
+    for (uint64_t row = 0; row < nrows; ++row) {
+      for (uint64_t col = 0; col < columns; ++col) {
+        ColumnEscapeInfo& info = col_escape_info[col];
+
+        // Skip if we already know this column has escapes
+        if (info.has_escapes) {
+          continue;
+        }
+
+        uint64_t field_idx = row * columns + col;
+        if (field_idx >= flat_indexes_count) {
+          continue;
+        }
+
+        uint64_t end_pos = flat_indexes[field_idx];
+        uint64_t start_pos = (field_idx == 0) ? 0 : flat_indexes[field_idx - 1] + 1;
+
+        // Bounds check
+        if (start_pos >= len || end_pos > len || start_pos > end_pos) {
+          continue;
+        }
+
+        // Check if field is quoted
+        if (buf[start_pos] == q) {
+          info.has_quotes = true;
+
+          // Look for doubled quotes (escape sequences)
+          for (size_t i = start_pos + 1; i + 1 < end_pos; ++i) {
+            if (buf[i] == q && buf[i + 1] == q) {
+              info.has_escapes = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 void ParseIndex::write(const std::string& filename, const SourceMetadata& source_meta) {
   // Write to temp file, then atomic rename for crash safety
   std::string temp_path = filename + ".tmp";
