@@ -1114,6 +1114,7 @@ set(BENCHMARK_SOURCES
     benchmark/row_reconstruction_benchmarks.cpp
     benchmark/end_to_end_benchmarks.cpp
     benchmark/transpose_benchmarks.cpp
+    benchmark/hypothesis_benchmarks.cpp
     benchmark/escape_tracking_benchmarks.cpp
 )
 
