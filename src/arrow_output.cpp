@@ -440,6 +440,67 @@ std::shared_ptr<arrow::Schema> ArrowConverter::build_schema(const std::vector<st
   return arrow::schema(fields);
 }
 
+namespace {
+
+// Check if a quoted field contains escape sequences (doubled quotes)
+bool field_has_escape_seq(const char* data, size_t len, char quote_char) {
+  // Only check quoted fields that are at least 4 chars ("x"" minimum for escape)
+  if (len < 4 || data[0] != quote_char)
+    return false;
+
+  const char* p = data + 1;
+  const char* end = data + len - 1;
+  while (p + 1 < end) {
+    if (*p == quote_char && *(p + 1) == quote_char) {
+      return true;
+    }
+    ++p;
+  }
+  return false;
+}
+
+// Count escape sequences in a quoted field (each "" becomes ")
+size_t count_escape_sequences(const char* data, size_t len, char quote_char) {
+  if (len < 4 || data[0] != quote_char)
+    return 0;
+
+  size_t count = 0;
+  const char* p = data + 1;
+  const char* end = data + len - 1;
+  while (p + 1 < end) {
+    if (*p == quote_char && *(p + 1) == quote_char) {
+      count++;
+      p += 2;
+    } else {
+      ++p;
+    }
+  }
+  return count;
+}
+
+// Unescape a quoted field directly into a buffer, returns bytes written
+size_t unescape_field_into_buffer(uint8_t* out, const char* data, size_t len, char quote_char) {
+  if (len < 2)
+    return 0;
+
+  // Skip opening quote
+  const char* p = data + 1;
+  const char* end = data + len - 1; // Skip closing quote
+  uint8_t* out_start = out;
+
+  while (p < end) {
+    if (*p == quote_char && p + 1 < end && *(p + 1) == quote_char) {
+      *out++ = static_cast<uint8_t>(quote_char);
+      p += 2;
+    } else {
+      *out++ = static_cast<uint8_t>(*p++);
+    }
+  }
+  return static_cast<size_t>(out - out_start);
+}
+
+} // namespace
+
 arrow::Result<std::shared_ptr<arrow::Array>>
 ArrowConverter::build_string_column(const uint8_t* buf, const std::vector<FieldRange>& ranges,
                                     const Dialect& dialect) {
@@ -452,15 +513,50 @@ ArrowConverter::build_string_column(const uint8_t* buf, const std::vector<FieldR
   arrow::MemoryPool* pool =
       options_.memory_pool ? options_.memory_pool : arrow::default_memory_pool();
 
+  // Pre-scan to check if any field in the column has escape sequences
+  // This lets us skip per-field escape checks for columns without escapes
+  bool column_has_escapes = false;
+  for (const auto& range : ranges) {
+    if (range.start >= range.end)
+      continue;
+    const char* raw = reinterpret_cast<const char*>(buf + range.start);
+    size_t raw_len = range.end - range.start;
+    if (field_has_escape_seq(raw, raw_len, dialect.quote_char)) {
+      column_has_escapes = true;
+      break;
+    }
+  }
+
   // First pass: calculate total data size and identify nulls
+  // Account for quote stripping and escape sequence reduction
   int64_t total_data_bytes = 0;
   int64_t null_count = 0;
   for (const auto& range : ranges) {
+    const char* raw = reinterpret_cast<const char*>(buf + range.start);
+    size_t raw_len = range.end - range.start;
+
+    // Check for null using extract_field (handles quote stripping for comparison)
     auto cell = extract_field(buf, range.start, range.end, dialect);
     if (is_null_value(cell)) {
       null_count++;
+      continue;
+    }
+
+    // Calculate output size based on quoting and escapes
+    bool is_quoted =
+        (raw_len >= 2 && raw[0] == dialect.quote_char && raw[raw_len - 1] == dialect.quote_char);
+
+    if (!is_quoted) {
+      // Unquoted: use raw size
+      total_data_bytes += static_cast<int64_t>(raw_len);
+    } else if (!column_has_escapes) {
+      // Quoted but column has no escapes: strip quotes
+      total_data_bytes += static_cast<int64_t>(raw_len - 2);
     } else {
-      total_data_bytes += static_cast<int64_t>(cell.size());
+      // Quoted with potential escapes: count escape sequences
+      size_t escape_count = count_escape_sequences(raw, raw_len, dialect.quote_char);
+      // Output size = raw_len - 2 (quotes) - escape_count (each "" becomes ")
+      total_data_bytes += static_cast<int64_t>(raw_len - 2 - escape_count);
     }
   }
 
@@ -500,11 +596,15 @@ ArrowConverter::build_string_column(const uint8_t* buf, const std::vector<FieldR
   // Second pass: copy data directly and fill offsets
   int32_t current_offset = 0;
   offsets[0] = 0;
-  int64_t data_pos = 0;
+  uint8_t* data_ptr = data;
 
   for (int64_t i = 0; i < n; ++i) {
-    auto cell = extract_field(buf, ranges[static_cast<size_t>(i)].start,
-                              ranges[static_cast<size_t>(i)].end, dialect);
+    const auto& range = ranges[static_cast<size_t>(i)];
+    const char* raw = reinterpret_cast<const char*>(buf + range.start);
+    size_t raw_len = range.end - range.start;
+
+    // Check for null using extract_field
+    auto cell = extract_field(buf, range.start, range.end, dialect);
     if (is_null_value(cell)) {
       // Mark as null in validity bitmap
       if (validity) {
@@ -512,16 +612,34 @@ ArrowConverter::build_string_column(const uint8_t* buf, const std::vector<FieldR
       }
       // Offset stays the same for null values
       offsets[i + 1] = current_offset;
-    } else {
-      // Copy string data directly with memcpy
-      const int32_t str_len = static_cast<int32_t>(cell.size());
-      if (str_len > 0) {
-        std::memcpy(data + data_pos, cell.data(), static_cast<size_t>(str_len));
-        data_pos += str_len;
-      }
-      current_offset += str_len;
-      offsets[i + 1] = current_offset;
+      continue;
     }
+
+    // Determine if field is quoted
+    bool is_quoted =
+        (raw_len >= 2 && raw[0] == dialect.quote_char && raw[raw_len - 1] == dialect.quote_char);
+
+    size_t bytes_written = 0;
+    if (!is_quoted) {
+      // Unquoted field: direct memcpy
+      std::memcpy(data_ptr, raw, raw_len);
+      bytes_written = raw_len;
+    } else if (!column_has_escapes) {
+      // Quoted but column has no escapes: strip quotes, direct memcpy
+      std::memcpy(data_ptr, raw + 1, raw_len - 2);
+      bytes_written = raw_len - 2;
+    } else if (!field_has_escape_seq(raw, raw_len, dialect.quote_char)) {
+      // Column has escapes, but this field doesn't: strip quotes, direct memcpy
+      std::memcpy(data_ptr, raw + 1, raw_len - 2);
+      bytes_written = raw_len - 2;
+    } else {
+      // This field has escapes: unescape directly into buffer
+      bytes_written = unescape_field_into_buffer(data_ptr, raw, raw_len, dialect.quote_char);
+    }
+
+    data_ptr += bytes_written;
+    current_offset += static_cast<int32_t>(bytes_written);
+    offsets[i + 1] = current_offset;
   }
 
   // Create StringArray from buffers using ArrayData
