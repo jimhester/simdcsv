@@ -436,17 +436,110 @@ std::shared_ptr<arrow::Schema> ArrowConverter::build_schema(const std::vector<st
   return arrow::schema(fields);
 }
 
+namespace {
+
+// Check if a quoted field contains escape sequences (doubled quotes)
+bool field_has_escape_seq(const char* data, size_t len, char quote_char) {
+  // Only check quoted fields that are at least 4 chars ("x"" minimum for escape)
+  if (len < 4 || data[0] != quote_char)
+    return false;
+
+  const char* p = data + 1;
+  const char* end = data + len - 1;
+  while (p + 1 < end) {
+    if (*p == quote_char && *(p + 1) == quote_char) {
+      return true;
+    }
+    ++p;
+  }
+  return false;
+}
+
+// Unescape a quoted field into an output string (reuse buffer to avoid allocations)
+void unescape_field_into(std::string& out, const char* data, size_t len, char quote_char) {
+  out.clear();
+  if (len < 2)
+    return;
+
+  // Skip opening quote
+  const char* p = data + 1;
+  const char* end = data + len - 1; // Skip closing quote
+  out.reserve(end - p);
+
+  while (p < end) {
+    if (*p == quote_char && p + 1 < end && *(p + 1) == quote_char) {
+      out += quote_char;
+      p += 2;
+    } else {
+      out += *p++;
+    }
+  }
+}
+
+} // namespace
+
 arrow::Result<std::shared_ptr<arrow::Array>>
 ArrowConverter::build_string_column(const uint8_t* buf, const std::vector<FieldRange>& ranges,
                                     const Dialect& dialect) {
   arrow::StringBuilder builder(options_.memory_pool);
   ARROW_RETURN_NOT_OK(builder.Reserve(static_cast<int64_t>(ranges.size())));
+
+  // Pre-scan to check if any field in the column has escape sequences
+  // This lets us skip per-field escape checks for columns without escapes
+  bool column_has_escapes = false;
   for (const auto& range : ranges) {
+    if (range.start >= range.end)
+      continue;
+    const char* raw = reinterpret_cast<const char*>(buf + range.start);
+    size_t raw_len = range.end - range.start;
+    if (field_has_escape_seq(raw, raw_len, dialect.quote_char)) {
+      column_has_escapes = true;
+      break;
+    }
+  }
+
+  // Scratch buffer for unescaping - reused across all fields
+  std::string scratch;
+
+  for (const auto& range : ranges) {
+    // Get raw field (including quotes if present)
+    const char* raw = reinterpret_cast<const char*>(buf + range.start);
+    size_t raw_len = range.end - range.start;
+
+    // Empty field
+    if (raw_len == 0) {
+      ARROW_RETURN_NOT_OK(builder.Append("", 0));
+      continue;
+    }
+
+    // Check for null value (need to strip quotes first for comparison)
     auto cell = extract_field(buf, range.start, range.end, dialect);
-    if (is_null_value(cell))
+    if (is_null_value(cell)) {
       ARROW_RETURN_NOT_OK(builder.AppendNull());
-    else
-      ARROW_RETURN_NOT_OK(builder.Append(std::string(cell)));
+      continue;
+    }
+
+    // Determine if field is quoted
+    bool is_quoted =
+        (raw_len >= 2 && raw[0] == dialect.quote_char && raw[raw_len - 1] == dialect.quote_char);
+
+    if (!is_quoted) {
+      // Unquoted field: direct append (1 copy)
+      ARROW_RETURN_NOT_OK(builder.Append(raw, static_cast<int64_t>(raw_len)));
+    } else if (!column_has_escapes) {
+      // Quoted but column has no escapes: strip quotes, direct append (1 copy)
+      ARROW_RETURN_NOT_OK(builder.Append(raw + 1, static_cast<int64_t>(raw_len - 2)));
+    } else {
+      // Column has some escapes - check this specific field
+      if (!field_has_escape_seq(raw, raw_len, dialect.quote_char)) {
+        // This field has no escapes: strip quotes, direct append (1 copy)
+        ARROW_RETURN_NOT_OK(builder.Append(raw + 1, static_cast<int64_t>(raw_len - 2)));
+      } else {
+        // This field has escapes: unescape into scratch buffer (2 copies but unavoidable)
+        unescape_field_into(scratch, raw, raw_len, dialect.quote_char);
+        ARROW_RETURN_NOT_OK(builder.Append(scratch.data(), static_cast<int64_t>(scratch.size())));
+      }
+    }
   }
   return builder.Finish();
 }

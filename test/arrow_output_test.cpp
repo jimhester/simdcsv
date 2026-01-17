@@ -36,8 +36,8 @@ protected:
   ArrowConvertResult parseAndConvert(const std::string& csv,
                                      const ArrowConvertOptions& opts = ArrowConvertOptions()) {
     TestBuffer buf(csv);
-    two_pass parser;
-    index idx = parser.init(buf.len, 1);
+    TwoPass parser;
+    ParseIndex idx = parser.init(buf.len, 1);
     parser.parse(buf.data, idx, buf.len);
     ArrowConverter converter(opts);
     return converter.convert(buf.data, buf.len, idx);
@@ -248,6 +248,43 @@ TEST_F(ArrowOutputTest, QuotedWithCommas) {
   ASSERT_TRUE(result.ok()) << result.error_message;
   EXPECT_EQ(result.num_columns, 3);
   EXPECT_EQ(result.num_rows, 1);
+}
+
+TEST_F(ArrowOutputTest, QuotedWithEscapedQuotes) {
+  // Test RFC 4180 escaped quotes: "" inside quoted field means literal "
+  auto result = parseAndConvert("name,quote\n\"John\",\"He said \"\"Hello\"\"\"\n");
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.num_columns, 2);
+  EXPECT_EQ(result.num_rows, 1);
+
+  // Verify the escaped quotes are properly unescaped
+  auto col = result.table->column(1);
+  ASSERT_EQ(col->type()->id(), arrow::Type::STRING);
+  auto string_array = std::static_pointer_cast<arrow::StringArray>(col->chunk(0));
+  EXPECT_EQ(string_array->GetString(0), "He said \"Hello\"");
+}
+
+TEST_F(ArrowOutputTest, QuotedWithMultipleEscapes) {
+  // Multiple escaped quotes in one field
+  auto result = parseAndConvert("text\n\"\"\"quoted\"\" and \"\"more\"\"\"\n");
+  ASSERT_TRUE(result.ok()) << result.error_message;
+
+  auto col = result.table->column(0);
+  auto string_array = std::static_pointer_cast<arrow::StringArray>(col->chunk(0));
+  EXPECT_EQ(string_array->GetString(0), "\"quoted\" and \"more\"");
+}
+
+TEST_F(ArrowOutputTest, MixedQuotedAndUnquoted) {
+  // Mix of unquoted, quoted without escapes, and quoted with escapes
+  auto result = parseAndConvert("text\nunquoted\n\"quoted\"\n\"has \"\"escape\"\"\"\n");
+  ASSERT_TRUE(result.ok()) << result.error_message;
+  EXPECT_EQ(result.num_rows, 3);
+
+  auto col = result.table->column(0);
+  auto string_array = std::static_pointer_cast<arrow::StringArray>(col->chunk(0));
+  EXPECT_EQ(string_array->GetString(0), "unquoted");
+  EXPECT_EQ(string_array->GetString(1), "quoted");
+  EXPECT_EQ(string_array->GetString(2), "has \"escape\"");
 }
 
 // Special double values
@@ -978,13 +1015,12 @@ TEST_F(ArrowOutputTest, RoundTripParquet) {
   auto input_result = arrow::io::ReadableFile::Open(tmp_path);
   ASSERT_TRUE(input_result.ok()) << input_result.status().ToString();
 
-  std::unique_ptr<parquet::arrow::FileReader> parquet_reader;
-  auto status =
-      parquet::arrow::OpenFile(*input_result, arrow::default_memory_pool(), &parquet_reader);
-  ASSERT_TRUE(status.ok()) << status.ToString();
+  auto reader_result = parquet::arrow::OpenFile(*input_result, arrow::default_memory_pool());
+  ASSERT_TRUE(reader_result.ok()) << reader_result.status().ToString();
+  auto parquet_reader = std::move(*reader_result);
 
   std::shared_ptr<arrow::Table> read_table;
-  status = parquet_reader->ReadTable(&read_table);
+  auto status = parquet_reader->ReadTable(&read_table);
   ASSERT_TRUE(status.ok()) << status.ToString();
 
   // Verify dimensions
