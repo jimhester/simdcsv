@@ -14,9 +14,10 @@ import pytest
 def simple_csv():
     """Create a simple CSV file for testing."""
     content = "name,age,city\nAlice,30,New York\nBob,25,Los Angeles\nCharlie,35,Chicago\n"
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
-        f.write(content)
-        yield f.name
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+    f.write(content)
+    f.close()
+    yield f.name
     os.unlink(f.name)
 
 
@@ -24,9 +25,10 @@ def simple_csv():
 def tsv_file():
     """Create a TSV file for testing."""
     content = "name\tage\tcity\nAlice\t30\tNew York\nBob\t25\tLos Angeles\nCharlie\t35\tChicago\n"
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv", delete=False) as f:
-        f.write(content)
-        yield f.name
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".tsv", delete=False)
+    f.write(content)
+    f.close()
+    yield f.name
     os.unlink(f.name)
 
 
@@ -34,9 +36,10 @@ def tsv_file():
 def no_header_csv():
     """Create a CSV file without header."""
     content = "Alice,30,New York\nBob,25,Los Angeles\nCharlie,35,Chicago\n"
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
-        f.write(content)
-        yield f.name
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+    f.write(content)
+    f.close()
+    yield f.name
     os.unlink(f.name)
 
 
