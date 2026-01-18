@@ -30,12 +30,12 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake build-essential ccache
+        sudo apt-get install -y cmake build-essential ccache libzstd-dev liblz4-dev libsnappy-dev
 
     - name: Install build dependencies (macOS)
       if: runner.os == 'macOS'
       run: |
-        brew install cmake ccache
+        brew install cmake ccache zstd lz4 snappy
 
     - name: Cache ccache
       uses: actions/cache@v4
