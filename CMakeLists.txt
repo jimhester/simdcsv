@@ -384,6 +384,7 @@ set(VROOM_SOURCES
     src/writer/statistics.cpp
     src/writer/dictionary.cpp
     src/simd/statistics_simd.cpp
+    src/writer/arrow_ipc_writer.cpp
 )
 
 add_library(vroom ${VROOM_SOURCES})

@@ -31,6 +31,9 @@
 #include "vroom/dictionary.h"
 #include "vroom/statistics.h"
 
+// Output formats
+#include "vroom/arrow_ipc_writer.h"
+
 // Re-export vroom namespace as libvroom for compatibility
 namespace libvroom = vroom;
 

@@ -203,6 +203,29 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
 }
 
 // =============================================================================
+// to_arrow_ipc function - CSV to Arrow IPC conversion
+// =============================================================================
+
+void to_arrow_ipc(const std::string& input_path, const std::string& output_path,
+                  std::optional<size_t> batch_size = std::nullopt,
+                  std::optional<size_t> num_threads = std::nullopt) {
+  vroom::CsvOptions csv_opts;
+  if (num_threads) {
+    csv_opts.num_threads = *num_threads;
+  }
+
+  vroom::ArrowIpcOptions ipc_opts;
+  if (batch_size) {
+    ipc_opts.batch_size = *batch_size;
+  }
+
+  auto result = vroom::convert_csv_to_arrow_ipc(input_path, output_path, csv_opts, ipc_opts);
+  if (!result.ok()) {
+    throw std::runtime_error(result.error);
+  }
+}
+
+// =============================================================================
 // Python module definition
 // =============================================================================
 
@@ -291,6 +314,33 @@ PYBIND11_MODULE(_core, m) {
         --------
         >>> import vroom_csv
         >>> vroom_csv.to_parquet("data.csv", "data.parquet")
+    )doc");
+
+  // to_arrow_ipc function
+  m.def("to_arrow_ipc", &to_arrow_ipc, py::arg("input_path"), py::arg("output_path"),
+        py::arg("batch_size") = py::none(), py::arg("num_threads") = py::none(),
+        R"doc(
+        Convert a CSV file to Arrow IPC format.
+
+        NOTE: This function is not yet implemented. It will raise an error
+        explaining that Arrow IPC output requires FlatBuffers integration.
+        Use to_parquet() for columnar output instead.
+
+        Parameters
+        ----------
+        input_path : str
+            Path to the input CSV file.
+        output_path : str
+            Path to the output Arrow IPC file (.arrow or .feather).
+        batch_size : int, optional
+            Number of rows per record batch. Default is 65536.
+        num_threads : int, optional
+            Number of threads to use. Default is auto-detect.
+
+        Raises
+        ------
+        RuntimeError
+            Always raised - Arrow IPC output is not yet implemented.
     )doc");
 
   // Version info
