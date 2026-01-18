@@ -14,7 +14,7 @@ else()
 endif()
 
 # Set C++ standard
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -191,6 +191,49 @@ set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
 set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(highway)
 
+# fast_float - SIMD float parsing
+FetchContent_Declare(
+    fast_float
+    GIT_REPOSITORY https://github.com/fastfloat/fast_float.git
+    GIT_TAG v6.1.1
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(fast_float)
+
+# simdutf - SIMD UTF-8 validation
+FetchContent_Declare(
+    simdutf
+    GIT_REPOSITORY https://github.com/simdutf/simdutf.git
+    GIT_TAG v5.5.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(simdutf)
+
+# BS::thread_pool - Lightweight thread pool
+FetchContent_Declare(
+    thread_pool
+    GIT_REPOSITORY https://github.com/bshoshany/thread-pool.git
+    GIT_TAG v4.1.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(thread_pool)
+
+# System compression libraries
+find_package(ZLIB REQUIRED)
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(ZSTD libzstd)
+    pkg_check_modules(LZ4 liblz4)
+    pkg_check_modules(SNAPPY snappy)
+endif()
+if(NOT ZSTD_FOUND)
+    find_library(ZSTD_LIBRARIES zstd)
+    find_path(ZSTD_INCLUDE_DIRS zstd.h)
+    if(ZSTD_LIBRARIES AND ZSTD_INCLUDE_DIRS)
+        set(ZSTD_FOUND TRUE)
+    endif()
+endif()
+
 # Google Benchmark for performance testing (only if benchmarks enabled)
 if(BUILD_BENCHMARKS)
     FetchContent_Declare(
@@ -212,17 +255,10 @@ if(BUILD_BENCHMARKS)
     option(ENABLE_ARROW_BENCHMARK "Enable Apache Arrow CSV parser benchmarks" OFF)
 endif()
 
-# Apache Arrow output integration (optional)
-option(LIBVROOM_ENABLE_ARROW "Enable Apache Arrow output integration" OFF)
-
-# Type detection module (optional, but ON by default for backward compatibility)
-option(LIBVROOM_ENABLE_TYPE_DETECTION "Enable type detection module (libvroom_types.h)" ON)
-
-if(LIBVROOM_ENABLE_TYPE_DETECTION)
-    message(STATUS "Type detection module enabled")
-else()
-    message(STATUS "Type detection module disabled (libvroom_types.h excluded)")
-endif()
+# Legacy options (kept for compatibility, but no longer used)
+# The new libvroom2 has built-in Parquet writer and type detection
+option(LIBVROOM_ENABLE_ARROW "Enable Apache Arrow output integration (legacy)" OFF)
+option(LIBVROOM_ENABLE_TYPE_DETECTION "Enable type detection module (always on in v2)" ON)
 
 # External benchmark parsers (only built if benchmarks enabled)
 if(BUILD_BENCHMARKS)
@@ -321,61 +357,84 @@ endif()
 
 # Library target (SHARED or STATIC based on BUILD_SHARED_LIBS)
 set(VROOM_SOURCES
-    src/io_util.cpp
-    src/error.cpp
-    src/dialect.cpp
-    src/encoding.cpp
-    src/index_cache.cpp
-    src/libvroom_c.cpp
-    src/mmap_util.cpp
-    src/value_extraction.cpp
-    src/streaming.cpp
-    src/two_pass.cpp
-    src/branchless_state_machine.cpp
-    src/simd_number_parsing.cpp
-    src/utf8.cpp
+    src/reader/mmap_source.cpp
+    src/reader/csv_reader.cpp
+    src/parser/chunk_finder.cpp
+    src/parser/simd_chunk_finder.cpp
+    src/parser/line_parser.cpp
+    src/parser/split_fields.cpp
+    src/parser/split_fields_iter.cpp
+    src/parser/quote_parity.cpp
+    src/parser/simd_atoi.cpp
+    src/schema/type_inference.cpp
+    src/schema/type_parsers.cpp
+    src/columns/column_builder.cpp
+    src/encoding/plain.cpp
+    src/encoding/rle.cpp
+    src/encoding/delta_bitpacked.cpp
+    src/encoding/delta_length.cpp
+    src/encoding/hybrid_rle.cpp
+    src/writer/thrift_compact.cpp
+    src/writer/parquet_types.cpp
+    src/writer/parquet_file.cpp
+    src/writer/row_group.cpp
+    src/writer/column_writer.cpp
+    src/writer/page_writer.cpp
+    src/writer/compression.cpp
+    src/writer/statistics.cpp
+    src/writer/dictionary.cpp
+    src/simd/statistics_simd.cpp
 )
-
-# Add SIMD dispatch source for dynamic dispatch (runtime CPU detection)
-if(NOT HWY_COMPILE_ONLY_STATIC)
-    list(APPEND VROOM_SOURCES src/simd_dispatch.cpp)
-endif()
-
-# Add type detection source if enabled
-if(LIBVROOM_ENABLE_TYPE_DETECTION)
-    list(APPEND VROOM_SOURCES src/libvroom_types.cpp)
-endif()
 
 add_library(vroom ${VROOM_SOURCES})
 
 target_include_directories(vroom PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/vroom
 )
 
 # Add source directory for Highway's foreach_target.h self-inclusion pattern
+# The -inl.h files use paths like "parser/simd_atoi-inl.h" relative to src/
 target_include_directories(vroom PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${thread_pool_SOURCE_DIR}/include
 )
 
 target_link_libraries(vroom PUBLIC
     hwy
+    fast_float
+    simdutf
+    ZLIB::ZLIB
 )
 
-# Optional Apache Arrow output integration
-include(cmake/ArrowIntegration.cmake)
+# Optional compression libraries
+if(ZSTD_FOUND)
+    target_link_libraries(vroom PUBLIC ${ZSTD_LIBRARIES})
+    target_include_directories(vroom PRIVATE ${ZSTD_INCLUDE_DIRS})
+    target_compile_definitions(vroom PRIVATE VROOM_HAVE_ZSTD)
+endif()
+if(LZ4_FOUND)
+    target_link_libraries(vroom PUBLIC ${LZ4_LIBRARIES})
+    target_include_directories(vroom PRIVATE ${LZ4_INCLUDE_DIRS})
+    target_compile_definitions(vroom PRIVATE VROOM_HAVE_LZ4)
+endif()
+if(SNAPPY_FOUND)
+    target_link_libraries(vroom PUBLIC ${SNAPPY_LIBRARIES})
+    target_include_directories(vroom PRIVATE ${SNAPPY_INCLUDE_DIRS})
+    target_compile_definitions(vroom PRIVATE VROOM_HAVE_SNAPPY)
+endif()
 
 # CLI utility (user-friendly CSV tool)
-add_executable(vroom-cli
-    src/cli.cpp
-)
-
-# Set output binary name to 'vroom' (target name is 'vroom-cli' to avoid conflict with library)
-set_target_properties(vroom-cli PROPERTIES OUTPUT_NAME vroom)
-
-target_link_libraries(vroom-cli PRIVATE
-    vroom
-    pthread
-)
+# NOTE: Temporarily disabled during Phase 2 migration. Will be updated in Phase 4.
+# add_executable(vroom-cli
+#     src/cli.cpp
+# )
+# set_target_properties(vroom-cli PROPERTIES OUTPUT_NAME vroom)
+# target_link_libraries(vroom-cli PRIVATE
+#     vroom
+#     pthread
+# )
 
 # =============================================================================
 # Testing (optional, controlled by BUILD_TESTING)
