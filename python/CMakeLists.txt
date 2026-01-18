@@ -23,13 +23,65 @@ endif()
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 
-# Set C++ standard
-set(CMAKE_CXX_STANDARD 17)
+# Set C++ standard (C++20 required for libvroom2)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Build position-independent code for shared libraries
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# =============================================================================
+# SIMD compiler flags for Highway
+# =============================================================================
+include(CheckCXXCompilerFlag)
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+    message(STATUS "Python bindings: Detected x86-64 architecture, enabling AVX2/SIMD flags")
+    set(SIMD_FLAGS "")
+
+    check_cxx_compiler_flag("-mavx2" HAVE_AVX2)
+    if(HAVE_AVX2)
+        list(APPEND SIMD_FLAGS "-mavx2")
+    endif()
+
+    check_cxx_compiler_flag("-mfma" HAVE_FMA)
+    if(HAVE_FMA)
+        list(APPEND SIMD_FLAGS "-mfma")
+    endif()
+
+    check_cxx_compiler_flag("-mbmi" HAVE_BMI)
+    if(HAVE_BMI)
+        list(APPEND SIMD_FLAGS "-mbmi")
+    endif()
+
+    check_cxx_compiler_flag("-mbmi2" HAVE_BMI2)
+    if(HAVE_BMI2)
+        list(APPEND SIMD_FLAGS "-mbmi2")
+    endif()
+
+    check_cxx_compiler_flag("-mf16c" HAVE_F16C)
+    if(HAVE_F16C)
+        list(APPEND SIMD_FLAGS "-mf16c")
+    endif()
+
+    check_cxx_compiler_flag("-maes" HAVE_AES)
+    if(HAVE_AES)
+        list(APPEND SIMD_FLAGS "-maes")
+    endif()
+
+    check_cxx_compiler_flag("-mpclmul" HAVE_PCLMUL)
+    if(HAVE_PCLMUL)
+        list(APPEND SIMD_FLAGS "-mpclmul")
+    endif()
+
+    if(SIMD_FLAGS)
+        message(STATUS "Python bindings: Enabling SIMD flags: ${SIMD_FLAGS}")
+        add_compile_options(${SIMD_FLAGS})
+    endif()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+    message(STATUS "Python bindings: Detected ARM64 architecture, NEON is enabled by default")
+endif()
 
 # SIMD dispatch option - default to dynamic for runtime CPU detection
 # This allows wheels to work across different CPU generations
@@ -45,8 +97,12 @@ endif()
 # Build libvroom as a static library (embedded in the Python extension)
 # =============================================================================
 
-# Fetch Google Highway (required by libvroom)
+# =============================================================================
+# Dependencies (fetched via FetchContent)
+# =============================================================================
 include(FetchContent)
+
+# Google Highway for portable SIMD
 FetchContent_Declare(
     highway
     GIT_REPOSITORY https://github.com/google/highway.git
@@ -61,37 +117,118 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(highway)
 set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_SAVED} CACHE BOOL "" FORCE)
 
-# libvroom source files (relative to parent directory)
+# fast_float - SIMD float parsing
+FetchContent_Declare(
+    fast_float
+    GIT_REPOSITORY https://github.com/fastfloat/fast_float.git
+    GIT_TAG v6.1.1
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(fast_float)
+
+# simdutf - SIMD UTF-8 validation
+FetchContent_Declare(
+    simdutf
+    GIT_REPOSITORY https://github.com/simdutf/simdutf.git
+    GIT_TAG v5.5.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(simdutf)
+
+# BS::thread_pool - Lightweight thread pool
+FetchContent_Declare(
+    thread_pool
+    GIT_REPOSITORY https://github.com/bshoshany/thread-pool.git
+    GIT_TAG v4.1.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(thread_pool)
+
+# System compression libraries
+find_package(ZLIB REQUIRED)
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(ZSTD libzstd)
+    pkg_check_modules(LZ4 liblz4)
+    pkg_check_modules(SNAPPY snappy)
+endif()
+if(NOT ZSTD_FOUND)
+    find_library(ZSTD_LIBRARIES zstd)
+    find_path(ZSTD_INCLUDE_DIRS zstd.h)
+    if(ZSTD_LIBRARIES AND ZSTD_INCLUDE_DIRS)
+        set(ZSTD_FOUND TRUE)
+    endif()
+endif()
+
+# =============================================================================
+# libvroom source files (libvroom2 architecture)
+# =============================================================================
 set(LIBVROOM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(VROOM_SOURCES
-    ${LIBVROOM_ROOT}/src/io_util.cpp
-    ${LIBVROOM_ROOT}/src/error.cpp
-    ${LIBVROOM_ROOT}/src/dialect.cpp
-    ${LIBVROOM_ROOT}/src/encoding.cpp
-    ${LIBVROOM_ROOT}/src/index_cache.cpp
-    ${LIBVROOM_ROOT}/src/libvroom_c.cpp
-    ${LIBVROOM_ROOT}/src/mmap_util.cpp
-    ${LIBVROOM_ROOT}/src/value_extraction.cpp
-    ${LIBVROOM_ROOT}/src/streaming.cpp
-    ${LIBVROOM_ROOT}/src/two_pass.cpp
-    ${LIBVROOM_ROOT}/src/branchless_state_machine.cpp
-    ${LIBVROOM_ROOT}/src/simd_number_parsing.cpp
-    ${LIBVROOM_ROOT}/src/utf8.cpp
-    ${LIBVROOM_ROOT}/src/libvroom_types.cpp
+    ${LIBVROOM_ROOT}/src/reader/mmap_source.cpp
+    ${LIBVROOM_ROOT}/src/reader/csv_reader.cpp
+    ${LIBVROOM_ROOT}/src/parser/chunk_finder.cpp
+    ${LIBVROOM_ROOT}/src/parser/simd_chunk_finder.cpp
+    ${LIBVROOM_ROOT}/src/parser/line_parser.cpp
+    ${LIBVROOM_ROOT}/src/parser/split_fields.cpp
+    ${LIBVROOM_ROOT}/src/parser/split_fields_iter.cpp
+    ${LIBVROOM_ROOT}/src/parser/quote_parity.cpp
+    ${LIBVROOM_ROOT}/src/parser/simd_atoi.cpp
+    ${LIBVROOM_ROOT}/src/schema/type_inference.cpp
+    ${LIBVROOM_ROOT}/src/schema/type_parsers.cpp
+    ${LIBVROOM_ROOT}/src/columns/column_builder.cpp
+    ${LIBVROOM_ROOT}/src/encoding/plain.cpp
+    ${LIBVROOM_ROOT}/src/encoding/rle.cpp
+    ${LIBVROOM_ROOT}/src/encoding/delta_bitpacked.cpp
+    ${LIBVROOM_ROOT}/src/encoding/delta_length.cpp
+    ${LIBVROOM_ROOT}/src/encoding/hybrid_rle.cpp
+    ${LIBVROOM_ROOT}/src/writer/thrift_compact.cpp
+    ${LIBVROOM_ROOT}/src/writer/parquet_types.cpp
+    ${LIBVROOM_ROOT}/src/writer/parquet_file.cpp
+    ${LIBVROOM_ROOT}/src/writer/row_group.cpp
+    ${LIBVROOM_ROOT}/src/writer/column_writer.cpp
+    ${LIBVROOM_ROOT}/src/writer/page_writer.cpp
+    ${LIBVROOM_ROOT}/src/writer/compression.cpp
+    ${LIBVROOM_ROOT}/src/writer/statistics.cpp
+    ${LIBVROOM_ROOT}/src/writer/dictionary.cpp
+    ${LIBVROOM_ROOT}/src/simd/statistics_simd.cpp
 )
-
-# Add SIMD dispatch source for dynamic dispatch (when HWY_COMPILE_ONLY_STATIC is OFF)
-if(NOT HWY_COMPILE_ONLY_STATIC)
-    message(STATUS "Dynamic SIMD dispatch enabled for Python bindings")
-    list(APPEND VROOM_SOURCES ${LIBVROOM_ROOT}/src/simd_dispatch.cpp)
-endif()
 
 # Build libvroom as a static library for embedding
 add_library(vroom_static STATIC ${VROOM_SOURCES})
-target_include_directories(vroom_static PUBLIC ${LIBVROOM_ROOT}/include)
+target_include_directories(vroom_static PUBLIC
+    ${LIBVROOM_ROOT}/include
+    ${LIBVROOM_ROOT}/include/vroom
+)
 # Add source directory for Highway's foreach_target.h self-inclusion pattern
-target_include_directories(vroom_static PRIVATE ${LIBVROOM_ROOT})
-target_link_libraries(vroom_static PUBLIC hwy)
+# The -inl.h files use paths like "parser/simd_atoi-inl.h" relative to src/
+target_include_directories(vroom_static PRIVATE
+    ${LIBVROOM_ROOT}
+    ${LIBVROOM_ROOT}/src
+    ${thread_pool_SOURCE_DIR}/include
+)
+target_link_libraries(vroom_static PUBLIC
+    hwy
+    fast_float
+    simdutf
+    ZLIB::ZLIB
+)
+# Optional compression libraries
+if(ZSTD_FOUND)
+    target_link_libraries(vroom_static PUBLIC ${ZSTD_LIBRARIES})
+    target_include_directories(vroom_static PRIVATE ${ZSTD_INCLUDE_DIRS})
+    target_compile_definitions(vroom_static PRIVATE VROOM_HAVE_ZSTD)
+endif()
+if(LZ4_FOUND)
+    target_link_libraries(vroom_static PUBLIC ${LZ4_LIBRARIES})
+    target_include_directories(vroom_static PRIVATE ${LZ4_INCLUDE_DIRS})
+    target_compile_definitions(vroom_static PRIVATE VROOM_HAVE_LZ4)
+endif()
+if(SNAPPY_FOUND)
+    target_link_libraries(vroom_static PUBLIC ${SNAPPY_LIBRARIES})
+    target_include_directories(vroom_static PRIVATE ${SNAPPY_INCLUDE_DIRS})
+    target_compile_definitions(vroom_static PRIVATE VROOM_HAVE_SNAPPY)
+endif()
 set_target_properties(vroom_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # =============================================================================
@@ -103,7 +240,10 @@ pybind11_add_module(_core MODULE
 )
 
 target_link_libraries(_core PRIVATE vroom_static)
-target_include_directories(_core PRIVATE ${LIBVROOM_ROOT}/include)
+target_include_directories(_core PRIVATE
+    ${LIBVROOM_ROOT}/include
+    ${LIBVROOM_ROOT}/include/vroom
+)
 
 # Compiler warnings
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
