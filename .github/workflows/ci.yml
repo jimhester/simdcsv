@@ -72,14 +72,6 @@ jobs:
       run: |
         ccache -s
 
-    - name: Run well-formed CSV tests
-      run: |
-        ./build/libvroom_test
-
-    - name: Run error handling tests
-      run: |
-        ./build/error_handling_test
-
     - name: Run all tests with CTest
       run: |
         cd build && ctest --output-on-failure --build-config ${{ matrix.build_type }} -j
