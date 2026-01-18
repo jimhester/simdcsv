@@ -10,16 +10,22 @@
 
 #include "libvroom.h"
 
+#include <atomic>
 #include <cstdio>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
+#include <unistd.h>
+
+// Counter to ensure unique file names across all tests
+static std::atomic<uint64_t> g_temp_file_counter{0};
 
 // Helper to create a temporary CSV file
 class TempCsvFile {
 public:
   explicit TempCsvFile(const std::string& content) {
-    path_ = "/tmp/vroom_test_" + std::to_string(rand()) + ".csv";
+    uint64_t id = g_temp_file_counter.fetch_add(1);
+    path_ = "/tmp/vroom_test_" + std::to_string(getpid()) + "_" + std::to_string(id) + ".csv";
     std::ofstream f(path_);
     f << content;
     f.close();
@@ -36,7 +42,10 @@ private:
 // Helper to create a temporary output path
 class TempOutputFile {
 public:
-  TempOutputFile() { path_ = "/tmp/vroom_test_" + std::to_string(rand()) + ".parquet"; }
+  TempOutputFile() {
+    uint64_t id = g_temp_file_counter.fetch_add(1);
+    path_ = "/tmp/vroom_test_" + std::to_string(getpid()) + "_" + std::to_string(id) + ".parquet";
+  }
 
   ~TempOutputFile() { std::remove(path_.c_str()); }
 
