@@ -425,16 +425,15 @@ if(SNAPPY_FOUND)
     target_compile_definitions(vroom PRIVATE VROOM_HAVE_SNAPPY)
 endif()
 
-# CLI utility (user-friendly CSV tool)
-# NOTE: Temporarily disabled during Phase 2 migration. Will be updated in Phase 4.
-# add_executable(vroom-cli
-#     src/cli.cpp
-# )
-# set_target_properties(vroom-cli PROPERTIES OUTPUT_NAME vroom)
-# target_link_libraries(vroom-cli PRIVATE
-#     vroom
-#     pthread
-# )
+# CLI utility (CSV to Parquet converter)
+add_executable(vroom-cli
+    src/cli.cpp
+)
+set_target_properties(vroom-cli PROPERTIES OUTPUT_NAME vroom)
+target_link_libraries(vroom-cli PRIVATE
+    vroom
+    pthread
+)
 
 # =============================================================================
 # Testing (optional, controlled by BUILD_TESTING)
