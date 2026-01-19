@@ -8,43 +8,79 @@
 namespace vroom {
 namespace writer {
 
+// Helper to merge min/max values - explicit type handling to avoid complex template expansion
+using StatValue = std::variant<std::monostate, bool, int32_t, int64_t, double, std::string>;
+
+static StatValue merge_min(const StatValue& av, const StatValue& bv) {
+  if (std::holds_alternative<std::monostate>(av))
+    return bv;
+  if (std::holds_alternative<std::monostate>(bv))
+    return av;
+
+  // Explicit type dispatch to avoid nested std::visit (clang segfault workaround)
+  if (auto* a_val = std::get_if<int32_t>(&av)) {
+    if (auto* b_val = std::get_if<int32_t>(&bv)) {
+      return *a_val < *b_val ? av : bv;
+    }
+  } else if (auto* a_val = std::get_if<int64_t>(&av)) {
+    if (auto* b_val = std::get_if<int64_t>(&bv)) {
+      return *a_val < *b_val ? av : bv;
+    }
+  } else if (auto* a_val = std::get_if<double>(&av)) {
+    if (auto* b_val = std::get_if<double>(&bv)) {
+      return *a_val < *b_val ? av : bv;
+    }
+  } else if (auto* a_val = std::get_if<std::string>(&av)) {
+    if (auto* b_val = std::get_if<std::string>(&bv)) {
+      return *a_val < *b_val ? av : bv;
+    }
+  } else if (auto* a_val = std::get_if<bool>(&av)) {
+    if (auto* b_val = std::get_if<bool>(&bv)) {
+      return (!*a_val) ? av : bv; // false < true
+    }
+  }
+  return av; // Type mismatch - keep first
+}
+
+static StatValue merge_max(const StatValue& av, const StatValue& bv) {
+  if (std::holds_alternative<std::monostate>(av))
+    return bv;
+  if (std::holds_alternative<std::monostate>(bv))
+    return av;
+
+  // Explicit type dispatch to avoid nested std::visit (clang segfault workaround)
+  if (auto* a_val = std::get_if<int32_t>(&av)) {
+    if (auto* b_val = std::get_if<int32_t>(&bv)) {
+      return *a_val > *b_val ? av : bv;
+    }
+  } else if (auto* a_val = std::get_if<int64_t>(&av)) {
+    if (auto* b_val = std::get_if<int64_t>(&bv)) {
+      return *a_val > *b_val ? av : bv;
+    }
+  } else if (auto* a_val = std::get_if<double>(&av)) {
+    if (auto* b_val = std::get_if<double>(&bv)) {
+      return *a_val > *b_val ? av : bv;
+    }
+  } else if (auto* a_val = std::get_if<std::string>(&av)) {
+    if (auto* b_val = std::get_if<std::string>(&bv)) {
+      return *a_val > *b_val ? av : bv;
+    }
+  } else if (auto* a_val = std::get_if<bool>(&av)) {
+    if (auto* b_val = std::get_if<bool>(&bv)) {
+      return *a_val ? av : bv; // true > false
+    }
+  }
+  return av; // Type mismatch - keep first
+}
+
 // Merge two statistics objects (for combining page stats into column stats)
 ColumnStatistics merge_statistics(const ColumnStatistics& a, const ColumnStatistics& b) {
   ColumnStatistics result;
 
   result.has_null = a.has_null || b.has_null;
   result.null_count = a.null_count + b.null_count;
-
-  // Merge min/max based on type
-  auto merge_variant = [](const auto& av, const auto& bv, bool is_min) -> decltype(av) {
-    // Handle monostate (no value)
-    if (std::holds_alternative<std::monostate>(av))
-      return bv;
-    if (std::holds_alternative<std::monostate>(bv))
-      return av;
-
-    // Both have values - compare based on type
-    return std::visit(
-        [&](const auto& a_val) -> decltype(av) {
-          using T = std::decay_t<decltype(a_val)>;
-          if constexpr (std::is_same_v<T, std::monostate>) {
-            return bv;
-          } else {
-            if (auto* b_val = std::get_if<T>(&bv)) {
-              if (is_min) {
-                return a_val < *b_val ? av : bv;
-              } else {
-                return a_val > *b_val ? av : bv;
-              }
-            }
-            return av; // Type mismatch - keep first
-          }
-        },
-        av);
-  };
-
-  result.min_value = merge_variant(a.min_value, b.min_value, true);
-  result.max_value = merge_variant(a.max_value, b.max_value, false);
+  result.min_value = merge_min(a.min_value, b.min_value);
+  result.max_value = merge_max(a.max_value, b.max_value);
 
   return result;
 }
