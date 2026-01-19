@@ -52,7 +52,8 @@ jobs:
           # Build x64 on Windows (ARM64 support requires additional work)
           CIBW_ARCHS_WINDOWS: AMD64
           # macOS: require 10.15+ for std::filesystem support, set Homebrew paths
-          CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=10.15 LIBRARY_PATH=/opt/homebrew/lib:/usr/local/lib CPATH=/opt/homebrew/include:/usr/local/include CMAKE_PREFIX_PATH=/opt/homebrew:/usr/local"
+          # CMAKE_BUILD_PARALLEL_LEVEL=2 to avoid memory issues causing clang segfaults
+          CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=10.15 LIBRARY_PATH=/opt/homebrew/lib:/usr/local/lib CPATH=/opt/homebrew/include:/usr/local/include CMAKE_PREFIX_PATH=/opt/homebrew:/usr/local CMAKE_BUILD_PARALLEL_LEVEL=2"
           # macOS: Install compression libraries via Homebrew
           CIBW_BEFORE_BUILD_MACOS: brew install zstd lz4 snappy || true
           # Linux: Install compression development libraries (manylinux2014 uses yum)
