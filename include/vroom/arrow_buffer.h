@@ -7,6 +7,19 @@
 #include <string_view>
 #include <vector>
 
+// Cross-platform inline/noinline macros
+#ifdef _MSC_VER
+#define VROOM_FORCE_INLINE __forceinline
+#define VROOM_NOINLINE __declspec(noinline)
+#define VROOM_LIKELY(x) (x)
+#define VROOM_UNLIKELY(x) (x)
+#else
+#define VROOM_FORCE_INLINE __attribute__((always_inline)) inline
+#define VROOM_NOINLINE __attribute__((noinline))
+#define VROOM_LIKELY(x) __builtin_expect(!!(x), 1)
+#define VROOM_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#endif
+
 namespace vroom {
 
 // Packed null bitmap - stores 8 null flags per byte
@@ -31,8 +44,8 @@ public:
   // Append a validity flag (true = valid, false = null)
   // OPTIMIZED: For valid values with no prior nulls, just increment counter
   // Force inline for hot path performance
-  __attribute__((always_inline)) inline void push_back(bool valid) {
-    if (__builtin_expect(valid, 1)) {
+  VROOM_FORCE_INLINE void push_back(bool valid) {
+    if (VROOM_LIKELY(valid)) {
       push_back_valid();
     } else {
       push_back_null();
@@ -44,8 +57,8 @@ public:
   // 1. Small enough to inline (compiler will inline small functions)
   // 2. Have the common case (no nulls) as the fast path
   // 3. Use branch prediction hints
-  __attribute__((always_inline)) inline void push_back_valid() {
-    if (__builtin_expect(!has_nulls_, 1)) {
+  VROOM_FORCE_INLINE void push_back_valid() {
+    if (VROOM_LIKELY(!has_nulls_)) {
       // Fast path: no nulls yet - just count, no bitmap work
       size_++;
       return;
@@ -77,7 +90,7 @@ public:
 private:
   // Slow path for push_back_valid when we already have nulls
   // Separated to keep push_back_valid() small for better inlining
-  __attribute__((noinline)) void push_back_valid_slow() {
+  VROOM_NOINLINE void push_back_valid_slow() {
     size_t byte_idx = size_ / 8;
     size_t bit_idx = size_ % 8;
     if (byte_idx >= data_.size()) {
@@ -290,7 +303,7 @@ public:
   void reserve(size_t n) { data_.reserve(n); }
 
   // Append value - force inline for hot path
-  __attribute__((always_inline)) inline void push_back(T value) { data_.push_back(value); }
+  VROOM_FORCE_INLINE void push_back(T value) { data_.push_back(value); }
 
   // Append without bounds checking
   void push_back_unchecked(T value) {

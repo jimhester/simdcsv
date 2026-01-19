@@ -94,10 +94,9 @@ public:
     return true;
   }
 
-  __attribute__((always_inline)) static inline void append_int32(FastArrowContext& ctx,
-                                                                 std::string_view value) {
+  VROOM_FORCE_INLINE static void append_int32(FastArrowContext& ctx, std::string_view value) {
     int32_t result;
-    if (__builtin_expect(simd::parse_int32_simd(value.data(), value.size(), result), 1)) {
+    if (VROOM_LIKELY(simd::parse_int32_simd(value.data(), value.size(), result))) {
       ctx.int32_buffer->push_back(result);
       ctx.null_bitmap->push_back_valid();
     } else {
