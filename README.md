@@ -5,7 +5,7 @@
 [![codecov](https://codecov.io/gh/jimhester/libvroom/branch/main/graph/badge.svg)](https://codecov.io/gh/jimhester/libvroom)
 <!-- badges: end -->
 
-High-performance CSV parser using SIMD instructions. Uses multi-threaded speculative parsing to process large files in parallel with throughput exceeding 4 GB/s on modern hardware.
+High-performance CSV to Parquet converter using SIMD instructions. Converts CSV files directly to Parquet format with automatic type inference, achieving throughput exceeding 4 GB/s on modern hardware.
 
 ## Installation
 
@@ -23,16 +23,23 @@ cmake --build build -j$(nproc)
 The build produces a `vroom` command line tool:
 
 ```bash
-vroom count data.csv              # Count rows
-vroom head -n 20 data.csv         # Display first 20 rows
-vroom tail -n 10 data.csv         # Display last 10 rows
-vroom sample -n 100 data.csv      # Random sample of 100 rows
-vroom select -c name,age data.csv # Select columns by name or index
-vroom pretty data.csv             # Pretty-print with aligned columns
-vroom info data.csv               # Get file info (rows, columns, dialect)
-vroom dialect data.csv            # Detect and display CSV dialect
-vroom schema data.csv             # Infer column types
-vroom stats data.csv              # Column statistics (min, max, mean)
+# Convert CSV to Parquet (default command)
+vroom input.csv -o output.parquet
+
+# With compression (zstd, snappy, gzip, lz4, or none)
+vroom input.csv -o output.parquet -c zstd
+
+# Control row group size
+vroom input.csv -o output.parquet -r 100000
+
+# Custom delimiter and quote character
+vroom input.csv -o output.parquet -d ';' -q "'"
+
+# Verbose output with progress
+vroom input.csv -o output.parquet -v
+
+# Get help
+vroom --help
 ```
 
 ### C++ Library
@@ -40,62 +47,62 @@ vroom stats data.csv              # Column statistics (min, max, mean)
 ```cpp
 #include <libvroom.h>
 
-// Load and parse a CSV file
-libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
-libvroom::Parser parser(4);  // Use 4 threads
+// Simple CSV to Parquet conversion
+vroom::VroomOptions opts;
+opts.input_path = "data.csv";
+opts.output_path = "data.parquet";
+opts.parquet.compression = vroom::Compression::ZSTD;
 
-auto result = parser.parse(buffer.data(), buffer.size());
+auto result = vroom::convert_csv_to_parquet(opts);
 
-if (result.success()) {
-    std::cout << "Columns: " << result.num_columns() << "\n";
-    std::cout << "Rows: " << result.num_rows() << "\n";
-
-    // Iterate over rows
-    for (auto row : result.rows()) {
-        auto name = row.get<std::string>("name");
-        auto age = row.get<int>("age");
-        if (name.ok() && age.ok()) {
-            std::cout << name.get() << ": " << age.get() << "\n";
-        }
-    }
-}
-
-// Check for errors
-if (result.has_errors()) {
-    std::cerr << result.error_summary() << "\n";
+if (result.ok()) {
+    std::cout << "Converted " << result.rows << " rows, "
+              << result.cols << " columns\n";
+} else {
+    std::cerr << "Error: " << result.error << "\n";
 }
 ```
 
-### Streaming Parser (Large Files)
+### Using CsvReader directly
 
 ```cpp
-#include <streaming.h>
+#include <libvroom.h>
 
-// Memory-efficient row-by-row processing
-libvroom::StreamReader reader("large_file.csv");
+// Read CSV and access data programmatically
+vroom::CsvOptions csv_opts;
+csv_opts.separator = ',';
+csv_opts.has_header = true;
 
-for (const auto& row : reader) {
-    std::cout << row[0].str() << "\n";
+vroom::CsvReader reader(csv_opts);
+auto open_result = reader.open("data.csv");
+
+if (open_result.ok) {
+    // Access schema
+    const auto& schema = reader.schema();
+    for (const auto& col : schema) {
+        std::cout << col.name << ": " << static_cast<int>(col.type) << "\n";
+    }
+
+    // Read all data
+    auto read_result = reader.read_all();
+    if (read_result.ok) {
+        std::cout << "Read " << read_result.value.total_rows << " rows\n";
+    }
 }
 ```
 
-### C API (FFI Bindings)
+### Python Bindings
 
-```c
-#include <libvroom_c.h>
+```python
+import vroom_csv
 
-libvroom_buffer_t* buffer = libvroom_buffer_load_file("data.csv");
-libvroom_parser_t* parser = libvroom_parser_create();
-libvroom_detection_result_t* detection = NULL;
+# Convert CSV to Parquet directly
+vroom_csv.to_parquet("data.csv", "output.parquet", compression="zstd")
 
-libvroom_parse_auto(parser, buffer, index, errors, &detection);
-
-printf("Columns: %zu\n", libvroom_detection_result_columns(detection));
-
-// Cleanup
-libvroom_detection_result_destroy(detection);
-libvroom_parser_destroy(parser);
-libvroom_buffer_destroy(buffer);
+# Or read CSV for inspection
+table = vroom_csv.read_csv("data.csv")
+print(f"Columns: {table.column_names}")
+print(f"Rows: {table.num_rows}")
 ```
 
 ### CMake Integration
@@ -107,20 +114,18 @@ FetchContent_Declare(libvroom
   GIT_TAG main)
 FetchContent_MakeAvailable(libvroom)
 
-target_link_libraries(your_target PRIVATE libvroom_lib)
+target_link_libraries(your_target PRIVATE vroom)
 ```
 
 ## Features
 
 - **SIMD-accelerated parsing** via [Google Highway](https://github.com/google/highway) (x86-64 SSE4.2/AVX2/AVX-512, ARM NEON)
+- **Direct Parquet output** with no intermediate Arrow dependency
 - **Multi-threaded** speculative chunking for parallel processing of large files
-- **Streaming parser** for memory-efficient processing of files larger than RAM
-- **Index caching** for instant re-reads of previously parsed files
-- **Automatic dialect detection** (delimiter, quoting style, line endings, encoding)
-- **Automatic encoding detection** with transcoding support (UTF-8, UTF-16, UTF-32, Latin-1)
-- **Schema inference** with type detection (integer, float, boolean, string)
-- **Three error modes**: `STRICT` (stop on first error), `PERMISSIVE` (collect all errors), `BEST_EFFORT` (ignore errors)
-- **C API** for FFI integration with other languages
+- **Automatic type inference** (integer, float, boolean, string) with SIMD-optimized parsers
+- **Compression support**: ZSTD, Snappy, Gzip, LZ4, or uncompressed
+- **Python bindings** with Arrow PyCapsule interface for zero-copy interop
+- **UTF-8 validation** via [simdutf](https://github.com/simdutf/simdutf) for high-speed character validation
 - **Cross-platform** support for Linux and macOS (x86-64 and ARM64)
 
 ## Performance

@@ -34,7 +34,7 @@ jobs:
     - name: Install dependencies (macOS)
       if: runner.os == 'macOS'
       run: |
-        brew install cmake ccache
+        brew install cmake ccache zstd lz4 snappy
 
     - name: Cache ccache
       uses: actions/cache@v4
@@ -60,9 +60,15 @@ jobs:
         restore-keys: |
           deps-${{ runner.os }}-${{ matrix.build_type }}-
 
-    - name: Configure CMake
+    - name: Configure CMake (Linux)
+      if: runner.os == 'Linux'
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+    - name: Configure CMake (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_PREFIX_PATH=/opt/homebrew
 
     - name: Build
       run: |
@@ -71,14 +77,6 @@ jobs:
     - name: Show ccache stats
       run: |
         ccache -s
-
-    - name: Run well-formed CSV tests
-      run: |
-        ./build/libvroom_test
-
-    - name: Run error handling tests
-      run: |
-        ./build/error_handling_test
 
     - name: Run all tests with CTest
       run: |

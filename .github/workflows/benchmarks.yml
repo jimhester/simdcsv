@@ -86,7 +86,7 @@ jobs:
 
     - name: Configure CMake (Release)
       run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=Release
+        cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCHMARKS=ON
 
     - name: Build benchmark executable
       run: |
@@ -215,7 +215,7 @@ jobs:
         git checkout "$COMPARE_REF"
 
         # Build
-        cmake -B build-compare -DCMAKE_BUILD_TYPE=Release
+        cmake -B build-compare -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCHMARKS=ON
         cmake --build build-compare --target libvroom_benchmark -j$(nproc)
 
         # Run benchmarks
