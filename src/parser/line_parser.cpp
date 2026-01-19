@@ -1,6 +1,6 @@
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
-namespace vroom {
+namespace libvroom {
 
 LineParser::LineParser(const CsvOptions& options) : options_(options) {
   init_null_values();
@@ -207,4 +207,4 @@ bool LineParser::is_null_value(std::string_view value) const {
 #endif
 }
 
-} // namespace vroom
+} // namespace libvroom

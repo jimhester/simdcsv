@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 
 // Forward declaration
 class ArrowColumnBuilder;
@@ -81,4 +81,4 @@ inline void release_arrow_array(ArrowArray* array) {
   array->release = nullptr;
 }
 
-} // namespace vroom
+} // namespace libvroom

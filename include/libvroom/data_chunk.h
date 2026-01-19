@@ -4,7 +4,7 @@
 #include <memory>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 
 // DataChunk - a contiguous block of typed data with null bitmap
 // Inspired by Arrow's Array concept from Polars' ChunkedArray
@@ -170,4 +170,4 @@ private:
   std::vector<std::unique_ptr<DataChunk<T>>> chunks_;
 };
 
-} // namespace vroom
+} // namespace libvroom

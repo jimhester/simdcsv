@@ -9,7 +9,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 
 // Forward declaration for SIMD batch operations
 namespace simd {
@@ -622,4 +622,4 @@ using Float64Statistics = Statistics<double>;
 using StringStatistics = Statistics<std::string>;
 using BoolStatistics = Statistics<bool>;
 
-} // namespace vroom
+} // namespace libvroom

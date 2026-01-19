@@ -1,6 +1,6 @@
 #include "parquet_types.h"
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 void Statistics::write(ThriftCompactWriter& writer) const {
@@ -415,4 +415,4 @@ void FileMetaData::write(ThriftCompactWriter& writer) const {
 }
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

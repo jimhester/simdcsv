@@ -1,4 +1,4 @@
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
 #include <algorithm>
 #include <climits>
@@ -13,7 +13,7 @@
 #include <lz4.h>
 #endif
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 // Note: zlib uses uInt (typically 32-bit) for buffer sizes, limiting single
@@ -383,4 +383,4 @@ size_t max_compressed_size(Compression codec, size_t input_size) {
 }
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

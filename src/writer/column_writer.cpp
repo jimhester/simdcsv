@@ -1,11 +1,12 @@
+#include "libvroom/dictionary.h"
+#include "libvroom/statistics.h"
+#include "libvroom/vroom.h"
+
 #include "columns/cow_buffer.h"
-#include "vroom/dictionary.h"
-#include "vroom/statistics.h"
-#include "vroom/vroom.h"
 
 #include <cstring>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 // Forward declarations
@@ -395,4 +396,4 @@ ColumnChunkData write_bool_column(const std::vector<bool>& values,
 }
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

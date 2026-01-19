@@ -1,8 +1,8 @@
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
 #include <algorithm>
 
-namespace vroom {
+namespace libvroom {
 
 // Threshold for using SIMD vs scalar - SIMD has setup overhead
 constexpr size_t kSimdThreshold = 64;
@@ -86,4 +86,4 @@ std::pair<size_t, size_t> ChunkFinder::count_rows(const char* data, size_t size)
   return count_rows_simd(data, size, quote_);
 }
 
-} // namespace vroom
+} // namespace libvroom

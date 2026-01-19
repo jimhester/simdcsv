@@ -5,14 +5,15 @@
 //
 // Direct port of Polars' SplitFields with Highway for portability.
 
+#include "libvroom/quote_parity.h"
+
 #include "hwy/highway.h"
-#include "vroom/quote_parity.h"
 
 #include <cstddef>
 #include <cstdint>
 
 HWY_BEFORE_NAMESPACE();
-namespace vroom {
+namespace libvroom {
 namespace HWY_NAMESPACE {
 
 namespace hn = hwy::HWY_NAMESPACE;
@@ -98,5 +99,5 @@ HWY_NOINLINE uint64_t ScanForTwoCharsImpl(const char* data, size_t len, char c1,
 }
 
 } // namespace HWY_NAMESPACE
-} // namespace vroom
+} // namespace libvroom
 HWY_AFTER_NAMESPACE();

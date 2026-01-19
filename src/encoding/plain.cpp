@@ -1,10 +1,10 @@
-#include "vroom/arrow_buffer.h"
-#include "vroom/vroom.h"
+#include "libvroom/arrow_buffer.h"
+#include "libvroom/vroom.h"
 
 #include <cstring>
 #include <string_view>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 namespace encoding {
 
@@ -656,4 +656,4 @@ void encode_dictionary_indices(const std::vector<int32_t>& indices, const NullBi
 
 } // namespace encoding
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

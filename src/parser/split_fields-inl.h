@@ -3,15 +3,16 @@
 // This file is included multiple times by split_fields.cpp with different
 // SIMD targets defined by Highway's foreach_target.h mechanism.
 
+#include "libvroom/quote_parity.h"
+#include "libvroom/types.h"
+
 #include "hwy/highway.h"
-#include "vroom/quote_parity.h"
-#include "vroom/types.h"
 
 #include <cstring>
 #include <vector>
 
 HWY_BEFORE_NAMESPACE();
-namespace vroom {
+namespace libvroom {
 namespace HWY_NAMESPACE {
 
 namespace hn = hwy::HWY_NAMESPACE;
@@ -320,5 +321,5 @@ HWY_NOINLINE void SplitFieldsSimdIntoImpl(const char* data, size_t size, char se
 }
 
 } // namespace HWY_NAMESPACE
-} // namespace vroom
+} // namespace libvroom
 HWY_AFTER_NAMESPACE();

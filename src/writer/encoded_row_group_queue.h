@@ -7,7 +7,7 @@
 #include <optional>
 #include <queue>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 // Thread-safe bounded queue for passing encoded row groups from encoder to writer
@@ -68,4 +68,4 @@ private:
 };
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

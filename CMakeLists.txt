@@ -424,7 +424,7 @@ add_library(vroom ${VROOM_SOURCES})
 
 target_include_directories(vroom PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/vroom
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/libvroom
 )
 
 # Add source directory for Highway's foreach_target.h self-inclusion pattern

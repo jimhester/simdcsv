@@ -1,11 +1,12 @@
+#include "libvroom/arrow_column_builder.h"
+#include "libvroom/dictionary.h"
+#include "libvroom/vroom.h"
+
 #include "BS_thread_pool.hpp"
 #include "encoded_row_group.h"
 #include "encoded_row_group_queue.h"
 #include "parquet_types.h"
 #include "thrift_compact.h"
-#include "vroom/arrow_column_builder.h"
-#include "vroom/dictionary.h"
-#include "vroom/vroom.h"
 
 #include <atomic>
 #include <cstring>
@@ -14,7 +15,7 @@
 #include <string_view>
 #include <thread>
 
-namespace vroom {
+namespace libvroom {
 
 // Parquet magic bytes
 static constexpr char PARQUET_MAGIC[] = "PAR1";
@@ -1112,4 +1113,4 @@ Result<bool> ParquetWriter::close() {
   return Result<bool>::success(true);
 }
 
-} // namespace vroom
+} // namespace libvroom

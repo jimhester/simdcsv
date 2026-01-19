@@ -12,9 +12,9 @@
 // Generate dispatch tables and public API (only once)
 #if HWY_ONCE
 
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
-namespace vroom {
+namespace libvroom {
 
 // Export SIMD implementations for dynamic dispatch
 HWY_EXPORT(SplitFieldsSimdImpl);
@@ -221,6 +221,6 @@ void split_fields_into(const char* data, size_t size, char separator, char quote
   }
 }
 
-} // namespace vroom
+} // namespace libvroom
 
 #endif // HWY_ONCE

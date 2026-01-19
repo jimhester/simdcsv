@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 
 // Type hierarchy: BOOL < INT32 < INT64 < FLOAT64 < STRING
 // Lower types can be promoted to higher types during inference
@@ -157,4 +157,4 @@ struct ColumnStatistics {
   std::variant<std::monostate, bool, int32_t, int64_t, double, std::string> max_value;
 };
 
-} // namespace vroom
+} // namespace libvroom

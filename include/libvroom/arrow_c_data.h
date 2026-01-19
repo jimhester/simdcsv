@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace vroom {
+namespace libvroom {
 
 // Arrow C Data Interface flag constants
 constexpr int64_t ARROW_FLAG_DICTIONARY_ORDERED = 1;
@@ -110,4 +110,4 @@ inline void init_empty_array(ArrowArray* array) {
   array->private_data = nullptr;
 }
 
-} // namespace vroom
+} // namespace libvroom

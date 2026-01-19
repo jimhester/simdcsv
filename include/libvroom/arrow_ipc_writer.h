@@ -19,15 +19,15 @@
 #include <functional>
 
 // Forward declaration (defined in vroom.h)
-namespace vroom {
+namespace libvroom {
 using ProgressCallback = std::function<bool(size_t, size_t)>;
-} // namespace vroom
+} // namespace libvroom
 
 #include <memory>
 #include <string>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 
 // Arrow IPC writing options
 struct ArrowIpcOptions {
@@ -145,4 +145,4 @@ ArrowIpcResult convert_csv_to_arrow_ipc(const std::string& csv_path, const std::
                                         const ArrowIpcOptions& ipc_options = {},
                                         ProgressCallback progress = nullptr);
 
-} // namespace vroom
+} // namespace libvroom

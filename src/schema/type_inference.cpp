@@ -1,9 +1,9 @@
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
 #include <cctype>
 #include <fast_float/fast_float.h>
 
-namespace vroom {
+namespace libvroom {
 
 TypeInference::TypeInference(const CsvOptions& options) : options_(options) {}
 
@@ -234,4 +234,4 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
   return types;
 }
 
-} // namespace vroom
+} // namespace libvroom

@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 /**
@@ -105,4 +105,4 @@ private:
 };
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

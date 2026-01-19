@@ -11,9 +11,9 @@
 // Generate dispatch tables and public API (only once)
 #if HWY_ONCE
 
-#include "vroom/simd_atoi.h"
+#include "libvroom/simd_atoi.h"
 
-namespace vroom {
+namespace libvroom {
 namespace simd {
 
 // Export implementations for dynamic dispatch
@@ -35,6 +35,6 @@ bool parse_int64_highway(const char* p, size_t len, int64_t& out) {
 }
 
 } // namespace simd
-} // namespace vroom
+} // namespace libvroom
 
 #endif // HWY_ONCE

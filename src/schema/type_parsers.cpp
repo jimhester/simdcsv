@@ -1,8 +1,8 @@
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
 #include <fast_float/fast_float.h>
 
-namespace vroom {
+namespace libvroom {
 
 // Helper function to check if a year is a leap year
 static inline bool is_leap_year(int year) {
@@ -280,4 +280,4 @@ bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch) {
   return true;
 }
 
-} // namespace vroom
+} // namespace libvroom

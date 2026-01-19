@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace vroom {
+namespace libvroom {
 
 // Compute prefix XOR sum using CLMUL instruction if available.
 // Each bit i in result = XOR of quote_bits[0..=i]
@@ -32,4 +32,4 @@ uint64_t find_quote_mask(uint64_t quote_bits, uint64_t& prev_iter_inside_quote);
 // For consistency, pass 0 or ~0ULL as with find_quote_mask().
 uint64_t scalar_find_quote_mask(uint64_t quote_bits, uint64_t prev_iter_inside_quote);
 
-} // namespace vroom
+} // namespace libvroom

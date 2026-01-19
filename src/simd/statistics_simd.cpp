@@ -12,7 +12,7 @@
 #include <limits>
 
 HWY_BEFORE_NAMESPACE();
-namespace vroom {
+namespace libvroom {
 namespace simd {
 namespace HWY_NAMESPACE {
 
@@ -156,12 +156,12 @@ void ComputeMinMaxFloat64(const double* data, size_t count, double& min_out, dou
 
 } // namespace HWY_NAMESPACE
 } // namespace simd
-} // namespace vroom
+} // namespace libvroom
 HWY_AFTER_NAMESPACE();
 
 #if HWY_ONCE
 
-namespace vroom {
+namespace libvroom {
 namespace simd {
 
 // Export the best available implementation
@@ -183,6 +183,6 @@ void compute_minmax_float64(const double* data, size_t count, double& min_out, d
 }
 
 } // namespace simd
-} // namespace vroom
+} // namespace libvroom
 
 #endif // HWY_ONCE

@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 // Parquet physical types (from parquet.thrift)
@@ -210,4 +210,4 @@ struct FileMetaData {
 };
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

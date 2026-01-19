@@ -1,6 +1,6 @@
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 // Row group metadata
@@ -41,4 +41,4 @@ RowGroupMetadata build_row_group(const std::vector<std::unique_ptr<ColumnBuilder
 }
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

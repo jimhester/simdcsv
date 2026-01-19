@@ -1,7 +1,8 @@
+#include "libvroom/arrow_column_builder.h"
+#include "libvroom/split_fields.h"
+#include "libvroom/vroom.h"
+
 #include "BS_thread_pool.hpp"
-#include "vroom/arrow_column_builder.h"
-#include "vroom/split_fields.h"
-#include "vroom/vroom.h"
 
 #include <algorithm>
 #include <chrono>
@@ -9,7 +10,7 @@
 #include <thread>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 
 // Helper function to unescape doubled quotes in a quoted field
 // Converts "" to " as per CSV specification (RFC 4180)
@@ -978,4 +979,4 @@ ConversionResult convert_csv_to_parquet(const VroomOptions& options, ProgressCal
   return result; // Success (error is empty)
 }
 
-} // namespace vroom
+} // namespace libvroom

@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 ThriftCompactWriter::ThriftCompactWriter(std::vector<uint8_t>& buffer)
@@ -125,4 +125,4 @@ uint64_t ThriftCompactWriter::zigzag_encode(int64_t value) {
 }
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

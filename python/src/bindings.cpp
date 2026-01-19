@@ -10,9 +10,8 @@
  */
 
 #include "libvroom.h"
-
-#include "vroom/arrow_c_data.h"
-#include "vroom/arrow_export.h"
+#include "libvroom/arrow_c_data.h"
+#include "libvroom/arrow_export.h"
 
 #include <memory>
 #include <optional>
@@ -38,8 +37,8 @@ static PyObject* IOError_custom = nullptr;
 
 class Table : public std::enable_shared_from_this<Table> {
 public:
-  Table(std::vector<vroom::ColumnSchema> schema,
-        std::vector<std::unique_ptr<vroom::ArrowColumnBuilder>> columns, size_t num_rows)
+  Table(std::vector<libvroom::ColumnSchema> schema,
+        std::vector<std::unique_ptr<libvroom::ArrowColumnBuilder>> columns, size_t num_rows)
       : schema_(std::move(schema)), columns_(std::move(columns)), num_rows_(num_rows) {}
 
   // Make non-copyable (unique_ptr members)
@@ -51,7 +50,7 @@ public:
   size_t num_rows() const { return num_rows_; }
   size_t num_columns() const { return columns_.size(); }
 
-  const std::vector<vroom::ColumnSchema>& schema() const { return schema_; }
+  const std::vector<libvroom::ColumnSchema>& schema() const { return schema_; }
 
   std::vector<std::string> column_names() const {
     std::vector<std::string> names;
@@ -63,13 +62,13 @@ public:
   }
 
   // Access to column builders for export
-  const std::vector<std::unique_ptr<vroom::ArrowColumnBuilder>>& columns() const {
+  const std::vector<std::unique_ptr<libvroom::ArrowColumnBuilder>>& columns() const {
     return columns_;
   }
 
 private:
-  std::vector<vroom::ColumnSchema> schema_;
-  std::vector<std::unique_ptr<vroom::ArrowColumnBuilder>> columns_;
+  std::vector<libvroom::ColumnSchema> schema_;
+  std::vector<std::unique_ptr<libvroom::ArrowColumnBuilder>> columns_;
   size_t num_rows_;
 };
 
@@ -87,12 +86,12 @@ struct TableStreamPrivate {
 // Private data for struct schema - owns child schemas
 struct StructSchemaPrivate {
   std::string name_storage;
-  std::vector<std::unique_ptr<vroom::ArrowSchema>> child_schemas;
-  std::vector<vroom::ArrowSchema*> child_schema_ptrs;
+  std::vector<std::unique_ptr<libvroom::ArrowSchema>> child_schemas;
+  std::vector<libvroom::ArrowSchema*> child_schema_ptrs;
 };
 
 // Release callback for struct schema
-void release_struct_schema(vroom::ArrowSchema* schema) {
+void release_struct_schema(libvroom::ArrowSchema* schema) {
   if (schema->release == nullptr)
     return;
 
@@ -114,7 +113,7 @@ void release_struct_schema(vroom::ArrowSchema* schema) {
 }
 
 // Stream get_schema callback
-int table_stream_get_schema(vroom::ArrowArrayStream* stream, vroom::ArrowSchema* out) {
+int table_stream_get_schema(libvroom::ArrowArrayStream* stream, libvroom::ArrowSchema* out) {
   auto* priv = static_cast<TableStreamPrivate*>(stream->private_data);
   auto& table = priv->table;
   const auto& table_schema = table->schema();
@@ -125,14 +124,14 @@ int table_stream_get_schema(vroom::ArrowArrayStream* stream, vroom::ArrowSchema*
 
   // Create struct schema with children for each column
   for (size_t i = 0; i < table->num_columns(); ++i) {
-    auto child = std::make_unique<vroom::ArrowSchema>();
+    auto child = std::make_unique<libvroom::ArrowSchema>();
     table->columns()[i]->export_schema(child.get(), table_schema[i].name);
     schema_priv->child_schema_ptrs.push_back(child.get());
     schema_priv->child_schemas.push_back(std::move(child));
   }
 
   // Set up struct schema
-  out->format = vroom::arrow_format::STRUCT;
+  out->format = libvroom::arrow_format::STRUCT;
   out->name = schema_priv->name_storage.c_str();
   out->metadata = nullptr;
   out->flags = 0;
@@ -148,14 +147,14 @@ int table_stream_get_schema(vroom::ArrowArrayStream* stream, vroom::ArrowSchema*
 // Private data for struct array - owns child arrays and keeps table alive
 struct StructArrayPrivate {
   std::shared_ptr<Table> table; // Keep table alive while array is in use
-  std::vector<std::unique_ptr<vroom::ArrowArray>> child_arrays;
-  std::vector<vroom::ArrowArray*> child_array_ptrs;
+  std::vector<std::unique_ptr<libvroom::ArrowArray>> child_arrays;
+  std::vector<libvroom::ArrowArray*> child_array_ptrs;
   // Note: child_privates are owned by the ArrowArray's release callback, not stored here
   std::vector<const void*> struct_buffers;
 };
 
 // Release callback for struct array
-void release_struct_array(vroom::ArrowArray* array) {
+void release_struct_array(libvroom::ArrowArray* array) {
   if (array->release == nullptr)
     return;
 
@@ -177,12 +176,12 @@ void release_struct_array(vroom::ArrowArray* array) {
 }
 
 // Stream get_next callback
-int table_stream_get_next(vroom::ArrowArrayStream* stream, vroom::ArrowArray* out) {
+int table_stream_get_next(libvroom::ArrowArrayStream* stream, libvroom::ArrowArray* out) {
   auto* stream_priv = static_cast<TableStreamPrivate*>(stream->private_data);
 
   if (stream_priv->batch_returned) {
     // No more batches - signal end of stream
-    vroom::init_empty_array(out);
+    libvroom::init_empty_array(out);
     return 0;
   }
 
@@ -195,8 +194,8 @@ int table_stream_get_next(vroom::ArrowArrayStream* stream, vroom::ArrowArray* ou
   // Create child arrays for each column
   for (size_t i = 0; i < table->num_columns(); ++i) {
     // ArrowColumnPrivate is owned by the ArrowArray's release callback
-    auto* child_priv = new vroom::ArrowColumnPrivate();
-    auto child = std::make_unique<vroom::ArrowArray>();
+    auto* child_priv = new libvroom::ArrowColumnPrivate();
+    auto child = std::make_unique<libvroom::ArrowArray>();
     table->columns()[i]->export_to_arrow(child.get(), child_priv);
 
     array_priv->child_array_ptrs.push_back(child.get());
@@ -222,13 +221,13 @@ int table_stream_get_next(vroom::ArrowArrayStream* stream, vroom::ArrowArray* ou
 }
 
 // Stream get_last_error callback
-const char* table_stream_get_last_error(vroom::ArrowArrayStream* stream) {
+const char* table_stream_get_last_error(libvroom::ArrowArrayStream* stream) {
   auto* priv = static_cast<TableStreamPrivate*>(stream->private_data);
   return priv->last_error.empty() ? nullptr : priv->last_error.c_str();
 }
 
 // Stream release callback
-void table_stream_release(vroom::ArrowArrayStream* stream) {
+void table_stream_release(libvroom::ArrowArrayStream* stream) {
   if (stream->release == nullptr)
     return;
 
@@ -247,7 +246,7 @@ std::shared_ptr<Table> read_csv(const std::string& path,
                                 std::optional<char> quote = std::nullopt, bool has_header = true,
                                 std::optional<size_t> num_threads = std::nullopt) {
   // Set up options
-  vroom::CsvOptions csv_opts;
+  libvroom::CsvOptions csv_opts;
   if (separator)
     csv_opts.separator = *separator;
   if (quote)
@@ -257,7 +256,7 @@ std::shared_ptr<Table> read_csv(const std::string& path,
     csv_opts.num_threads = *num_threads;
 
   // Create reader and open file
-  vroom::CsvReader reader(csv_opts);
+  libvroom::CsvReader reader(csv_opts);
   auto open_result = reader.open(path);
   if (!open_result.ok) {
     throw std::runtime_error(open_result.error);
@@ -283,7 +282,7 @@ std::shared_ptr<Table> read_csv(const std::string& path,
   // TODO: Implement chunked table or merge logic
   if (chunks.empty()) {
     return std::make_shared<Table>(schema,
-                                   std::vector<std::unique_ptr<vroom::ArrowColumnBuilder>>{}, 0);
+                                   std::vector<std::unique_ptr<libvroom::ArrowColumnBuilder>>{}, 0);
   }
 
   // For now, just return the first chunk
@@ -299,22 +298,22 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
                 std::optional<std::string> compression = std::nullopt,
                 std::optional<size_t> row_group_size = std::nullopt,
                 std::optional<size_t> num_threads = std::nullopt) {
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = input_path;
   opts.output_path = output_path;
 
   // Set compression
   if (compression) {
     if (*compression == "zstd") {
-      opts.parquet.compression = vroom::Compression::ZSTD;
+      opts.parquet.compression = libvroom::Compression::ZSTD;
     } else if (*compression == "snappy") {
-      opts.parquet.compression = vroom::Compression::SNAPPY;
+      opts.parquet.compression = libvroom::Compression::SNAPPY;
     } else if (*compression == "lz4") {
-      opts.parquet.compression = vroom::Compression::LZ4;
+      opts.parquet.compression = libvroom::Compression::LZ4;
     } else if (*compression == "gzip") {
-      opts.parquet.compression = vroom::Compression::GZIP;
+      opts.parquet.compression = libvroom::Compression::GZIP;
     } else if (*compression == "none") {
-      opts.parquet.compression = vroom::Compression::NONE;
+      opts.parquet.compression = libvroom::Compression::NONE;
     } else {
       throw std::runtime_error("Unknown compression: " + *compression);
     }
@@ -328,7 +327,7 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
     opts.threads.num_threads = *num_threads;
   }
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   if (!result.ok()) {
     throw std::runtime_error(result.error);
   }
@@ -341,17 +340,17 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
 void to_arrow_ipc(const std::string& input_path, const std::string& output_path,
                   std::optional<size_t> batch_size = std::nullopt,
                   std::optional<size_t> num_threads = std::nullopt) {
-  vroom::CsvOptions csv_opts;
+  libvroom::CsvOptions csv_opts;
   if (num_threads) {
     csv_opts.num_threads = *num_threads;
   }
 
-  vroom::ArrowIpcOptions ipc_opts;
+  libvroom::ArrowIpcOptions ipc_opts;
   if (batch_size) {
     ipc_opts.batch_size = *batch_size;
   }
 
-  auto result = vroom::convert_csv_to_arrow_ipc(input_path, output_path, csv_opts, ipc_opts);
+  auto result = libvroom::convert_csv_to_arrow_ipc(input_path, output_path, csv_opts, ipc_opts);
   if (!result.ok()) {
     throw std::runtime_error(result.error);
   }
@@ -392,7 +391,7 @@ PYBIND11_MODULE(_core, m) {
           "__arrow_c_stream__",
           [](std::shared_ptr<Table> self, py::object requested_schema) {
             // Create stream
-            auto* stream = new vroom::ArrowArrayStream();
+            auto* stream = new libvroom::ArrowArrayStream();
             auto* priv = new TableStreamPrivate();
             priv->table = self;
 
@@ -404,7 +403,7 @@ PYBIND11_MODULE(_core, m) {
 
             // Wrap in PyCapsule with required name
             return py::capsule(stream, "arrow_array_stream", [](void* ptr) {
-              auto* s = static_cast<vroom::ArrowArrayStream*>(ptr);
+              auto* s = static_cast<libvroom::ArrowArrayStream*>(ptr);
               if (s->release)
                 s->release(s);
               delete s;
@@ -415,20 +414,20 @@ PYBIND11_MODULE(_core, m) {
       .def(
           "__arrow_c_schema__",
           [](std::shared_ptr<Table> self) {
-            auto* schema = new vroom::ArrowSchema();
+            auto* schema = new libvroom::ArrowSchema();
             auto* priv = new StructSchemaPrivate();
             const auto& table_schema = self->schema();
 
             // Create child schemas
             for (size_t i = 0; i < self->num_columns(); ++i) {
-              auto child = std::make_unique<vroom::ArrowSchema>();
+              auto child = std::make_unique<libvroom::ArrowSchema>();
               self->columns()[i]->export_schema(child.get(), table_schema[i].name);
               priv->child_schema_ptrs.push_back(child.get());
               priv->child_schemas.push_back(std::move(child));
             }
 
             priv->name_storage = "";
-            schema->format = vroom::arrow_format::STRUCT;
+            schema->format = libvroom::arrow_format::STRUCT;
             schema->name = priv->name_storage.c_str();
             schema->metadata = nullptr;
             schema->flags = 0;
@@ -439,7 +438,7 @@ PYBIND11_MODULE(_core, m) {
             schema->private_data = priv;
 
             return py::capsule(schema, "arrow_schema", [](void* ptr) {
-              auto* s = static_cast<vroom::ArrowSchema*>(ptr);
+              auto* s = static_cast<libvroom::ArrowSchema*>(ptr);
               if (s->release)
                 s->release(s);
               delete s;

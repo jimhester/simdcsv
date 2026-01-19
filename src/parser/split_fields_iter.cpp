@@ -11,7 +11,7 @@
 // Generate dispatch tables and public API (only once)
 #if HWY_ONCE
 
-namespace vroom {
+namespace libvroom {
 
 // Export implementations for dynamic dispatch
 HWY_EXPORT(ScanForCharImpl);
@@ -26,6 +26,6 @@ uint64_t scan_for_two_chars_simd(const char* data, size_t len, char c1, char c2)
   return HWY_DYNAMIC_DISPATCH(ScanForTwoCharsImpl)(data, len, c1, c2);
 }
 
-} // namespace vroom
+} // namespace libvroom
 
 #endif // HWY_ONCE

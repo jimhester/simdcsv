@@ -1,10 +1,10 @@
-#include "vroom/dictionary.h"
+#include "libvroom/dictionary.h"
 
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 // Analyze string column for dictionary potential
@@ -288,4 +288,4 @@ create_int64_dictionary(const std::vector<int64_t>& values, const std::vector<bo
 }
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

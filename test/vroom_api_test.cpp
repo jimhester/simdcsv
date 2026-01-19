@@ -62,16 +62,16 @@ private:
 TEST(CsvReaderTest, OpenValidFile) {
   TempCsvFile csv("a,b,c\n1,2,3\n4,5,6\n");
 
-  vroom::CsvOptions opts;
-  vroom::CsvReader reader(opts);
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
 
   auto result = reader.open(csv.path());
   ASSERT_TRUE(result.ok) << result.error;
 }
 
 TEST(CsvReaderTest, OpenNonExistentFile) {
-  vroom::CsvOptions opts;
-  vroom::CsvReader reader(opts);
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
 
   auto result = reader.open("/nonexistent/path/to/file.csv");
   ASSERT_FALSE(result.ok);
@@ -81,8 +81,8 @@ TEST(CsvReaderTest, OpenNonExistentFile) {
 TEST(CsvReaderTest, ReadSchema) {
   TempCsvFile csv("name,age,city\nAlice,30,NYC\nBob,25,LA\n");
 
-  vroom::CsvOptions opts;
-  vroom::CsvReader reader(opts);
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
 
   auto open_result = reader.open(csv.path());
   ASSERT_TRUE(open_result.ok) << open_result.error;
@@ -97,8 +97,8 @@ TEST(CsvReaderTest, ReadSchema) {
 TEST(CsvReaderTest, ReadAllData) {
   TempCsvFile csv("x,y\n1,2\n3,4\n5,6\n");
 
-  vroom::CsvOptions opts;
-  vroom::CsvReader reader(opts);
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
 
   auto open_result = reader.open(csv.path());
   ASSERT_TRUE(open_result.ok) << open_result.error;
@@ -113,8 +113,8 @@ TEST(CsvReaderTest, ReadAllData) {
 TEST(CsvReaderTest, TypeInference) {
   TempCsvFile csv("int_col,float_col,str_col\n1,1.5,hello\n2,2.5,world\n");
 
-  vroom::CsvOptions opts;
-  vroom::CsvReader reader(opts);
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
 
   auto open_result = reader.open(csv.path());
   ASSERT_TRUE(open_result.ok) << open_result.error;
@@ -125,16 +125,16 @@ TEST(CsvReaderTest, TypeInference) {
   // Check that types were inferred (exact types may vary based on implementation)
   // At minimum, the schema should have valid types
   for (const auto& col : schema) {
-    EXPECT_NE(col.type, vroom::DataType::UNKNOWN);
+    EXPECT_NE(col.type, libvroom::DataType::UNKNOWN);
   }
 }
 
 TEST(CsvReaderTest, CustomDelimiter) {
   TempCsvFile csv("a;b;c\n1;2;3\n");
 
-  vroom::CsvOptions opts;
+  libvroom::CsvOptions opts;
   opts.separator = ';';
-  vroom::CsvReader reader(opts);
+  libvroom::CsvReader reader(opts);
 
   auto open_result = reader.open(csv.path());
   ASSERT_TRUE(open_result.ok) << open_result.error;
@@ -149,8 +149,8 @@ TEST(CsvReaderTest, CustomDelimiter) {
 TEST(CsvReaderTest, QuotedFields) {
   TempCsvFile csv("name,description\n\"John\",\"Hello, World\"\n\"Jane\",\"Line1\nLine2\"\n");
 
-  vroom::CsvOptions opts;
-  vroom::CsvReader reader(opts);
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
 
   auto open_result = reader.open(csv.path());
   ASSERT_TRUE(open_result.ok) << open_result.error;
@@ -164,9 +164,9 @@ TEST(CsvReaderTest, QuotedFields) {
 TEST(CsvReaderTest, NoHeader) {
   TempCsvFile csv("1,2,3\n4,5,6\n");
 
-  vroom::CsvOptions opts;
+  libvroom::CsvOptions opts;
   opts.has_header = false;
-  vroom::CsvReader reader(opts);
+  libvroom::CsvReader reader(opts);
 
   auto open_result = reader.open(csv.path());
   ASSERT_TRUE(open_result.ok) << open_result.error;
@@ -186,12 +186,12 @@ TEST(ConversionTest, BasicConversion) {
   TempCsvFile csv("a,b,c\n1,2,3\n4,5,6\n7,8,9\n");
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = csv.path();
   opts.output_path = parquet.path();
-  opts.parquet.compression = vroom::Compression::NONE;
+  opts.parquet.compression = libvroom::Compression::NONE;
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   ASSERT_TRUE(result.ok()) << result.error;
 
   EXPECT_EQ(result.rows, 3);
@@ -206,12 +206,12 @@ TEST(ConversionTest, WithZstdCompression) {
   TempCsvFile csv("x,y\n1,2\n3,4\n");
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = csv.path();
   opts.output_path = parquet.path();
-  opts.parquet.compression = vroom::Compression::ZSTD;
+  opts.parquet.compression = libvroom::Compression::ZSTD;
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   ASSERT_TRUE(result.ok()) << result.error;
 
   EXPECT_EQ(result.rows, 2);
@@ -221,11 +221,11 @@ TEST(ConversionTest, EmptyFile) {
   TempCsvFile csv("a,b,c\n");
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = csv.path();
   opts.output_path = parquet.path();
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   ASSERT_TRUE(result.ok()) << result.error;
 
   EXPECT_EQ(result.rows, 0);
@@ -243,11 +243,11 @@ TEST(ConversionTest, LargerFile) {
   TempCsvFile csv(content);
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = csv.path();
   opts.output_path = parquet.path();
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   ASSERT_TRUE(result.ok()) << result.error;
 
   EXPECT_EQ(result.rows, 1000);
@@ -257,11 +257,11 @@ TEST(ConversionTest, LargerFile) {
 TEST(ConversionTest, InvalidInputPath) {
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = "/nonexistent/file.csv";
   opts.output_path = parquet.path();
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   EXPECT_FALSE(result.ok());
   EXPECT_FALSE(result.error.empty());
 }
@@ -274,11 +274,11 @@ TEST(TypeTest, IntegerColumn) {
   TempCsvFile csv("numbers\n1\n2\n3\n100\n-50\n");
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = csv.path();
   opts.output_path = parquet.path();
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   ASSERT_TRUE(result.ok()) << result.error;
   EXPECT_EQ(result.rows, 5);
 }
@@ -287,11 +287,11 @@ TEST(TypeTest, FloatColumn) {
   TempCsvFile csv("values\n1.5\n2.7\n3.14159\n-0.5\n");
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = csv.path();
   opts.output_path = parquet.path();
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   ASSERT_TRUE(result.ok()) << result.error;
   EXPECT_EQ(result.rows, 4);
 }
@@ -300,11 +300,11 @@ TEST(TypeTest, StringColumn) {
   TempCsvFile csv("names\nhello\nworld\n\"with spaces\"\n\"with,comma\"\n");
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = csv.path();
   opts.output_path = parquet.path();
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   ASSERT_TRUE(result.ok()) << result.error;
   EXPECT_EQ(result.rows, 4);
 }
@@ -313,11 +313,11 @@ TEST(TypeTest, MixedTypes) {
   TempCsvFile csv("int_col,float_col,str_col,bool_col\n1,1.5,hello,true\n2,2.5,world,false\n");
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = csv.path();
   opts.output_path = parquet.path();
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   ASSERT_TRUE(result.ok()) << result.error;
   EXPECT_EQ(result.rows, 2);
   EXPECT_EQ(result.cols, 4);
@@ -331,11 +331,11 @@ TEST(EdgeCaseTest, SingleColumn) {
   TempCsvFile csv("value\n1\n2\n3\n");
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = csv.path();
   opts.output_path = parquet.path();
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   ASSERT_TRUE(result.ok()) << result.error;
   EXPECT_EQ(result.cols, 1);
 }
@@ -344,11 +344,11 @@ TEST(EdgeCaseTest, SingleRow) {
   TempCsvFile csv("a,b,c\n1,2,3\n");
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = csv.path();
   opts.output_path = parquet.path();
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   ASSERT_TRUE(result.ok()) << result.error;
   EXPECT_EQ(result.rows, 1);
 }
@@ -369,11 +369,11 @@ TEST(EdgeCaseTest, ManyColumns) {
   TempCsvFile csv(header + "\n" + row + "\n");
   TempOutputFile parquet;
 
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = csv.path();
   opts.output_path = parquet.path();
 
-  auto result = vroom::convert_csv_to_parquet(opts);
+  auto result = libvroom::convert_csv_to_parquet(opts);
   ASSERT_TRUE(result.ok()) << result.error;
   EXPECT_EQ(result.cols, 100);
 }

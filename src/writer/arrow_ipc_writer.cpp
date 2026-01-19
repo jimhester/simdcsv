@@ -12,13 +12,13 @@
  * See: https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format
  */
 
-#include "vroom/arrow_ipc_writer.h"
+#include "libvroom/arrow_ipc_writer.h"
 
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
 #include <fstream>
 
-namespace vroom {
+namespace libvroom {
 
 // =============================================================================
 // Implementation
@@ -111,4 +111,4 @@ ArrowIpcResult convert_csv_to_arrow_ipc([[maybe_unused]] const std::string& csv_
   return result;
 }
 
-} // namespace vroom
+} // namespace libvroom

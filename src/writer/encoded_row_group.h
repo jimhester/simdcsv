@@ -1,14 +1,15 @@
 #pragma once
 
+#include "libvroom/vroom.h"
+
 #include "parquet_types.h"
-#include "vroom/vroom.h"
 
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 // Pre-encoded column data ready for writing
@@ -51,4 +52,4 @@ struct EncodedRowGroup {
 };
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

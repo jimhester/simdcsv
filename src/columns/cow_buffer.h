@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 
 /**
  * CowBuffer - Copy-on-Write Buffer
@@ -236,4 +236,4 @@ template <typename T> void swap(CowBuffer<T>& a, CowBuffer<T>& b) noexcept {
   a.swap(b);
 }
 
-} // namespace vroom
+} // namespace libvroom

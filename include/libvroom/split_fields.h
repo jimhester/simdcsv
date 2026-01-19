@@ -6,7 +6,7 @@
 // we find ALL field boundaries in that block and cache them. Subsequent
 // next() calls extract from the cache without re-scanning.
 
-#include "vroom/quote_parity.h"
+#include "libvroom/quote_parity.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -43,7 +43,7 @@ VROOM_FORCE_INLINE unsigned vroom_ctz64_portable(uint64_t x) {
 #define VROOM_CTZ64(x) vroom_ctz64_portable(x)
 #endif
 
-namespace vroom {
+namespace libvroom {
 
 // Forward declarations for Highway-based SIMD functions
 // (defined in src/parser/split_fields_iter.cpp)
@@ -279,4 +279,4 @@ private:
   }
 };
 
-} // namespace vroom
+} // namespace libvroom

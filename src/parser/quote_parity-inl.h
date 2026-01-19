@@ -8,7 +8,7 @@
 #include <cstdint>
 
 HWY_BEFORE_NAMESPACE();
-namespace vroom {
+namespace libvroom {
 namespace HWY_NAMESPACE {
 
 namespace hn = hwy::HWY_NAMESPACE;
@@ -55,5 +55,5 @@ HWY_NOINLINE uint64_t FindQuoteMaskImpl(uint64_t quote_bits, uint64_t& prev_iter
 }
 
 } // namespace HWY_NAMESPACE
-} // namespace vroom
+} // namespace libvroom
 HWY_AFTER_NAMESPACE();

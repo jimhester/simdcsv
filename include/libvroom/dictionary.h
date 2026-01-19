@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 // Smart dictionary heuristics from Polars
@@ -87,4 +87,4 @@ std::pair<std::vector<int64_t>, std::vector<int32_t>>
 create_int64_dictionary(const std::vector<int64_t>& values, const std::vector<bool>& null_bitmap);
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

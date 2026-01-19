@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 
 // CSV parsing options
 struct CsvOptions {
@@ -100,4 +100,4 @@ inline size_t calculate_chunk_size(size_t file_size, size_t n_cols, size_t n_thr
   return chunk_size;
 }
 
-} // namespace vroom
+} // namespace libvroom

@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace vroom {
+namespace libvroom {
 
 // Forward declarations from type_parsers.cpp
 bool parse_date(std::string_view value, int32_t& days_since_epoch);
@@ -262,4 +262,4 @@ public:
   inline void append_null() { append_null_fn(*this); }
 };
 
-} // namespace vroom
+} // namespace libvroom

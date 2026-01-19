@@ -64,7 +64,7 @@ public:
     }
   }
 
-  vroom::ProgressCallback callback() {
+  libvroom::ProgressCallback callback() {
     return [this](size_t processed, size_t total) { return this->update(processed, total); };
   }
 
@@ -211,7 +211,7 @@ int cmd_convert(int argc, char* argv[]) {
   }
 
   // Set up options
-  vroom::VroomOptions opts;
+  libvroom::VroomOptions opts;
   opts.input_path = input_path;
   opts.output_path = output_path;
   opts.verbose = verbose;
@@ -231,15 +231,15 @@ int cmd_convert(int argc, char* argv[]) {
 
   // Set compression
   if (compression == "zstd") {
-    opts.parquet.compression = vroom::Compression::ZSTD;
+    opts.parquet.compression = libvroom::Compression::ZSTD;
   } else if (compression == "snappy") {
-    opts.parquet.compression = vroom::Compression::SNAPPY;
+    opts.parquet.compression = libvroom::Compression::SNAPPY;
   } else if (compression == "lz4") {
-    opts.parquet.compression = vroom::Compression::LZ4;
+    opts.parquet.compression = libvroom::Compression::LZ4;
   } else if (compression == "gzip") {
-    opts.parquet.compression = vroom::Compression::GZIP;
+    opts.parquet.compression = libvroom::Compression::GZIP;
   } else if (compression == "none") {
-    opts.parquet.compression = vroom::Compression::NONE;
+    opts.parquet.compression = libvroom::Compression::NONE;
   } else {
     cerr << "Error: Unknown compression type: " << compression << endl;
     return 1;
@@ -247,7 +247,7 @@ int cmd_convert(int argc, char* argv[]) {
 
   // Set up progress callback
   ProgressBar progress(show_progress && isatty(STDERR_FILENO));
-  vroom::ProgressCallback progress_cb = nullptr;
+  libvroom::ProgressCallback progress_cb = nullptr;
   if (show_progress) {
     progress_cb = progress.callback();
   }
@@ -259,7 +259,7 @@ int cmd_convert(int argc, char* argv[]) {
     cerr << "Row group size: " << row_group_size << endl;
   }
 
-  auto result = vroom::convert_csv_to_parquet(opts, progress_cb);
+  auto result = libvroom::convert_csv_to_parquet(opts, progress_cb);
 
   if (show_progress) {
     progress.finish();

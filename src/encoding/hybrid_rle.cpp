@@ -1,8 +1,8 @@
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
 #include <cstring>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 namespace encoding {
 
@@ -240,4 +240,4 @@ void encode_def_levels_hybrid(const std::vector<bool>& null_bitmap, uint8_t max_
 
 } // namespace encoding
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

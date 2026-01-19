@@ -1,9 +1,9 @@
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
 #include <algorithm>
 #include <cstring>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 namespace encoding {
 
@@ -217,4 +217,4 @@ void encode_int64_delta(const int64_t* values, size_t count, std::vector<uint8_t
 
 } // namespace encoding
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

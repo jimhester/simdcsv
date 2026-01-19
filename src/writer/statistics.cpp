@@ -1,11 +1,11 @@
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 // Helper to merge min/max values - explicit type handling to avoid complex template expansion
@@ -236,4 +236,4 @@ private:
 };
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

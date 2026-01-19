@@ -1,6 +1,6 @@
-#include "vroom/data_chunk.h"
-#include "vroom/statistics.h"
-#include "vroom/vroom.h"
+#include "libvroom/data_chunk.h"
+#include "libvroom/statistics.h"
+#include "libvroom/vroom.h"
 
 #include <algorithm>
 #include <cassert>
@@ -9,7 +9,7 @@
 #include <fast_float/fast_float.h>
 #include <limits>
 
-namespace vroom {
+namespace libvroom {
 
 // ============================================================================
 // ChunkedColumnBuilder - base template for all chunked column types
@@ -666,4 +666,4 @@ std::unique_ptr<ColumnBuilder> ColumnBuilder::create_timestamp() {
   return std::make_unique<TimestampColumnBuilder>();
 }
 
-} // namespace vroom
+} // namespace libvroom

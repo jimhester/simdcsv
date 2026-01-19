@@ -9,7 +9,7 @@
 #include <cstdint>
 
 HWY_BEFORE_NAMESPACE();
-namespace vroom {
+namespace libvroom {
 namespace simd {
 namespace HWY_NAMESPACE {
 
@@ -173,5 +173,5 @@ HWY_NOINLINE bool ParseInt64SimdImpl(const char* p, size_t len, int64_t& out) {
 
 } // namespace HWY_NAMESPACE
 } // namespace simd
-} // namespace vroom
+} // namespace libvroom
 HWY_AFTER_NAMESPACE();

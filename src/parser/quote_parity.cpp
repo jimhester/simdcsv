@@ -14,9 +14,9 @@
 // Generate dispatch tables and public API (only once)
 #if HWY_ONCE
 
-#include "vroom/quote_parity.h"
+#include "libvroom/quote_parity.h"
 
-namespace vroom {
+namespace libvroom {
 
 // Export implementations for dynamic dispatch
 HWY_EXPORT(PrefixXorsumInclusiveImpl);
@@ -62,6 +62,6 @@ uint64_t scalar_find_quote_mask(uint64_t quote_bits, uint64_t prev_iter_inside_q
   return quote_mask;
 }
 
-} // namespace vroom
+} // namespace libvroom
 
 #endif // HWY_ONCE

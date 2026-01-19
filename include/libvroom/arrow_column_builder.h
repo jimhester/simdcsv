@@ -8,7 +8,7 @@
 #include <memory>
 #include <string_view>
 
-namespace vroom {
+namespace libvroom {
 
 // ArrowColumnBuilder - Column builder using Arrow-style buffers
 // Key benefits:
@@ -629,4 +629,4 @@ inline std::unique_ptr<ArrowColumnBuilder> ArrowColumnBuilder::create_string() {
   return std::make_unique<ArrowStringColumnBuilder>();
 }
 
-} // namespace vroom
+} // namespace libvroom

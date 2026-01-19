@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace vroom {
+namespace libvroom {
 namespace simd {
 
 // Highway-based implementations (defined in src/parser/simd_atoi.cpp)
@@ -101,4 +101,4 @@ inline bool parse_int64_simd(const char* p, size_t len, int64_t& out) {
 }
 
 } // namespace simd
-} // namespace vroom
+} // namespace libvroom

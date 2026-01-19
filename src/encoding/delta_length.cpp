@@ -1,8 +1,8 @@
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
 #include <cstring>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 namespace encoding {
 
@@ -46,4 +46,4 @@ void encode_delta_length_byte_array(const std::vector<std::string>& values,
 
 } // namespace encoding
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

@@ -16,25 +16,22 @@
 #define LIBVROOM_VERSION_STRING "2.0.0"
 
 // Core headers
-#include "vroom/options.h"
-#include "vroom/types.h"
-#include "vroom/vroom.h"
+#include "libvroom/options.h"
+#include "libvroom/types.h"
+#include "libvroom/vroom.h"
 
 // Column builders
-#include "vroom/arrow_column_builder.h"
+#include "libvroom/arrow_column_builder.h"
 
 // Parsing
-#include "vroom/quote_parity.h"
-#include "vroom/split_fields.h"
+#include "libvroom/quote_parity.h"
+#include "libvroom/split_fields.h"
 
 // Statistics and dictionary
-#include "vroom/dictionary.h"
-#include "vroom/statistics.h"
+#include "libvroom/dictionary.h"
+#include "libvroom/statistics.h"
 
 // Output formats
-#include "vroom/arrow_ipc_writer.h"
-
-// Re-export vroom namespace as libvroom for compatibility
-namespace libvroom = vroom;
+#include "libvroom/arrow_ipc_writer.h"
 
 #endif // LIBVROOM_H

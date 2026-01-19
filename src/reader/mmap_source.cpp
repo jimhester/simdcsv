@@ -1,11 +1,11 @@
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace vroom {
+namespace libvroom {
 
 struct MmapSource::Impl {
   int fd = -1;
@@ -82,4 +82,4 @@ void MmapSource::close() {
   impl_->size = 0;
 }
 
-} // namespace vroom
+} // namespace libvroom

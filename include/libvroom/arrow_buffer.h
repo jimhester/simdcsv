@@ -20,7 +20,7 @@
 #define VROOM_UNLIKELY(x) __builtin_expect(!!(x), 0)
 #endif
 
-namespace vroom {
+namespace libvroom {
 
 // Packed null bitmap - stores 8 null flags per byte
 // Bit is SET (1) when value is VALID (non-null)
@@ -392,4 +392,4 @@ using Float64Column = ArrowColumn<NumericBuffer<double>>;
 using BoolColumn = ArrowColumn<NumericBuffer<uint8_t>>; // Use uint8 for bool to avoid vector<bool>
 using StringColumn = ArrowColumn<StringBuffer>;
 
-} // namespace vroom
+} // namespace libvroom

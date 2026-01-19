@@ -1,10 +1,11 @@
+#include "libvroom/dictionary.h"
+#include "libvroom/vroom.h"
+
 #include "columns/cow_buffer.h"
-#include "vroom/dictionary.h"
-#include "vroom/vroom.h"
 
 #include <cstring>
 
-namespace vroom {
+namespace libvroom {
 namespace writer {
 
 // Forward declarations from encoding modules
@@ -256,4 +257,4 @@ static void write_int64_le_internal(int64_t value, std::vector<uint8_t>& output)
 }
 
 } // namespace writer
-} // namespace vroom
+} // namespace libvroom

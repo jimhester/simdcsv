@@ -10,9 +10,10 @@
 
 #undef HWY_TARGET_INCLUDE
 #define HWY_TARGET_INCLUDE "src/parser/simd_chunk_finder.cpp"
+#include "libvroom/quote_parity.h"
+
 #include "hwy/foreach_target.h"
 #include "hwy/highway.h"
-#include "vroom/quote_parity.h"
 
 #include <cstdint>
 #include <tuple>
@@ -23,7 +24,7 @@
 // Use #ifndef guard to prevent redefinition across foreach_target.h iterations
 #ifndef VROOM_DUAL_STATE_RESULT_DEFINED
 #define VROOM_DUAL_STATE_RESULT_DEFINED
-namespace vroom {
+namespace libvroom {
 struct DualStateResultInternal {
   size_t row_count_outside;
   size_t last_row_end_outside;
@@ -31,11 +32,11 @@ struct DualStateResultInternal {
   size_t last_row_end_inside;
   int ends_inside_quote; // 1 if ends inside (from outside start), 0 otherwise
 };
-} // namespace vroom
+} // namespace libvroom
 #endif
 
 HWY_BEFORE_NAMESPACE();
-namespace vroom {
+namespace libvroom {
 namespace HWY_NAMESPACE {
 
 namespace hn = hwy::HWY_NAMESPACE;
@@ -495,17 +496,17 @@ HWY_NOINLINE size_t FindRowEndSimdImpl(const char* data, size_t size, size_t sta
 }
 
 } // namespace HWY_NAMESPACE
-} // namespace vroom
+} // namespace libvroom
 HWY_AFTER_NAMESPACE();
 
 // Generate dispatch tables and public API (only once)
 #if HWY_ONCE
 
-#include "vroom/vroom.h"
+#include "libvroom/vroom.h"
 
 #include <cstring>
 
-namespace vroom {
+namespace libvroom {
 
 // Export implementations for dynamic dispatch
 HWY_EXPORT(CountRowsSimdImpl);
@@ -620,6 +621,6 @@ size_t find_row_end_scalar(const char* data, size_t size, size_t start, char quo
   return size;
 }
 
-} // namespace vroom
+} // namespace libvroom
 
 #endif // HWY_ONCE

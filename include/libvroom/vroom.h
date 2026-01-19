@@ -15,7 +15,7 @@
 // (needed for unique_ptr destruction in user code)
 #include "arrow_column_builder.h"
 
-namespace vroom {
+namespace libvroom {
 
 // Forward declarations
 class MmapSource;
@@ -376,4 +376,4 @@ bool parse_date(std::string_view value, int32_t& days_since_epoch);
 // Returns true on success, false on parse error
 bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch);
 
-} // namespace vroom
+} // namespace libvroom
