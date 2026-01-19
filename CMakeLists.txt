@@ -208,6 +208,9 @@ FetchContent_Declare(
     GIT_TAG v5.5.0
     GIT_SHALLOW TRUE
 )
+set(SIMDUTF_TESTS OFF CACHE BOOL "" FORCE)
+set(SIMDUTF_TOOLS OFF CACHE BOOL "" FORCE)
+set(SIMDUTF_BENCHMARKS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(simdutf)
 
 # BS::thread_pool - Lightweight thread pool
@@ -221,6 +224,21 @@ FetchContent_MakeAvailable(thread_pool)
 
 # System compression libraries
 find_package(ZLIB REQUIRED)
+
+# Add Homebrew paths for macOS
+if(APPLE)
+    # Apple Silicon Macs use /opt/homebrew, Intel Macs use /usr/local
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64")
+        list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+        list(APPEND CMAKE_LIBRARY_PATH "/opt/homebrew/lib")
+        list(APPEND CMAKE_INCLUDE_PATH "/opt/homebrew/include")
+    else()
+        list(APPEND CMAKE_PREFIX_PATH "/usr/local")
+        list(APPEND CMAKE_LIBRARY_PATH "/usr/local/lib")
+        list(APPEND CMAKE_INCLUDE_PATH "/usr/local/include")
+    endif()
+endif()
+
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
     pkg_check_modules(ZSTD libzstd)
@@ -232,6 +250,20 @@ if(NOT ZSTD_FOUND)
     find_path(ZSTD_INCLUDE_DIRS zstd.h)
     if(ZSTD_LIBRARIES AND ZSTD_INCLUDE_DIRS)
         set(ZSTD_FOUND TRUE)
+    endif()
+endif()
+if(NOT LZ4_FOUND)
+    find_library(LZ4_LIBRARIES lz4)
+    find_path(LZ4_INCLUDE_DIRS lz4.h)
+    if(LZ4_LIBRARIES AND LZ4_INCLUDE_DIRS)
+        set(LZ4_FOUND TRUE)
+    endif()
+endif()
+if(NOT SNAPPY_FOUND)
+    find_library(SNAPPY_LIBRARIES snappy)
+    find_path(SNAPPY_INCLUDE_DIRS snappy.h)
+    if(SNAPPY_LIBRARIES AND SNAPPY_INCLUDE_DIRS)
+        set(SNAPPY_FOUND TRUE)
     endif()
 endif()
 
@@ -412,16 +444,25 @@ target_link_libraries(vroom PUBLIC
 
 # Optional compression libraries
 if(ZSTD_FOUND)
+    if(ZSTD_LIBRARY_DIRS)
+        target_link_directories(vroom PUBLIC ${ZSTD_LIBRARY_DIRS})
+    endif()
     target_link_libraries(vroom PUBLIC ${ZSTD_LIBRARIES})
     target_include_directories(vroom PRIVATE ${ZSTD_INCLUDE_DIRS})
     target_compile_definitions(vroom PRIVATE VROOM_HAVE_ZSTD)
 endif()
 if(LZ4_FOUND)
+    if(LZ4_LIBRARY_DIRS)
+        target_link_directories(vroom PUBLIC ${LZ4_LIBRARY_DIRS})
+    endif()
     target_link_libraries(vroom PUBLIC ${LZ4_LIBRARIES})
     target_include_directories(vroom PRIVATE ${LZ4_INCLUDE_DIRS})
     target_compile_definitions(vroom PRIVATE VROOM_HAVE_LZ4)
 endif()
 if(SNAPPY_FOUND)
+    if(SNAPPY_LIBRARY_DIRS)
+        target_link_directories(vroom PUBLIC ${SNAPPY_LIBRARY_DIRS})
+    endif()
     target_link_libraries(vroom PUBLIC ${SNAPPY_LIBRARIES})
     target_include_directories(vroom PRIVATE ${SNAPPY_INCLUDE_DIRS})
     target_compile_definitions(vroom PRIVATE VROOM_HAVE_SNAPPY)
