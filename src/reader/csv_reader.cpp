@@ -253,7 +253,10 @@ std::pair<size_t, bool> parse_chunk_with_state(
 
 struct CsvReader::Impl {
   CsvOptions options;
-  MmapSource source;
+  MmapSource source;              // For file-based reading
+  AlignedBuffer owned_buffer;     // For stdin/buffer-based reading
+  const char* data_ptr = nullptr; // Points to either source.data() or owned_buffer.data()
+  size_t data_size = 0;           // Size of data
   std::vector<ColumnSchema> schema;
   size_t row_count = 0;
   size_t header_end_offset = 0;
@@ -283,8 +286,12 @@ Result<bool> CsvReader::open(const std::string& path) {
     return result;
   }
 
-  const char* data = impl_->source.data();
-  size_t size = impl_->source.size();
+  // Set data pointer from mmap source
+  impl_->data_ptr = impl_->source.data();
+  impl_->data_size = impl_->source.size();
+
+  const char* data = impl_->data_ptr;
+  size_t size = impl_->data_size;
 
   if (size == 0) {
     return Result<bool>::failure("Empty file");
@@ -383,6 +390,113 @@ Result<bool> CsvReader::open(const std::string& path) {
   return Result<bool>::success(true);
 }
 
+Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
+  // Take ownership of the buffer
+  impl_->owned_buffer = std::move(buffer);
+
+  // Set data pointer from owned buffer
+  impl_->data_ptr = reinterpret_cast<const char*>(impl_->owned_buffer.data());
+  impl_->data_size = impl_->owned_buffer.size();
+
+  const char* data = impl_->data_ptr;
+  size_t size = impl_->data_size;
+
+  if (size == 0) {
+    return Result<bool>::failure("Empty file");
+  }
+
+  ChunkFinder finder(impl_->options.separator, impl_->options.quote);
+  LineParser parser(impl_->options);
+
+  // Parse header if present
+  if (impl_->options.has_header) {
+    size_t header_end = finder.find_row_end(data, size, 0);
+    impl_->header_end_offset = header_end;
+
+    auto header_names = parser.parse_header(data, header_end);
+
+    // Validate header (only if error handling is enabled)
+    if (impl_->error_collector.is_enabled()) [[unlikely]] {
+      // Check for empty header
+      if (header_names.empty() || (header_names.size() == 1 && header_names[0].empty())) {
+        impl_->error_collector.add_error(ErrorCode::EMPTY_HEADER, ErrorSeverity::FATAL, 1, 1, 0,
+                                         "Header row is empty");
+        if (impl_->error_collector.should_stop()) {
+          return Result<bool>::failure("Header row is empty");
+        }
+      }
+
+      // Check for duplicate column names
+      std::unordered_set<std::string> seen_names;
+      for (size_t i = 0; i < header_names.size(); ++i) {
+        const auto& name = header_names[i];
+        if (!name.empty() && !seen_names.insert(name).second) {
+          impl_->error_collector.add_error(ErrorCode::DUPLICATE_COLUMN_NAMES,
+                                           ErrorSeverity::WARNING, 1, i + 1, 0,
+                                           "Duplicate column name: '" + name + "'");
+          // Warnings don't stop parsing
+        }
+      }
+    }
+
+    // Create schema from header
+    for (size_t i = 0; i < header_names.size(); ++i) {
+      ColumnSchema col;
+      col.name = header_names[i];
+      col.index = i;
+      col.type = DataType::STRING; // Will be refined by type inference
+      impl_->schema.push_back(std::move(col));
+    }
+  } else {
+    // No header - count columns from first row
+    size_t first_row_end = finder.find_row_end(data, size, 0);
+
+    // Count separators in first row
+    bool in_quote = false;
+    size_t col_count = 1;
+    for (size_t i = 0; i < first_row_end; ++i) {
+      char c = data[i];
+      if (c == impl_->options.quote) {
+        if (in_quote && i + 1 < first_row_end && data[i + 1] == impl_->options.quote) {
+          ++i;
+        } else {
+          in_quote = !in_quote;
+        }
+      } else if (c == impl_->options.separator && !in_quote) {
+        ++col_count;
+      }
+    }
+
+    // Create generic column names
+    for (size_t i = 0; i < col_count; ++i) {
+      ColumnSchema col;
+      col.name = "V" + std::to_string(i + 1);
+      col.index = i;
+      col.type = DataType::STRING;
+      impl_->schema.push_back(std::move(col));
+    }
+
+    impl_->header_end_offset = 0;
+  }
+
+  // Perform type inference on sample rows
+  if (!impl_->schema.empty()) {
+    TypeInference inference(impl_->options);
+    auto inferred_types = inference.infer_from_sample(
+        data + impl_->header_end_offset, size - impl_->header_end_offset, impl_->schema.size(),
+        impl_->options.sample_rows);
+
+    for (size_t i = 0; i < impl_->schema.size() && i < inferred_types.size(); ++i) {
+      impl_->schema[i].type = inferred_types[i];
+    }
+  }
+
+  // Row count will be computed during read_all() to avoid separate SIMD pass
+  impl_->row_count = 0;
+
+  return Result<bool>::success(true);
+}
+
 const std::vector<ColumnSchema>& CsvReader::schema() const {
   return impl_->schema;
 }
@@ -406,8 +520,8 @@ Result<ParsedChunks> CsvReader::read_all() {
     return Result<ParsedChunks>::success(std::move(result));
   }
 
-  const char* data = impl_->source.data();
-  size_t size = impl_->source.size();
+  const char* data = impl_->data_ptr;
+  size_t size = impl_->data_size;
   size_t data_start = impl_->header_end_offset;
   size_t data_size = size - data_start;
 
@@ -622,8 +736,8 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
     fast_contexts.push_back(col->create_context());
   }
 
-  const char* data = impl_->source.data();
-  size_t size = impl_->source.size();
+  const char* data = impl_->data_ptr;
+  size_t size = impl_->data_size;
   const CsvOptions& options = impl_->options;
 
   // Create null checker once for O(1) lookup

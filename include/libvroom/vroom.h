@@ -1,5 +1,6 @@
 #pragma once
 
+#include "io_util.h"
 #include "options.h"
 #include "types.h"
 
@@ -116,6 +117,10 @@ public:
 
   // Open a CSV file
   Result<bool> open(const std::string& path);
+
+  // Open from a pre-loaded buffer (e.g., stdin)
+  // Takes ownership of the buffer
+  Result<bool> open_from_buffer(AlignedBuffer buffer);
 
   // Get detected schema after opening
   const std::vector<ColumnSchema>& schema() const;
