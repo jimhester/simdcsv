@@ -133,6 +133,9 @@ FetchContent_Declare(
     GIT_TAG v5.5.0
     GIT_SHALLOW TRUE
 )
+set(SIMDUTF_TESTS OFF CACHE BOOL "" FORCE)
+set(SIMDUTF_TOOLS OFF CACHE BOOL "" FORCE)
+set(SIMDUTF_BENCHMARKS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(simdutf)
 
 # BS::thread_pool - Lightweight thread pool
@@ -247,16 +250,25 @@ target_link_libraries(vroom_static PUBLIC
 )
 # Optional compression libraries
 if(ZSTD_FOUND)
+    if(ZSTD_LIBRARY_DIRS)
+        target_link_directories(vroom_static PUBLIC ${ZSTD_LIBRARY_DIRS})
+    endif()
     target_link_libraries(vroom_static PUBLIC ${ZSTD_LIBRARIES})
     target_include_directories(vroom_static PRIVATE ${ZSTD_INCLUDE_DIRS})
     target_compile_definitions(vroom_static PRIVATE VROOM_HAVE_ZSTD)
 endif()
 if(LZ4_FOUND)
+    if(LZ4_LIBRARY_DIRS)
+        target_link_directories(vroom_static PUBLIC ${LZ4_LIBRARY_DIRS})
+    endif()
     target_link_libraries(vroom_static PUBLIC ${LZ4_LIBRARIES})
     target_include_directories(vroom_static PRIVATE ${LZ4_INCLUDE_DIRS})
     target_compile_definitions(vroom_static PRIVATE VROOM_HAVE_LZ4)
 endif()
 if(SNAPPY_FOUND)
+    if(SNAPPY_LIBRARY_DIRS)
+        target_link_directories(vroom_static PUBLIC ${SNAPPY_LIBRARY_DIRS})
+    endif()
     target_link_libraries(vroom_static PUBLIC ${SNAPPY_LIBRARIES})
     target_include_directories(vroom_static PRIVATE ${SNAPPY_INCLUDE_DIRS})
     target_compile_definitions(vroom_static PRIVATE VROOM_HAVE_SNAPPY)
