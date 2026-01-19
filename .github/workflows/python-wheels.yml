@@ -50,8 +50,16 @@ jobs:
           CIBW_ARCHS_MACOS: x86_64 arm64
           # Build x64 on Windows (ARM64 support requires additional work)
           CIBW_ARCHS_WINDOWS: AMD64
-          # macOS: require 10.15+ for std::filesystem support
-          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.15
+          # macOS: require 10.15+ for std::filesystem support, set Homebrew paths
+          CIBW_ENVIRONMENT_MACOS: >
+            MACOSX_DEPLOYMENT_TARGET=10.15
+            LIBRARY_PATH=/opt/homebrew/lib:/usr/local/lib
+            CPATH=/opt/homebrew/include:/usr/local/include
+            CMAKE_PREFIX_PATH=/opt/homebrew;/usr/local
+          # macOS: Install compression libraries via Homebrew
+          CIBW_BEFORE_BUILD_MACOS: brew install zstd lz4 snappy || true
+          # Linux: Install compression development libraries (manylinux2014 uses yum)
+          CIBW_BEFORE_BUILD_LINUX: yum install -y zlib-devel libzstd-devel lz4-devel snappy-devel || true
           # Windows: Install zlib and compression libraries via vcpkg
           CIBW_BEFORE_BUILD_WINDOWS: >
             pip install delvewheel &&
