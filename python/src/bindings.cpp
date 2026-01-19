@@ -241,10 +241,20 @@ void table_stream_release(libvroom::ArrowArrayStream* stream) {
 // read_csv function - main entry point
 // =============================================================================
 
+// Result structure for read_csv when returning errors
+struct ReadResult {
+  std::shared_ptr<Table> table;
+  std::vector<libvroom::ParseError> errors;
+  bool has_warnings;
+  bool has_fatal;
+};
+
 std::shared_ptr<Table> read_csv(const std::string& path,
                                 std::optional<char> separator = std::nullopt,
                                 std::optional<char> quote = std::nullopt, bool has_header = true,
-                                std::optional<size_t> num_threads = std::nullopt) {
+                                std::optional<size_t> num_threads = std::nullopt,
+                                std::optional<std::string> error_mode = std::nullopt,
+                                std::optional<size_t> max_errors = std::nullopt) {
   // Set up options
   libvroom::CsvOptions csv_opts;
   if (separator)
@@ -255,17 +265,56 @@ std::shared_ptr<Table> read_csv(const std::string& path,
   if (num_threads)
     csv_opts.num_threads = *num_threads;
 
+  // Set error handling options
+  if (error_mode) {
+    if (*error_mode == "disabled") {
+      csv_opts.error_mode = libvroom::ErrorMode::DISABLED;
+    } else if (*error_mode == "fail_fast" || *error_mode == "strict") {
+      csv_opts.error_mode = libvroom::ErrorMode::FAIL_FAST;
+    } else if (*error_mode == "permissive") {
+      csv_opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+    } else if (*error_mode == "best_effort") {
+      csv_opts.error_mode = libvroom::ErrorMode::BEST_EFFORT;
+    } else {
+      throw std::runtime_error("Unknown error_mode: " + *error_mode +
+                               " (use 'disabled', 'fail_fast', 'permissive', or 'best_effort')");
+    }
+  }
+  if (max_errors) {
+    csv_opts.max_errors = *max_errors;
+    // Enable error collection if max_errors is specified
+    if (csv_opts.error_mode == libvroom::ErrorMode::DISABLED) {
+      csv_opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+    }
+  }
+
   // Create reader and open file
   libvroom::CsvReader reader(csv_opts);
   auto open_result = reader.open(path);
   if (!open_result.ok) {
-    throw std::runtime_error(open_result.error);
+    // Include any collected errors in the exception message
+    std::string error_msg = open_result.error;
+    if (reader.has_errors()) {
+      error_msg += "\n\nParse errors:\n";
+      for (const auto& err : reader.errors()) {
+        error_msg += "  " + err.to_string() + "\n";
+      }
+    }
+    throw std::runtime_error(error_msg);
   }
 
   // Read all data
   auto read_result = reader.read_all();
   if (!read_result.ok) {
-    throw std::runtime_error(read_result.error);
+    // Include any collected errors in the exception message
+    std::string error_msg = read_result.error;
+    if (reader.has_errors()) {
+      error_msg += "\n\nParse errors:\n";
+      for (const auto& err : reader.errors()) {
+        error_msg += "  " + err.to_string() + "\n";
+      }
+    }
+    throw std::runtime_error(error_msg);
   }
 
   // Flatten chunks into single column builders
@@ -297,7 +346,9 @@ std::shared_ptr<Table> read_csv(const std::string& path,
 void to_parquet(const std::string& input_path, const std::string& output_path,
                 std::optional<std::string> compression = std::nullopt,
                 std::optional<size_t> row_group_size = std::nullopt,
-                std::optional<size_t> num_threads = std::nullopt) {
+                std::optional<size_t> num_threads = std::nullopt,
+                std::optional<std::string> error_mode = std::nullopt,
+                std::optional<size_t> max_errors = std::nullopt) {
   libvroom::VroomOptions opts;
   opts.input_path = input_path;
   opts.output_path = output_path;
@@ -327,10 +378,44 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
     opts.threads.num_threads = *num_threads;
   }
 
+  // Set error handling options
+  if (error_mode) {
+    if (*error_mode == "disabled") {
+      opts.csv.error_mode = libvroom::ErrorMode::DISABLED;
+    } else if (*error_mode == "fail_fast" || *error_mode == "strict") {
+      opts.csv.error_mode = libvroom::ErrorMode::FAIL_FAST;
+    } else if (*error_mode == "permissive") {
+      opts.csv.error_mode = libvroom::ErrorMode::PERMISSIVE;
+    } else if (*error_mode == "best_effort") {
+      opts.csv.error_mode = libvroom::ErrorMode::BEST_EFFORT;
+    } else {
+      throw std::runtime_error("Unknown error_mode: " + *error_mode +
+                               " (use 'disabled', 'fail_fast', 'permissive', or 'best_effort')");
+    }
+  }
+  if (max_errors) {
+    opts.csv.max_errors = *max_errors;
+    // Enable error collection if max_errors is specified
+    if (opts.csv.error_mode == libvroom::ErrorMode::DISABLED) {
+      opts.csv.error_mode = libvroom::ErrorMode::PERMISSIVE;
+    }
+  }
+
   auto result = libvroom::convert_csv_to_parquet(opts);
   if (!result.ok()) {
-    throw std::runtime_error(result.error);
+    // Include any collected errors in the exception message
+    std::string error_msg = result.error;
+    if (result.has_errors()) {
+      error_msg += "\n\nParse errors:\n";
+      for (const auto& err : result.parse_errors) {
+        error_msg += "  " + err.to_string() + "\n";
+      }
+    }
+    throw std::runtime_error(error_msg);
   }
+
+  // Warn about any errors collected even on success (permissive mode)
+  // TODO: Consider returning warnings to Python instead of just logging
 }
 
 // =============================================================================
@@ -449,7 +534,8 @@ PYBIND11_MODULE(_core, m) {
   // read_csv function
   m.def("read_csv", &read_csv, py::arg("path"), py::arg("separator") = py::none(),
         py::arg("quote") = py::none(), py::arg("has_header") = true,
-        py::arg("num_threads") = py::none(),
+        py::arg("num_threads") = py::none(), py::arg("error_mode") = py::none(),
+        py::arg("max_errors") = py::none(),
         R"doc(
         Read a CSV file into a Table.
 
@@ -465,23 +551,42 @@ PYBIND11_MODULE(_core, m) {
             Whether the file has a header row. Default is True.
         num_threads : int, optional
             Number of threads to use. Default is auto-detect.
+        error_mode : str, optional
+            Error handling mode:
+            - "disabled" (default): No error collection, maximum performance
+            - "fail_fast" or "strict": Stop on first error
+            - "permissive": Collect all errors, stop on fatal
+            - "best_effort": Ignore errors, parse what's possible
+        max_errors : int, optional
+            Maximum number of errors to collect. Default is 10000.
+            Setting this automatically enables "permissive" mode if error_mode is not set.
 
         Returns
         -------
         Table
             A Table object containing the parsed data.
 
+        Raises
+        ------
+        RuntimeError
+            If parsing fails. In permissive mode, collected errors are included
+            in the exception message.
+
         Examples
         --------
         >>> import vroom_csv
         >>> table = vroom_csv.read_csv("data.csv")
         >>> print(table.num_rows, table.num_columns)
+
+        # With error handling
+        >>> table = vroom_csv.read_csv("data.csv", error_mode="permissive")
     )doc");
 
   // to_parquet function
   m.def("to_parquet", &to_parquet, py::arg("input_path"), py::arg("output_path"),
         py::arg("compression") = py::none(), py::arg("row_group_size") = py::none(),
-        py::arg("num_threads") = py::none(),
+        py::arg("num_threads") = py::none(), py::arg("error_mode") = py::none(),
+        py::arg("max_errors") = py::none(),
         R"doc(
         Convert a CSV file to Parquet format.
 
@@ -498,11 +603,29 @@ PYBIND11_MODULE(_core, m) {
             Number of rows per row group. Default is 1,000,000.
         num_threads : int, optional
             Number of threads to use. Default is auto-detect.
+        error_mode : str, optional
+            Error handling mode:
+            - "disabled" (default): No error collection, maximum performance
+            - "fail_fast" or "strict": Stop on first error
+            - "permissive": Collect all errors, stop on fatal
+            - "best_effort": Ignore errors, parse what's possible
+        max_errors : int, optional
+            Maximum number of errors to collect. Default is 10000.
+            Setting this automatically enables "permissive" mode if error_mode is not set.
+
+        Raises
+        ------
+        RuntimeError
+            If parsing fails. In permissive mode, collected errors are included
+            in the exception message.
 
         Examples
         --------
         >>> import vroom_csv
         >>> vroom_csv.to_parquet("data.csv", "data.parquet")
+
+        # With error handling
+        >>> vroom_csv.to_parquet("data.csv", "data.parquet", error_mode="strict")
     )doc");
 
   // to_arrow_ipc function

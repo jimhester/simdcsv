@@ -1,5 +1,5 @@
-#include "error.h"
-#include "io_util.h"
+#include "libvroom/error.h"
+#include "libvroom/vroom.h"
 
 #include <filesystem>
 #include <fstream>
@@ -766,22 +766,107 @@ TEST(ErrorModeTest, BestEffortModeDefinition) {
   EXPECT_EQ(collector.mode(), ErrorMode::BEST_EFFORT);
 }
 
+// Note: I/O utility tests removed - they tested v1 io_util.h APIs that don't exist in v2
+
 // ============================================================================
-// I/O UTILITY ERROR PATH TESTS
+// CSV READER INTEGRATION TESTS
 // ============================================================================
 
-TEST(IOUtilTest, ReadFileNotFound) {
-  // Test file open failure path
-  EXPECT_THROW(
-      { read_file("/nonexistent/file/path/that/does/not/exist.csv", 32); }, std::runtime_error);
+// Test that CsvReader detects empty header
+TEST(CsvReaderErrorTest, EmptyHeader) {
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+
+  libvroom::CsvReader reader(opts);
+  auto result = reader.open("test/data/malformed/empty_header.csv");
+
+  // With error collection enabled, should still fail on empty header
+  EXPECT_FALSE(result.ok);
+  EXPECT_TRUE(reader.has_errors());
+
+  // Check that we got the expected error
+  const auto& errors = reader.errors();
+  ASSERT_GE(errors.size(), 1);
+  EXPECT_EQ(errors[0].code, libvroom::ErrorCode::EMPTY_HEADER);
+  EXPECT_EQ(errors[0].severity, libvroom::ErrorSeverity::FATAL);
 }
 
-TEST(IOUtilTest, ReadFileInvalidPath) {
-  // Test another file open failure path with invalid path
-  EXPECT_THROW({ read_file("", 32); }, std::runtime_error);
+// Test that CsvReader detects duplicate column names
+TEST(CsvReaderErrorTest, DuplicateColumnNames) {
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+
+  libvroom::CsvReader reader(opts);
+  auto result = reader.open("test/data/malformed/duplicate_column_names.csv");
+
+  // Should succeed (duplicate names are just a warning)
+  EXPECT_TRUE(result.ok);
+  EXPECT_TRUE(reader.has_errors());
+
+  // Check that we got the expected warnings
+  const auto& errors = reader.errors();
+  ASSERT_GE(errors.size(), 2); // "A" and "B" are both duplicated
+
+  bool found_duplicate_a = false;
+  bool found_duplicate_b = false;
+  for (const auto& err : errors) {
+    EXPECT_EQ(err.code, libvroom::ErrorCode::DUPLICATE_COLUMN_NAMES);
+    EXPECT_EQ(err.severity, libvroom::ErrorSeverity::WARNING);
+    if (err.message.find("'A'") != std::string::npos) {
+      found_duplicate_a = true;
+    }
+    if (err.message.find("'B'") != std::string::npos) {
+      found_duplicate_b = true;
+    }
+  }
+  EXPECT_TRUE(found_duplicate_a) << "Should detect duplicate column 'A'";
+  EXPECT_TRUE(found_duplicate_b) << "Should detect duplicate column 'B'";
 }
 
-int main(int argc, char** argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+// Test that error mode DISABLED doesn't collect errors
+TEST(CsvReaderErrorTest, DisabledModeNoErrors) {
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::DISABLED; // Default
+
+  libvroom::CsvReader reader(opts);
+  auto result = reader.open("test/data/malformed/duplicate_column_names.csv");
+
+  // Should succeed
+  EXPECT_TRUE(result.ok);
+
+  // Should NOT have collected any errors (DISABLED mode)
+  EXPECT_FALSE(reader.has_errors());
+  EXPECT_EQ(reader.errors().size(), 0);
+}
+
+// Test that ConversionResult properly populates parse_errors
+TEST(ConversionErrorTest, ConversionResultHasErrors) {
+  libvroom::VroomOptions opts;
+  opts.csv.error_mode = libvroom::ErrorMode::PERMISSIVE;
+  opts.input_path = "test/data/malformed/duplicate_column_names.csv";
+  opts.output_path = "/tmp/test_output.parquet";
+
+  auto result = libvroom::convert_csv_to_parquet(opts);
+
+  // Conversion should succeed
+  EXPECT_TRUE(result.ok());
+
+  // But should have collected warnings
+  EXPECT_TRUE(result.has_warnings());
+  EXPECT_FALSE(result.has_fatal());
+  EXPECT_GE(result.error_count(), 2);
+}
+
+// Test error_summary helper method
+TEST(ConversionErrorTest, ErrorSummary) {
+  libvroom::VroomOptions opts;
+  opts.csv.error_mode = libvroom::ErrorMode::PERMISSIVE;
+  opts.input_path = "test/data/malformed/duplicate_column_names.csv";
+  opts.output_path = "/tmp/test_output.parquet";
+
+  auto result = libvroom::convert_csv_to_parquet(opts);
+
+  std::string summary = result.error_summary();
+  EXPECT_NE(summary.find("warnings"), std::string::npos)
+      << "Summary should mention warnings: " << summary;
 }

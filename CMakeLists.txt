@@ -390,6 +390,7 @@ endif()
 
 # Library target (SHARED or STATIC based on BUILD_SHARED_LIBS)
 set(VROOM_SOURCES
+    src/error.cpp
     src/reader/mmap_source.cpp
     src/reader/csv_reader.cpp
     src/parser/chunk_finder.cpp
@@ -548,7 +549,11 @@ if(BUILD_TESTING)
 #   - vroom::ArrowColumnBuilder
 #
 # add_executable(libvroom_test test/csv_parser_test.cpp)
-# add_executable(error_handling_test test/error_handling_test.cpp)
+
+# Error handling test (enabled - tests ErrorCollector infrastructure)
+add_executable(error_handling_test test/error_handling_test.cpp)
+target_link_libraries(error_handling_test PRIVATE vroom GTest::gtest_main)
+add_test(NAME error_handling_test COMMAND error_handling_test)
 # add_executable(csv_parsing_test test/csv_parsing_test.cpp)
 # add_executable(csv_parser_errors_test test/csv_parser_errors_test.cpp)
 # add_executable(csv_extended_test test/csv_extended_test.cpp)

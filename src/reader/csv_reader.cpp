@@ -1,4 +1,5 @@
 #include "libvroom/arrow_column_builder.h"
+#include "libvroom/error.h"
 #include "libvroom/split_fields.h"
 #include "libvroom/vroom.h"
 
@@ -8,6 +9,7 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace libvroom {
@@ -257,8 +259,9 @@ struct CsvReader::Impl {
   size_t header_end_offset = 0;
   size_t num_threads = 0;
   bool file_has_quotes = false; // Detected during sampling
+  ErrorCollector error_collector;
 
-  Impl(const CsvOptions& opts) : options(opts) {
+  Impl(const CsvOptions& opts) : options(opts), error_collector(opts.error_mode, opts.max_errors) {
     // Use options.num_threads if specified, otherwise auto-detect
     if (options.num_threads > 0) {
       num_threads = options.num_threads;
@@ -296,6 +299,30 @@ Result<bool> CsvReader::open(const std::string& path) {
     impl_->header_end_offset = header_end;
 
     auto header_names = parser.parse_header(data, header_end);
+
+    // Validate header (only if error handling is enabled)
+    if (impl_->error_collector.is_enabled()) [[unlikely]] {
+      // Check for empty header
+      if (header_names.empty() || (header_names.size() == 1 && header_names[0].empty())) {
+        impl_->error_collector.add_error(ErrorCode::EMPTY_HEADER, ErrorSeverity::FATAL, 1, 1, 0,
+                                         "Header row is empty");
+        if (impl_->error_collector.should_stop()) {
+          return Result<bool>::failure("Header row is empty");
+        }
+      }
+
+      // Check for duplicate column names
+      std::unordered_set<std::string> seen_names;
+      for (size_t i = 0; i < header_names.size(); ++i) {
+        const auto& name = header_names[i];
+        if (!name.empty() && !seen_names.insert(name).second) {
+          impl_->error_collector.add_error(ErrorCode::DUPLICATE_COLUMN_NAMES,
+                                           ErrorSeverity::WARNING, 1, i + 1, 0,
+                                           "Duplicate column name: '" + name + "'");
+          // Warnings don't stop parsing
+        }
+      }
+    }
 
     // Create schema from header
     for (size_t i = 0; i < header_names.size(); ++i) {
@@ -362,6 +389,14 @@ const std::vector<ColumnSchema>& CsvReader::schema() const {
 
 size_t CsvReader::row_count() const {
   return impl_->row_count;
+}
+
+const std::vector<ParseError>& CsvReader::errors() const {
+  return impl_->error_collector.errors();
+}
+
+bool CsvReader::has_errors() const {
+  return impl_->error_collector.has_errors();
 }
 
 Result<ParsedChunks> CsvReader::read_all() {
@@ -744,8 +779,13 @@ ConversionResult convert_csv_to_parquet(const VroomOptions& options, ProgressCal
 
   if (!read_result) {
     result.error = read_result.error;
+    // Copy any collected errors even on failure
+    result.parse_errors = reader.errors();
     return result;
   }
+
+  // Copy collected errors from reader
+  result.parse_errors = reader.errors();
 
   // Capture row count from parsed data
   result.rows = reader.row_count();

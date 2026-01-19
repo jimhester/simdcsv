@@ -111,6 +111,11 @@ CSV OPTIONS:
     -q, --quote <CHAR>       Quote character (default: ")
     --no-header              CSV has no header row
 
+ERROR HANDLING:
+    --strict                 Stop on first error (exit code 1)
+    --permissive             Collect all errors, stop on fatal (exit code 0 unless fatal)
+    --max-errors <N>         Maximum errors to collect (default: 10000)
+
 EXAMPLES:
     vroom convert data.csv -o data.parquet
     vroom convert data.csv -o data.parquet -c snappy -j 4
@@ -138,6 +143,8 @@ int cmd_convert(int argc, char* argv[]) {
   char delimiter = ',';
   char quote = '"';
   bool has_header = true;
+  libvroom::ErrorMode error_mode = libvroom::ErrorMode::DISABLED;
+  size_t max_errors = libvroom::ErrorCollector::DEFAULT_MAX_ERRORS;
 
   // Parse arguments
   for (int i = 1; i < argc; ++i) {
@@ -181,6 +188,20 @@ int cmd_convert(int argc, char* argv[]) {
       quote = argv[i][0];
     } else if (arg == "--no-header") {
       has_header = false;
+    } else if (arg == "--strict") {
+      error_mode = libvroom::ErrorMode::FAIL_FAST;
+    } else if (arg == "--permissive") {
+      error_mode = libvroom::ErrorMode::PERMISSIVE;
+    } else if (arg == "--max-errors") {
+      if (++i >= argc) {
+        cerr << "Error: --max-errors requires a number" << endl;
+        return 1;
+      }
+      max_errors = stoul(argv[i]);
+      // Enable error collection if max-errors is specified
+      if (error_mode == libvroom::ErrorMode::DISABLED) {
+        error_mode = libvroom::ErrorMode::PERMISSIVE;
+      }
     } else if (arg == "-p" || arg == "--progress") {
       show_progress = true;
     } else if (arg == "-v" || arg == "--verbose") {
@@ -188,10 +209,10 @@ int cmd_convert(int argc, char* argv[]) {
     } else if (arg == "-h" || arg == "--help") {
       print_usage();
       return 0;
-    } else if (arg[0] != '-' && input_path.empty()) {
-      input_path = arg;
     } else if (arg == "convert") {
       // Skip command name
+    } else if (arg[0] != '-' && input_path.empty()) {
+      input_path = arg;
     } else {
       cerr << "Error: Unknown option: " << arg << endl;
       return 1;
@@ -221,6 +242,8 @@ int cmd_convert(int argc, char* argv[]) {
   opts.csv.separator = delimiter;
   opts.csv.quote = quote;
   opts.csv.has_header = has_header;
+  opts.csv.error_mode = error_mode;
+  opts.csv.max_errors = max_errors;
   if (num_threads > 0) {
     opts.csv.num_threads = num_threads;
     opts.threads.num_threads = num_threads;
@@ -267,7 +290,28 @@ int cmd_convert(int argc, char* argv[]) {
 
   if (!result.ok()) {
     cerr << "Error: " << result.error << endl;
+    // Display collected errors if any
+    if (result.has_errors()) {
+      cerr << "\nParse errors (" << result.error_summary() << "):" << endl;
+      for (const auto& err : result.parse_errors) {
+        cerr << "  " << err.to_string() << endl;
+      }
+    }
     return 1;
+  }
+
+  // Display warnings/errors even on success
+  if (result.has_errors()) {
+    if (verbose || error_mode != libvroom::ErrorMode::DISABLED) {
+      cerr << "\n" << result.error_summary() << ":" << endl;
+      for (const auto& err : result.parse_errors) {
+        cerr << "  " << err.to_string() << endl;
+      }
+    }
+    // In strict mode, any error is a failure
+    if (error_mode == libvroom::ErrorMode::FAIL_FAST) {
+      return 1;
+    }
   }
 
   if (verbose) {
