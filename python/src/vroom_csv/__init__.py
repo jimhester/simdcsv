@@ -34,19 +34,13 @@ Arrow Interoperability
 import sys
 
 from vroom_csv._core import (
-    BatchedReader,
-    Dialect,
-    RecordBatch,
-    RowIterator,
     Table,
-    detect_dialect,
     read_csv,
-    read_csv_batched,
-    read_csv_rows,
+    to_parquet,
+    to_arrow_ipc,
     VroomError,
     ParseError,
     IOError,
-    LIBVROOM_VERSION,
 )
 
 # Version from setuptools-scm, with fallback to _core for editable installs
@@ -105,19 +99,13 @@ def default_progress(bytes_read: int, total_bytes: int) -> None:
 
 
 __all__ = [
-    "BatchedReader",
-    "Dialect",
-    "RecordBatch",
-    "RowIterator",
     "Table",
     "default_progress",
-    "detect_dialect",
     "read_csv",
-    "read_csv_batched",
-    "read_csv_rows",
+    "to_parquet",
+    "to_arrow_ipc",
     "VroomError",
     "ParseError",
     "IOError",
     "__version__",
-    "LIBVROOM_VERSION",
 ]

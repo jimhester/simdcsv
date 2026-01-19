@@ -11,6 +11,9 @@
 
 #include "libvroom.h"
 
+#include "vroom/arrow_c_data.h"
+#include "vroom/arrow_export.h"
+
 #include <memory>
 #include <optional>
 #include <pybind11/pybind11.h>
@@ -20,44 +23,6 @@
 #include <vector>
 
 namespace py = pybind11;
-
-// =============================================================================
-// Arrow C Data Interface structures (for PyCapsule protocol)
-// See: https://arrow.apache.org/docs/format/CDataInterface.html
-// =============================================================================
-
-struct ArrowSchema {
-  const char* format;
-  const char* name;
-  const char* metadata;
-  int64_t flags;
-  int64_t n_children;
-  ArrowSchema** children;
-  ArrowSchema* dictionary;
-  void (*release)(ArrowSchema*);
-  void* private_data;
-};
-
-struct ArrowArray {
-  int64_t length;
-  int64_t null_count;
-  int64_t offset;
-  int64_t n_buffers;
-  int64_t n_children;
-  const void** buffers;
-  ArrowArray** children;
-  ArrowArray* dictionary;
-  void (*release)(ArrowArray*);
-  void* private_data;
-};
-
-struct ArrowArrayStream {
-  int (*get_schema)(ArrowArrayStream*, ArrowSchema* out);
-  int (*get_next)(ArrowArrayStream*, ArrowArray* out);
-  const char* (*get_last_error)(ArrowArrayStream*);
-  void (*release)(ArrowArrayStream*);
-  void* private_data;
-};
 
 // =============================================================================
 // Custom Python exceptions
@@ -97,14 +62,181 @@ public:
     return names;
   }
 
-  // Arrow PyCapsule protocol - __arrow_c_stream__
-  // TODO: Implement for zero-copy export
+  // Access to column builders for export
+  const std::vector<std::unique_ptr<vroom::ArrowColumnBuilder>>& columns() const {
+    return columns_;
+  }
 
 private:
   std::vector<vroom::ColumnSchema> schema_;
   std::vector<std::unique_ptr<vroom::ArrowColumnBuilder>> columns_;
   size_t num_rows_;
 };
+
+// =============================================================================
+// Arrow stream export for Table
+// =============================================================================
+
+// Private data for the stream - keeps Table alive and tracks state
+struct TableStreamPrivate {
+  std::shared_ptr<Table> table;
+  bool batch_returned = false;
+  std::string last_error;
+};
+
+// Private data for struct schema - owns child schemas
+struct StructSchemaPrivate {
+  std::string name_storage;
+  std::vector<std::unique_ptr<vroom::ArrowSchema>> child_schemas;
+  std::vector<vroom::ArrowSchema*> child_schema_ptrs;
+};
+
+// Release callback for struct schema
+void release_struct_schema(vroom::ArrowSchema* schema) {
+  if (schema->release == nullptr)
+    return;
+
+  // Release all child schemas first
+  if (schema->children) {
+    for (int64_t i = 0; i < schema->n_children; ++i) {
+      if (schema->children[i] && schema->children[i]->release) {
+        schema->children[i]->release(schema->children[i]);
+      }
+    }
+  }
+
+  // Delete our private data (which owns the child ArrowSchema objects)
+  if (schema->private_data) {
+    delete static_cast<StructSchemaPrivate*>(schema->private_data);
+  }
+
+  schema->release = nullptr;
+}
+
+// Stream get_schema callback
+int table_stream_get_schema(vroom::ArrowArrayStream* stream, vroom::ArrowSchema* out) {
+  auto* priv = static_cast<TableStreamPrivate*>(stream->private_data);
+  auto& table = priv->table;
+  const auto& table_schema = table->schema();
+
+  // Create private data to own the child schemas
+  auto* schema_priv = new StructSchemaPrivate();
+  schema_priv->name_storage = "";
+
+  // Create struct schema with children for each column
+  for (size_t i = 0; i < table->num_columns(); ++i) {
+    auto child = std::make_unique<vroom::ArrowSchema>();
+    table->columns()[i]->export_schema(child.get(), table_schema[i].name);
+    schema_priv->child_schema_ptrs.push_back(child.get());
+    schema_priv->child_schemas.push_back(std::move(child));
+  }
+
+  // Set up struct schema
+  out->format = vroom::arrow_format::STRUCT;
+  out->name = schema_priv->name_storage.c_str();
+  out->metadata = nullptr;
+  out->flags = 0;
+  out->n_children = static_cast<int64_t>(table->num_columns());
+  out->children = schema_priv->child_schema_ptrs.data();
+  out->dictionary = nullptr;
+  out->release = release_struct_schema;
+  out->private_data = schema_priv;
+
+  return 0;
+}
+
+// Private data for struct array - owns child arrays and keeps table alive
+struct StructArrayPrivate {
+  std::shared_ptr<Table> table; // Keep table alive while array is in use
+  std::vector<std::unique_ptr<vroom::ArrowArray>> child_arrays;
+  std::vector<vroom::ArrowArray*> child_array_ptrs;
+  // Note: child_privates are owned by the ArrowArray's release callback, not stored here
+  std::vector<const void*> struct_buffers;
+};
+
+// Release callback for struct array
+void release_struct_array(vroom::ArrowArray* array) {
+  if (array->release == nullptr)
+    return;
+
+  // Release all child arrays first
+  if (array->children) {
+    for (int64_t i = 0; i < array->n_children; ++i) {
+      if (array->children[i] && array->children[i]->release) {
+        array->children[i]->release(array->children[i]);
+      }
+    }
+  }
+
+  // Delete our private data (which owns the child ArrowArray objects and the table)
+  if (array->private_data) {
+    delete static_cast<StructArrayPrivate*>(array->private_data);
+  }
+
+  array->release = nullptr;
+}
+
+// Stream get_next callback
+int table_stream_get_next(vroom::ArrowArrayStream* stream, vroom::ArrowArray* out) {
+  auto* stream_priv = static_cast<TableStreamPrivate*>(stream->private_data);
+
+  if (stream_priv->batch_returned) {
+    // No more batches - signal end of stream
+    vroom::init_empty_array(out);
+    return 0;
+  }
+
+  auto& table = stream_priv->table;
+
+  // Create private data to own the child arrays and keep table alive
+  auto* array_priv = new StructArrayPrivate();
+  array_priv->table = table; // Keep table alive
+
+  // Create child arrays for each column
+  for (size_t i = 0; i < table->num_columns(); ++i) {
+    // ArrowColumnPrivate is owned by the ArrowArray's release callback
+    auto* child_priv = new vroom::ArrowColumnPrivate();
+    auto child = std::make_unique<vroom::ArrowArray>();
+    table->columns()[i]->export_to_arrow(child.get(), child_priv);
+
+    array_priv->child_array_ptrs.push_back(child.get());
+    array_priv->child_arrays.push_back(std::move(child));
+  }
+
+  // Set up struct array
+  array_priv->struct_buffers = {nullptr}; // Struct has no buffers itself
+
+  out->length = static_cast<int64_t>(table->num_rows());
+  out->null_count = 0;
+  out->offset = 0;
+  out->n_buffers = 1;
+  out->n_children = static_cast<int64_t>(table->num_columns());
+  out->buffers = array_priv->struct_buffers.data();
+  out->children = array_priv->child_array_ptrs.data();
+  out->dictionary = nullptr;
+  out->release = release_struct_array;
+  out->private_data = array_priv;
+
+  stream_priv->batch_returned = true;
+  return 0;
+}
+
+// Stream get_last_error callback
+const char* table_stream_get_last_error(vroom::ArrowArrayStream* stream) {
+  auto* priv = static_cast<TableStreamPrivate*>(stream->private_data);
+  return priv->last_error.empty() ? nullptr : priv->last_error.c_str();
+}
+
+// Stream release callback
+void table_stream_release(vroom::ArrowArrayStream* stream) {
+  if (stream->release == nullptr)
+    return;
+
+  auto* priv = static_cast<TableStreamPrivate*>(stream->private_data);
+  delete priv;
+
+  stream->release = nullptr;
+}
 
 // =============================================================================
 // read_csv function - main entry point
@@ -255,7 +387,65 @@ PYBIND11_MODULE(_core, m) {
     )doc")
       .def_property_readonly("num_rows", &Table::num_rows, "Number of rows in the table")
       .def_property_readonly("num_columns", &Table::num_columns, "Number of columns in the table")
-      .def_property_readonly("column_names", &Table::column_names, "List of column names");
+      .def_property_readonly("column_names", &Table::column_names, "List of column names")
+      .def(
+          "__arrow_c_stream__",
+          [](std::shared_ptr<Table> self, py::object requested_schema) {
+            // Create stream
+            auto* stream = new vroom::ArrowArrayStream();
+            auto* priv = new TableStreamPrivate();
+            priv->table = self;
+
+            stream->get_schema = table_stream_get_schema;
+            stream->get_next = table_stream_get_next;
+            stream->get_last_error = table_stream_get_last_error;
+            stream->release = table_stream_release;
+            stream->private_data = priv;
+
+            // Wrap in PyCapsule with required name
+            return py::capsule(stream, "arrow_array_stream", [](void* ptr) {
+              auto* s = static_cast<vroom::ArrowArrayStream*>(ptr);
+              if (s->release)
+                s->release(s);
+              delete s;
+            });
+          },
+          py::arg("requested_schema") = py::none(),
+          "Export table as Arrow stream via PyCapsule (zero-copy)")
+      .def(
+          "__arrow_c_schema__",
+          [](std::shared_ptr<Table> self) {
+            auto* schema = new vroom::ArrowSchema();
+            auto* priv = new StructSchemaPrivate();
+            const auto& table_schema = self->schema();
+
+            // Create child schemas
+            for (size_t i = 0; i < self->num_columns(); ++i) {
+              auto child = std::make_unique<vroom::ArrowSchema>();
+              self->columns()[i]->export_schema(child.get(), table_schema[i].name);
+              priv->child_schema_ptrs.push_back(child.get());
+              priv->child_schemas.push_back(std::move(child));
+            }
+
+            priv->name_storage = "";
+            schema->format = vroom::arrow_format::STRUCT;
+            schema->name = priv->name_storage.c_str();
+            schema->metadata = nullptr;
+            schema->flags = 0;
+            schema->n_children = static_cast<int64_t>(self->num_columns());
+            schema->children = priv->child_schema_ptrs.data();
+            schema->dictionary = nullptr;
+            schema->release = release_struct_schema;
+            schema->private_data = priv;
+
+            return py::capsule(schema, "arrow_schema", [](void* ptr) {
+              auto* s = static_cast<vroom::ArrowSchema*>(ptr);
+              if (s->release)
+                s->release(s);
+              delete s;
+            });
+          },
+          "Export table schema as Arrow schema via PyCapsule");
 
   // read_csv function
   m.def("read_csv", &read_csv, py::arg("path"), py::arg("separator") = py::none(),
