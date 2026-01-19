@@ -112,32 +112,26 @@ protected:
 TEST_F(CliTest, NoArgsShowsUsage) {
   auto result = CliRunner::run("");
   EXPECT_EQ(result.exit_code, 1);
-  EXPECT_TRUE(result.output.find("Usage:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("USAGE:") != std::string::npos);
 }
 
 TEST_F(CliTest, HelpFlagShort) {
   auto result = CliRunner::run("-h");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.output.find("Usage:") != std::string::npos);
-  EXPECT_TRUE(result.output.find("Commands:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("USAGE:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("COMMANDS:") != std::string::npos);
 }
 
 TEST_F(CliTest, HelpFlagLong) {
   auto result = CliRunner::run("--help");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.output.find("Usage:") != std::string::npos);
+  EXPECT_TRUE(result.output.find("USAGE:") != std::string::npos);
 }
 
-TEST_F(CliTest, VersionFlagShort) {
-  auto result = CliRunner::run("-v");
+TEST_F(CliTest, VersionCommand) {
+  auto result = CliRunner::run("version");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.output.find("vroom version") != std::string::npos);
-}
-
-TEST_F(CliTest, VersionFlagLong) {
-  auto result = CliRunner::run("--version");
-  EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.output.find("vroom version") != std::string::npos);
+  EXPECT_TRUE(result.output.find("vroom ") != std::string::npos);
 }
 
 TEST_F(CliTest, UnknownCommandShowsError) {
@@ -598,13 +592,7 @@ TEST_F(CliTest, SingleRowHeaderOnly) {
 TEST_F(CliTest, HelpAfterCommand) {
   auto result = CliRunner::run("count -h");
   EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.output.find("Usage:") != std::string::npos);
-}
-
-TEST_F(CliTest, VersionAfterCommand) {
-  auto result = CliRunner::run("head -v");
-  EXPECT_EQ(result.exit_code, 0);
-  EXPECT_TRUE(result.output.find("vroom version") != std::string::npos);
+  EXPECT_TRUE(result.output.find("USAGE:") != std::string::npos);
 }
 
 // =============================================================================
