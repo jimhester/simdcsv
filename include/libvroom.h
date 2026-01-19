@@ -16,7 +16,10 @@
 #define LIBVROOM_VERSION_STRING "2.0.0"
 
 // Core headers
+#include "libvroom/common_defs.h"
+#include "libvroom/dialect.h"
 #include "libvroom/error.h"
+#include "libvroom/io_util.h"
 #include "libvroom/options.h"
 #include "libvroom/types.h"
 #include "libvroom/vroom.h"

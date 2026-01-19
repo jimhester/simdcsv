@@ -391,6 +391,8 @@ endif()
 # Library target (SHARED or STATIC based on BUILD_SHARED_LIBS)
 set(VROOM_SOURCES
     src/error.cpp
+    src/io_util.cpp
+    src/dialect.cpp
     src/reader/mmap_source.cpp
     src/reader/csv_reader.cpp
     src/parser/chunk_finder.cpp
@@ -557,7 +559,12 @@ add_test(NAME error_handling_test COMMAND error_handling_test)
 # add_executable(csv_parsing_test test/csv_parsing_test.cpp)
 # add_executable(csv_parser_errors_test test/csv_parser_errors_test.cpp)
 # add_executable(csv_extended_test test/csv_extended_test.cpp)
-# add_executable(dialect_detection_test test/dialect_detection_test.cpp)
+
+# Dialect detection test (enabled - tests dialect detection infrastructure)
+add_executable(dialect_detection_test test/dialect_detection_test.cpp)
+target_link_libraries(dialect_detection_test PRIVATE vroom GTest::gtest_main)
+add_dependencies(dialect_detection_test copy_test_data)
+add_test(NAME dialect_detection_test COMMAND dialect_detection_test)
 # add_executable(type_detection_test test/type_detection_test.cpp)
 # add_executable(c_api_test test/c_api_test.cpp)
 # add_executable(debug_test test/debug_test.cpp)
