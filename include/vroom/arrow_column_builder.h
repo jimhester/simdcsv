@@ -1,6 +1,7 @@
 #pragma once
 
 #include "arrow_buffer.h"
+#include "arrow_export.h"
 #include "fast_arrow_context.h"
 #include "types.h"
 
@@ -43,6 +44,14 @@ public:
   // The other builder must be of the same type
   // O(n) operation - appends data from other to this
   virtual void merge_from(ArrowColumnBuilder& other) = 0;
+
+  // Export column to Arrow C Data Interface
+  // The ArrowArray buffers point directly to this column's data (zero-copy)
+  // Caller must ensure this column outlives the ArrowArray
+  virtual void export_to_arrow(ArrowArray* out, ArrowColumnPrivate* priv) const = 0;
+
+  // Export schema to Arrow C Data Interface
+  virtual void export_schema(ArrowSchema* out, const std::string& name) const = 0;
 
   // Factory methods
   static std::unique_ptr<ArrowColumnBuilder> create(DataType type);
@@ -92,6 +101,38 @@ public:
   // Direct access for writing
   const NumericBuffer<int32_t>& values() const { return values_; }
 
+  void export_to_arrow(ArrowArray* out, ArrowColumnPrivate* priv) const override {
+    priv->buffers.resize(2);
+    priv->buffers[0] = nulls_.has_nulls() ? nulls_.data() : nullptr;
+    priv->buffers[1] = values_.data();
+
+    out->length = static_cast<int64_t>(values_.size());
+    out->null_count = static_cast<int64_t>(nulls_.null_count_fast());
+    out->offset = 0;
+    out->n_buffers = 2;
+    out->n_children = 0;
+    out->buffers = priv->buffers.data();
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_array;
+    out->private_data = priv;
+  }
+
+  void export_schema(ArrowSchema* out, const std::string& name) const override {
+    auto* schema_priv = new ArrowSchemaPrivate();
+    schema_priv->name_storage = name;
+
+    out->format = arrow_format::INT32;
+    out->name = schema_priv->name_storage.c_str();
+    out->metadata = nullptr;
+    out->flags = ARROW_FLAG_NULLABLE;
+    out->n_children = 0;
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_schema;
+    out->private_data = schema_priv;
+  }
+
 private:
   NumericBuffer<int32_t> values_;
   NullBitmap nulls_;
@@ -132,6 +173,38 @@ public:
   }
 
   const NumericBuffer<int64_t>& values() const { return values_; }
+
+  void export_to_arrow(ArrowArray* out, ArrowColumnPrivate* priv) const override {
+    priv->buffers.resize(2);
+    priv->buffers[0] = nulls_.has_nulls() ? nulls_.data() : nullptr;
+    priv->buffers[1] = values_.data();
+
+    out->length = static_cast<int64_t>(values_.size());
+    out->null_count = static_cast<int64_t>(nulls_.null_count_fast());
+    out->offset = 0;
+    out->n_buffers = 2;
+    out->n_children = 0;
+    out->buffers = priv->buffers.data();
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_array;
+    out->private_data = priv;
+  }
+
+  void export_schema(ArrowSchema* out, const std::string& name) const override {
+    auto* schema_priv = new ArrowSchemaPrivate();
+    schema_priv->name_storage = name;
+
+    out->format = arrow_format::INT64;
+    out->name = schema_priv->name_storage.c_str();
+    out->metadata = nullptr;
+    out->flags = ARROW_FLAG_NULLABLE;
+    out->n_children = 0;
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_schema;
+    out->private_data = schema_priv;
+  }
 
 private:
   NumericBuffer<int64_t> values_;
@@ -174,6 +247,38 @@ public:
 
   const NumericBuffer<double>& values() const { return values_; }
 
+  void export_to_arrow(ArrowArray* out, ArrowColumnPrivate* priv) const override {
+    priv->buffers.resize(2);
+    priv->buffers[0] = nulls_.has_nulls() ? nulls_.data() : nullptr;
+    priv->buffers[1] = values_.data();
+
+    out->length = static_cast<int64_t>(values_.size());
+    out->null_count = static_cast<int64_t>(nulls_.null_count_fast());
+    out->offset = 0;
+    out->n_buffers = 2;
+    out->n_children = 0;
+    out->buffers = priv->buffers.data();
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_array;
+    out->private_data = priv;
+  }
+
+  void export_schema(ArrowSchema* out, const std::string& name) const override {
+    auto* schema_priv = new ArrowSchemaPrivate();
+    schema_priv->name_storage = name;
+
+    out->format = arrow_format::FLOAT64;
+    out->name = schema_priv->name_storage.c_str();
+    out->metadata = nullptr;
+    out->flags = ARROW_FLAG_NULLABLE;
+    out->n_children = 0;
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_schema;
+    out->private_data = schema_priv;
+  }
+
 private:
   NumericBuffer<double> values_;
   NullBitmap nulls_;
@@ -214,6 +319,39 @@ public:
   }
 
   const NumericBuffer<uint8_t>& values() const { return values_; }
+
+  void export_to_arrow(ArrowArray* out, ArrowColumnPrivate* priv) const override {
+    priv->buffers.resize(2);
+    priv->buffers[0] = nulls_.has_nulls() ? nulls_.data() : nullptr;
+    priv->buffers[1] = values_.data();
+
+    out->length = static_cast<int64_t>(values_.size());
+    out->null_count = static_cast<int64_t>(nulls_.null_count_fast());
+    out->offset = 0;
+    out->n_buffers = 2;
+    out->n_children = 0;
+    out->buffers = priv->buffers.data();
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_array;
+    out->private_data = priv;
+  }
+
+  void export_schema(ArrowSchema* out, const std::string& name) const override {
+    auto* schema_priv = new ArrowSchemaPrivate();
+    schema_priv->name_storage = name;
+
+    // Use uint8 "C" format since we store as uint8, not packed bits
+    out->format = "C";
+    out->name = schema_priv->name_storage.c_str();
+    out->metadata = nullptr;
+    out->flags = ARROW_FLAG_NULLABLE;
+    out->n_children = 0;
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_schema;
+    out->private_data = schema_priv;
+  }
 
 private:
   NumericBuffer<uint8_t> values_;
@@ -256,6 +394,38 @@ public:
 
   const NumericBuffer<int32_t>& values() const { return values_; }
 
+  void export_to_arrow(ArrowArray* out, ArrowColumnPrivate* priv) const override {
+    priv->buffers.resize(2);
+    priv->buffers[0] = nulls_.has_nulls() ? nulls_.data() : nullptr;
+    priv->buffers[1] = values_.data();
+
+    out->length = static_cast<int64_t>(values_.size());
+    out->null_count = static_cast<int64_t>(nulls_.null_count_fast());
+    out->offset = 0;
+    out->n_buffers = 2;
+    out->n_children = 0;
+    out->buffers = priv->buffers.data();
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_array;
+    out->private_data = priv;
+  }
+
+  void export_schema(ArrowSchema* out, const std::string& name) const override {
+    auto* schema_priv = new ArrowSchemaPrivate();
+    schema_priv->name_storage = name;
+
+    out->format = arrow_format::DATE32;
+    out->name = schema_priv->name_storage.c_str();
+    out->metadata = nullptr;
+    out->flags = ARROW_FLAG_NULLABLE;
+    out->n_children = 0;
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_schema;
+    out->private_data = schema_priv;
+  }
+
 private:
   NumericBuffer<int32_t> values_;
   NullBitmap nulls_;
@@ -296,6 +466,38 @@ public:
   }
 
   const NumericBuffer<int64_t>& values() const { return values_; }
+
+  void export_to_arrow(ArrowArray* out, ArrowColumnPrivate* priv) const override {
+    priv->buffers.resize(2);
+    priv->buffers[0] = nulls_.has_nulls() ? nulls_.data() : nullptr;
+    priv->buffers[1] = values_.data();
+
+    out->length = static_cast<int64_t>(values_.size());
+    out->null_count = static_cast<int64_t>(nulls_.null_count_fast());
+    out->offset = 0;
+    out->n_buffers = 2;
+    out->n_children = 0;
+    out->buffers = priv->buffers.data();
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_array;
+    out->private_data = priv;
+  }
+
+  void export_schema(ArrowSchema* out, const std::string& name) const override {
+    auto* schema_priv = new ArrowSchemaPrivate();
+    schema_priv->name_storage = name;
+
+    out->format = arrow_format::TIMESTAMP_US;
+    out->name = schema_priv->name_storage.c_str();
+    out->metadata = nullptr;
+    out->flags = ARROW_FLAG_NULLABLE;
+    out->n_children = 0;
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_schema;
+    out->private_data = schema_priv;
+  }
 
 private:
   NumericBuffer<int64_t> values_;
@@ -338,6 +540,40 @@ public:
   }
 
   const StringBuffer& values() const { return values_; }
+
+  void export_to_arrow(ArrowArray* out, ArrowColumnPrivate* priv) const override {
+    // String arrays have 3 buffers: [validity, offsets, data]
+    priv->buffers.resize(3);
+    priv->buffers[0] = nulls_.has_nulls() ? nulls_.data() : nullptr;
+    priv->buffers[1] = values_.offsets(); // int32 offsets
+    priv->buffers[2] = values_.data();    // char data
+
+    out->length = static_cast<int64_t>(values_.size());
+    out->null_count = static_cast<int64_t>(nulls_.null_count_fast());
+    out->offset = 0;
+    out->n_buffers = 3;
+    out->n_children = 0;
+    out->buffers = priv->buffers.data();
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_array;
+    out->private_data = priv;
+  }
+
+  void export_schema(ArrowSchema* out, const std::string& name) const override {
+    auto* schema_priv = new ArrowSchemaPrivate();
+    schema_priv->name_storage = name;
+
+    out->format = arrow_format::UTF8;
+    out->name = schema_priv->name_storage.c_str();
+    out->metadata = nullptr;
+    out->flags = ARROW_FLAG_NULLABLE;
+    out->n_children = 0;
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_schema;
+    out->private_data = schema_priv;
+  }
 
 private:
   StringBuffer values_;

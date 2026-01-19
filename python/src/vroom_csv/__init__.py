@@ -40,6 +40,7 @@ except ImportError:
 
 __all__ = [
     "Table",
+    "default_progress",
     "read_csv",
     "to_parquet",
     "to_arrow_ipc",
