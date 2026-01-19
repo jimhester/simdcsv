@@ -52,6 +52,12 @@ jobs:
           CIBW_ARCHS_WINDOWS: AMD64
           # macOS: require 10.15+ for std::filesystem support
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.15
+          # Windows: Install zlib and compression libraries via vcpkg
+          CIBW_BEFORE_BUILD_WINDOWS: >
+            pip install delvewheel &&
+            vcpkg install zlib:x64-windows zstd:x64-windows lz4:x64-windows snappy:x64-windows
+          CIBW_ENVIRONMENT_WINDOWS: CMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: delvewheel repair -w {dest_dir} {wheel}
           # Test requirements - use pytest only, skip Arrow tests in wheel build
           # Full Arrow tests run in the main Python CI workflow
           CIBW_TEST_REQUIRES: pytest>=7.0

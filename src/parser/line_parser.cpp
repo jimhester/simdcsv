@@ -193,8 +193,18 @@ bool LineParser::is_null_value(std::string_view value) const {
     return false;
   }
 
-  // O(1) hash set lookup with heterogeneous find (no allocation)
+  // Use heterogeneous lookup if available (C++20), otherwise linear search
+#if defined(__cpp_lib_generic_unordered_lookup) && __cpp_lib_generic_unordered_lookup >= 201811L
   return null_value_set_.find(value) != null_value_set_.end();
+#else
+  // Linear search fallback for older compilers (fast for small sets, avoids allocation)
+  for (const auto& null_val : null_value_set_) {
+    if (null_val == value) {
+      return true;
+    }
+  }
+  return false;
+#endif
 }
 
 } // namespace vroom

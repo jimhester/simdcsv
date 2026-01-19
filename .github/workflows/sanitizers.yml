@@ -92,12 +92,12 @@ jobs:
 
     - name: Run concurrency tests with TSAN
       env:
-        TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:suppressions=${{ github.workspace }}/tsan_suppressions.txt
       run: |
         cd build && ctest -R concurrency --output-on-failure -j
 
     - name: Run all tests with TSAN
       env:
-        TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:suppressions=${{ github.workspace }}/tsan_suppressions.txt
       run: |
         cd build && ctest --output-on-failure -j
