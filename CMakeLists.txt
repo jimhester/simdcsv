@@ -642,6 +642,7 @@ set(BENCHMARK_SOURCES
     benchmark/transpose_benchmarks.cpp
     benchmark/hypothesis_benchmarks.cpp
     benchmark/escape_tracking_benchmarks.cpp
+    benchmark/table_benchmarks.cpp
 )
 
 # Add external parser benchmarks if any external parser is enabled
