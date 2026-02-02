@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <iostream>
 #include <thread>
 #include <unordered_set>
@@ -16,7 +17,9 @@ namespace libvroom {
 
 // Helper function to unescape doubled quotes in a quoted field
 // Converts "" to " as per CSV specification (RFC 4180)
-static std::string unescape_quotes(std::string_view value, char quote) {
+// If has_invalid_escape is non-null, sets it to true when a lone quote is found
+static std::string unescape_quotes(std::string_view value, char quote,
+                                   bool* has_invalid_escape = nullptr) {
   // Fast path: no escaped quotes
   if (value.find(quote) == std::string_view::npos) {
     return std::string(value);
@@ -30,6 +33,12 @@ static std::string unescape_quotes(std::string_view value, char quote) {
       // Escaped quote (doubled) - output single quote
       result += quote;
       ++i; // Skip next quote
+    } else if (value[i] == quote) {
+      // Lone quote - invalid escape
+      if (has_invalid_escape) {
+        *has_invalid_escape = true;
+      }
+      result += value[i];
     } else {
       result += value[i];
     }
@@ -110,9 +119,12 @@ struct ChunkParseResult {
 
 // Parse a chunk of data with a specific starting quote state
 // Returns (row_count, ends_inside_quote)
+// error_collector is optional (nullptr = no error checking)
+// base_byte_offset is the offset of this chunk within the full file (for error locations)
 std::pair<size_t, bool> parse_chunk_with_state(
     const char* data, size_t size, const CsvOptions& options, const NullChecker& null_checker,
-    std::vector<std::unique_ptr<ArrowColumnBuilder>>& columns, bool start_inside_quote) {
+    std::vector<std::unique_ptr<ArrowColumnBuilder>>& columns, bool start_inside_quote,
+    ErrorCollector* error_collector = nullptr, size_t base_byte_offset = 0) {
   if (size == 0 || columns.empty()) {
     return {0, start_inside_quote};
   }
@@ -127,6 +139,7 @@ std::pair<size_t, bool> parse_chunk_with_state(
   bool in_quote = start_inside_quote;
   size_t offset = 0;
   size_t row_count = 0;
+  const bool check_errors = error_collector != nullptr;
 
   // If we start inside a quote, we need to find where the quote ends
   // and skip the partial field
@@ -197,6 +210,7 @@ std::pair<size_t, bool> parse_chunk_with_state(
       break;
 
     // Create iterator for remaining data - it stops at EOL
+    size_t row_start_offset = offset;
     size_t start_remaining = size - offset;
     SplitFields iter(data + offset, start_remaining, sep, quote, '\n');
 
@@ -213,6 +227,31 @@ std::pair<size_t, bool> parse_chunk_with_state(
 
       std::string_view field_view(field_data, field_len);
 
+      // Error detection within fields
+      if (check_errors) [[unlikely]] {
+        // Null byte detection
+        if (std::memchr(field_data, '\0', field_len)) {
+          for (size_t i = 0; i < field_len; ++i) {
+            if (field_data[i] == '\0') {
+              size_t byte_off = base_byte_offset + static_cast<size_t>(field_data - data) + i;
+              error_collector->add_error(ErrorCode::NULL_BYTE, ErrorSeverity::RECOVERABLE, 0,
+                                         col_idx + 1, byte_off, "Unexpected null byte in data");
+              if (error_collector->should_stop())
+                goto done_chunk;
+            }
+          }
+        }
+
+        // Quote in unquoted field
+        if (!needs_escaping && field_len > 0 && std::memchr(field_data, quote, field_len)) {
+          size_t byte_off = base_byte_offset + static_cast<size_t>(field_data - data);
+          error_collector->add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD, ErrorSeverity::RECOVERABLE,
+                                     0, col_idx + 1, byte_off, "Quote character in unquoted field");
+          if (error_collector->should_stop())
+            goto done_chunk;
+        }
+      }
+
       if (col_idx >= num_cols) {
         col_idx++;
         continue;
@@ -226,7 +265,19 @@ std::pair<size_t, bool> parse_chunk_with_state(
         if (field_len >= 2 && field_data[0] == quote && field_data[field_len - 1] == quote) {
           field_view = std::string_view(field_data + 1, field_len - 2);
         }
-        std::string unescaped = unescape_quotes(field_view, quote);
+        bool has_invalid_escape = false;
+        std::string unescaped =
+            unescape_quotes(field_view, quote, check_errors ? &has_invalid_escape : nullptr);
+
+        // Invalid quote escape detection
+        if (has_invalid_escape) [[unlikely]] {
+          size_t byte_off = base_byte_offset + static_cast<size_t>(field_data - data);
+          error_collector->add_error(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::RECOVERABLE, 0,
+                                     col_idx + 1, byte_off, "Invalid quote escape sequence");
+          if (error_collector->should_stop())
+            goto done_chunk;
+        }
+
         // Devirtualized append call
         fast_contexts[col_idx].append(unescaped);
       } else {
@@ -234,6 +285,16 @@ std::pair<size_t, bool> parse_chunk_with_state(
         fast_contexts[col_idx].append(field_view);
       }
       col_idx++;
+    }
+
+    // Error: inconsistent field count
+    if (check_errors && col_idx != num_cols) [[unlikely]] {
+      error_collector->add_error(ErrorCode::INCONSISTENT_FIELD_COUNT, ErrorSeverity::RECOVERABLE, 0,
+                                 0, base_byte_offset + row_start_offset,
+                                 "Expected " + std::to_string(num_cols) + " fields, got " +
+                                     std::to_string(col_idx));
+      if (error_collector->should_stop())
+        goto done_chunk;
     }
 
     // Fill remaining columns with nulls
@@ -244,8 +305,16 @@ std::pair<size_t, bool> parse_chunk_with_state(
     row_count++;
     // Advance offset by consumed bytes
     offset += start_remaining - iter.remaining();
+
+    // Unclosed quote detection at end of chunk
+    if (check_errors && iter.finished_inside_quote() && offset >= size) [[unlikely]] {
+      error_collector->add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::RECOVERABLE, 0, 0,
+                                 base_byte_offset + row_start_offset,
+                                 "Quoted field not closed before end of data");
+    }
   }
 
+done_chunk:
   // Note: ending quote state is already computed during the analysis phase
   // so we return false here since the caller ignores it anyway
   return {row_count, false};
@@ -654,6 +723,17 @@ Result<ParsedChunks> CsvReader::read_all() {
   impl_->row_count = total_row_count;
 
   // Phase 3: Parse each chunk ONCE with the correct starting state
+  // Create per-thread error collectors if error handling is enabled
+  const bool check_errors = impl_->error_collector.is_enabled();
+  std::vector<ErrorCollector> thread_error_collectors;
+  if (check_errors) {
+    thread_error_collectors.reserve(num_chunks);
+    for (size_t i = 0; i < num_chunks; ++i) {
+      thread_error_collectors.emplace_back(impl_->error_collector.mode(),
+                                           impl_->error_collector.max_errors());
+    }
+  }
+
   std::vector<ChunkParseResult> chunk_results(num_chunks);
   {
     std::vector<std::future<void>> futures;
@@ -668,37 +748,62 @@ Result<ParsedChunks> CsvReader::read_all() {
       size_t expected_rows = start_inside ? analysis_results[chunk_idx].row_count_inside
                                           : analysis_results[chunk_idx].row_count_outside;
 
-      futures.push_back(
-          pool.submit_task([&chunk_results, data, size, chunk_idx, start_offset, end_offset,
-                            start_inside, expected_rows, options, &schema]() {
-            if (start_offset >= size || end_offset > size || start_offset >= end_offset) {
-              return;
-            }
+      ErrorCollector* chunk_error_collector =
+          check_errors ? &thread_error_collectors[chunk_idx] : nullptr;
 
-            auto& result = chunk_results[chunk_idx];
-            const char* chunk_data = data + start_offset;
-            size_t chunk_size = end_offset - start_offset;
+      futures.push_back(pool.submit_task([&chunk_results, data, size, chunk_idx, start_offset,
+                                          end_offset, start_inside, expected_rows, options, &schema,
+                                          chunk_error_collector]() {
+        if (start_offset >= size || end_offset > size || start_offset >= end_offset) {
+          return;
+        }
 
-            NullChecker null_checker(options);
+        auto& result = chunk_results[chunk_idx];
+        const char* chunk_data = data + start_offset;
+        size_t chunk_size = end_offset - start_offset;
 
-            // Create column builders with pre-allocated capacity
-            for (const auto& col_schema : schema) {
-              auto builder = ArrowColumnBuilder::create(col_schema.type);
-              builder->reserve(expected_rows);
-              result.columns.push_back(std::move(builder));
-            }
+        NullChecker null_checker(options);
 
-            // Parse ONCE with the correct starting state
-            auto [rows, ends_inside] = parse_chunk_with_state(
-                chunk_data, chunk_size, options, null_checker, result.columns, start_inside);
-            (void)ends_inside; // Already computed in analysis phase
-            result.row_count = rows;
-          }));
+        // Create column builders with pre-allocated capacity
+        for (const auto& col_schema : schema) {
+          auto builder = ArrowColumnBuilder::create(col_schema.type);
+          builder->reserve(expected_rows);
+          result.columns.push_back(std::move(builder));
+        }
+
+        // Parse ONCE with the correct starting state
+        auto [rows, ends_inside] =
+            parse_chunk_with_state(chunk_data, chunk_size, options, null_checker, result.columns,
+                                   start_inside, chunk_error_collector, start_offset);
+        (void)ends_inside; // Already computed in analysis phase
+        result.row_count = rows;
+      }));
     }
 
     for (auto& f : futures) {
       f.get();
     }
+  }
+
+  // Merge per-thread error collectors into the main error collector
+  if (check_errors) {
+    // Detect UNCLOSED_QUOTE from the last chunk's ending state
+    const auto& last_analysis = analysis_results[num_chunks - 1];
+    bool last_used_inside = use_inside_state[num_chunks - 1];
+    bool last_ends_inside;
+    if (last_used_inside) {
+      last_ends_inside = !last_analysis.ends_inside_starting_outside;
+    } else {
+      last_ends_inside = last_analysis.ends_inside_starting_outside;
+    }
+    if (last_ends_inside) {
+      size_t last_start = chunk_ranges[num_chunks - 1].first;
+      thread_error_collectors.back().add_error(ErrorCode::UNCLOSED_QUOTE,
+                                               ErrorSeverity::RECOVERABLE, 0, 0, last_start,
+                                               "Quoted field not closed before end of data");
+    }
+
+    impl_->error_collector.merge_sorted(thread_error_collectors);
   }
 
   // Phase 4: Return chunks directly (NO MERGING)
@@ -749,6 +854,9 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
   const char quote = options.quote;
   const char sep = options.separator;
   const size_t num_cols = columns.size();
+  const bool check_errors = impl_->error_collector.is_enabled();
+  // Row number is 1-indexed; row 1 is the header (if present)
+  size_t row_number = impl_->options.has_header ? 2 : 1;
 
   while (offset < size) {
     // Skip empty lines
@@ -772,6 +880,7 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
       break;
 
     // Create iterator for remaining data - it stops at EOL
+    size_t row_start_offset = offset;
     size_t start_remaining = size - offset;
     SplitFields iter(data + offset, start_remaining, sep, quote, '\n');
 
@@ -788,6 +897,34 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
 
       std::string_view field_view(field_data, field_len);
 
+      // Error detection within fields (only when error collection is enabled)
+      if (check_errors) [[unlikely]] {
+        // Null byte detection
+        if (std::memchr(field_data, '\0', field_len)) {
+          // Count and report each null byte
+          for (size_t i = 0; i < field_len; ++i) {
+            if (field_data[i] == '\0') {
+              size_t byte_off = static_cast<size_t>(field_data - data) + i;
+              impl_->error_collector.add_error(ErrorCode::NULL_BYTE, ErrorSeverity::RECOVERABLE,
+                                               row_number, col_idx + 1, byte_off,
+                                               "Unexpected null byte in data");
+              if (impl_->error_collector.should_stop())
+                goto done_serial;
+            }
+          }
+        }
+
+        // Quote in unquoted field
+        if (!needs_escaping && field_len > 0 && std::memchr(field_data, quote, field_len)) {
+          size_t byte_off = static_cast<size_t>(field_data - data);
+          impl_->error_collector.add_error(ErrorCode::QUOTE_IN_UNQUOTED_FIELD,
+                                           ErrorSeverity::RECOVERABLE, row_number, col_idx + 1,
+                                           byte_off, "Quote character in unquoted field");
+          if (impl_->error_collector.should_stop())
+            goto done_serial;
+        }
+      }
+
       if (col_idx >= num_cols) {
         col_idx++;
         continue;
@@ -801,7 +938,20 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
         if (field_len >= 2 && field_data[0] == quote && field_data[field_len - 1] == quote) {
           field_view = std::string_view(field_data + 1, field_len - 2);
         }
-        std::string unescaped = unescape_quotes(field_view, quote);
+        bool has_invalid_escape = false;
+        std::string unescaped =
+            unescape_quotes(field_view, quote, check_errors ? &has_invalid_escape : nullptr);
+
+        // Invalid quote escape detection
+        if (has_invalid_escape) [[unlikely]] {
+          size_t byte_off = static_cast<size_t>(field_data - data);
+          impl_->error_collector.add_error(ErrorCode::INVALID_QUOTE_ESCAPE,
+                                           ErrorSeverity::RECOVERABLE, row_number, col_idx + 1,
+                                           byte_off, "Invalid quote escape sequence");
+          if (impl_->error_collector.should_stop())
+            goto done_serial;
+        }
+
         // Devirtualized append call
         fast_contexts[col_idx].append(unescaped);
       } else {
@@ -811,6 +961,16 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
       col_idx++;
     }
 
+    // Error: inconsistent field count
+    if (check_errors && col_idx != num_cols) [[unlikely]] {
+      impl_->error_collector.add_error(ErrorCode::INCONSISTENT_FIELD_COUNT,
+                                       ErrorSeverity::RECOVERABLE, row_number, 0, row_start_offset,
+                                       "Expected " + std::to_string(num_cols) + " fields, got " +
+                                           std::to_string(col_idx));
+      if (impl_->error_collector.should_stop())
+        goto done_serial;
+    }
+
     // Fill remaining columns with nulls
     for (; col_idx < num_cols; ++col_idx) {
       fast_contexts[col_idx].append_null();
@@ -818,8 +978,19 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
 
     // Advance offset by consumed bytes
     offset += start_remaining - iter.remaining();
+
+    // Unclosed quote detection: if the iterator finished inside a quote
+    // on the very last row (no more data), report it after the main loop
+    if (check_errors && iter.finished_inside_quote() && offset >= size) [[unlikely]] {
+      impl_->error_collector.add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::RECOVERABLE,
+                                       row_number, 0, row_start_offset,
+                                       "Quoted field not closed before end of data");
+    }
+
+    row_number++;
   }
 
+done_serial:
   // Return as a single chunk
   result.total_rows = columns.empty() ? 0 : columns[0]->size();
   impl_->row_count = result.total_rows; // Set row count after parsing
