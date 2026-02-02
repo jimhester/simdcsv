@@ -229,6 +229,7 @@ set(VROOM_SOURCES
     ${LIBVROOM_ROOT}/src/writer/dictionary.cpp
     ${LIBVROOM_ROOT}/src/simd/statistics_simd.cpp
     ${LIBVROOM_ROOT}/src/writer/arrow_ipc_writer.cpp
+    ${LIBVROOM_ROOT}/src/table.cpp
 )
 
 # Build libvroom as a static library for embedding
