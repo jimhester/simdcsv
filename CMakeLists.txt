@@ -552,6 +552,19 @@ if(BUILD_TESTING)
     add_dependencies(table_test copy_test_data)
     gtest_discover_tests(table_test)
 
+    # Quote parity (SIMD quote mask) tests
+    add_executable(quote_parity_test test/quote_parity_test.cpp)
+    target_link_libraries(quote_parity_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(quote_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(quote_parity_test)
+
+    # SIMD parsing and error detection tests
+    add_executable(simd_parsing_test test/simd_parsing_test.cpp)
+    target_link_libraries(simd_parsing_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(simd_parsing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_dependencies(simd_parsing_test copy_test_data)
+    gtest_discover_tests(simd_parsing_test)
+
     # =============================================================================
     # Legacy tests (disabled - use old API headers that no longer exist)
     # TODO: Port these tests to use the new libvroom2 API
