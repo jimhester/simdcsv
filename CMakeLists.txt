@@ -633,6 +633,7 @@ set(BENCHMARK_SOURCES
     benchmark/transpose_benchmarks.cpp
     benchmark/hypothesis_benchmarks.cpp
     benchmark/escape_tracking_benchmarks.cpp
+    benchmark/table_benchmarks.cpp
 )
 
 # Add external parser benchmarks if any external parser is enabled
@@ -699,6 +700,19 @@ target_link_libraries(quote_mask_benchmark PRIVATE
     benchmark::benchmark
 )
 target_include_directories(quote_mask_benchmark PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Table/Arrow stream benchmark - standalone benchmark for Table API overhead
+# Run separately with ./table_benchmark
+add_executable(table_benchmark benchmark/table_benchmarks.cpp)
+target_link_libraries(table_benchmark PRIVATE
+    vroom
+    benchmark::benchmark
+    benchmark::benchmark_main
+    pthread
+)
+target_include_directories(table_benchmark PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
