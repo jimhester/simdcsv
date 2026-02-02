@@ -6,13 +6,10 @@
  * It implements the Arrow PyCapsule interface for zero-copy interoperability with
  * PyArrow, Polars, and DuckDB.
  *
- * The Table class and Arrow stream export logic live in the core library
- * (include/libvroom/table.h, src/table.cpp). This file only contains
- * Python-specific wrappers and the pybind11 module definition.
+ * Uses libvroom::Table for multi-batch Arrow stream export (Issue #632).
  */
 
 #include "libvroom.h"
-#include "libvroom/arrow_c_data.h"
 #include "libvroom/table.h"
 
 #include <memory>
@@ -106,9 +103,8 @@ std::shared_ptr<libvroom::Table> read_csv(const std::string& path,
     throw std::runtime_error(error_msg);
   }
 
-  // Use core Table::from_parsed_chunks to handle chunk merging
-  auto schema = reader.schema();
-  return libvroom::Table::from_parsed_chunks(schema, read_result.value);
+  // Create Table from parsed chunks - O(1), no merge needed
+  return libvroom::Table::from_parsed_chunks(reader.schema(), std::move(read_result.value));
 }
 
 // =============================================================================
@@ -232,25 +228,27 @@ PYBIND11_MODULE(_core, m) {
   m.attr("IOError") = py::handle(IOError_custom);
 
   // Table class (using shared_ptr holder for move-only type)
-  // Uses libvroom::Table from core library
   py::class_<libvroom::Table, std::shared_ptr<libvroom::Table>>(m, "Table", R"doc(
         A table of data read from a CSV file.
 
         This class implements the Arrow PyCapsule interface (__arrow_c_stream__)
         for zero-copy interoperability with PyArrow, Polars, and DuckDB.
+
+        Each parsed chunk is emitted as a separate RecordBatch in the Arrow
+        stream, avoiding expensive chunk merge operations.
     )doc")
       .def_property_readonly("num_rows", &libvroom::Table::num_rows, "Number of rows in the table")
       .def_property_readonly("num_columns", &libvroom::Table::num_columns,
                              "Number of columns in the table")
       .def_property_readonly("column_names", &libvroom::Table::column_names, "List of column names")
+      .def_property_readonly("num_chunks", &libvroom::Table::num_chunks,
+                             "Number of chunks (RecordBatches) in the table")
       .def(
           "__arrow_c_stream__",
           [](std::shared_ptr<libvroom::Table> self, py::object requested_schema) {
-            // Create stream and export via core Table method
             auto* stream = new libvroom::ArrowArrayStream();
             self->export_to_stream(stream);
 
-            // Wrap in PyCapsule with required name
             return py::capsule(stream, "arrow_array_stream", [](void* ptr) {
               auto* s = static_cast<libvroom::ArrowArrayStream*>(ptr);
               if (s->release)
@@ -259,13 +257,19 @@ PYBIND11_MODULE(_core, m) {
             });
           },
           py::arg("requested_schema") = py::none(),
-          "Export table as Arrow stream via PyCapsule (zero-copy)")
+          "Export table as Arrow stream via PyCapsule (zero-copy, multi-batch)")
       .def(
           "__arrow_c_schema__",
           [](std::shared_ptr<libvroom::Table> self) {
-            // Create schema and export via core Table method
+            // Get schema via a temporary stream
+            auto* stream = new libvroom::ArrowArrayStream();
+            self->export_to_stream(stream);
+
             auto* schema = new libvroom::ArrowSchema();
-            self->export_schema(schema);
+            stream->get_schema(stream, schema);
+
+            stream->release(stream);
+            delete stream;
 
             return py::capsule(schema, "arrow_schema", [](void* ptr) {
               auto* s = static_cast<libvroom::ArrowSchema*>(ptr);

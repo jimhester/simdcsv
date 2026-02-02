@@ -35,7 +35,7 @@
 #include "libvroom/dictionary.h"
 #include "libvroom/statistics.h"
 
-// Table (Arrow stream export)
+// Table (multi-batch Arrow stream export)
 #include "libvroom/table.h"
 
 // Output formats

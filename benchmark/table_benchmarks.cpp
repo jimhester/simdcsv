@@ -1,67 +1,55 @@
 /**
  * @file table_benchmarks.cpp
- * @brief Benchmarks comparing CsvReader::read_all() vs Table creation vs Arrow export.
+ * @brief Benchmarks for Table construction and Arrow stream export.
  *
- * Measures the incremental cost of:
- * 1. BM_CsvReaderOnly - CsvReader open + read_all (baseline parse to column builders)
- * 2. BM_CsvReaderToTable - Same + Table::from_parsed_chunks (Table creation overhead)
- * 3. BM_CsvReaderToArrowStream - Same + Table + full Arrow stream export/consume
- *
- * Uses generated CSV files written to disk once at setup time.
+ * Validates Issue #632: Table::from_parsed_chunks() is O(1) (moves vectors,
+ * no data copy), and multi-batch stream export avoids merge overhead.
  */
 
 #include "libvroom.h"
 #include "libvroom/table.h"
 
 #include <benchmark/benchmark.h>
-#include <cstdio>
+#include <cstring>
 #include <fstream>
-#include <map>
+#include <iomanip>
 #include <random>
 #include <sstream>
 #include <string>
-#include <vector>
 
 namespace {
 
-/// Generate CSV content with mixed types (int, double, string columns)
-std::string generate_typed_csv(size_t target_rows, size_t num_int_cols, size_t num_dbl_cols,
-                               size_t num_str_cols) {
+// Generate CSV data with mixed types for benchmarking
+std::string generate_csv(size_t num_rows, size_t num_cols) {
   std::mt19937 rng(42);
-  std::uniform_int_distribution<int> int_dist(0, 99999);
-  std::uniform_real_distribution<double> dbl_dist(-1000.0, 1000.0);
+  std::uniform_int_distribution<int> int_dist(0, 999999);
+  std::uniform_real_distribution<double> dbl_dist(0.0, 1000.0);
 
-  const std::vector<std::string> words = {"hello", "world", "foo", "bar",
-                                          "test",  "data",  "csv", "benchmark"};
-  std::uniform_int_distribution<size_t> word_dist(0, words.size() - 1);
-
-  size_t total_cols = num_int_cols + num_dbl_cols + num_str_cols;
   std::ostringstream oss;
 
   // Header
-  for (size_t c = 0; c < total_cols; ++c) {
+  for (size_t c = 0; c < num_cols; ++c) {
     if (c > 0)
       oss << ',';
-    if (c < num_int_cols)
-      oss << "int" << c;
-    else if (c < num_int_cols + num_dbl_cols)
-      oss << "dbl" << (c - num_int_cols);
-    else
-      oss << "str" << (c - num_int_cols - num_dbl_cols);
+    oss << "col" << c;
   }
   oss << '\n';
 
   // Data rows
-  for (size_t r = 0; r < target_rows; ++r) {
-    for (size_t c = 0; c < total_cols; ++c) {
+  for (size_t r = 0; r < num_rows; ++r) {
+    for (size_t c = 0; c < num_cols; ++c) {
       if (c > 0)
         oss << ',';
-      if (c < num_int_cols) {
+      switch (c % 3) {
+      case 0:
         oss << int_dist(rng);
-      } else if (c < num_int_cols + num_dbl_cols) {
-        oss << dbl_dist(rng);
-      } else {
-        oss << words[word_dist(rng)];
+        break;
+      case 1:
+        oss << std::fixed << std::setprecision(2) << dbl_dist(rng);
+        break;
+      case 2:
+        oss << "str_" << r << "_" << c;
+        break;
       }
     }
     oss << '\n';
@@ -70,194 +58,195 @@ std::string generate_typed_csv(size_t target_rows, size_t num_int_cols, size_t n
   return oss.str();
 }
 
-/// Key for cached CSV files: (rows, int_cols, dbl_cols, str_cols)
-using CsvKey = std::tuple<size_t, size_t, size_t, size_t>;
-
-/// Cache of temp file paths
-std::map<CsvKey, std::string> csv_file_cache;
-
-/// Get or create a temp CSV file with the given dimensions
-const std::string& get_or_create_csv_file(size_t rows, size_t int_cols, size_t dbl_cols,
-                                          size_t str_cols) {
-  auto key = CsvKey{rows, int_cols, dbl_cols, str_cols};
-  auto it = csv_file_cache.find(key);
-  if (it != csv_file_cache.end()) {
-    return it->second;
-  }
-
-  std::string csv = generate_typed_csv(rows, int_cols, dbl_cols, str_cols);
-
-  // Write to a temp file
-  char tmpname[] = "/tmp/libvroom_bench_XXXXXX";
-  int fd = mkstemp(tmpname);
-  if (fd < 0) {
-    static std::string empty;
-    return empty;
-  }
-
-  FILE* f = fdopen(fd, "w");
-  fwrite(csv.data(), 1, csv.size(), f);
-  fclose(f);
-
-  auto result = csv_file_cache.emplace(key, std::string(tmpname));
-  return result.first->second;
+// Write CSV to a temp file and return path
+std::string write_temp_csv(const std::string& csv_data) {
+  std::string path = "/tmp/table_benchmark.csv";
+  std::ofstream out(path);
+  out << csv_data;
+  return path;
 }
 
-/// Cleanup temp files at program exit
-struct TempFileCleanup {
-  ~TempFileCleanup() {
-    for (auto& [key, path] : csv_file_cache) {
-      std::remove(path.c_str());
-    }
-  }
-} cleanup_guard;
+} // namespace
 
-} // anonymous namespace
+// =============================================================================
+// BM_TableFromParsedChunks - Measure Table construction time (should be O(1))
+// =============================================================================
 
-// ============================================================================
-// BM_CsvReaderOnly - Parse CSV to column builders (baseline)
-// ============================================================================
-static void BM_CsvReaderOnly(benchmark::State& state) {
-  size_t rows = static_cast<size_t>(state.range(0));
-  size_t cols = static_cast<size_t>(state.range(1));
+static void BM_TableFromParsedChunks(benchmark::State& state) {
+  size_t num_rows = static_cast<size_t>(state.range(0));
+  size_t num_cols = static_cast<size_t>(state.range(1));
+  size_t num_threads = static_cast<size_t>(state.range(2));
 
-  // Split cols evenly: 1/3 int, 1/3 double, 1/3 string
-  size_t int_cols = cols / 3;
-  size_t dbl_cols = cols / 3;
-  size_t str_cols = cols - int_cols - dbl_cols;
-
-  const auto& path = get_or_create_csv_file(rows, int_cols, dbl_cols, str_cols);
-  if (path.empty()) {
-    state.SkipWithError("Failed to create temp file");
-    return;
-  }
+  std::string csv_data = generate_csv(num_rows, num_cols);
+  std::string path = write_temp_csv(csv_data);
 
   libvroom::CsvOptions opts;
+  opts.num_threads = num_threads;
 
-  for (auto _ : state) {
-    libvroom::CsvReader reader(opts);
-    auto open_result = reader.open(path);
-    if (!open_result.ok) {
-      state.SkipWithError(open_result.error.c_str());
-      return;
-    }
-    auto read_result = reader.read_all();
-    if (!read_result.ok) {
-      state.SkipWithError(read_result.error.c_str());
-      return;
-    }
-    benchmark::DoNotOptimize(read_result.value);
-  }
-
-  state.counters["Rows"] = static_cast<double>(rows);
-  state.counters["Cols"] = static_cast<double>(cols);
-}
-
-// ============================================================================
-// BM_CsvReaderToTable - Parse CSV + create Table (measures Table overhead)
-// ============================================================================
-static void BM_CsvReaderToTable(benchmark::State& state) {
-  size_t rows = static_cast<size_t>(state.range(0));
-  size_t cols = static_cast<size_t>(state.range(1));
-
-  size_t int_cols = cols / 3;
-  size_t dbl_cols = cols / 3;
-  size_t str_cols = cols - int_cols - dbl_cols;
-
-  const auto& path = get_or_create_csv_file(rows, int_cols, dbl_cols, str_cols);
-  if (path.empty()) {
-    state.SkipWithError("Failed to create temp file");
+  // Pre-parse to get schema
+  libvroom::CsvReader reader(opts);
+  reader.open(path);
+  auto result = reader.read_all();
+  if (!result.ok) {
+    state.SkipWithError(result.error.c_str());
     return;
   }
-
-  libvroom::CsvOptions opts;
+  auto schema = reader.schema();
 
   for (auto _ : state) {
-    auto table = libvroom::read_csv_to_table(path, opts);
+    // Re-parse each iteration to get fresh ParsedChunks
+    state.PauseTiming();
+    libvroom::CsvReader r(opts);
+    r.open(path);
+    auto res = r.read_all();
+    if (!res.ok) {
+      state.SkipWithError(res.error.c_str());
+      return;
+    }
+    state.ResumeTiming();
+
+    // This is what we're benchmarking: O(1) table construction
+    auto table = libvroom::Table::from_parsed_chunks(schema, std::move(res.value));
     benchmark::DoNotOptimize(table);
   }
 
-  state.counters["Rows"] = static_cast<double>(rows);
-  state.counters["Cols"] = static_cast<double>(cols);
+  state.counters["Rows"] = static_cast<double>(num_rows);
+  state.counters["Cols"] = static_cast<double>(num_cols);
+  state.counters["Threads"] = static_cast<double>(num_threads);
 }
 
-// ============================================================================
-// BM_CsvReaderToArrowStream - Parse CSV + Table + full Arrow stream consume
-// ============================================================================
-static void BM_CsvReaderToArrowStream(benchmark::State& state) {
-  size_t rows = static_cast<size_t>(state.range(0));
-  size_t cols = static_cast<size_t>(state.range(1));
+BENCHMARK(BM_TableFromParsedChunks)
+    ->Args({10000, 10, 1})
+    ->Args({10000, 10, 4})
+    ->Args({100000, 10, 1})
+    ->Args({100000, 10, 4})
+    ->Args({1000000, 10, 1})
+    ->Args({1000000, 10, 4})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseRealTime();
 
-  size_t int_cols = cols / 3;
-  size_t dbl_cols = cols / 3;
-  size_t str_cols = cols - int_cols - dbl_cols;
+// =============================================================================
+// BM_TableStreamExport - Measure Arrow stream setup + consumption
+// =============================================================================
 
-  const auto& path = get_or_create_csv_file(rows, int_cols, dbl_cols, str_cols);
-  if (path.empty()) {
-    state.SkipWithError("Failed to create temp file");
-    return;
-  }
+static void BM_TableStreamExport(benchmark::State& state) {
+  size_t num_rows = static_cast<size_t>(state.range(0));
+  size_t num_cols = static_cast<size_t>(state.range(1));
+  size_t num_threads = static_cast<size_t>(state.range(2));
+
+  std::string csv_data = generate_csv(num_rows, num_cols);
+  std::string path = write_temp_csv(csv_data);
 
   libvroom::CsvOptions opts;
+  opts.num_threads = num_threads;
+
+  // Parse once and create table
+  libvroom::CsvReader reader(opts);
+  reader.open(path);
+  auto result = reader.read_all();
+  if (!result.ok) {
+    state.SkipWithError(result.error.c_str());
+    return;
+  }
+  auto table = libvroom::Table::from_parsed_chunks(reader.schema(), std::move(result.value));
+
+  size_t batch_count = 0;
+  size_t total_rows_exported = 0;
 
   for (auto _ : state) {
-    auto table = libvroom::read_csv_to_table(path, opts);
-
-    // Export and consume the Arrow stream (simulating what R/Python would do)
     libvroom::ArrowArrayStream stream;
     table->export_to_stream(&stream);
 
-    // Get schema
-    libvroom::ArrowSchema schema;
-    int rc = stream.get_schema(&stream, &schema);
-    benchmark::DoNotOptimize(rc);
-
-    // Get the single batch
-    libvroom::ArrowArray batch;
-    rc = stream.get_next(&stream, &batch);
-    benchmark::DoNotOptimize(rc);
-
-    // Verify end of stream
-    libvroom::ArrowArray end;
-    rc = stream.get_next(&stream, &end);
-    benchmark::DoNotOptimize(rc);
-
-    // Release everything
-    if (schema.release)
-      schema.release(&schema);
-    if (batch.release)
+    // Consume all batches
+    batch_count = 0;
+    total_rows_exported = 0;
+    while (true) {
+      libvroom::ArrowArray batch;
+      stream.get_next(&stream, &batch);
+      if (batch.release == nullptr)
+        break;
+      total_rows_exported += static_cast<size_t>(batch.length);
+      batch_count++;
       batch.release(&batch);
+    }
+
     stream.release(&stream);
   }
 
-  state.counters["Rows"] = static_cast<double>(rows);
-  state.counters["Cols"] = static_cast<double>(cols);
+  state.counters["Rows"] = static_cast<double>(num_rows);
+  state.counters["Cols"] = static_cast<double>(num_cols);
+  state.counters["Threads"] = static_cast<double>(num_threads);
+  state.counters["Batches"] = static_cast<double>(batch_count);
+  state.counters["ExportedRows"] = static_cast<double>(total_rows_exported);
 }
 
-// ============================================================================
-// Benchmark Registration
-// ============================================================================
+BENCHMARK(BM_TableStreamExport)
+    ->Args({10000, 10, 1})
+    ->Args({10000, 10, 4})
+    ->Args({100000, 10, 1})
+    ->Args({100000, 10, 4})
+    ->Args({1000000, 10, 1})
+    ->Args({1000000, 10, 4})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseRealTime();
 
-// Test matrix: Rows x Cols
-// Rows: 10K, 100K, 1M
-// Cols: 9 (3+3+3), 30 (10+10+10)
-static void TableBenchmarkArgs(benchmark::internal::Benchmark* b) {
-  for (int64_t rows : {10000, 100000, 1000000}) {
-    for (int64_t cols : {9, 30}) {
-      b->Args({rows, cols});
+// =============================================================================
+// BM_EndToEndReadToStream - Full pipeline: read CSV -> Table -> stream
+// =============================================================================
+
+static void BM_EndToEndReadToStream(benchmark::State& state) {
+  size_t num_rows = static_cast<size_t>(state.range(0));
+  size_t num_cols = static_cast<size_t>(state.range(1));
+  size_t num_threads = static_cast<size_t>(state.range(2));
+
+  std::string csv_data = generate_csv(num_rows, num_cols);
+  std::string path = write_temp_csv(csv_data);
+
+  libvroom::CsvOptions opts;
+  opts.num_threads = num_threads;
+
+  size_t batch_count = 0;
+
+  for (auto _ : state) {
+    // Full pipeline
+    libvroom::CsvReader reader(opts);
+    reader.open(path);
+    auto result = reader.read_all();
+    if (!result.ok) {
+      state.SkipWithError(result.error.c_str());
+      return;
     }
+    auto table = libvroom::Table::from_parsed_chunks(reader.schema(), std::move(result.value));
+
+    // Export and consume stream
+    libvroom::ArrowArrayStream stream;
+    table->export_to_stream(&stream);
+
+    batch_count = 0;
+    while (true) {
+      libvroom::ArrowArray batch;
+      stream.get_next(&stream, &batch);
+      if (batch.release == nullptr)
+        break;
+      batch_count++;
+      batch.release(&batch);
+    }
+    stream.release(&stream);
   }
+
+  state.SetBytesProcessed(static_cast<int64_t>(csv_data.size() * state.iterations()));
+  state.counters["Rows"] = static_cast<double>(num_rows);
+  state.counters["Cols"] = static_cast<double>(num_cols);
+  state.counters["Threads"] = static_cast<double>(num_threads);
+  state.counters["Batches"] = static_cast<double>(batch_count);
 }
 
-BENCHMARK(BM_CsvReaderOnly)
-    ->Apply(TableBenchmarkArgs)
-    ->Unit(benchmark::kMillisecond)
-    ->UseRealTime();
-BENCHMARK(BM_CsvReaderToTable)
-    ->Apply(TableBenchmarkArgs)
-    ->Unit(benchmark::kMillisecond)
-    ->UseRealTime();
-BENCHMARK(BM_CsvReaderToArrowStream)
-    ->Apply(TableBenchmarkArgs)
+BENCHMARK(BM_EndToEndReadToStream)
+    ->Args({10000, 10, 1})
+    ->Args({10000, 10, 4})
+    ->Args({100000, 10, 1})
+    ->Args({100000, 10, 4})
+    ->Args({1000000, 10, 1})
+    ->Args({1000000, 10, 4})
     ->Unit(benchmark::kMillisecond)
     ->UseRealTime();

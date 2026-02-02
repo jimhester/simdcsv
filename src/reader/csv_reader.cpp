@@ -1152,7 +1152,7 @@ std::shared_ptr<Table> read_csv_to_table(const std::string& path, const CsvOptio
   }
 
   auto schema = reader.schema();
-  return Table::from_parsed_chunks(schema, read_result.value);
+  return Table::from_parsed_chunks(schema, std::move(read_result.value));
 }
 
 } // namespace libvroom
