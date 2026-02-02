@@ -673,6 +673,27 @@ TEST_F(SIMDParsingTest, UnclosedQuoteSpanningMultipleBlocks) {
       << "Should detect unclosed quote spanning blocks";
 }
 
+TEST_F(SIMDParsingTest, ClosedQuoteNoTrailingNewline) {
+  // A properly closed quoted field with no trailing newline should NOT
+  // be reported as an unclosed quote (regression test for false positive)
+  std::string content = "A,B\n\"val\",2";
+  auto result = parseWithErrors(content);
+  ASSERT_TRUE(result.opened);
+
+  EXPECT_FALSE(hasErrorCode(result.errors, ErrorCode::UNCLOSED_QUOTE))
+      << "Properly closed quoted field without trailing newline should not be UNCLOSED_QUOTE";
+}
+
+TEST_F(SIMDParsingTest, UnclosedQuoteReportedExactlyOnce) {
+  // Verify no double-reporting of UNCLOSED_QUOTE
+  std::string content = "A,B\n\"unclosed";
+  auto result = parseWithErrors(content);
+  ASSERT_TRUE(result.opened);
+
+  EXPECT_EQ(countErrorCode(result.errors, ErrorCode::UNCLOSED_QUOTE), 1u)
+      << "UNCLOSED_QUOTE should be reported exactly once";
+}
+
 // ============================================================================
 // SPECIAL CHARACTERS AND EDGE CASES
 // ============================================================================
