@@ -1,33 +1,43 @@
 /**
  * @file integration_test.cpp
- * @brief End-to-end integration tests for libvroom.
+ * @brief End-to-end integration tests for the CsvReader pipeline.
  *
- * These tests validate the complete parsing pipeline from file loading through
- * parsing to data extraction. They complement unit tests by verifying that
- * all components work together correctly.
+ * Rewritten from old integration_test.cpp to use the libvroom2 CsvReader API.
+ * Tests the full pipeline: file load -> parse -> verify schema + data + errors.
  *
- * Test scenarios:
- * 1. Basic E2E - Load file, parse with multi-threading, verify data via streaming
- * 2. Multi-threaded consistency - Same results with different thread counts
- * 3. Streaming vs batch equivalence - Both parsing approaches work on same data
- *
- * Note: The batch parser (Parser class) produces an index of field positions.
- * To verify actual field values, we use the streaming parser (StreamReader).
- * The num_columns() field in Parser::Result is not always populated by the
- * batch parser, so we verify column counts via streaming where needed.
+ * @see GitHub issue #626
  */
 
-#include <gtest/gtest.h>
-#include <libvroom.h>
-#include <streaming.h>
-#include <thread>
-#include <sstream>
-#include <fstream>
-#include <vector>
-#include <string>
-#include <cstring>
+#include "libvroom.h"
+#include "libvroom/arrow_column_builder.h"
 
-using namespace libvroom;
+#include <atomic>
+#include <cstdio>
+#include <fstream>
+#include <gtest/gtest.h>
+#include <sstream>
+#include <string>
+#include <unistd.h>
+#include <vector>
+
+// Counter for unique temp file names
+static std::atomic<uint64_t> g_int_temp_counter{0};
+
+class TempIntCsv {
+public:
+  explicit TempIntCsv(const std::string& content) {
+    uint64_t id = g_int_temp_counter.fetch_add(1);
+    path_ = "/tmp/int_test_" + std::to_string(getpid()) + "_" + std::to_string(id) + ".csv";
+    std::ofstream f(path_, std::ios::binary);
+    f.write(content.data(), static_cast<std::streamsize>(content.size()));
+    f.close();
+  }
+  ~TempIntCsv() { std::remove(path_.c_str()); }
+  const std::string& path() const { return path_; }
+
+private:
+  std::string path_;
+};
 
 // =============================================================================
 // Test Fixture
@@ -35,654 +45,443 @@ using namespace libvroom;
 
 class IntegrationTest : public ::testing::Test {
 protected:
-    // Helper to create a padded buffer from string content
-    static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
-        size_t len = content.size();
-        uint8_t* buf = allocate_padded_buffer(len, 64);
-        std::memcpy(buf, content.data(), len);
-        return {buf, len};
+  std::string testDataPath(const std::string& subpath) { return "test/data/" + subpath; }
+
+  // Parse a file and return the result; asserts open+read succeed
+  struct ParsedFile {
+    libvroom::ParsedChunks chunks;
+    std::vector<libvroom::ColumnSchema> schema;
+  };
+
+  ParsedFile parseFile(const std::string& path, libvroom::CsvOptions opts = {}) {
+    libvroom::CsvReader reader(opts);
+    auto open_result = reader.open(path);
+    EXPECT_TRUE(open_result.ok) << "Failed to open: " << path;
+    auto read_result = reader.read_all();
+    EXPECT_TRUE(read_result.ok) << "Failed to read: " << path;
+    std::vector<libvroom::ColumnSchema> schema(reader.schema().begin(), reader.schema().end());
+    return {std::move(read_result.value), std::move(schema)};
+  }
+
+  ParsedFile parseContent(const std::string& content, libvroom::CsvOptions opts = {}) {
+    TempIntCsv csv(content);
+    return parseFile(csv.path(), opts);
+  }
+
+  // Get value as string from any column type (handles type inference)
+  std::string getValue(const libvroom::ArrowColumnBuilder* builder, size_t idx) {
+    switch (builder->type()) {
+    case libvroom::DataType::STRING: {
+      auto* col = dynamic_cast<const libvroom::ArrowStringColumnBuilder*>(builder);
+      return std::string(col->values().get(idx));
     }
-
-    // Helper to extract all field values using streaming parser
-    // This is used to verify actual data correctness
-    static std::vector<std::vector<std::string>> extract_all_fields_streaming(
-        const std::string& csv_content, const Dialect& dialect, bool has_header = true) {
-
-        std::istringstream input(csv_content);
-        StreamConfig config;
-        config.dialect = dialect;
-        config.parse_header = has_header;
-
-        StreamReader reader(input, config);
-
-        std::vector<std::vector<std::string>> rows;
-        while (reader.next_row()) {
-            std::vector<std::string> row;
-            for (const auto& field : reader.row()) {
-                row.push_back(std::string(field.data));
-            }
-            rows.push_back(row);
-        }
-        return rows;
+    case libvroom::DataType::INT32: {
+      auto* col = dynamic_cast<const libvroom::ArrowInt32ColumnBuilder*>(builder);
+      return std::to_string(col->values().get(idx));
     }
-
-    // Helper to get header using streaming parser
-    static std::vector<std::string> get_header_streaming(
-        const std::string& csv_content, const Dialect& dialect) {
-
-        std::istringstream input(csv_content);
-        StreamConfig config;
-        config.dialect = dialect;
-        config.parse_header = true;
-
-        StreamReader reader(input, config);
-        if (reader.next_row()) {
-            return reader.header();
-        }
-        return {};
+    case libvroom::DataType::INT64: {
+      auto* col = dynamic_cast<const libvroom::ArrowInt64ColumnBuilder*>(builder);
+      return std::to_string(col->values().get(idx));
     }
-
-    // Path to test data directory (relative to build directory)
-    static std::string test_data_path(const std::string& filename) {
-        return "test/data/" + filename;
+    case libvroom::DataType::FLOAT64: {
+      auto* col = dynamic_cast<const libvroom::ArrowFloat64ColumnBuilder*>(builder);
+      std::ostringstream oss;
+      oss << col->values().get(idx);
+      return oss.str();
     }
+    case libvroom::DataType::BOOL: {
+      auto* col = dynamic_cast<const libvroom::ArrowBoolColumnBuilder*>(builder);
+      return col->values().get(idx) ? "true" : "false";
+    }
+    default:
+      ADD_FAILURE() << "Unsupported column type: " << static_cast<int>(builder->type());
+      return "";
+    }
+  }
+
+  // Get string value from parsed data: searches across all chunks for the row
+  std::string getStringValue(const libvroom::ParsedChunks& chunks, size_t col, size_t row) {
+    size_t row_offset = 0;
+    for (const auto& chunk : chunks.chunks) {
+      size_t chunk_rows = chunk[col]->size();
+      if (row < row_offset + chunk_rows) {
+        return getValue(chunk[col].get(), row - row_offset);
+      }
+      row_offset += chunk_rows;
+    }
+    ADD_FAILURE() << "Row " << row << " not found in any chunk (total rows: " << row_offset << ")";
+    return "";
+  }
+
+  // Get total column count from parsed data
+  size_t getColumnCount(const libvroom::ParsedChunks& chunks) {
+    if (chunks.chunks.empty())
+      return 0;
+    return chunks.chunks[0].size();
+  }
 };
 
 // =============================================================================
-// Test 1: Basic End-to-End Test
+// 1. Basic End-to-End Tests
 // =============================================================================
 
-TEST_F(IntegrationTest, BasicEndToEnd_LoadParseVerify) {
-    // Load a real CSV file
-    FileBuffer buffer = load_file(test_data_path("basic/simple.csv"));
-    ASSERT_TRUE(buffer.valid()) << "Failed to load test file";
-    ASSERT_GT(buffer.size(), 0) << "File is empty";
+TEST_F(IntegrationTest, BasicE2E_SimpleCSV_SchemaAndRowCount) {
+  auto [chunks, schema] = parseFile(testDataPath("basic/simple.csv"));
 
-    // Parse with multi-threaded parser
-    const size_t num_threads = std::min(4u, std::thread::hardware_concurrency());
-    Parser parser(num_threads);
+  // Verify schema
+  ASSERT_EQ(schema.size(), 3u);
+  EXPECT_EQ(schema[0].name, "A");
+  EXPECT_EQ(schema[1].name, "B");
+  EXPECT_EQ(schema[2].name, "C");
 
-    auto result = parser.parse(buffer.data(), buffer.size());
+  // Verify row count (3 data rows: 1,2,3 / 4,5,6 / 7,8,9)
+  EXPECT_EQ(chunks.total_rows, 3u);
 
-    // Verify parsing succeeded
-    ASSERT_TRUE(result.success()) << "Parsing failed";
-    EXPECT_GT(result.total_indexes(), 0) << "No field indexes found";
-
-    // Verify dialect was detected correctly
-    EXPECT_EQ(result.dialect.delimiter, ',');
-    EXPECT_EQ(result.dialect.quote_char, '"');
-
-    // Extract actual data using streaming parser and verify correctness
-    std::string csv_content(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-    auto rows = extract_all_fields_streaming(csv_content, result.dialect);
-
-    // simple.csv has 3 data rows (excluding header): 1,2,3 / 4,5,6 / 7,8,9
-    ASSERT_EQ(rows.size(), 3) << "Expected 3 data rows";
-    EXPECT_EQ(rows[0], (std::vector<std::string>{"1", "2", "3"}));
-    EXPECT_EQ(rows[1], (std::vector<std::string>{"4", "5", "6"}));
-    EXPECT_EQ(rows[2], (std::vector<std::string>{"7", "8", "9"}));
-
-    // Verify header via streaming
-    auto header = get_header_streaming(csv_content, result.dialect);
-    EXPECT_EQ(header.size(), 3);
-    EXPECT_EQ(header, (std::vector<std::string>{"A", "B", "C"}));
+  // Spot-check values
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "1");
+  EXPECT_EQ(getStringValue(chunks, 1, 1), "5");
+  EXPECT_EQ(getStringValue(chunks, 2, 2), "9");
 }
 
-TEST_F(IntegrationTest, BasicEndToEnd_RealWorldFile) {
-    // Test with a more complex real-world file with quoted fields
-    FileBuffer buffer = load_file(test_data_path("real_world/contacts.csv"));
-    ASSERT_TRUE(buffer.valid()) << "Failed to load contacts.csv";
+TEST_F(IntegrationTest, BasicE2E_ContactsCSV_RowCountAndColumns) {
+  auto [chunks, schema] = parseFile(testDataPath("real_world/contacts.csv"));
 
-    Parser parser(4);
-    auto result = parser.parse(buffer.data(), buffer.size());
+  // contacts.csv: Name, Email, Phone, Address with 4 rows
+  ASSERT_EQ(schema.size(), 4u);
+  EXPECT_EQ(schema[0].name, "Name");
+  EXPECT_EQ(schema[1].name, "Email");
+  EXPECT_EQ(schema[2].name, "Phone");
+  EXPECT_EQ(schema[3].name, "Address");
 
-    ASSERT_TRUE(result.success()) << "Parsing failed";
-    EXPECT_GT(result.total_indexes(), 0) << "No field indexes found";
+  EXPECT_EQ(chunks.total_rows, 4u);
 
-    // Verify data using streaming
-    std::string csv_content(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-    auto rows = extract_all_fields_streaming(csv_content, result.dialect);
-
-    // contacts.csv has 4 data rows
-    ASSERT_EQ(rows.size(), 4) << "Expected 4 contact records";
-
-    // Verify first row contains "Smith, John" with embedded comma
-    EXPECT_EQ(rows[0][0], "Smith, John");
-    EXPECT_EQ(rows[0][1], "john.smith@example.com");
-    EXPECT_EQ(rows[0][2], "(555) 123-4567");
-
-    // Verify last row
-    EXPECT_EQ(rows[3][0], "Williams, Alice");
-
-    // Verify header
-    auto header = get_header_streaming(csv_content, result.dialect);
-    EXPECT_EQ(header.size(), 4);
-    EXPECT_EQ(header, (std::vector<std::string>{"Name", "Email", "Phone", "Address"}));
+  // Verify a quoted field with embedded comma
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "Smith, John");
+  EXPECT_EQ(getStringValue(chunks, 0, 3), "Williams, Alice");
 }
 
-TEST_F(IntegrationTest, BasicEndToEnd_AutoDetectDialect) {
-    // Test dialect auto-detection with tab-separated file
-    FileBuffer buffer = load_file(test_data_path("separators/tab.csv"));
-    ASSERT_TRUE(buffer.valid()) << "Failed to load tab.csv";
+TEST_F(IntegrationTest, BasicE2E_SemicolonDelimiter) {
+  libvroom::CsvOptions opts;
+  opts.separator = ';';
+  auto [chunks, schema] = parseFile(testDataPath("separators/semicolon.csv"), opts);
 
-    Parser parser(2);
-    auto result = parser.parse(buffer.data(), buffer.size());
-
-    ASSERT_TRUE(result.success()) << "Parsing failed";
-
-    // Verify auto-detection found the tab delimiter
-    EXPECT_EQ(result.dialect.delimiter, '\t') << "Should detect tab delimiter";
+  ASSERT_EQ(schema.size(), 3u);
+  EXPECT_EQ(schema[0].name, "A");
+  EXPECT_EQ(schema[1].name, "B");
+  EXPECT_EQ(schema[2].name, "C");
+  EXPECT_EQ(chunks.total_rows, 3u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "1");
+  EXPECT_EQ(getStringValue(chunks, 2, 2), "9");
 }
 
-TEST_F(IntegrationTest, BasicEndToEnd_SemicolonDialect) {
-    // Test with semicolon-separated file
-    FileBuffer buffer = load_file(test_data_path("separators/semicolon.csv"));
-    ASSERT_TRUE(buffer.valid()) << "Failed to load semicolon.csv";
+TEST_F(IntegrationTest, BasicE2E_TabDelimiter) {
+  libvroom::CsvOptions opts;
+  opts.separator = '\t';
+  auto [chunks, schema] = parseFile(testDataPath("separators/tab.csv"), opts);
 
-    Parser parser(2);
-    auto result = parser.parse(buffer.data(), buffer.size());
-
-    ASSERT_TRUE(result.success()) << "Parsing failed";
-    EXPECT_EQ(result.dialect.delimiter, ';') << "Should detect semicolon delimiter";
+  ASSERT_EQ(schema.size(), 3u);
+  EXPECT_EQ(schema[0].name, "A");
+  EXPECT_EQ(schema[1].name, "B");
+  EXPECT_EQ(schema[2].name, "C");
+  EXPECT_EQ(chunks.total_rows, 3u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "1");
+  EXPECT_EQ(getStringValue(chunks, 1, 2), "8");
 }
 
 // =============================================================================
-// Test 2: Multi-threaded Consistency Test
+// 2. Multi-threaded Consistency Tests
 // =============================================================================
 
-TEST_F(IntegrationTest, MultiThreadedConsistency_SameResults) {
-    // Load test file
-    FileBuffer buffer = load_file(test_data_path("basic/many_rows.csv"));
-    ASSERT_TRUE(buffer.valid()) << "Failed to load test file";
+TEST_F(IntegrationTest, MultiThread_SimpleCSV_1vs2vs4) {
+  // Parse simple.csv with 1, 2, and 4 threads and verify identical results
+  std::string path = testDataPath("basic/simple.csv");
 
-    std::string csv_content(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+  for (size_t threads : {1u, 2u, 4u}) {
+    libvroom::CsvOptions opts;
+    opts.num_threads = threads;
+    auto [chunks, schema] = parseFile(path, opts);
 
-    // Parse with different thread counts: 1, 2, 4, 8
-    std::vector<size_t> thread_counts = {1, 2, 4, 8};
-    Dialect detected_dialect;
-    bool first = true;
+    EXPECT_EQ(chunks.total_rows, 3u) << "Row count mismatch with " << threads << " threads";
+    EXPECT_EQ(schema.size(), 3u) << "Schema size mismatch with " << threads << " threads";
+    EXPECT_EQ(getStringValue(chunks, 0, 0), "1") << "Value mismatch with " << threads << " threads";
+    EXPECT_EQ(getStringValue(chunks, 2, 2), "9") << "Value mismatch with " << threads << " threads";
+  }
+}
 
-    for (size_t threads : thread_counts) {
-        Parser parser(threads);
-        auto result = parser.parse(buffer.data(), buffer.size());
+TEST_F(IntegrationTest, MultiThread_QuotedFields_1vs4) {
+  // quoted_fields.csv has 3 rows with quoted values
+  std::string path = testDataPath("quoted/quoted_fields.csv");
 
-        ASSERT_TRUE(result.success()) << "Parsing failed with " << threads << " threads";
-        EXPECT_GT(result.total_indexes(), 0) << "No indexes with " << threads << " threads";
+  libvroom::CsvOptions opts1;
+  opts1.num_threads = 1;
+  auto result1 = parseFile(path, opts1);
 
-        // All should detect the same dialect
-        if (first) {
-            detected_dialect = result.dialect;
-            first = false;
-        } else {
-            EXPECT_EQ(result.dialect.delimiter, detected_dialect.delimiter)
-                << "Dialect mismatch with " << threads << " threads";
-        }
+  libvroom::CsvOptions opts4;
+  opts4.num_threads = 4;
+  auto result4 = parseFile(path, opts4);
+
+  EXPECT_EQ(result1.chunks.total_rows, result4.chunks.total_rows);
+  EXPECT_EQ(result1.schema.size(), result4.schema.size());
+}
+
+TEST_F(IntegrationTest, MultiThread_LargeFile_1vs4vs8) {
+  // parallel_chunk_boundary.csv is ~2MB, designed to stress chunk boundaries
+  std::string path = testDataPath("large/parallel_chunk_boundary.csv");
+
+  size_t expected_rows = 0;
+  for (size_t threads : {1u, 4u, 8u}) {
+    libvroom::CsvOptions opts;
+    opts.num_threads = threads;
+    auto [chunks, schema] = parseFile(path, opts);
+
+    EXPECT_GE(chunks.total_rows, 1u) << "No rows parsed with " << threads << " threads";
+    EXPECT_GE(schema.size(), 1u) << "No columns with " << threads << " threads";
+
+    if (threads == 1) {
+      expected_rows = chunks.total_rows;
+    } else {
+      EXPECT_EQ(chunks.total_rows, expected_rows)
+          << "Row count differs between 1 and " << threads << " threads: " << "expected "
+          << expected_rows << ", got " << chunks.total_rows;
     }
-
-    // The key consistency check: streaming parser produces identical data
-    // regardless of how batch parsing was done
-    auto rows = extract_all_fields_streaming(csv_content, detected_dialect);
-    EXPECT_GT(rows.size(), 0) << "Should have parsed rows";
-}
-
-TEST_F(IntegrationTest, MultiThreadedConsistency_QuotedFields) {
-    // Test with file containing quoted fields (more complex parsing)
-    FileBuffer buffer = load_file(test_data_path("quoted/newlines_in_quotes.csv"));
-    ASSERT_TRUE(buffer.valid()) << "Failed to load test file";
-
-    std::string csv_content(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-
-    // Parse with 1 and 4 threads
-    Parser parser1(1);
-    Parser parser4(4);
-
-    auto result1 = parser1.parse(buffer.data(), buffer.size());
-    auto result4 = parser4.parse(buffer.data(), buffer.size());
-
-    ASSERT_TRUE(result1.success()) << "Single-threaded parsing failed";
-    ASSERT_TRUE(result4.success()) << "Multi-threaded parsing failed";
-
-    // Both should produce indexes
-    EXPECT_GT(result1.total_indexes(), 0);
-    EXPECT_GT(result4.total_indexes(), 0);
-
-    // Both should detect same dialect
-    EXPECT_EQ(result1.dialect.delimiter, result4.dialect.delimiter);
-
-    // Verify data is correct using streaming parser
-    auto rows = extract_all_fields_streaming(csv_content, result1.dialect);
-    EXPECT_GT(rows.size(), 0) << "Should have parsed rows with quoted fields";
-}
-
-TEST_F(IntegrationTest, MultiThreadedConsistency_LargeFile) {
-    // Test with a file that spans multiple chunks
-    FileBuffer buffer = load_file(test_data_path("large/buffer_boundary.csv"));
-    ASSERT_TRUE(buffer.valid()) << "Failed to load buffer_boundary.csv";
-
-    std::string csv_content(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-
-    std::vector<size_t> thread_counts = {1, 2, 4};
-    Dialect detected_dialect;
-
-    for (size_t threads : thread_counts) {
-        Parser parser(threads);
-        auto result = parser.parse(buffer.data(), buffer.size());
-        ASSERT_TRUE(result.success()) << "Parsing failed with " << threads << " threads";
-        EXPECT_GT(result.total_indexes(), 0) << "No indexes with " << threads << " threads";
-
-        if (threads == 1) {
-            detected_dialect = result.dialect;
-        } else {
-            EXPECT_EQ(result.dialect.delimiter, detected_dialect.delimiter);
-        }
-    }
-
-    // Verify data can be extracted correctly
-    auto rows = extract_all_fields_streaming(csv_content, detected_dialect);
-    EXPECT_GT(rows.size(), 0) << "Should have parsed rows from large file";
-}
-
-TEST_F(IntegrationTest, MultiThreadedConsistency_AllAlgorithms) {
-    // Verify different algorithms produce consistent results
-    FileBuffer buffer = load_file(test_data_path("basic/simple.csv"));
-    ASSERT_TRUE(buffer.valid());
-
-    Parser parser(4);
-    Dialect csv_dialect = Dialect::csv();
-
-    // Parse with each algorithm
-    auto result_auto = parser.parse(buffer.data(), buffer.size(),
-        {.dialect = csv_dialect, .algorithm = ParseAlgorithm::AUTO});
-    auto result_spec = parser.parse(buffer.data(), buffer.size(),
-        {.dialect = csv_dialect, .algorithm = ParseAlgorithm::SPECULATIVE});
-    auto result_two = parser.parse(buffer.data(), buffer.size(),
-        {.dialect = csv_dialect, .algorithm = ParseAlgorithm::TWO_PASS});
-    auto result_branch = parser.parse(buffer.data(), buffer.size(),
-        {.dialect = csv_dialect, .algorithm = ParseAlgorithm::BRANCHLESS});
-
-    // All should succeed
-    ASSERT_TRUE(result_auto.success());
-    ASSERT_TRUE(result_spec.success());
-    ASSERT_TRUE(result_two.success());
-    ASSERT_TRUE(result_branch.success());
-
-    // All should produce same results
-    EXPECT_EQ(result_auto.num_columns(), result_spec.num_columns());
-    EXPECT_EQ(result_auto.num_columns(), result_two.num_columns());
-    EXPECT_EQ(result_auto.num_columns(), result_branch.num_columns());
-
-    EXPECT_EQ(result_auto.total_indexes(), result_spec.total_indexes());
-    EXPECT_EQ(result_auto.total_indexes(), result_two.total_indexes());
-    EXPECT_EQ(result_auto.total_indexes(), result_branch.total_indexes());
+  }
 }
 
 // =============================================================================
-// Test 3: Streaming vs Batch Equivalence Test
+// 3. In-memory Buffer Parsing Tests
 // =============================================================================
 
-TEST_F(IntegrationTest, StreamingVsBatch_EquivalentResults) {
-    // Load test file
-    FileBuffer buffer = load_file(test_data_path("basic/simple.csv"));
-    ASSERT_TRUE(buffer.valid()) << "Failed to load test file";
+TEST_F(IntegrationTest, InMemoryBuffer_BasicCSV) {
+  std::string csv = "id,name,score\n1,Alice,95\n2,Bob,87\n3,Charlie,92\n";
+  auto buffer = libvroom::AlignedBuffer::allocate(csv.size(), LIBVROOM_PADDING);
+  std::memcpy(buffer.data(), csv.data(), csv.size());
 
-    std::string csv_content(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open_from_buffer(std::move(buffer));
+  ASSERT_TRUE(open_result.ok) << "Failed to open from buffer: " << open_result.error;
 
-    // BATCH PARSING: Use Parser to parse the data
-    Parser parser(4);
-    auto batch_result = parser.parse(buffer.data(), buffer.size());
-    ASSERT_TRUE(batch_result.success()) << "Batch parsing failed";
-    EXPECT_GT(batch_result.total_indexes(), 0) << "Batch should produce indexes";
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << "Failed to read: " << read_result.error;
 
-    // STREAMING PARSING: Use StreamReader to get field data
-    std::istringstream input(csv_content);
-    StreamConfig config;
-    config.dialect = batch_result.dialect;
-    config.parse_header = true;
-
-    StreamReader reader(input, config);
-
-    std::vector<std::string> streaming_header;
-    std::vector<std::vector<std::string>> streaming_rows;
-
-    while (reader.next_row()) {
-        if (streaming_header.empty()) {
-            streaming_header = reader.header();
-        }
-        std::vector<std::string> row;
-        for (const auto& field : reader.row()) {
-            row.push_back(std::string(field.data));
-        }
-        streaming_rows.push_back(row);
-    }
-
-    // Verify header
-    EXPECT_EQ(streaming_header, (std::vector<std::string>{"A", "B", "C"}));
-
-    // Verify row count and content
-    ASSERT_EQ(streaming_rows.size(), 3) << "Expected 3 data rows";
-    EXPECT_EQ(streaming_rows[0], (std::vector<std::string>{"1", "2", "3"}));
-    EXPECT_EQ(streaming_rows[1], (std::vector<std::string>{"4", "5", "6"}));
-    EXPECT_EQ(streaming_rows[2], (std::vector<std::string>{"7", "8", "9"}));
-
-    // Verify both parsers use the same dialect
-    EXPECT_EQ(batch_result.dialect.delimiter, ',');
+  EXPECT_EQ(read_result.value.total_rows, 3u);
+  ASSERT_EQ(reader.schema().size(), 3u);
+  EXPECT_EQ(reader.schema()[0].name, "id");
+  EXPECT_EQ(reader.schema()[1].name, "name");
+  EXPECT_EQ(reader.schema()[2].name, "score");
 }
 
-TEST_F(IntegrationTest, StreamingVsBatch_QuotedFieldsEquivalence) {
-    // Test with quoted fields to ensure both handle escaping correctly
-    FileBuffer buffer = load_file(test_data_path("quoted/escaped_quotes.csv"));
-    ASSERT_TRUE(buffer.valid()) << "Failed to load escaped_quotes.csv";
+TEST_F(IntegrationTest, InMemoryBuffer_QuotedFields) {
+  std::string csv = "Name,Address,City\n"
+                    "\"John Doe\",\"123 Main St\",\"Springfield\"\n"
+                    "\"Jane Smith\",\"456 Oak Ave\",\"Portland\"\n";
+  auto buffer = libvroom::AlignedBuffer::allocate(csv.size(), LIBVROOM_PADDING);
+  std::memcpy(buffer.data(), csv.data(), csv.size());
 
-    std::string csv_content(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open_from_buffer(std::move(buffer));
+  ASSERT_TRUE(open_result.ok) << open_result.error;
 
-    // Batch parsing
-    Parser parser(2);
-    auto batch_result = parser.parse(buffer.data(), buffer.size());
-    ASSERT_TRUE(batch_result.success()) << "Batch parsing failed";
-    EXPECT_GT(batch_result.total_indexes(), 0);
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
 
-    // Streaming parsing - verify we can extract all rows
-    std::istringstream input(csv_content);
-    StreamConfig config;
-    config.dialect = batch_result.dialect;
-    config.parse_header = true;
-
-    StreamReader reader(input, config);
-
-    size_t streaming_row_count = 0;
-    size_t expected_field_count = 0;
-
-    while (reader.next_row()) {
-        if (streaming_row_count == 0) {
-            expected_field_count = reader.row().field_count();
-        } else {
-            // All rows should have consistent field count
-            EXPECT_EQ(reader.row().field_count(), expected_field_count)
-                << "Field count mismatch on row " << streaming_row_count;
-        }
-        streaming_row_count++;
-    }
-
-    EXPECT_GT(streaming_row_count, 0) << "No rows parsed by streaming";
+  EXPECT_EQ(read_result.value.total_rows, 2u);
+  ASSERT_EQ(reader.schema().size(), 3u);
+  EXPECT_EQ(reader.schema()[0].name, "Name");
 }
 
-TEST_F(IntegrationTest, StreamingVsBatch_RealWorldData) {
-    // Test with real-world data containing various quoting scenarios
-    FileBuffer buffer = load_file(test_data_path("real_world/contacts.csv"));
-    ASSERT_TRUE(buffer.valid());
+TEST_F(IntegrationTest, InMemoryBuffer_EscapedQuotes) {
+  // RFC 4180: "" inside quoted field becomes literal "
+  std::string csv = "Text,Description\n"
+                    "\"He said \"\"Hello\"\"\",\"A greeting\"\n"
+                    "\"She replied \"\"Hi there\"\"\",\"A response\"\n";
+  auto buffer = libvroom::AlignedBuffer::allocate(csv.size(), LIBVROOM_PADDING);
+  std::memcpy(buffer.data(), csv.data(), csv.size());
 
-    std::string csv_content(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open_from_buffer(std::move(buffer));
+  ASSERT_TRUE(open_result.ok) << open_result.error;
 
-    // Batch parsing
-    Parser parser(4);
-    auto batch_result = parser.parse(buffer.data(), buffer.size());
-    ASSERT_TRUE(batch_result.success());
-    EXPECT_GT(batch_result.total_indexes(), 0);
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
 
-    // Streaming parsing - verify data extraction
-    std::istringstream input(csv_content);
-    StreamConfig config;
-    config.dialect = batch_result.dialect;
-    config.parse_header = true;
-
-    StreamReader reader(input, config);
-
-    // Count rows from streaming and verify structure
-    size_t streaming_rows = 0;
-    while (reader.next_row()) {
-        streaming_rows++;
-        // contacts.csv should have 4 fields per row
-        EXPECT_EQ(reader.row().field_count(), 4)
-            << "Row " << streaming_rows << " should have 4 fields";
-    }
-
-    // Should have parsed 4 data rows
-    EXPECT_EQ(streaming_rows, 4) << "contacts.csv has 4 data rows";
-}
-
-TEST_F(IntegrationTest, StreamingVsBatch_ChunkedVsWhole) {
-    // Verify streaming chunked parsing matches whole-file streaming
-    // Note: Using no header for cleaner comparison
-    std::string csv = "Alice,100\nBob,200\nCharlie,300\n";
-
-    // Whole-file streaming
-    std::istringstream input1(csv);
-    StreamConfig config;
-    config.parse_header = false;  // No header for simpler comparison
-
-    StreamReader reader1(input1, config);
-    std::vector<std::vector<std::string>> whole_rows;
-    while (reader1.next_row()) {
-        std::vector<std::string> row;
-        for (const auto& field : reader1.row()) {
-            row.push_back(std::string(field.data));
-        }
-        whole_rows.push_back(row);
-    }
-
-    // Chunked streaming (push model)
-    StreamParser parser(config);
-    std::vector<std::vector<std::string>> chunked_rows;
-
-    parser.set_row_handler([&chunked_rows](const Row& row) {
-        std::vector<std::string> r;
-        for (const auto& field : row) {
-            r.push_back(std::string(field.data));
-        }
-        chunked_rows.push_back(r);
-        return true;
-    });
-
-    // Feed in small chunks
-    size_t chunk_size = 10;
-    for (size_t i = 0; i < csv.size(); i += chunk_size) {
-        size_t len = std::min(chunk_size, csv.size() - i);
-        parser.parse_chunk(std::string_view(csv.data() + i, len));
-    }
-    parser.finish();
-
-    // Results should be identical
-    ASSERT_EQ(whole_rows.size(), chunked_rows.size())
-        << "Row count mismatch: whole=" << whole_rows.size() << ", chunked=" << chunked_rows.size();
-    for (size_t i = 0; i < whole_rows.size(); ++i) {
-        EXPECT_EQ(whole_rows[i], chunked_rows[i])
-            << "Row " << i << " mismatch between whole and chunked parsing";
-    }
+  EXPECT_EQ(read_result.value.total_rows, 2u);
+  ASSERT_EQ(reader.schema().size(), 2u);
+  EXPECT_EQ(reader.schema()[0].name, "Text");
+  EXPECT_EQ(reader.schema()[1].name, "Description");
 }
 
 // =============================================================================
-// Additional Integration Tests
+// 4. Schema Verification Tests
 // =============================================================================
 
-TEST_F(IntegrationTest, ErrorHandling_MalformedFile) {
-    // Test error collection with a malformed file
-    FileBuffer buffer = load_file(test_data_path("malformed/unclosed_quote.csv"));
-    ASSERT_TRUE(buffer.valid());
+TEST_F(IntegrationTest, Schema_ColumnNamesMatchHeader) {
+  auto [chunks, schema] = parseContent("Name,Age,City\nalice,30,NYC\n");
 
-    Parser parser(2);
-    ErrorCollector errors(ErrorMode::PERMISSIVE);
-
-    auto result = parser.parse(buffer.data(), buffer.size(),
-        ParseOptions::with_errors(errors));
-
-    // Parsing should complete (in permissive mode)
-    EXPECT_TRUE(result.success());
-
-    // Should have collected errors
-    EXPECT_TRUE(errors.has_errors()) << "Should detect errors in malformed file";
+  ASSERT_EQ(schema.size(), 3u);
+  EXPECT_EQ(schema[0].name, "Name");
+  EXPECT_EQ(schema[1].name, "Age");
+  EXPECT_EQ(schema[2].name, "City");
 }
 
-TEST_F(IntegrationTest, ErrorHandling_InconsistentColumns) {
-    // Test with inconsistent column counts
-    FileBuffer buffer = load_file(test_data_path("malformed/inconsistent_columns.csv"));
-    ASSERT_TRUE(buffer.valid());
+TEST_F(IntegrationTest, Schema_TypeInferenceProducesNonUnknown) {
+  // financial.csv has dates, floats, and integers
+  auto [chunks, schema] = parseFile(testDataPath("real_world/financial.csv"));
 
-    Parser parser(2);
-    ErrorCollector errors(ErrorMode::PERMISSIVE);
+  ASSERT_EQ(schema.size(), 6u);
+  for (size_t i = 0; i < schema.size(); ++i) {
+    EXPECT_NE(schema[i].type, libvroom::DataType::UNKNOWN)
+        << "Column " << schema[i].name << " at index " << i << " has UNKNOWN type";
+  }
 
-    auto result = parser.parse(buffer.data(), buffer.size(),
-        ParseOptions::with_errors(errors));
+  // Date column should be detected as DATE
+  EXPECT_EQ(schema[0].name, "Date");
+  EXPECT_EQ(schema[0].type, libvroom::DataType::DATE);
 
-    EXPECT_TRUE(result.success());
-    EXPECT_TRUE(errors.has_errors()) << "Should detect inconsistent column count";
+  // Volume should be numeric
+  EXPECT_EQ(schema[5].name, "Volume");
+  EXPECT_TRUE(schema[5].type == libvroom::DataType::INT32 ||
+              schema[5].type == libvroom::DataType::INT64)
+      << "Volume type: " << libvroom::type_name(schema[5].type);
 }
+
+TEST_F(IntegrationTest, Schema_WideCSV_20Columns) {
+  auto [chunks, schema] = parseFile(testDataPath("basic/wide_columns.csv"));
+
+  ASSERT_EQ(schema.size(), 20u);
+  EXPECT_EQ(schema[0].name, "C1");
+  EXPECT_EQ(schema[9].name, "C10");
+  EXPECT_EQ(schema[19].name, "C20");
+  EXPECT_EQ(chunks.total_rows, 3u);
+}
+
+// =============================================================================
+// 5. Error Handling Integration Tests
+// =============================================================================
+
+TEST_F(IntegrationTest, ErrorHandling_UnclosedQuote_Permissive) {
+  // malformed/unclosed_quote.csv has an unclosed quote on row 2
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(testDataPath("malformed/unclosed_quote.csv"));
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  // Parsing should complete in permissive mode
+  EXPECT_TRUE(read_result.ok) << read_result.error;
+
+  // Should have collected errors about the unclosed quote
+  EXPECT_TRUE(reader.has_errors()) << "Should detect errors in malformed file";
+  EXPECT_GT(reader.errors().size(), 0u);
+}
+
+TEST_F(IntegrationTest, ErrorHandling_InconsistentColumns_Permissive) {
+  // malformed/inconsistent_columns.csv has rows with varying field counts
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(testDataPath("malformed/inconsistent_columns.csv"));
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  EXPECT_TRUE(read_result.ok) << read_result.error;
+
+  // Should have collected errors for inconsistent column counts
+  EXPECT_TRUE(reader.has_errors()) << "Should detect inconsistent column count";
+}
+
+TEST_F(IntegrationTest, ErrorHandling_ValidFile_NoErrors) {
+  // simple.csv is well-formed; with error collection enabled, no errors
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(testDataPath("basic/simple.csv"));
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  EXPECT_FALSE(reader.has_errors()) << "Valid file should produce no errors";
+  EXPECT_EQ(reader.errors().size(), 0u);
+  EXPECT_EQ(read_result.value.total_rows, 3u);
+}
+
+// =============================================================================
+// 6. Real-world Data Tests
+// =============================================================================
+
+TEST_F(IntegrationTest, RealWorld_FinancialData) {
+  auto [chunks, schema] = parseFile(testDataPath("real_world/financial.csv"));
+
+  // financial.csv: Date,Open,High,Low,Close,Volume with 5 rows
+  ASSERT_EQ(schema.size(), 6u);
+  EXPECT_EQ(schema[0].name, "Date");
+  EXPECT_EQ(schema[1].name, "Open");
+  EXPECT_EQ(schema[2].name, "High");
+  EXPECT_EQ(schema[3].name, "Low");
+  EXPECT_EQ(schema[4].name, "Close");
+  EXPECT_EQ(schema[5].name, "Volume");
+  EXPECT_EQ(chunks.total_rows, 5u);
+}
+
+TEST_F(IntegrationTest, RealWorld_UnicodeData) {
+  auto [chunks, schema] = parseFile(testDataPath("real_world/unicode.csv"));
+
+  // unicode.csv: Name,City,Country,Description with 5 rows of UTF-8 content
+  ASSERT_EQ(schema.size(), 4u);
+  EXPECT_EQ(schema[0].name, "Name");
+  EXPECT_EQ(schema[1].name, "City");
+  EXPECT_EQ(schema[2].name, "Country");
+  EXPECT_EQ(schema[3].name, "Description");
+  EXPECT_EQ(chunks.total_rows, 5u);
+}
+
+TEST_F(IntegrationTest, RealWorld_ProductCatalog) {
+  auto [chunks, schema] = parseFile(testDataPath("real_world/product_catalog.csv"));
+
+  // product_catalog.csv: SKU,Name,Category,Price,Stock,Description
+  ASSERT_EQ(schema.size(), 6u);
+  EXPECT_EQ(schema[0].name, "SKU");
+  EXPECT_EQ(schema[1].name, "Name");
+  EXPECT_EQ(schema[2].name, "Category");
+  EXPECT_EQ(schema[3].name, "Price");
+  EXPECT_EQ(schema[4].name, "Stock");
+  EXPECT_EQ(schema[5].name, "Description");
+  EXPECT_GE(chunks.total_rows, 1u);
+}
+
+// =============================================================================
+// 7. Edge Case Tests
+// =============================================================================
 
 TEST_F(IntegrationTest, EdgeCase_EmptyFile) {
-    // Test with empty file
-    FileBuffer buffer = load_file(test_data_path("edge_cases/empty_file.csv"));
-    // Empty file might load as valid with 0 size or might fail
-    // Either way, parsing should handle it gracefully
-
-    if (buffer.valid() && buffer.size() > 0) {
-        Parser parser(1);
-        auto result = parser.parse(buffer.data(), buffer.size());
-        // Should either succeed with 0 rows or fail gracefully
-    }
+  // Empty file should fail to open (no header)
+  TempIntCsv csv("");
+  libvroom::CsvReader reader(libvroom::CsvOptions{});
+  auto open_result = reader.open(csv.path());
+  EXPECT_FALSE(open_result.ok) << "Empty file should fail to open (no header)";
 }
 
-TEST_F(IntegrationTest, EdgeCase_SingleCell) {
-    // Test with single-cell file
-    FileBuffer buffer = load_file(test_data_path("edge_cases/single_cell.csv"));
-    ASSERT_TRUE(buffer.valid());
+TEST_F(IntegrationTest, EdgeCase_SingleCellFile) {
+  auto [chunks, schema] = parseFile(testDataPath("edge_cases/single_cell.csv"));
 
-    Parser parser(1);
-    auto result = parser.parse(buffer.data(), buffer.size());
-    ASSERT_TRUE(result.success());
-
-    // Verify via streaming
-    std::string csv_content(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-    auto rows = extract_all_fields_streaming(csv_content, result.dialect, false);
-    EXPECT_GE(rows.size(), 1) << "Should have at least 1 row";
+  // single_cell.csv has a single column header "Value"
+  ASSERT_EQ(schema.size(), 1u);
+  EXPECT_EQ(schema[0].name, "Value");
 }
 
-TEST_F(IntegrationTest, LineEndings_CRLF) {
-    // Test Windows-style line endings
-    FileBuffer buffer = load_file(test_data_path("line_endings/crlf.csv"));
-    ASSERT_TRUE(buffer.valid());
+TEST_F(IntegrationTest, EdgeCase_CRLFLineEndings) {
+  auto [chunks, schema] = parseFile(testDataPath("line_endings/crlf.csv"));
 
-    Parser parser(2);
-    auto result = parser.parse(buffer.data(), buffer.size());
-    ASSERT_TRUE(result.success());
-
-    // Verify data is correct despite CRLF
-    std::string csv_content(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-    auto rows = extract_all_fields_streaming(csv_content, result.dialect);
-    EXPECT_GT(rows.size(), 0);
-}
-
-TEST_F(IntegrationTest, LineEndings_CR) {
-    // Test old Mac-style line endings
-    FileBuffer buffer = load_file(test_data_path("line_endings/cr.csv"));
-    ASSERT_TRUE(buffer.valid());
-
-    Parser parser(2);
-    auto result = parser.parse(buffer.data(), buffer.size());
-    ASSERT_TRUE(result.success());
-}
-
-TEST_F(IntegrationTest, Unicode_UTF8Content) {
-    // Test file with Unicode content
-    FileBuffer buffer = load_file(test_data_path("real_world/unicode.csv"));
-    ASSERT_TRUE(buffer.valid());
-
-    Parser parser(2);
-    auto result = parser.parse(buffer.data(), buffer.size());
-    ASSERT_TRUE(result.success());
-    EXPECT_GT(result.total_indexes(), 0);
-
-    // Verify we can extract rows
-    std::string csv_content(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-    auto rows = extract_all_fields_streaming(csv_content, result.dialect);
-    EXPECT_GT(rows.size(), 0) << "Should parse unicode content";
-}
-
-TEST_F(IntegrationTest, Performance_LargeFileMultiThreaded) {
-    // Performance sanity check with larger file
-    FileBuffer buffer = load_file(test_data_path("large/buffer_boundary.csv"));
-    ASSERT_TRUE(buffer.valid());
-
-    // Parse with different thread counts and verify reasonable performance
-    for (size_t threads : {1u, 4u}) {
-        Parser parser(threads);
-        auto result = parser.parse(buffer.data(), buffer.size());
-        ASSERT_TRUE(result.success()) << "Failed with " << threads << " threads";
-        EXPECT_GT(result.total_indexes(), 0);
-    }
-}
-
-// =============================================================================
-// In-Memory Buffer Tests (no file I/O)
-// =============================================================================
-
-TEST_F(IntegrationTest, InMemory_BasicParsing) {
-    // Test complete pipeline with in-memory data
-    std::string csv = "id,name,score\n1,Alice,95\n2,Bob,87\n3,Charlie,92\n";
-    auto [buf, len] = make_buffer(csv);
-    FileBuffer buffer(buf, len);
-
-    Parser parser(2);
-    auto result = parser.parse(buffer.data(), buffer.size());
-
-    ASSERT_TRUE(result.success());
-    EXPECT_GT(result.total_indexes(), 0);
-    EXPECT_EQ(result.dialect.delimiter, ',');
-
-    // Verify data
-    auto rows = extract_all_fields_streaming(csv, result.dialect);
-    ASSERT_EQ(rows.size(), 3);
-    EXPECT_EQ(rows[0], (std::vector<std::string>{"1", "Alice", "95"}));
-    EXPECT_EQ(rows[1], (std::vector<std::string>{"2", "Bob", "87"}));
-    EXPECT_EQ(rows[2], (std::vector<std::string>{"3", "Charlie", "92"}));
-
-    // Verify header
-    auto header = get_header_streaming(csv, result.dialect);
-    EXPECT_EQ(header, (std::vector<std::string>{"id", "name", "score"}));
-}
-
-TEST_F(IntegrationTest, InMemory_QuotedWithNewlines) {
-    // Test handling of quoted fields containing newlines
-    std::string csv = "text,number\n\"line1\nline2\",100\n\"single\",200\n";
-    auto [buf, len] = make_buffer(csv);
-    FileBuffer buffer(buf, len);
-
-    Parser parser(2);
-    auto result = parser.parse(buffer.data(), buffer.size());
-
-    ASSERT_TRUE(result.success());
-    EXPECT_GT(result.total_indexes(), 0);
-
-    // Verify using streaming
-    auto rows = extract_all_fields_streaming(csv, result.dialect);
-    ASSERT_EQ(rows.size(), 2);
-    EXPECT_EQ(rows[0][0], "line1\nline2");
-    EXPECT_EQ(rows[0][1], "100");
-}
-
-TEST_F(IntegrationTest, InMemory_EscapedQuotes) {
-    // Test handling of escaped quotes (doubled quotes)
-    std::string csv = "quote\n\"say \"\"hello\"\"\"\n\"normal\"\n";
-    auto [buf, len] = make_buffer(csv);
-    FileBuffer buffer(buf, len);
-
-    Parser parser(2);
-    auto result = parser.parse(buffer.data(), buffer.size());
-
-    ASSERT_TRUE(result.success());
-
-    // Verify using streaming (with unescaping)
-    std::istringstream input(csv);
-    StreamConfig config;
-    config.dialect = result.dialect;
-    config.parse_header = true;
-
-    StreamReader reader(input, config);
-
-    ASSERT_TRUE(reader.next_row());
-    // Raw data contains doubled quotes
-    EXPECT_EQ(reader.row()[0].data, "say \"\"hello\"\"");
-    // Unescaped version should have single quotes
-    EXPECT_EQ(reader.row()[0].unescaped(), "say \"hello\"");
-
-    ASSERT_TRUE(reader.next_row());
-    EXPECT_EQ(reader.row()[0].data, "normal");
+  // crlf.csv: A,B,C with 2 data rows using \r\n line endings
+  ASSERT_EQ(schema.size(), 3u);
+  EXPECT_EQ(chunks.total_rows, 2u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "1");
+  EXPECT_EQ(getStringValue(chunks, 2, 1), "6");
 }

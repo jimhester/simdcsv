@@ -565,73 +565,85 @@ if(BUILD_TESTING)
     add_dependencies(simd_parsing_test copy_test_data)
     gtest_discover_tests(simd_parsing_test)
 
-    # csv_errors_test and csv_reader_test are planned for follow-up PRs
+    # CSV error detection and error mode tests
+    add_executable(csv_errors_test test/csv_errors_test.cpp)
+    target_link_libraries(csv_errors_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(csv_errors_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_dependencies(csv_errors_test copy_test_data)
+    gtest_discover_tests(csv_errors_test)
+
+    # Core CSV reader parsing tests
+    add_executable(csv_reader_test test/csv_reader_test.cpp)
+    target_link_libraries(csv_reader_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(csv_reader_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_dependencies(csv_reader_test copy_test_data)
+    gtest_discover_tests(csv_reader_test)
+
+    # Multi-threaded CSV parsing safety and correctness tests
+    add_executable(concurrency_test test/concurrency_test.cpp)
+    target_link_libraries(concurrency_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(concurrency_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(concurrency_test)
+
+    # End-to-end integration tests (ported to libvroom2 CsvReader API)
+    add_executable(integration_test test/integration_test.cpp)
+    target_link_libraries(integration_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(integration_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_dependencies(integration_test copy_test_data)
+    gtest_discover_tests(integration_test)
 
     # =============================================================================
-    # Legacy tests (disabled - use old API headers that no longer exist)
-    # TODO: Port these tests to use the new libvroom2 API
+    # Infrastructure tests (pre-existing, not part of the port)
     # =============================================================================
 
-# Legacy test executables commented out - they use headers from the old architecture
-# that have been replaced by the libvroom2 migration:
-#   - dialect.h, error.h, io_util.h, two_pass.h, value_extraction.h, etc.
-#
-# These tests need to be rewritten to use the new API:
-#   - vroom::CsvReader, vroom::CsvOptions
-#   - vroom::convert_csv_to_parquet()
-#   - vroom::ArrowColumnBuilder
-#
-# add_executable(libvroom_test test/csv_parser_test.cpp)
+    # Error handling test (tests ErrorCollector infrastructure)
+    add_executable(error_handling_test test/error_handling_test.cpp)
+    target_link_libraries(error_handling_test PRIVATE vroom GTest::gtest_main)
+    add_test(NAME error_handling_test COMMAND error_handling_test)
 
-# Error handling test (enabled - tests ErrorCollector infrastructure)
-add_executable(error_handling_test test/error_handling_test.cpp)
-target_link_libraries(error_handling_test PRIVATE vroom GTest::gtest_main)
-add_test(NAME error_handling_test COMMAND error_handling_test)
-# add_executable(csv_parsing_test test/csv_parsing_test.cpp)
-# add_executable(csv_parser_errors_test test/csv_parser_errors_test.cpp)
-# add_executable(csv_extended_test test/csv_extended_test.cpp)
+    # Dialect detection test (tests dialect detection infrastructure)
+    add_executable(dialect_detection_test test/dialect_detection_test.cpp)
+    target_link_libraries(dialect_detection_test PRIVATE vroom GTest::gtest_main)
+    add_dependencies(dialect_detection_test copy_test_data)
+    add_test(NAME dialect_detection_test COMMAND dialect_detection_test)
 
-# Dialect detection test (enabled - tests dialect detection infrastructure)
-add_executable(dialect_detection_test test/dialect_detection_test.cpp)
-target_link_libraries(dialect_detection_test PRIVATE vroom GTest::gtest_main)
-add_dependencies(dialect_detection_test copy_test_data)
-add_test(NAME dialect_detection_test COMMAND dialect_detection_test)
-# add_executable(type_detection_test test/type_detection_test.cpp)
-# add_executable(c_api_test test/c_api_test.cpp)
-# add_executable(debug_test test/debug_test.cpp)
-# add_executable(api_test test/api_test.cpp)
-# add_executable(quote_mask_test test/quote_mask_test.cpp)
-# add_executable(column_major_test test/column_major_test.cpp)
-# add_executable(value_extraction_test test/value_extraction_test.cpp)
-# add_executable(column_config_test test/column_config_test.cpp)
-# add_executable(lazy_column_test test/lazy_column_test.cpp)
-# add_executable(streaming_test test/streaming_test.cpp)
-# add_executable(branchless_test test/branchless_test.cpp)
-# add_executable(simd_error_detection_test test/simd_error_detection_test.cpp)
-# add_executable(size_limits_test test/size_limits_test.cpp)
-# add_executable(simd_number_parsing_test test/simd_number_parsing_test.cpp)
-# add_executable(io_util_test test/io_util_test.cpp)
+    # I/O utility tests (AlignedBuffer, load_file_to_ptr)
+    add_executable(io_util_test test/io_util_test.cpp)
+    target_link_libraries(io_util_test PRIVATE vroom GTest::gtest_main)
+    add_dependencies(io_util_test copy_test_data)
+    gtest_discover_tests(io_util_test WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-# CLI integration tests (tests the vroom command-line tool)
-add_executable(cli_test test/cli_test.cpp)
-target_link_libraries(cli_test PRIVATE GTest::gtest_main)
-add_dependencies(cli_test vroom-cli copy_test_data)
-gtest_discover_tests(cli_test WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    # CLI integration tests (tests the vroom command-line tool)
+    add_executable(cli_test test/cli_test.cpp)
+    target_link_libraries(cli_test PRIVATE GTest::gtest_main)
+    add_dependencies(cli_test vroom-cli copy_test_data)
+    gtest_discover_tests(cli_test WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-# add_executable(two_pass_coverage_test test/two_pass_coverage_test.cpp)
-# add_executable(encoding_test test/encoding_test.cpp)
-# add_executable(utf8_test test/utf8_test.cpp)
-# add_executable(bounds_validation_test test/bounds_validation_test.cpp)
-# add_executable(integration_test test/integration_test.cpp)
-# add_executable(concurrency_test test/concurrency_test.cpp)
-# add_executable(comment_line_test test/comment_line_test.cpp)
-# add_executable(row_filter_test test/row_filter_test.cpp)
-# add_executable(mmap_util_test test/mmap_util_test.cpp)
-# add_executable(index_cache_test test/index_cache_test.cpp)
-# add_executable(buffer_lifetime_test test/buffer_lifetime_test.cpp)
-# add_executable(column_escape_test test/column_escape_test.cpp)
-# add_executable(arrow_output_test test/arrow_output_test.cpp)
-# add_executable(arrow_file_test test/arrow_file_test.cpp)
+    # Comment line handling tests
+    add_executable(comment_line_test test/comment_line_test.cpp)
+    target_link_libraries(comment_line_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(comment_line_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_dependencies(comment_line_test copy_test_data)
+    gtest_discover_tests(comment_line_test)
+
+    # Row filter tests (skip_empty_rows implemented; skip/n_max not yet)
+    add_executable(row_filter_test test/row_filter_test.cpp)
+    target_link_libraries(row_filter_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(row_filter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(row_filter_test)
+
+    # Type inference tests
+    add_executable(type_inference_test test/type_inference_test.cpp)
+    target_link_libraries(type_inference_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(type_inference_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(type_inference_test)
+
+    # Arrow conversion and Parquet output tests
+    add_executable(arrow_conversion_test test/arrow_conversion_test.cpp)
+    target_link_libraries(arrow_conversion_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(arrow_conversion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_dependencies(arrow_conversion_test copy_test_data)
+    gtest_discover_tests(arrow_conversion_test)
 
 endif() # BUILD_TESTING
 
