@@ -390,6 +390,7 @@ endif()
 
 # Library target (SHARED or STATIC based on BUILD_SHARED_LIBS)
 set(VROOM_SOURCES
+    src/table.cpp
     src/error.cpp
     src/io_util.cpp
     src/dialect.cpp
@@ -535,6 +536,21 @@ if(BUILD_TESTING)
 
     # Register API tests with CTest
     gtest_discover_tests(vroom_api_test)
+
+    # Table multi-batch Arrow stream tests (Issue #632)
+    add_executable(table_test
+        test/table_test.cpp
+    )
+    target_link_libraries(table_test PRIVATE
+        vroom
+        GTest::gtest_main
+        pthread
+    )
+    target_include_directories(table_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    add_dependencies(table_test copy_test_data)
+    gtest_discover_tests(table_test)
 
     # =============================================================================
     # Legacy tests (disabled - use old API headers that no longer exist)
