@@ -5,6 +5,7 @@
 #include "arrow_export.h"
 #include "types.h"
 
+#include <cassert>
 #include <memory>
 #include <string>
 #include <vector>
@@ -22,6 +23,8 @@ struct ParsedChunks;
 class Table : public std::enable_shared_from_this<Table> {
 public:
   /// Construct a Table from schema and pre-built chunks.
+  /// Note: export_to_stream() requires the Table to be managed by shared_ptr
+  /// (uses shared_from_this). Prefer from_parsed_chunks() which returns shared_ptr.
   Table(std::vector<ColumnSchema> schema,
         std::vector<std::vector<std::unique_ptr<ArrowColumnBuilder>>> chunks,
         std::vector<size_t> chunk_row_counts, size_t total_rows)
@@ -40,7 +43,10 @@ public:
   size_t num_rows() const { return total_rows_; }
   size_t num_columns() const { return schema_.size(); }
   size_t num_chunks() const { return chunks_.size(); }
-  size_t chunk_rows(size_t chunk_idx) const { return chunk_row_counts_[chunk_idx]; }
+  size_t chunk_rows(size_t chunk_idx) const {
+    assert(chunk_idx < chunks_.size());
+    return chunk_row_counts_[chunk_idx];
+  }
 
   const std::vector<ColumnSchema>& schema() const { return schema_; }
 
@@ -54,6 +60,7 @@ public:
   }
 
   const std::vector<std::unique_ptr<ArrowColumnBuilder>>& chunk_columns(size_t chunk_idx) const {
+    assert(chunk_idx < chunks_.size());
     return chunks_[chunk_idx];
   }
 
