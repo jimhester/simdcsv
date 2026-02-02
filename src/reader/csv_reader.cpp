@@ -305,13 +305,6 @@ std::pair<size_t, bool> parse_chunk_with_state(
     row_count++;
     // Advance offset by consumed bytes
     offset += start_remaining - iter.remaining();
-
-    // Unclosed quote detection at end of chunk
-    if (check_errors && iter.finished_inside_quote() && offset >= size) [[unlikely]] {
-      error_collector->add_error(ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::RECOVERABLE, 0, 0,
-                                 base_byte_offset + row_start_offset,
-                                 "Quoted field not closed before end of data");
-    }
   }
 
 done_chunk:
