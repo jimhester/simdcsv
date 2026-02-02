@@ -31,11 +31,11 @@ public:
   Table(std::vector<ColumnSchema> schema, std::vector<std::unique_ptr<ArrowColumnBuilder>> columns,
         size_t num_rows);
 
-  // Non-copyable (unique_ptr members)
+  // Non-copyable, non-movable (shared_from_this() breaks after move)
   Table(const Table&) = delete;
   Table& operator=(const Table&) = delete;
-  Table(Table&&) = default;
-  Table& operator=(Table&&) = default;
+  Table(Table&&) = delete;
+  Table& operator=(Table&&) = delete;
 
   /// Number of rows in the table
   size_t num_rows() const { return num_rows_; }

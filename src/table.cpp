@@ -2,7 +2,6 @@
 
 #include "libvroom/vroom.h"
 
-#include <cassert>
 #include <stdexcept>
 
 namespace libvroom {
@@ -197,7 +196,11 @@ std::shared_ptr<Table> Table::from_parsed_chunks(const std::vector<ColumnSchema>
   auto& first = chunks.chunks[0];
   for (size_t chunk_idx = 1; chunk_idx < chunks.chunks.size(); ++chunk_idx) {
     auto& other = chunks.chunks[chunk_idx];
-    assert(other.size() == first.size() && "All chunks must have the same number of columns");
+    if (other.size() != first.size()) {
+      throw std::runtime_error("Internal error: chunk " + std::to_string(chunk_idx) + " has " +
+                               std::to_string(other.size()) + " columns, expected " +
+                               std::to_string(first.size()));
+    }
     for (size_t col_idx = 0; col_idx < first.size() && col_idx < other.size(); ++col_idx) {
       first[col_idx]->merge_from(*other[col_idx]);
     }
