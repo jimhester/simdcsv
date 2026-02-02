@@ -2,6 +2,9 @@
 
 #include "libvroom/vroom.h"
 
+#include <cassert>
+#include <numeric>
+
 namespace libvroom {
 
 // =============================================================================
@@ -20,6 +23,9 @@ std::shared_ptr<Table> Table::from_parsed_chunks(const std::vector<ColumnSchema>
       non_empty_chunks.push_back(std::move(chunk));
     }
   }
+
+  assert(std::accumulate(chunk_row_counts.begin(), chunk_row_counts.end(), size_t{0}) ==
+         parsed.total_rows);
 
   return std::make_shared<Table>(schema, std::move(non_empty_chunks), std::move(chunk_row_counts),
                                  parsed.total_rows);
