@@ -19,6 +19,9 @@
 namespace libvroom {
 
 // Forward declarations
+class Table;
+
+// Forward declarations
 class MmapSource;
 class ColumnBuilder; // Legacy, kept for existing code that hasn't migrated
 class ParquetWriter;
@@ -448,5 +451,14 @@ bool parse_date(std::string_view value, int32_t& days_since_epoch);
 //   YYYY-MM-DDTHH:MM:SS-HH:MM (timezone offset)
 // Returns true on success, false on parse error
 bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch);
+
+// ============================================================================
+// Convenience functions
+// ============================================================================
+
+/// Read a CSV file and return a Table (Arrow-exportable).
+/// This is the primary high-level API for consumers that want Arrow output.
+std::shared_ptr<Table> read_csv_to_table(const std::string& path,
+                                         const CsvOptions& opts = CsvOptions{});
 
 } // namespace libvroom

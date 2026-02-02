@@ -1,6 +1,7 @@
 #include "libvroom/arrow_column_builder.h"
 #include "libvroom/error.h"
 #include "libvroom/split_fields.h"
+#include "libvroom/table.h"
 #include "libvroom/vroom.h"
 
 #include "BS_thread_pool.hpp"
@@ -1131,6 +1132,27 @@ ConversionResult convert_csv_to_parquet(const VroomOptions& options, ProgressCal
   }
 
   return result; // Success (error is empty)
+}
+
+// =============================================================================
+// read_csv_to_table - convenience function
+// =============================================================================
+
+std::shared_ptr<Table> read_csv_to_table(const std::string& path, const CsvOptions& opts) {
+  CsvReader reader(opts);
+
+  auto open_result = reader.open(path);
+  if (!open_result.ok) {
+    throw std::runtime_error(open_result.error);
+  }
+
+  auto read_result = reader.read_all();
+  if (!read_result.ok) {
+    throw std::runtime_error(read_result.error);
+  }
+
+  auto schema = reader.schema();
+  return Table::from_parsed_chunks(schema, read_result.value);
 }
 
 } // namespace libvroom

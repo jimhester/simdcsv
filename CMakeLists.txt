@@ -421,6 +421,7 @@ set(VROOM_SOURCES
     src/writer/dictionary.cpp
     src/simd/statistics_simd.cpp
     src/writer/arrow_ipc_writer.cpp
+    src/table.cpp
 )
 
 add_library(vroom ${VROOM_SOURCES})
@@ -580,6 +581,12 @@ add_test(NAME dialect_detection_test COMMAND dialect_detection_test)
 # add_executable(size_limits_test test/size_limits_test.cpp)
 # add_executable(simd_number_parsing_test test/simd_number_parsing_test.cpp)
 # add_executable(io_util_test test/io_util_test.cpp)
+
+# Table + Arrow stream export tests
+add_executable(table_test test/table_test.cpp)
+target_link_libraries(table_test PRIVATE vroom GTest::gtest_main pthread)
+add_dependencies(table_test copy_test_data)
+gtest_discover_tests(table_test)
 
 # CLI integration tests (tests the vroom command-line tool)
 add_executable(cli_test test/cli_test.cpp)
