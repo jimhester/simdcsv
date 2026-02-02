@@ -226,11 +226,10 @@ Work is broken into 6 PRs, ordered by risk priority.
 1. Delete test files for removed features (13 files listed in DELETE section)
 2. Remove commented-out lines from CMakeLists.txt (lines 553-603)
 3. Create follow-up issues:
-   - `#xxx` — Add streaming parser API
-   - `#xxx` — Add C API wrapper (`libvroom_c.h`)
-   - `#xxx` — Add index caching for repeated reads
-   - `#xxx` — Add character encoding detection (UTF-16, Latin-1)
-   - `#xxx` — Add UTF-8 utilities (validation, display width)
+   - #633 — Add streaming parser API
+   - #634 — Add C API wrapper (`libvroom_c.h`)
+   - #635 — Add index caching for repeated reads
+   - #636 — Add character encoding detection (UTF-16, Latin-1, UTF-8 utilities)
 4. Update `test/README.md` to document new test organization
 
 ## Test Organization After Porting
