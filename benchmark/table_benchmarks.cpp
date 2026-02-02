@@ -99,6 +99,10 @@ static void BM_TableFromParsedChunks(benchmark::State& state) {
     libvroom::CsvReader r(opts);
     r.open(path);
     auto res = r.read_all();
+    if (!res.ok) {
+      state.SkipWithError(res.error.c_str());
+      return;
+    }
     state.ResumeTiming();
 
     // This is what we're benchmarking: O(1) table construction
@@ -208,6 +212,10 @@ static void BM_EndToEndReadToStream(benchmark::State& state) {
     libvroom::CsvReader reader(opts);
     reader.open(path);
     auto result = reader.read_all();
+    if (!result.ok) {
+      state.SkipWithError(result.error.c_str());
+      return;
+    }
     auto table = libvroom::Table::from_parsed_chunks(reader.schema(), std::move(result.value));
 
     // Export and consume stream
