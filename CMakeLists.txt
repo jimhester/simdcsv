@@ -390,7 +390,6 @@ endif()
 
 # Library target (SHARED or STATIC based on BUILD_SHARED_LIBS)
 set(VROOM_SOURCES
-    src/table.cpp
     src/error.cpp
     src/io_util.cpp
     src/dialect.cpp

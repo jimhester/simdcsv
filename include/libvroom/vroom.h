@@ -20,8 +20,6 @@ namespace libvroom {
 
 // Forward declarations
 class Table;
-
-// Forward declarations
 class MmapSource;
 class ColumnBuilder; // Legacy, kept for existing code that hasn't migrated
 class ParquetWriter;
