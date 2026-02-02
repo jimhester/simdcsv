@@ -9,9 +9,9 @@
 | Metric | Count |
 |--------|-------|
 | Active test executables | 4 (`vroom_api_test`, `error_handling_test`, `dialect_detection_test`, `cli_test`) |
-| Active tests passing | 194 |
-| Disabled test executables | 32 |
-| Disabled test count (TEST macros) | 2,216 |
+| Active tests passing (ctest) | 194 |
+| Disabled test executables | 33 |
+| Disabled test count (TEST macros) | 2,263 |
 
 ## Triage
 
@@ -55,8 +55,9 @@ tests against the public API.
 | `bounds_validation_test.cpp` | 38 | Buffer edge cases → test via `CsvReader` with crafted inputs | **P2** |
 | `size_limits_test.cpp` | 36 | Oversized field/file scenarios → test via `CsvReader` | **P2** |
 | `api_test.cpp` | 134 | Multi-threaded, type conversion, UTF-8 → already partially covered by `vroom_api_test`, port gaps | **P1** |
+| `csv_parser_test.cpp` | 47 | Well-formed CSV test data files → test via `CsvReader` with `test/data/` files | **P1** |
 
-**Subtotal: 843 tests** (7 files), but many scenarios overlap with PORT files above
+**Subtotal: 890 tests** (8 files), but many scenarios overlap with PORT files above
 
 ### Action: DELETE — Features removed in libvroom2
 
@@ -86,9 +87,9 @@ Any needed functionality should be tracked as separate feature issues.
 | Action | Files | Tests | Notes |
 |--------|-------|-------|-------|
 | PORT (rewrite against new API) | 12 | 499 | Direct rewrite, keep test logic |
-| PORT SCENARIOS (extract test data) | 7 | 843 | Extract inputs/expectations, new test code |
+| PORT SCENARIOS (extract test data) | 8 | 890 | Extract inputs/expectations, new test code |
 | DELETE (removed features) | 13 | 874 | Delete tests, create follow-up issues |
-| **Total** | **32** | **2,216** | |
+| **Total** | **33** | **2,263** | |
 
 ## Implementation Plan
 
@@ -224,7 +225,7 @@ Work is broken into 6 PRs, ordered by risk priority.
 
 **Tasks:**
 1. Delete test files for removed features (13 files listed in DELETE section)
-2. Remove commented-out lines from CMakeLists.txt (lines 553-603)
+2. Remove commented-out `add_executable` lines from CMakeLists.txt (the `# add_executable(...)` lines only — do NOT remove active test definitions for `error_handling_test`, `dialect_detection_test`, or `cli_test`)
 3. Create follow-up issues:
    - #633 — Add streaming parser API
    - #634 — Add C API wrapper (`libvroom_c.h`)
