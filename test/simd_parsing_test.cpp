@@ -684,6 +684,17 @@ TEST_F(SIMDParsingTest, ClosedQuoteNoTrailingNewline) {
       << "Properly closed quoted field without trailing newline should not be UNCLOSED_QUOTE";
 }
 
+TEST_F(SIMDParsingTest, ClosedQuoteSingleColumnNoTrailingNewline) {
+  // Single-column CSV where the last field is a properly closed quoted field
+  // with no trailing newline. Regression test for false positive in finish().
+  std::string content = "A\n\"val\"";
+  auto result = parseWithErrors(content);
+  ASSERT_TRUE(result.opened);
+
+  EXPECT_FALSE(hasErrorCode(result.errors, ErrorCode::UNCLOSED_QUOTE))
+      << "Single-column closed quoted field without trailing newline should not be UNCLOSED_QUOTE";
+}
+
 TEST_F(SIMDParsingTest, UnclosedQuoteReportedExactlyOnce) {
   // Verify no double-reporting of UNCLOSED_QUOTE
   std::string content = "A,B\n\"unclosed";

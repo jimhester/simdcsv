@@ -183,8 +183,11 @@ private:
 
   VROOM_FORCE_INLINE bool finish(const char*& field_data, size_t& field_len, bool needs_escaping) {
     finished_ = true;
-    // If we consumed all data while in a quoted field, the quote was never closed
-    if (needs_escaping) {
+    // If we consumed all data while in a quoted field, the quote may be unclosed.
+    // Check: if the field starts and ends with quote, it's properly closed.
+    // Otherwise it's genuinely unclosed (e.g., "unclosed with no closing quote).
+    if (needs_escaping &&
+        !(remaining_ >= 2 && v_[0] == quote_char_ && v_[remaining_ - 1] == quote_char_)) {
       finished_inside_quote_ = true;
     }
     field_data = v_;

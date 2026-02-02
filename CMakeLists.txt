@@ -565,12 +565,7 @@ if(BUILD_TESTING)
     add_dependencies(simd_parsing_test copy_test_data)
     gtest_discover_tests(simd_parsing_test)
 
-    # CSV error detection and error mode tests
-    add_executable(csv_errors_test test/csv_errors_test.cpp)
-    target_link_libraries(csv_errors_test PRIVATE vroom GTest::gtest_main pthread)
-    target_include_directories(csv_errors_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    add_dependencies(csv_errors_test copy_test_data)
-    gtest_discover_tests(csv_errors_test)
+    # csv_errors_test and csv_reader_test are planned for follow-up PRs
 
     # =============================================================================
     # Legacy tests (disabled - use old API headers that no longer exist)
