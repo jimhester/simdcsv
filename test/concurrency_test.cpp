@@ -1,140 +1,267 @@
 /**
- * Concurrency and thread safety tests for libvroom CSV parser.
+ * @file concurrency_test.cpp
+ * @brief Multi-threaded CSV parsing safety and correctness tests.
  *
- * This file tests multi-threaded parsing behavior including:
- * - Thread safety stress tests (many threads, same data)
- * - Chunk boundary edge cases
- * - Thread count edge cases
- * - Multiple concurrent parser instances
+ * Rewritten from old concurrency_test.cpp to use the libvroom2 CsvReader API.
+ * Tests thread safety, deterministic results, and concurrent reader instances.
  *
- * Run with ThreadSanitizer (TSan) to detect data races:
- *   cmake -B build -DENABLE_TSAN=ON && cmake --build build
- *   ./build/concurrency_test
+ * @see GitHub issue #626
  */
 
-#include <atomic>
-#include <chrono>
-#include <cstring>
+#include "libvroom.h"
+
+#include "test_util.h"
+
+#include <cstdio>
+#include <fstream>
 #include <future>
 #include <gtest/gtest.h>
-#include <libvroom.h>
-#include <random>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
-// Helper function to create padded buffer from string
-static std::pair<uint8_t*, size_t> make_buffer(const std::string& content) {
-  size_t len = content.size();
-  uint8_t* buf = allocate_padded_buffer(len, 64);
-  std::memcpy(buf, content.data(), len);
-  return {buf, len};
-}
+namespace {
 
-// Generate CSV data with specified rows and columns
+// ---------------------------------------------------------------------------
+// CSV data generators
+// ---------------------------------------------------------------------------
+
 static std::string generate_csv(size_t rows, size_t cols, bool with_quotes = false) {
-  std::string csv;
-  csv.reserve(rows * cols * 10); // Rough estimate
-
-  // Header
+  std::ostringstream oss;
   for (size_t c = 0; c < cols; ++c) {
     if (c > 0)
-      csv += ',';
-    csv += "col" + std::to_string(c);
+      oss << ',';
+    oss << "col" << c;
   }
-  csv += '\n';
+  oss << '\n';
 
-  // Data rows
   for (size_t r = 0; r < rows; ++r) {
     for (size_t c = 0; c < cols; ++c) {
       if (c > 0)
-        csv += ',';
+        oss << ',';
       if (with_quotes && (r % 2 == 0)) {
-        csv += "\"value" + std::to_string(r) + "_" + std::to_string(c) + "\"";
+        oss << "\"value" << r << "_" << c << "\"";
       } else {
-        csv += "value" + std::to_string(r) + "_" + std::to_string(c);
+        oss << "value" << r << "_" << c;
       }
     }
-    csv += '\n';
+    oss << '\n';
   }
-  return csv;
+  return oss.str();
 }
 
-// =============================================================================
-// Test Fixture
-// =============================================================================
+static std::string generate_numeric_csv(size_t rows, size_t cols) {
+  std::ostringstream oss;
+  for (size_t c = 0; c < cols; ++c) {
+    if (c > 0)
+      oss << ',';
+    oss << "col" << c;
+  }
+  oss << '\n';
+
+  for (size_t r = 0; r < rows; ++r) {
+    for (size_t c = 0; c < cols; ++c) {
+      if (c > 0)
+        oss << ',';
+      oss << (r * cols + c);
+    }
+    oss << '\n';
+  }
+  return oss.str();
+}
+
+// ---------------------------------------------------------------------------
+// Test fixture
+// ---------------------------------------------------------------------------
 
 class ConcurrencyTest : public ::testing::Test {
 protected:
   void SetUp() override {
-    // Get hardware concurrency for adaptive tests
     hw_concurrency_ = std::thread::hardware_concurrency();
     if (hw_concurrency_ == 0)
-      hw_concurrency_ = 4; // Fallback
+      hw_concurrency_ = 4;
+  }
+
+  // Helper: parse a file and return total_rows, schema size, and success flag.
+  struct ParseResult {
+    size_t total_rows = 0;
+    size_t num_columns = 0;
+    bool ok = false;
+  };
+
+  ParseResult parse_file(const std::string& path, libvroom::CsvOptions opts = {}) {
+    libvroom::CsvReader reader(opts);
+    auto open_result = reader.open(path);
+    if (!open_result.ok)
+      return {};
+    auto read_result = reader.read_all();
+    if (!read_result.ok)
+      return {};
+    return {read_result.value.total_rows, reader.schema().size(), true};
   }
 
   unsigned int hw_concurrency_;
 };
 
 // =============================================================================
-// Thread Safety Stress Tests
+// 1. Thread Count Edge Cases
 // =============================================================================
 
-// Test: Many threads parsing identical data concurrently
-TEST_F(ConcurrencyTest, ManyThreadsSameData) {
-  const std::string csv = generate_csv(100, 5);
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
+TEST_F(ConcurrencyTest, MoreThreadsThanRows) {
+  // 8 threads parsing CSV with only 3 data rows
+  std::string csv = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
+  test_util::TempCsvFile tmp(csv);
 
-  const int num_threads = 100;
-  std::vector<std::future<bool>> futures;
-  std::atomic<int> success_count{0};
-  std::atomic<int> failure_count{0};
+  libvroom::CsvOptions opts;
+  opts.num_threads = 8;
+  auto result = parse_file(tmp.path(), opts);
 
-  for (int i = 0; i < num_threads; ++i) {
-    futures.push_back(std::async(std::launch::async, [&buffer, &success_count, &failure_count]() {
-      libvroom::Parser parser(4); // Each parser uses 4 threads
-      auto result = parser.parse(buffer.data(), buffer.size());
-      if (result.success() && result.total_indexes() > 0) {
-        success_count++;
-        return true;
-      } else {
-        failure_count++;
-        return false;
-      }
-    }));
-  }
-
-  // Wait for all threads to complete
-  for (auto& f : futures) {
-    EXPECT_TRUE(f.get());
-  }
-
-  EXPECT_EQ(success_count.load(), num_threads);
-  EXPECT_EQ(failure_count.load(), 0);
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 3u);
+  EXPECT_EQ(result.num_columns, 3u);
 }
 
-// Test: Concurrent parser instances with different data
-TEST_F(ConcurrencyTest, ConcurrentParsersWithDifferentData) {
-  const int num_parsers = 50;
-  std::vector<std::string> csv_data;
-  std::vector<std::pair<uint8_t*, size_t>> buffers;
+TEST_F(ConcurrencyTest, MoreThreadsThanBytes) {
+  // 8 threads on a tiny CSV (< 20 bytes)
+  std::string csv = "a,b\n1,2\n";
+  ASSERT_LT(csv.size(), 20u);
+  test_util::TempCsvFile tmp(csv);
 
-  // Create different CSV data for each parser
-  for (int i = 0; i < num_parsers; ++i) {
-    csv_data.push_back(generate_csv(50 + i, 3 + (i % 5)));
-    buffers.push_back(make_buffer(csv_data.back()));
+  libvroom::CsvOptions opts;
+  opts.num_threads = 8;
+  auto result = parse_file(tmp.path(), opts);
+
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 1u);
+  EXPECT_EQ(result.num_columns, 2u);
+}
+
+TEST_F(ConcurrencyTest, SingleThreadOnLargeCSV) {
+  std::string csv = generate_numeric_csv(5000, 10);
+  test_util::TempCsvFile tmp(csv);
+
+  libvroom::CsvOptions opts;
+  opts.num_threads = 1;
+  auto result = parse_file(tmp.path(), opts);
+
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 5000u);
+  EXPECT_EQ(result.num_columns, 10u);
+}
+
+TEST_F(ConcurrencyTest, ManyThreadsOnLargeCSV) {
+  std::string csv = generate_numeric_csv(5000, 10);
+  test_util::TempCsvFile tmp(csv);
+
+  libvroom::CsvOptions opts;
+  opts.num_threads = 16;
+  auto result = parse_file(tmp.path(), opts);
+
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 5000u);
+  EXPECT_EQ(result.num_columns, 10u);
+}
+
+TEST_F(ConcurrencyTest, DefaultThreadCountAutoDetects) {
+  // num_threads=0 should auto-detect via hardware_concurrency
+  std::string csv = generate_numeric_csv(1000, 5);
+  test_util::TempCsvFile tmp(csv);
+
+  libvroom::CsvOptions opts;
+  opts.num_threads = 0;
+  auto result = parse_file(tmp.path(), opts);
+
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 1000u);
+  EXPECT_EQ(result.num_columns, 5u);
+}
+
+// =============================================================================
+// 2. Deterministic Results Across Thread Counts
+// =============================================================================
+
+TEST_F(ConcurrencyTest, SameRowCountWithDifferentThreadCounts) {
+  std::string csv = generate_numeric_csv(2000, 8);
+  test_util::TempCsvFile tmp(csv);
+
+  size_t expected_rows = 0;
+  for (size_t threads : {1u, 2u, 4u, 8u}) {
+    libvroom::CsvOptions opts;
+    opts.num_threads = threads;
+    auto result = parse_file(tmp.path(), opts);
+
+    ASSERT_TRUE(result.ok) << "Failed with " << threads << " threads";
+    if (threads == 1) {
+      expected_rows = result.total_rows;
+    }
+    EXPECT_EQ(result.total_rows, expected_rows)
+        << "Row count differs with " << threads << " threads (expected " << expected_rows << ")";
   }
+}
 
+TEST_F(ConcurrencyTest, SameColumnCountAcrossThreadCounts) {
+  std::string csv = generate_numeric_csv(2000, 12);
+  test_util::TempCsvFile tmp(csv);
+
+  for (size_t threads : {1u, 2u, 4u, 8u}) {
+    libvroom::CsvOptions opts;
+    opts.num_threads = threads;
+    auto result = parse_file(tmp.path(), opts);
+
+    ASSERT_TRUE(result.ok) << "Failed with " << threads << " threads";
+    EXPECT_EQ(result.num_columns, 12u) << "Column count wrong with " << threads << " threads";
+  }
+}
+
+TEST_F(ConcurrencyTest, QuotedFieldsSameResultsSingleVsMulti) {
+  std::ostringstream oss;
+  oss << "A,B,C\n";
+  for (int i = 0; i < 3000; ++i) {
+    oss << i << ",\"quoted value " << i << "\",end\n";
+  }
+  std::string csv = oss.str();
+  test_util::TempCsvFile tmp(csv);
+
+  libvroom::CsvOptions opts1;
+  opts1.num_threads = 1;
+  auto r1 = parse_file(tmp.path(), opts1);
+
+  libvroom::CsvOptions opts4;
+  opts4.num_threads = 4;
+  auto r4 = parse_file(tmp.path(), opts4);
+
+  ASSERT_TRUE(r1.ok);
+  ASSERT_TRUE(r4.ok);
+  EXPECT_EQ(r1.total_rows, r4.total_rows);
+  EXPECT_EQ(r1.num_columns, r4.num_columns);
+}
+
+// =============================================================================
+// 3. Concurrent CsvReader Instances
+// =============================================================================
+
+TEST_F(ConcurrencyTest, MultipleReadersSameFileSimultaneously) {
+  std::string csv = generate_numeric_csv(1000, 5);
+  test_util::TempCsvFile tmp(csv);
+
+  const int num_readers = 10;
   std::vector<std::future<bool>> futures;
   std::atomic<int> success_count{0};
 
-  for (int i = 0; i < num_parsers; ++i) {
-    futures.push_back(std::async(std::launch::async, [i, &buffers, &success_count]() {
-      libvroom::Parser parser(2);
-      auto result = parser.parse(buffers[i].first, buffers[i].second);
-      if (result.success()) {
-        success_count++;
+  for (int i = 0; i < num_readers; ++i) {
+    futures.push_back(std::async(std::launch::async, [&tmp, &success_count]() {
+      libvroom::CsvOptions opts;
+      opts.num_threads = 2;
+      libvroom::CsvReader reader(opts);
+      auto open_result = reader.open(tmp.path());
+      if (!open_result.ok)
+        return false;
+      auto read_result = reader.read_all();
+      if (!read_result.ok)
+        return false;
+      if (read_result.value.total_rows == 1000) {
+        success_count.fetch_add(1);
         return true;
       }
       return false;
@@ -144,477 +271,407 @@ TEST_F(ConcurrencyTest, ConcurrentParsersWithDifferentData) {
   for (auto& f : futures) {
     EXPECT_TRUE(f.get());
   }
+  EXPECT_EQ(success_count.load(), num_readers);
+}
 
-  EXPECT_EQ(success_count.load(), num_parsers);
+TEST_F(ConcurrencyTest, MultipleReadersDifferentFilesSimultaneously) {
+  // Create different CSV files
+  std::vector<std::unique_ptr<test_util::TempCsvFile>> files;
+  std::vector<size_t> expected_rows;
+  const int num_files = 8;
 
-  // Clean up buffers not managed by FileBuffer
-  for (auto& [ptr, _] : buffers) {
-    aligned_free(ptr);
+  for (int i = 0; i < num_files; ++i) {
+    size_t rows = 500 + static_cast<size_t>(i) * 100;
+    size_t cols = 3 + static_cast<size_t>(i % 4);
+    files.push_back(std::make_unique<test_util::TempCsvFile>(generate_numeric_csv(rows, cols)));
+    expected_rows.push_back(rows);
+  }
+
+  std::vector<std::future<size_t>> futures;
+  for (int i = 0; i < num_files; ++i) {
+    futures.push_back(std::async(std::launch::async, [&files, i]() -> size_t {
+      libvroom::CsvOptions opts;
+      opts.num_threads = 2;
+      libvroom::CsvReader reader(opts);
+      auto open_result = reader.open(files[i]->path());
+      if (!open_result.ok)
+        return 0;
+      auto read_result = reader.read_all();
+      if (!read_result.ok)
+        return 0;
+      return read_result.value.total_rows;
+    }));
+  }
+
+  for (int i = 0; i < num_files; ++i) {
+    size_t rows = futures[i].get();
+    EXPECT_EQ(rows, expected_rows[i]) << "File " << i << " had wrong row count";
   }
 }
 
-// Test: Repeated parsing in tight loop (stress test for memory management)
-TEST_F(ConcurrencyTest, RepeatedParsingStress) {
-  const std::string csv = generate_csv(50, 5);
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
+TEST_F(ConcurrencyTest, MultipleReadersWithDifferentOptionsSimultaneously) {
+  // Same data, different separator configs parsed concurrently
+  std::string csv_comma = "a,b,c\n1,2,3\n4,5,6\n";
+  std::string csv_semi = "a;b;c\n1;2;3\n4;5;6\n";
+  std::string csv_tab = "a\tb\tc\n1\t2\t3\n4\t5\t6\n";
 
-  const int iterations = 1000;
-  libvroom::Parser parser(hw_concurrency_);
+  test_util::TempCsvFile tmp_comma(csv_comma);
+  test_util::TempCsvFile tmp_semi(csv_semi);
+  test_util::TempCsvFile tmp_tab(csv_tab);
 
-  for (int i = 0; i < iterations; ++i) {
-    auto result = parser.parse(buffer.data(), buffer.size());
-    ASSERT_TRUE(result.success()) << "Failed at iteration " << i;
-    ASSERT_GT(result.total_indexes(), 0) << "No indexes at iteration " << i;
-  }
+  auto parse_with_sep = [](const std::string& path, char sep) -> size_t {
+    libvroom::CsvOptions opts;
+    opts.separator = sep;
+    opts.num_threads = 2;
+    libvroom::CsvReader reader(opts);
+    auto open_result = reader.open(path);
+    if (!open_result.ok)
+      return 0;
+    auto read_result = reader.read_all();
+    if (!read_result.ok)
+      return 0;
+    return read_result.value.total_rows;
+  };
+
+  auto f1 = std::async(std::launch::async, parse_with_sep, tmp_comma.path(), ',');
+  auto f2 = std::async(std::launch::async, parse_with_sep, tmp_semi.path(), ';');
+  auto f3 = std::async(std::launch::async, parse_with_sep, tmp_tab.path(), '\t');
+
+  EXPECT_EQ(f1.get(), 2u);
+  EXPECT_EQ(f2.get(), 2u);
+  EXPECT_EQ(f3.get(), 2u);
 }
 
 // =============================================================================
-// Chunk Boundary Edge Cases
+// 4. Chunk Boundary Edge Cases
 // =============================================================================
 
-// Test: File smaller than minimum chunk size (64 bytes)
 TEST_F(ConcurrencyTest, FileSmallerThanChunkSize) {
-  // Create a small CSV that's definitely less than 64 bytes
-  const std::string csv = "a,b,c\n1,2,3\n"; // ~12 bytes
-  ASSERT_LT(csv.size(), 64);
+  // A tiny CSV with multiple threads -- forces at most one chunk
+  std::string csv = "a,b,c\n1,2,3\n";
+  ASSERT_LT(csv.size(), 64u);
+  test_util::TempCsvFile tmp(csv);
 
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
+  libvroom::CsvOptions opts;
+  opts.num_threads = 4;
+  auto result = parse_file(tmp.path(), opts);
 
-  // Try with various thread counts - should all succeed
-  for (int threads = 1; threads <= 8; ++threads) {
-    libvroom::Parser parser(threads);
-    auto result = parser.parse(buffer.data(), buffer.size());
-    EXPECT_TRUE(result.success()) << "Failed with " << threads << " threads";
-    EXPECT_GT(result.total_indexes(), 0);
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 1u);
+}
+
+TEST_F(ConcurrencyTest, SingleVeryLongRowMultiThreaded) {
+  // CSV with header and one very long data row (1000 columns)
+  std::ostringstream oss;
+  for (int c = 0; c < 1000; ++c) {
+    if (c > 0)
+      oss << ',';
+    oss << "c" << c;
+  }
+  oss << '\n';
+  for (int c = 0; c < 1000; ++c) {
+    if (c > 0)
+      oss << ',';
+    oss << "val" << c;
+  }
+  oss << '\n';
+
+  test_util::TempCsvFile tmp(oss.str());
+
+  libvroom::CsvOptions opts;
+  opts.num_threads = 8;
+  auto result = parse_file(tmp.path(), opts);
+
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 1u);
+  EXPECT_EQ(result.num_columns, 1000u);
+}
+
+TEST_F(ConcurrencyTest, RepeatedQuotedFieldsAcrossChunks) {
+  // Many quoted fields -- chunk boundaries may fall inside quotes
+  std::ostringstream oss;
+  oss << "name,description\n";
+  for (int i = 0; i < 500; ++i) {
+    oss << "\"item" << i << "\",\"This is a description with, comma\"\n";
+  }
+
+  test_util::TempCsvFile tmp(oss.str());
+
+  for (size_t threads : {1u, 2u, 4u, 8u}) {
+    libvroom::CsvOptions opts;
+    opts.num_threads = threads;
+    auto result = parse_file(tmp.path(), opts);
+    ASSERT_TRUE(result.ok) << "Failed with " << threads << " threads";
+    EXPECT_EQ(result.total_rows, 500u) << "Wrong row count with " << threads << " threads";
+    EXPECT_EQ(result.num_columns, 2u);
   }
 }
 
-// Test: Chunk boundary coinciding with quote characters
-TEST_F(ConcurrencyTest, ChunkBoundaryAtQuote) {
-  // Create CSV where quotes might fall on chunk boundaries
-  // Use repeated quoted fields to increase likelihood
-  std::string csv = "name,description\n";
-  for (int i = 0; i < 100; ++i) {
-    csv += "\"item" + std::to_string(i) + "\",\"This is a description with, comma\"\n";
+TEST_F(ConcurrencyTest, LargeFileManyShortRows) {
+  // Many short rows -- many row boundaries per chunk
+  std::ostringstream oss;
+  oss << "a,b\n";
+  for (int i = 0; i < 10000; ++i) {
+    oss << i << "," << (i + 1) << "\n";
   }
 
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
+  test_util::TempCsvFile tmp(oss.str());
 
-  // Parse with different thread counts - all should succeed without crashes
-  for (int threads = 1; threads <= 8; ++threads) {
-    libvroom::Parser parser(threads);
-    auto result = parser.parse(buffer.data(), buffer.size());
-    EXPECT_TRUE(result.success()) << "Failed with " << threads << " threads";
-    EXPECT_GT(result.total_indexes(), 0) << "No indexes with " << threads << " threads";
-  }
-}
+  libvroom::CsvOptions opts;
+  opts.num_threads = 4;
+  auto result = parse_file(tmp.path(), opts);
 
-// Test: Single quoted field spanning entire file
-TEST_F(ConcurrencyTest, SingleQuotedFieldSpanningFile) {
-  // A CSV with one quoted field that spans a large portion of the file
-  std::string long_value(500, 'x'); // 500 character value
-  std::string csv = "col1,col2\n\"" + long_value + "\",value2\n";
-
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
-
-  // This tests quote parity tracking across chunks
-  for (int threads = 1; threads <= 8; ++threads) {
-    libvroom::Parser parser(threads);
-    auto result = parser.parse(buffer.data(), buffer.size());
-    EXPECT_TRUE(result.success()) << "Failed with " << threads << " threads";
-  }
-}
-
-// Test: Single line content with multiple threads
-TEST_F(ConcurrencyTest, SingleLineMultipleThreads) {
-  // CSV with header and one very long data row
-  std::string csv = "a,b,c,d,e,f,g,h,i,j\n";
-  for (int i = 0; i < 100; ++i) {
-    if (i > 0)
-      csv += ",";
-    csv += "value" + std::to_string(i);
-  }
-  csv += "\n";
-
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
-
-  // Parse with 8 threads on essentially 2-line data
-  libvroom::Parser parser(8);
-  auto result = parser.parse(buffer.data(), buffer.size());
-  EXPECT_TRUE(result.success());
-  EXPECT_GT(result.total_indexes(), 0);
-}
-
-// Test: No newlines in file (forces fallback)
-TEST_F(ConcurrencyTest, NoNewlines) {
-  // CSV with no newlines - just a single line
-  std::string csv = "a,b,c,d,e,f,g,h,i,j";
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
-
-  // Should handle gracefully even with multiple threads
-  libvroom::Parser parser(4);
-  auto result = parser.parse(buffer.data(), buffer.size());
-  // May succeed or fail, but should not crash
-  SUCCEED();
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 10000u);
 }
 
 // =============================================================================
-// Thread Count Edge Cases
+// 5. Error Handling with Threads
 // =============================================================================
 
-// Test: Thread count exceeding row count
-TEST_F(ConcurrencyTest, MoreThreadsThanRows) {
-  // CSV with only 3 rows
-  const std::string csv = "a,b,c\n1,2,3\n4,5,6\n";
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
+TEST_F(ConcurrencyTest, InconsistentColumnsPermissiveMode) {
+  // CSV where some rows have wrong field count
+  std::ostringstream oss;
+  oss << "a,b,c\n";
+  for (int i = 0; i < 500; ++i) {
+    oss << "1,2,3\n";
+  }
+  oss << "x,y\n"; // Missing field
+  for (int i = 0; i < 500; ++i) {
+    oss << "4,5,6\n";
+  }
+  oss << "7,8,9,10\n"; // Extra field
+  for (int i = 0; i < 500; ++i) {
+    oss << "a,b,c\n";
+  }
 
-  // Try with 8 threads on 3 rows
-  libvroom::Parser parser(8);
-  auto result = parser.parse(buffer.data(), buffer.size());
-  EXPECT_TRUE(result.success());
-  EXPECT_GT(result.total_indexes(), 0);
+  test_util::TempCsvFile tmp(oss.str());
+
+  libvroom::CsvOptions opts;
+  opts.num_threads = 4;
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(tmp.path());
+  ASSERT_TRUE(open_result.ok);
+  auto read_result = reader.read_all();
+  // In permissive mode the parse may succeed or report errors but should not crash
+  EXPECT_TRUE(reader.has_errors()) << "Should detect field count inconsistencies";
 }
 
-// Test: Thread count exceeding byte count
-TEST_F(ConcurrencyTest, MoreThreadsThanBytes) {
-  // 10 byte CSV with 255 threads
-  const std::string csv = "a,b\n1,2\n";
-  ASSERT_LT(csv.size(), 255);
+TEST_F(ConcurrencyTest, MultiThreadedErrorsSorted) {
+  // Errors from multi-threaded parsing should be sorted by byte offset
+  std::ostringstream oss;
+  oss << "a,b,c\n";
+  for (int i = 0; i < 400; ++i) {
+    oss << "1,2,3\n";
+  }
+  oss << "error_row_1\n"; // First error
+  for (int i = 0; i < 400; ++i) {
+    oss << "4,5,6\n";
+  }
+  oss << "error_row_2,extra\n"; // Second error
+  for (int i = 0; i < 400; ++i) {
+    oss << "7,8,9\n";
+  }
 
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
+  test_util::TempCsvFile tmp(oss.str());
 
-  libvroom::Parser parser(255); // Max uint8_t
-  auto result = parser.parse(buffer.data(), buffer.size());
-  EXPECT_TRUE(result.success());
-}
+  libvroom::CsvOptions opts;
+  opts.num_threads = 4;
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
 
-// Test: Zero thread count (should default to 1)
-TEST_F(ConcurrencyTest, ZeroThreads) {
-  const std::string csv = "a,b,c\n1,2,3\n";
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(tmp.path());
+  ASSERT_TRUE(open_result.ok);
+  reader.read_all();
 
-  libvroom::Parser parser(0);
-  EXPECT_EQ(parser.num_threads(), 1); // Should default to 1
-
-  auto result = parser.parse(buffer.data(), buffer.size());
-  EXPECT_TRUE(result.success());
-}
-
-// Test: Maximum thread count (255 due to uint8_t)
-TEST_F(ConcurrencyTest, MaximumThreadCount) {
-  // Generate larger CSV to actually utilize threads
-  const std::string csv = generate_csv(1000, 10);
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
-
-  libvroom::Parser parser(255);
-  auto result = parser.parse(buffer.data(), buffer.size());
-  EXPECT_TRUE(result.success());
-  EXPECT_GT(result.total_indexes(), 0);
-}
-
-// Test: Single thread parsing
-TEST_F(ConcurrencyTest, SingleThreadParsing) {
-  const std::string csv = generate_csv(100, 5);
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
-
-  libvroom::Parser parser(1);
-  auto result = parser.parse(buffer.data(), buffer.size());
-  EXPECT_TRUE(result.success());
-  EXPECT_GT(result.total_indexes(), 0);
-}
-
-// Test: set_num_threads() changes thread count
-TEST_F(ConcurrencyTest, SetNumThreads) {
-  libvroom::Parser parser(1);
-  EXPECT_EQ(parser.num_threads(), 1);
-
-  parser.set_num_threads(4);
-  EXPECT_EQ(parser.num_threads(), 4);
-
-  parser.set_num_threads(0);
-  EXPECT_EQ(parser.num_threads(), 1); // Should clamp to 1
-
-  parser.set_num_threads(255);
-  EXPECT_EQ(parser.num_threads(), 255);
-}
-
-// =============================================================================
-// Consistency Tests (Single vs Multi-threaded)
-// =============================================================================
-
-// Test: Multi-threaded parsing produces valid results
-TEST_F(ConcurrencyTest, MultiThreadedProducesValidResults) {
-  const std::string csv = generate_csv(500, 10, true); // With quotes
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
-
-  // Parse with various thread counts - all should succeed and produce valid results
-  for (int threads = 1; threads <= 8; ++threads) {
-    libvroom::Parser parser(threads);
-    auto result = parser.parse(buffer.data(), buffer.size());
-    ASSERT_TRUE(result.success()) << "Failed with " << threads << " threads";
-    ASSERT_GT(result.total_indexes(), 0) << "No indexes with " << threads << " threads";
+  const auto& errors = reader.errors();
+  // Verify errors are sorted by byte offset (if multiple errors detected)
+  for (size_t i = 1; i < errors.size(); ++i) {
+    EXPECT_LE(errors[i - 1].byte_offset, errors[i].byte_offset)
+        << "Errors should be sorted by byte offset";
   }
 }
 
-// Test: Different algorithms succeed with multi-threading
-TEST_F(ConcurrencyTest, AlgorithmsSucceedMultiThreaded) {
-  const std::string csv = generate_csv(200, 5, true);
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
+TEST_F(ConcurrencyTest, SingleVsMultiThreadErrorCountConsistency) {
+  // Same malformed CSV should produce the same error count regardless of threads
+  std::ostringstream oss;
+  oss << "a,b,c\n";
+  oss << "1,2,3\n";
+  oss << "bad\n"; // Missing fields
+  oss << "4,5,6\n";
+  oss << "7,8\n"; // Missing field
+  oss << "9,10,11\n";
 
-  libvroom::Parser parser(4);
+  std::string csv = oss.str();
+  test_util::TempCsvFile tmp(csv);
 
-  // Parse with different algorithms - all should succeed
-  auto result_auto = parser.parse(
-      buffer.data(), buffer.size(),
-      {.dialect = libvroom::Dialect::csv(), .algorithm = libvroom::ParseAlgorithm::AUTO});
-  auto result_spec = parser.parse(
-      buffer.data(), buffer.size(),
-      {.dialect = libvroom::Dialect::csv(), .algorithm = libvroom::ParseAlgorithm::SPECULATIVE});
-  auto result_two = parser.parse(
-      buffer.data(), buffer.size(),
-      {.dialect = libvroom::Dialect::csv(), .algorithm = libvroom::ParseAlgorithm::TWO_PASS});
-  auto result_branch = parser.parse(
-      buffer.data(), buffer.size(),
-      {.dialect = libvroom::Dialect::csv(), .algorithm = libvroom::ParseAlgorithm::BRANCHLESS});
+  auto count_errors = [&](size_t threads) -> size_t {
+    libvroom::CsvOptions opts;
+    opts.num_threads = threads;
+    opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+    libvroom::CsvReader reader(opts);
+    auto open_result = reader.open(tmp.path());
+    if (!open_result.ok)
+      return 0;
+    reader.read_all();
+    return reader.errors().size();
+  };
 
-  EXPECT_TRUE(result_auto.success());
-  EXPECT_TRUE(result_spec.success());
-  EXPECT_TRUE(result_two.success());
-  EXPECT_TRUE(result_branch.success());
+  size_t errors_1 = count_errors(1);
+  size_t errors_2 = count_errors(2);
 
-  // All should produce valid index counts
-  EXPECT_GT(result_auto.total_indexes(), 0);
-  EXPECT_GT(result_spec.total_indexes(), 0);
-  EXPECT_GT(result_two.total_indexes(), 0);
-  EXPECT_GT(result_branch.total_indexes(), 0);
+  EXPECT_EQ(errors_1, errors_2) << "Single and multi-threaded should detect same number of errors";
 }
 
 // =============================================================================
-// Error Handling in Multi-threaded Context
+// 6. Stress Tests
 // =============================================================================
 
-// Test: Thread-local error collection
-TEST_F(ConcurrencyTest, ThreadLocalErrorCollection) {
-  // CSV with inconsistent field counts
-  std::string csv = "a,b,c\n";
-  for (int i = 0; i < 100; ++i) {
-    if (i % 10 == 0) {
-      csv += "x,y\n"; // Missing field
-    } else {
-      csv += "1,2,3\n";
-    }
-  }
-
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
-
-  libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  libvroom::Parser parser(4);
-
-  auto result =
-      parser.parse(buffer.data(), buffer.size(), libvroom::ParseOptions::with_errors(errors));
-
-  EXPECT_TRUE(result.success());    // Permissive mode succeeds
-  EXPECT_TRUE(errors.has_errors()); // But errors should be collected
-}
-
-// Test: Multiple concurrent parsers with error collection
-TEST_F(ConcurrencyTest, ConcurrentParsersWithErrors) {
-  // CSV with some errors
-  std::string csv = "a,b,c\n1,2,3\n4,5\n6,7,8\n";
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
-
-  const int num_parsers = 20;
-  std::vector<std::future<bool>> futures;
-  std::atomic<int> errors_found{0};
-
-  for (int i = 0; i < num_parsers; ++i) {
-    futures.push_back(std::async(std::launch::async, [&buffer, &errors_found]() {
-      libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-      libvroom::Parser parser(2);
-      auto result =
-          parser.parse(buffer.data(), buffer.size(), libvroom::ParseOptions::with_errors(errors));
-      if (errors.has_errors()) {
-        errors_found++;
-      }
-      return result.success();
-    }));
-  }
-
-  for (auto& f : futures) {
-    EXPECT_TRUE(f.get());
-  }
-
-  // All parsers should find the same error
-  EXPECT_EQ(errors_found.load(), num_parsers);
-}
-
-// =============================================================================
-// Large File Multi-threaded Tests
-// =============================================================================
-
-// Test: Large file with many threads
-TEST_F(ConcurrencyTest, LargeFileMultiThreaded) {
-  // Generate a reasonably large CSV (1000 rows, 20 columns)
-  const std::string csv = generate_csv(1000, 20, true);
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
-
-  // Parse with hardware concurrency
-  libvroom::Parser parser(hw_concurrency_);
-  auto result = parser.parse(buffer.data(), buffer.size());
-
-  EXPECT_TRUE(result.success());
-  EXPECT_GT(result.total_indexes(), 0);
-}
-
-// Test: Scaling with thread count
-TEST_F(ConcurrencyTest, ScalingWithThreadCount) {
-  // Medium-sized CSV
-  const std::string csv = generate_csv(500, 10);
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
-
-  // Parse with increasing thread counts - all should succeed
-  for (int threads = 1; threads <= 16; threads *= 2) {
-    libvroom::Parser parser(threads);
-    auto result = parser.parse(buffer.data(), buffer.size());
-    EXPECT_TRUE(result.success()) << "Failed with " << threads << " threads";
-  }
-}
-
-// =============================================================================
-// Data Race Detection Tests (for TSan)
-// =============================================================================
-
-// Test: Rapid sequential parsing (catches use-after-free, double-free)
 TEST_F(ConcurrencyTest, RapidSequentialParsing) {
+  // Parse 100 different CSVs in rapid succession to detect leaks/use-after-free
   for (int i = 0; i < 100; ++i) {
-    std::string csv = generate_csv(10 + i, 3);
-    auto [data, len] = make_buffer(csv);
-    libvroom::FileBuffer buffer(data, len);
+    std::string csv = generate_numeric_csv(10 + static_cast<size_t>(i), 3);
+    test_util::TempCsvFile tmp(csv);
 
-    libvroom::Parser parser(4);
-    auto result = parser.parse(buffer.data(), buffer.size());
-    EXPECT_TRUE(result.success()) << "Failed at iteration " << i;
+    libvroom::CsvOptions opts;
+    opts.num_threads = 2;
+    auto result = parse_file(tmp.path(), opts);
+    ASSERT_TRUE(result.ok) << "Failed at iteration " << i;
+    EXPECT_EQ(result.total_rows, 10u + static_cast<size_t>(i));
   }
 }
 
-// Test: Parser reuse across different data
-TEST_F(ConcurrencyTest, ParserReuse) {
-  libvroom::Parser parser(4);
+TEST_F(ConcurrencyTest, LargeFileStress) {
+  // 1000 rows x 20 columns with hardware_concurrency threads
+  std::string csv = generate_csv(1000, 20, true);
+  test_util::TempCsvFile tmp(csv);
 
-  for (int i = 0; i < 50; ++i) {
-    std::string csv = generate_csv(20 + i * 2, 5);
-    auto [data, len] = make_buffer(csv);
-    libvroom::FileBuffer buffer(data, len);
+  libvroom::CsvOptions opts;
+  opts.num_threads = hw_concurrency_;
+  auto result = parse_file(tmp.path(), opts);
 
-    auto result = parser.parse(buffer.data(), buffer.size());
-    EXPECT_TRUE(result.success()) << "Failed at iteration " << i;
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 1000u);
+  EXPECT_EQ(result.num_columns, 20u);
+}
+
+TEST_F(ConcurrencyTest, ScalingThreadCounts) {
+  // Parse the same data with 1, 2, 4, 8 threads and verify all succeed
+  std::string csv = generate_numeric_csv(3000, 8);
+  test_util::TempCsvFile tmp(csv);
+
+  for (size_t threads : {1u, 2u, 4u, 8u}) {
+    libvroom::CsvOptions opts;
+    opts.num_threads = threads;
+    auto result = parse_file(tmp.path(), opts);
+    ASSERT_TRUE(result.ok) << "Failed with " << threads << " threads";
+    EXPECT_EQ(result.total_rows, 3000u) << "Wrong row count with " << threads << " threads";
   }
 }
 
-// =============================================================================
-// Mixed Dialect Concurrent Tests
-// =============================================================================
+TEST_F(ConcurrencyTest, ManyConcurrentReaders) {
+  // 20 readers parsing from separate threads
+  std::string csv = generate_numeric_csv(500, 5);
+  test_util::TempCsvFile tmp(csv);
 
-// Test: Concurrent parsing with different dialects
-TEST_F(ConcurrencyTest, ConcurrentDifferentDialects) {
-  // CSV data
-  std::string csv_data = "a,b,c\n1,2,3\n";
-  // TSV data
-  std::string tsv_data = "a\tb\tc\n1\t2\t3\n";
-  // Semicolon-separated
-  std::string ssv_data = "a;b;c\n1;2;3\n";
-
-  auto [csv_buf, csv_len] = make_buffer(csv_data);
-  auto [tsv_buf, tsv_len] = make_buffer(tsv_data);
-  auto [ssv_buf, ssv_len] = make_buffer(ssv_data);
-
-  libvroom::FileBuffer csv_file(csv_buf, csv_len);
-  libvroom::FileBuffer tsv_file(tsv_buf, tsv_len);
-  libvroom::FileBuffer ssv_file(ssv_buf, ssv_len);
-
+  const int num_readers = 20;
   std::vector<std::future<bool>> futures;
+  std::atomic<int> success_count{0};
 
-  // Launch parsers for each dialect concurrently
-  for (int i = 0; i < 10; ++i) {
-    futures.push_back(std::async(std::launch::async, [&csv_file]() {
-      libvroom::Parser parser(2);
-      return parser.parse(csv_file.data(), csv_file.size(), {.dialect = libvroom::Dialect::csv()})
-          .success();
-    }));
-
-    futures.push_back(std::async(std::launch::async, [&tsv_file]() {
-      libvroom::Parser parser(2);
-      return parser.parse(tsv_file.data(), tsv_file.size(), {.dialect = libvroom::Dialect::tsv()})
-          .success();
-    }));
-
-    futures.push_back(std::async(std::launch::async, [&ssv_file]() {
-      libvroom::Parser parser(2);
-      return parser
-          .parse(ssv_file.data(), ssv_file.size(), {.dialect = libvroom::Dialect::semicolon()})
-          .success();
+  for (int i = 0; i < num_readers; ++i) {
+    futures.push_back(std::async(std::launch::async, [&tmp, &success_count]() {
+      libvroom::CsvOptions opts;
+      opts.num_threads = 2;
+      libvroom::CsvReader reader(opts);
+      auto open_result = reader.open(tmp.path());
+      if (!open_result.ok)
+        return false;
+      auto read_result = reader.read_all();
+      if (!read_result.ok)
+        return false;
+      if (read_result.value.total_rows == 500) {
+        success_count.fetch_add(1);
+        return true;
+      }
+      return false;
     }));
   }
 
   for (auto& f : futures) {
     EXPECT_TRUE(f.get());
   }
+  EXPECT_EQ(success_count.load(), num_readers);
 }
 
 // =============================================================================
-// CRLF/LF Handling in Multi-threaded Context
+// 7. Mixed Data Patterns
 // =============================================================================
 
-// Test: Mixed line endings with multiple threads
-TEST_F(ConcurrencyTest, MixedLineEndingsMultiThreaded) {
+TEST_F(ConcurrencyTest, CRLFLineEndingsMultiThreaded) {
   // CSV with CRLF line endings
-  std::string csv = "a,b,c\r\n";
-  for (int i = 0; i < 100; ++i) {
-    csv += "1,2,3\r\n";
+  std::ostringstream oss;
+  oss << "a,b,c\r\n";
+  for (int i = 0; i < 2000; ++i) {
+    oss << i << "," << (i + 1) << "," << (i + 2) << "\r\n";
   }
 
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
+  test_util::TempCsvFile tmp(oss.str());
 
-  libvroom::Parser parser(8);
-  auto result = parser.parse(buffer.data(), buffer.size());
-  EXPECT_TRUE(result.success());
+  libvroom::CsvOptions opts;
+  opts.num_threads = 4;
+  auto result = parse_file(tmp.path(), opts);
+
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 2000u);
+  EXPECT_EQ(result.num_columns, 3u);
 }
 
-// =============================================================================
-// Interleaved Index Verification
-// =============================================================================
+TEST_F(ConcurrencyTest, AllQuotedFieldsMultiThreaded) {
+  // Every field is quoted
+  std::ostringstream oss;
+  oss << "\"A\",\"B\",\"C\"\n";
+  for (int i = 0; i < 2000; ++i) {
+    oss << "\"" << i << "\",\"" << (i * 2) << "\",\"" << (i * 3) << "\"\n";
+  }
 
-// Test: Verify interleaved index pattern is correct
-TEST_F(ConcurrencyTest, InterleavedIndexPattern) {
-  // This test verifies that the interleaved index storage pattern
-  // works correctly with multiple threads
-  const std::string csv = generate_csv(100, 5);
-  auto [data, len] = make_buffer(csv);
-  libvroom::FileBuffer buffer(data, len);
+  test_util::TempCsvFile tmp(oss.str());
 
-  // Parse with 4 threads
-  libvroom::Parser parser(4);
-  auto result = parser.parse(buffer.data(), buffer.size());
+  // Verify same results for single and multi-threaded
+  libvroom::CsvOptions opts1;
+  opts1.num_threads = 1;
+  auto r1 = parse_file(tmp.path(), opts1);
 
-  EXPECT_TRUE(result.success());
-  // The indexes should be populated without any gaps in the pattern
-  EXPECT_GT(result.total_indexes(), 0);
+  libvroom::CsvOptions opts4;
+  opts4.num_threads = 4;
+  auto r4 = parse_file(tmp.path(), opts4);
+
+  ASSERT_TRUE(r1.ok);
+  ASSERT_TRUE(r4.ok);
+  EXPECT_EQ(r1.total_rows, r4.total_rows);
+  EXPECT_EQ(r1.total_rows, 2000u);
 }
+
+TEST_F(ConcurrencyTest, MixedQuotedUnquotedMultiThreaded) {
+  // Alternating quoted and unquoted fields with different lengths
+  std::ostringstream oss;
+  oss << "A,B,C,D\n";
+  for (int i = 0; i < 2000; ++i) {
+    oss << "plain" << i << "," << "\"quoted " << i << "\"," << (i * 10) << ","
+        << "\"has, comma\"\n";
+  }
+
+  test_util::TempCsvFile tmp(oss.str());
+
+  for (size_t threads : {1u, 2u, 4u, 8u}) {
+    libvroom::CsvOptions opts;
+    opts.num_threads = threads;
+    auto result = parse_file(tmp.path(), opts);
+    ASSERT_TRUE(result.ok) << "Failed with " << threads << " threads";
+    EXPECT_EQ(result.total_rows, 2000u) << "Wrong row count with " << threads << " threads";
+    EXPECT_EQ(result.num_columns, 4u) << "Wrong column count with " << threads << " threads";
+  }
+}
+
+} // anonymous namespace

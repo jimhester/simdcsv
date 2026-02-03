@@ -92,8 +92,8 @@ public:
   VROOM_FORCE_INLINE SplitFields(const char* slice, size_t size, char separator, char quote_char,
                                  char eol_char)
       : v_(slice), remaining_(size), separator_(separator), finished_(false),
-        quote_char_(quote_char), quoting_(quote_char != 0), eol_char_(eol_char),
-        previous_valid_ends_(0) {}
+        finished_inside_quote_(false), quote_char_(quote_char), quoting_(quote_char != 0),
+        eol_char_(eol_char), previous_valid_ends_(0) {}
 
   VROOM_FORCE_INLINE bool next(const char*& field_data, size_t& field_len, bool& needs_escaping) {
     if (finished_) {
@@ -153,11 +153,16 @@ public:
   VROOM_FORCE_INLINE size_t remaining() const { return remaining_; }
   VROOM_FORCE_INLINE bool finished() const { return finished_; }
 
+  // Returns true if the last field consumed was a quoted field that never
+  // had its closing quote found (i.e., the data ended inside a quote).
+  VROOM_FORCE_INLINE bool finished_inside_quote() const { return finished_inside_quote_; }
+
 private:
   const char* v_;
   size_t remaining_;
   char separator_;
   bool finished_;
+  bool finished_inside_quote_;
   char quote_char_;
   bool quoting_;
   char eol_char_;
@@ -177,8 +182,14 @@ private:
   }
 
   VROOM_FORCE_INLINE bool finish(const char*& field_data, size_t& field_len, bool needs_escaping) {
-    (void)needs_escaping;
     finished_ = true;
+    // If we consumed all data while in a quoted field, the quote may be unclosed.
+    // Check: if the field starts and ends with quote, it's properly closed.
+    // Otherwise it's genuinely unclosed (e.g., "unclosed with no closing quote).
+    if (needs_escaping &&
+        !(remaining_ >= 2 && v_[0] == quote_char_ && v_[remaining_ - 1] == quote_char_)) {
+      finished_inside_quote_ = true;
+    }
     field_data = v_;
     field_len = remaining_;
     v_ += remaining_;
