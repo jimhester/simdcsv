@@ -19,6 +19,7 @@
 namespace libvroom {
 
 // Forward declarations
+class Table;
 class MmapSource;
 class ColumnBuilder; // Legacy, kept for existing code that hasn't migrated
 class ParquetWriter;
@@ -394,13 +395,6 @@ private:
   CsvOptions options_;
 };
 
-// Date/timestamp parsing functions
-// Parse ISO8601 date (YYYY-MM-DD) to days since epoch
-bool parse_date(std::string_view value, int32_t& days_since_epoch);
-
-// Parse ISO8601 timestamp to microseconds since epoch
-bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch);
-
 // Field splitting functions
 // Main dispatcher: uses SIMD for lines >= 64 bytes, scalar otherwise
 std::vector<FieldView> split_fields(const char* data, size_t size, char separator = ',',
@@ -448,5 +442,14 @@ bool parse_date(std::string_view value, int32_t& days_since_epoch);
 //   YYYY-MM-DDTHH:MM:SS-HH:MM (timezone offset)
 // Returns true on success, false on parse error
 bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch);
+
+// ============================================================================
+// Convenience functions
+// ============================================================================
+
+/// Read a CSV file and return a Table (Arrow-exportable).
+/// This is the primary high-level API for consumers that want Arrow output.
+std::shared_ptr<Table> read_csv_to_table(const std::string& path,
+                                         const CsvOptions& opts = CsvOptions{});
 
 } // namespace libvroom

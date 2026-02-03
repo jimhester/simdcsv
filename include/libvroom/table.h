@@ -33,8 +33,8 @@ public:
 
   Table(const Table&) = delete;
   Table& operator=(const Table&) = delete;
-  Table(Table&&) = default;
-  Table& operator=(Table&&) = default;
+  Table(Table&&) = delete;
+  Table& operator=(Table&&) = delete;
 
   /// Create a Table from ParsedChunks (O(1) - just moves vectors).
   static std::shared_ptr<Table> from_parsed_chunks(const std::vector<ColumnSchema>& schema,

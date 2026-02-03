@@ -390,7 +390,6 @@ endif()
 
 # Library target (SHARED or STATIC based on BUILD_SHARED_LIBS)
 set(VROOM_SOURCES
-    src/table.cpp
     src/error.cpp
     src/io_util.cpp
     src/dialect.cpp
@@ -422,6 +421,7 @@ set(VROOM_SOURCES
     src/writer/dictionary.cpp
     src/simd/statistics_simd.cpp
     src/writer/arrow_ipc_writer.cpp
+    src/table.cpp
 )
 
 add_library(vroom ${VROOM_SOURCES})
