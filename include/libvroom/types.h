@@ -146,6 +146,17 @@ template <typename T> struct Result {
   explicit operator bool() const { return ok; }
 };
 
+// Specialization for void result (operations that succeed or fail with no value)
+template <> struct Result<void> {
+  std::string error;
+  bool ok = true;
+
+  static Result success() { return {"", true}; }
+  static Result failure(std::string err) { return {std::move(err), false}; }
+
+  explicit operator bool() const { return ok; }
+};
+
 // Statistics for a column chunk
 struct ColumnStatistics {
   bool has_null = false;

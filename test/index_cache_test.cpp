@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <string>
 #include <sys/stat.h>
+#include <unistd.h>
 
 using namespace libvroom;
 namespace fs = std::filesystem;
@@ -24,8 +25,11 @@ protected:
   std::string tmp_dir;
 
   void SetUp() override {
-    tmp_dir = fs::temp_directory_path().string() + "/libvroom_cache_test_" +
-              std::to_string(::testing::UnitTest::GetInstance()->random_seed());
+    // Use test name + PID to ensure unique temp dirs when CTest runs tests in parallel
+    // (gtest_discover_tests runs each test as a separate process with same random_seed)
+    const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+    tmp_dir = fs::temp_directory_path().string() + "/libvroom_cache_test_" + info->name() + "_" +
+              std::to_string(getpid());
     fs::create_directories(tmp_dir);
   }
 

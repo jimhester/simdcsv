@@ -423,6 +423,7 @@ set(VROOM_SOURCES
     src/writer/arrow_ipc_writer.cpp
     src/table.cpp
     src/cache/index_cache.cpp
+    src/reader/streaming_parser.cpp
 )
 
 add_library(vroom ${VROOM_SOURCES})
@@ -661,6 +662,12 @@ if(BUILD_TESTING)
     target_include_directories(index_cache_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_dependencies(index_cache_test copy_test_data)
     gtest_discover_tests(index_cache_test)
+
+    # Streaming parser tests (Issue #633)
+    add_executable(streaming_test test/streaming_test.cpp)
+    target_link_libraries(streaming_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(streaming_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(streaming_test)
 
 endif() # BUILD_TESTING
 
