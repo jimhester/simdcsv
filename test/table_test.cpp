@@ -281,3 +281,49 @@ TEST(TableStreamTest, StreamCanBeConsumedMultipleTimes) {
 
   stream2.release(&stream2);
 }
+
+// =============================================================================
+// read_csv_to_table() convenience function tests
+// =============================================================================
+
+TEST(ReadCsvToTable, HappyPath) {
+  TempFile csv("name,age,score\nAlice,30,95.5\nBob,25,87.3\nCharlie,35,91.0\n");
+
+  auto table = libvroom::read_csv_to_table(csv.path());
+
+  ASSERT_NE(table, nullptr);
+  EXPECT_EQ(table->num_rows(), 3);
+  EXPECT_EQ(table->num_columns(), 3);
+
+  auto names = table->column_names();
+  EXPECT_EQ(names[0], "name");
+  EXPECT_EQ(names[1], "age");
+  EXPECT_EQ(names[2], "score");
+
+  // Verify data is accessible via Arrow stream
+  libvroom::ArrowArrayStream stream;
+  table->export_to_stream(&stream);
+
+  libvroom::ArrowArray batch;
+  ASSERT_EQ(stream.get_next(&stream, &batch), 0);
+  ASSERT_NE(batch.release, nullptr);
+  EXPECT_EQ(batch.length, 3);
+  batch.release(&batch);
+
+  stream.release(&stream);
+}
+
+TEST(ReadCsvToTable, FileNotFound) {
+  EXPECT_THROW(libvroom::read_csv_to_table("/nonexistent/path/file.csv"), std::runtime_error);
+}
+
+TEST(ReadCsvToTable, DefaultOptions) {
+  TempFile csv("x,y\n1,2\n3,4\n");
+
+  // Default CsvOptions{} should auto-detect delimiter and types
+  auto table = libvroom::read_csv_to_table(csv.path(), libvroom::CsvOptions{});
+
+  ASSERT_NE(table, nullptr);
+  EXPECT_EQ(table->num_rows(), 2);
+  EXPECT_EQ(table->num_columns(), 2);
+}

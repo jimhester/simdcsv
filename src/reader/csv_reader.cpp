@@ -1151,7 +1151,7 @@ std::shared_ptr<Table> read_csv_to_table(const std::string& path, const CsvOptio
     throw std::runtime_error(read_result.error);
   }
 
-  auto schema = reader.schema();
+  const auto& schema = reader.schema();
   return Table::from_parsed_chunks(schema, std::move(read_result.value));
 }
 
