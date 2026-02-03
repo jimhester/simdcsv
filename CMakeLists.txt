@@ -422,6 +422,7 @@ set(VROOM_SOURCES
     src/simd/statistics_simd.cpp
     src/writer/arrow_ipc_writer.cpp
     src/table.cpp
+    src/reader/streaming_parser.cpp
 )
 
 add_library(vroom ${VROOM_SOURCES})
@@ -647,6 +648,12 @@ if(BUILD_TESTING)
     target_include_directories(arrow_conversion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_dependencies(arrow_conversion_test copy_test_data)
     gtest_discover_tests(arrow_conversion_test)
+
+    # Streaming parser tests (Issue #633)
+    add_executable(streaming_test test/streaming_test.cpp)
+    target_link_libraries(streaming_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(streaming_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(streaming_test)
 
 endif() # BUILD_TESTING
 

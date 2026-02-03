@@ -38,6 +38,9 @@
 // Table (multi-batch Arrow stream export)
 #include "libvroom/table.h"
 
+// Streaming parser
+#include "libvroom/streaming.h"
+
 // Output formats
 #include "libvroom/arrow_ipc_writer.h"
 
