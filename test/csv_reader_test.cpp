@@ -10,34 +10,14 @@
  */
 
 #include "libvroom.h"
-#include "libvroom/arrow_column_builder.h"
 
-#include <atomic>
+#include "test_util.h"
+
 #include <cstdio>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <sstream>
 #include <string>
-#include <unistd.h>
-
-// Counter for unique temp file names
-static std::atomic<uint64_t> g_csv_temp_counter{0};
-
-class TempCsv {
-public:
-  explicit TempCsv(const std::string& content) {
-    uint64_t id = g_csv_temp_counter.fetch_add(1);
-    path_ = "/tmp/csv_test_" + std::to_string(getpid()) + "_" + std::to_string(id) + ".csv";
-    std::ofstream f(path_, std::ios::binary);
-    f.write(content.data(), static_cast<std::streamsize>(content.size()));
-    f.close();
-  }
-  ~TempCsv() { std::remove(path_.c_str()); }
-  const std::string& path() const { return path_; }
-
-private:
-  std::string path_;
-};
 
 class CsvReaderTest : public ::testing::Test {
 protected:
@@ -60,61 +40,12 @@ protected:
   }
 
   ParsedFile parseContent(const std::string& content, libvroom::CsvOptions opts = {}) {
-    TempCsv csv(content);
+    test_util::TempCsvFile csv(content);
     return parseFile(csv.path(), opts);
   }
 
-  // Get value as string from any column type (handles type inference)
-  std::string getValue(const libvroom::ArrowColumnBuilder* builder, size_t idx) {
-    switch (builder->type()) {
-    case libvroom::DataType::STRING: {
-      auto* col = dynamic_cast<const libvroom::ArrowStringColumnBuilder*>(builder);
-      return std::string(col->values().get(idx));
-    }
-    case libvroom::DataType::INT32: {
-      auto* col = dynamic_cast<const libvroom::ArrowInt32ColumnBuilder*>(builder);
-      return std::to_string(col->values().get(idx));
-    }
-    case libvroom::DataType::INT64: {
-      auto* col = dynamic_cast<const libvroom::ArrowInt64ColumnBuilder*>(builder);
-      return std::to_string(col->values().get(idx));
-    }
-    case libvroom::DataType::FLOAT64: {
-      auto* col = dynamic_cast<const libvroom::ArrowFloat64ColumnBuilder*>(builder);
-      // Use ostringstream to match CSV representation
-      std::ostringstream oss;
-      oss << col->values().get(idx);
-      return oss.str();
-    }
-    case libvroom::DataType::BOOL: {
-      auto* col = dynamic_cast<const libvroom::ArrowBoolColumnBuilder*>(builder);
-      return col->values().get(idx) ? "true" : "false";
-    }
-    default:
-      ADD_FAILURE() << "Unsupported column type: " << static_cast<int>(builder->type());
-      return "";
-    }
-  }
-
-  // Get string value from parsed data: searches across all chunks for the row
   std::string getStringValue(const libvroom::ParsedChunks& chunks, size_t col, size_t row) {
-    size_t row_offset = 0;
-    for (const auto& chunk : chunks.chunks) {
-      size_t chunk_rows = chunk[col]->size();
-      if (row < row_offset + chunk_rows) {
-        return getValue(chunk[col].get(), row - row_offset);
-      }
-      row_offset += chunk_rows;
-    }
-    ADD_FAILURE() << "Row " << row << " not found in any chunk (total rows: " << row_offset << ")";
-    return "";
-  }
-
-  // Get total column count from parsed data
-  size_t getColumnCount(const libvroom::ParsedChunks& chunks) {
-    if (chunks.chunks.empty())
-      return 0;
-    return chunks.chunks[0].size();
+    return test_util::getStringValue(chunks, col, row);
   }
 };
 
@@ -293,7 +224,7 @@ TEST_F(CsvReaderTest, EmptyFieldValues) {
 }
 
 TEST_F(CsvReaderTest, EmptyFile) {
-  TempCsv csv("");
+  test_util::TempCsvFile csv("");
   libvroom::CsvReader reader(libvroom::CsvOptions{});
   auto open_result = reader.open(csv.path());
   // Empty file has no header, so open() fails
@@ -344,6 +275,9 @@ TEST_F(CsvReaderTest, InlineEscapedQuotes) {
 }
 
 TEST_F(CsvReaderTest, InlineMultilineField) {
+  // Note: This simple case works in single-threaded mode, but the file-based
+  // NewlinesInQuotes test (with multiple multi-line fields) is skipped because
+  // multi-line quoted fields are not reliably handled in all cases.
   auto [chunks, schema] = parseContent("A,B\n\"line1\nline2\",val\n");
   EXPECT_EQ(chunks.total_rows, 1u);
   EXPECT_EQ(getStringValue(chunks, 0, 0), "line1\nline2");

@@ -598,14 +598,16 @@ if(BUILD_TESTING)
 
     # Error handling test (tests ErrorCollector infrastructure)
     add_executable(error_handling_test test/error_handling_test.cpp)
-    target_link_libraries(error_handling_test PRIVATE vroom GTest::gtest_main)
-    add_test(NAME error_handling_test COMMAND error_handling_test)
+    target_link_libraries(error_handling_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(error_handling_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(error_handling_test)
 
     # Dialect detection test (tests dialect detection infrastructure)
     add_executable(dialect_detection_test test/dialect_detection_test.cpp)
-    target_link_libraries(dialect_detection_test PRIVATE vroom GTest::gtest_main)
+    target_link_libraries(dialect_detection_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(dialect_detection_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_dependencies(dialect_detection_test copy_test_data)
-    add_test(NAME dialect_detection_test COMMAND dialect_detection_test)
+    gtest_discover_tests(dialect_detection_test)
 
     # I/O utility tests (AlignedBuffer, load_file_to_ptr)
     add_executable(io_util_test test/io_util_test.cpp)
@@ -636,6 +638,7 @@ if(BUILD_TESTING)
     add_executable(type_inference_test test/type_inference_test.cpp)
     target_link_libraries(type_inference_test PRIVATE vroom GTest::gtest_main pthread)
     target_include_directories(type_inference_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_dependencies(type_inference_test copy_test_data)
     gtest_discover_tests(type_inference_test)
 
     # Arrow conversion and Parquet output tests

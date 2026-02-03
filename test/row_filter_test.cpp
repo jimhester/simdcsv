@@ -11,30 +11,12 @@
 
 #include "libvroom.h"
 
-#include <atomic>
+#include "test_util.h"
+
 #include <cstdio>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
-#include <unistd.h>
-
-static std::atomic<uint64_t> g_rf_temp_counter{0};
-
-class TempRowFilterCsv {
-public:
-  explicit TempRowFilterCsv(const std::string& content) {
-    uint64_t id = g_rf_temp_counter.fetch_add(1);
-    path_ = "/tmp/rf_test_" + std::to_string(getpid()) + "_" + std::to_string(id) + ".csv";
-    std::ofstream f(path_, std::ios::binary);
-    f.write(content.data(), static_cast<std::streamsize>(content.size()));
-    f.close();
-  }
-  ~TempRowFilterCsv() { std::remove(path_.c_str()); }
-  const std::string& path() const { return path_; }
-
-private:
-  std::string path_;
-};
 
 class RowFilterTest : public ::testing::Test {
 protected:
@@ -45,7 +27,7 @@ protected:
   };
 
   ParseResult parseContent(const std::string& content, bool skip_empty = true) {
-    TempRowFilterCsv csv(content);
+    test_util::TempCsvFile csv(content);
 
     libvroom::CsvOptions opts;
     opts.skip_empty_rows = skip_empty;

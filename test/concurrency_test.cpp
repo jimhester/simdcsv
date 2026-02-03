@@ -10,7 +10,8 @@
 
 #include "libvroom.h"
 
-#include <atomic>
+#include "test_util.h"
+
 #include <cstdio>
 #include <fstream>
 #include <future>
@@ -18,32 +19,9 @@
 #include <sstream>
 #include <string>
 #include <thread>
-#include <unistd.h>
 #include <vector>
 
 namespace {
-
-// ---------------------------------------------------------------------------
-// TempConcCsv RAII helper for inline CSV content
-// ---------------------------------------------------------------------------
-
-static std::atomic<uint64_t> g_conc_temp_counter{0};
-
-class TempConcCsv {
-public:
-  explicit TempConcCsv(const std::string& content) {
-    uint64_t id = g_conc_temp_counter.fetch_add(1);
-    path_ = "/tmp/conc_test_" + std::to_string(getpid()) + "_" + std::to_string(id) + ".csv";
-    std::ofstream f(path_, std::ios::binary);
-    f.write(content.data(), static_cast<std::streamsize>(content.size()));
-    f.close();
-  }
-  ~TempConcCsv() { std::remove(path_.c_str()); }
-  const std::string& path() const { return path_; }
-
-private:
-  std::string path_;
-};
 
 // ---------------------------------------------------------------------------
 // CSV data generators
@@ -133,7 +111,7 @@ protected:
 TEST_F(ConcurrencyTest, MoreThreadsThanRows) {
   // 8 threads parsing CSV with only 3 data rows
   std::string csv = "a,b,c\n1,2,3\n4,5,6\n7,8,9\n";
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   libvroom::CsvOptions opts;
   opts.num_threads = 8;
@@ -148,7 +126,7 @@ TEST_F(ConcurrencyTest, MoreThreadsThanBytes) {
   // 8 threads on a tiny CSV (< 20 bytes)
   std::string csv = "a,b\n1,2\n";
   ASSERT_LT(csv.size(), 20u);
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   libvroom::CsvOptions opts;
   opts.num_threads = 8;
@@ -161,7 +139,7 @@ TEST_F(ConcurrencyTest, MoreThreadsThanBytes) {
 
 TEST_F(ConcurrencyTest, SingleThreadOnLargeCSV) {
   std::string csv = generate_numeric_csv(5000, 10);
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   libvroom::CsvOptions opts;
   opts.num_threads = 1;
@@ -174,7 +152,7 @@ TEST_F(ConcurrencyTest, SingleThreadOnLargeCSV) {
 
 TEST_F(ConcurrencyTest, ManyThreadsOnLargeCSV) {
   std::string csv = generate_numeric_csv(5000, 10);
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   libvroom::CsvOptions opts;
   opts.num_threads = 16;
@@ -188,7 +166,7 @@ TEST_F(ConcurrencyTest, ManyThreadsOnLargeCSV) {
 TEST_F(ConcurrencyTest, DefaultThreadCountAutoDetects) {
   // num_threads=0 should auto-detect via hardware_concurrency
   std::string csv = generate_numeric_csv(1000, 5);
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   libvroom::CsvOptions opts;
   opts.num_threads = 0;
@@ -205,7 +183,7 @@ TEST_F(ConcurrencyTest, DefaultThreadCountAutoDetects) {
 
 TEST_F(ConcurrencyTest, SameRowCountWithDifferentThreadCounts) {
   std::string csv = generate_numeric_csv(2000, 8);
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   size_t expected_rows = 0;
   for (size_t threads : {1u, 2u, 4u, 8u}) {
@@ -224,7 +202,7 @@ TEST_F(ConcurrencyTest, SameRowCountWithDifferentThreadCounts) {
 
 TEST_F(ConcurrencyTest, SameColumnCountAcrossThreadCounts) {
   std::string csv = generate_numeric_csv(2000, 12);
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   for (size_t threads : {1u, 2u, 4u, 8u}) {
     libvroom::CsvOptions opts;
@@ -243,7 +221,7 @@ TEST_F(ConcurrencyTest, QuotedFieldsSameResultsSingleVsMulti) {
     oss << i << ",\"quoted value " << i << "\",end\n";
   }
   std::string csv = oss.str();
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   libvroom::CsvOptions opts1;
   opts1.num_threads = 1;
@@ -265,7 +243,7 @@ TEST_F(ConcurrencyTest, QuotedFieldsSameResultsSingleVsMulti) {
 
 TEST_F(ConcurrencyTest, MultipleReadersSameFileSimultaneously) {
   std::string csv = generate_numeric_csv(1000, 5);
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   const int num_readers = 10;
   std::vector<std::future<bool>> futures;
@@ -298,14 +276,14 @@ TEST_F(ConcurrencyTest, MultipleReadersSameFileSimultaneously) {
 
 TEST_F(ConcurrencyTest, MultipleReadersDifferentFilesSimultaneously) {
   // Create different CSV files
-  std::vector<std::unique_ptr<TempConcCsv>> files;
+  std::vector<std::unique_ptr<test_util::TempCsvFile>> files;
   std::vector<size_t> expected_rows;
   const int num_files = 8;
 
   for (int i = 0; i < num_files; ++i) {
     size_t rows = 500 + static_cast<size_t>(i) * 100;
     size_t cols = 3 + static_cast<size_t>(i % 4);
-    files.push_back(std::make_unique<TempConcCsv>(generate_numeric_csv(rows, cols)));
+    files.push_back(std::make_unique<test_util::TempCsvFile>(generate_numeric_csv(rows, cols)));
     expected_rows.push_back(rows);
   }
 
@@ -337,9 +315,9 @@ TEST_F(ConcurrencyTest, MultipleReadersWithDifferentOptionsSimultaneously) {
   std::string csv_semi = "a;b;c\n1;2;3\n4;5;6\n";
   std::string csv_tab = "a\tb\tc\n1\t2\t3\n4\t5\t6\n";
 
-  TempConcCsv tmp_comma(csv_comma);
-  TempConcCsv tmp_semi(csv_semi);
-  TempConcCsv tmp_tab(csv_tab);
+  test_util::TempCsvFile tmp_comma(csv_comma);
+  test_util::TempCsvFile tmp_semi(csv_semi);
+  test_util::TempCsvFile tmp_tab(csv_tab);
 
   auto parse_with_sep = [](const std::string& path, char sep) -> size_t {
     libvroom::CsvOptions opts;
@@ -372,7 +350,7 @@ TEST_F(ConcurrencyTest, FileSmallerThanChunkSize) {
   // A tiny CSV with multiple threads -- forces at most one chunk
   std::string csv = "a,b,c\n1,2,3\n";
   ASSERT_LT(csv.size(), 64u);
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   libvroom::CsvOptions opts;
   opts.num_threads = 4;
@@ -398,7 +376,7 @@ TEST_F(ConcurrencyTest, SingleVeryLongRowMultiThreaded) {
   }
   oss << '\n';
 
-  TempConcCsv tmp(oss.str());
+  test_util::TempCsvFile tmp(oss.str());
 
   libvroom::CsvOptions opts;
   opts.num_threads = 8;
@@ -417,7 +395,7 @@ TEST_F(ConcurrencyTest, RepeatedQuotedFieldsAcrossChunks) {
     oss << "\"item" << i << "\",\"This is a description with, comma\"\n";
   }
 
-  TempConcCsv tmp(oss.str());
+  test_util::TempCsvFile tmp(oss.str());
 
   for (size_t threads : {1u, 2u, 4u, 8u}) {
     libvroom::CsvOptions opts;
@@ -437,7 +415,7 @@ TEST_F(ConcurrencyTest, LargeFileManyShortRows) {
     oss << i << "," << (i + 1) << "\n";
   }
 
-  TempConcCsv tmp(oss.str());
+  test_util::TempCsvFile tmp(oss.str());
 
   libvroom::CsvOptions opts;
   opts.num_threads = 4;
@@ -467,7 +445,7 @@ TEST_F(ConcurrencyTest, InconsistentColumnsPermissiveMode) {
     oss << "a,b,c\n";
   }
 
-  TempConcCsv tmp(oss.str());
+  test_util::TempCsvFile tmp(oss.str());
 
   libvroom::CsvOptions opts;
   opts.num_threads = 4;
@@ -497,7 +475,7 @@ TEST_F(ConcurrencyTest, MultiThreadedErrorsSorted) {
     oss << "7,8,9\n";
   }
 
-  TempConcCsv tmp(oss.str());
+  test_util::TempCsvFile tmp(oss.str());
 
   libvroom::CsvOptions opts;
   opts.num_threads = 4;
@@ -527,7 +505,7 @@ TEST_F(ConcurrencyTest, SingleVsMultiThreadErrorCountConsistency) {
   oss << "9,10,11\n";
 
   std::string csv = oss.str();
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   auto count_errors = [&](size_t threads) -> size_t {
     libvroom::CsvOptions opts;
@@ -555,7 +533,7 @@ TEST_F(ConcurrencyTest, RapidSequentialParsing) {
   // Parse 100 different CSVs in rapid succession to detect leaks/use-after-free
   for (int i = 0; i < 100; ++i) {
     std::string csv = generate_numeric_csv(10 + static_cast<size_t>(i), 3);
-    TempConcCsv tmp(csv);
+    test_util::TempCsvFile tmp(csv);
 
     libvroom::CsvOptions opts;
     opts.num_threads = 2;
@@ -568,7 +546,7 @@ TEST_F(ConcurrencyTest, RapidSequentialParsing) {
 TEST_F(ConcurrencyTest, LargeFileStress) {
   // 1000 rows x 20 columns with hardware_concurrency threads
   std::string csv = generate_csv(1000, 20, true);
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   libvroom::CsvOptions opts;
   opts.num_threads = hw_concurrency_;
@@ -582,7 +560,7 @@ TEST_F(ConcurrencyTest, LargeFileStress) {
 TEST_F(ConcurrencyTest, ScalingThreadCounts) {
   // Parse the same data with 1, 2, 4, 8 threads and verify all succeed
   std::string csv = generate_numeric_csv(3000, 8);
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   for (size_t threads : {1u, 2u, 4u, 8u}) {
     libvroom::CsvOptions opts;
@@ -596,7 +574,7 @@ TEST_F(ConcurrencyTest, ScalingThreadCounts) {
 TEST_F(ConcurrencyTest, ManyConcurrentReaders) {
   // 20 readers parsing from separate threads
   std::string csv = generate_numeric_csv(500, 5);
-  TempConcCsv tmp(csv);
+  test_util::TempCsvFile tmp(csv);
 
   const int num_readers = 20;
   std::vector<std::future<bool>> futures;
@@ -639,7 +617,7 @@ TEST_F(ConcurrencyTest, CRLFLineEndingsMultiThreaded) {
     oss << i << "," << (i + 1) << "," << (i + 2) << "\r\n";
   }
 
-  TempConcCsv tmp(oss.str());
+  test_util::TempCsvFile tmp(oss.str());
 
   libvroom::CsvOptions opts;
   opts.num_threads = 4;
@@ -658,7 +636,7 @@ TEST_F(ConcurrencyTest, AllQuotedFieldsMultiThreaded) {
     oss << "\"" << i << "\",\"" << (i * 2) << "\",\"" << (i * 3) << "\"\n";
   }
 
-  TempConcCsv tmp(oss.str());
+  test_util::TempCsvFile tmp(oss.str());
 
   // Verify same results for single and multi-threaded
   libvroom::CsvOptions opts1;
@@ -684,7 +662,7 @@ TEST_F(ConcurrencyTest, MixedQuotedUnquotedMultiThreaded) {
         << "\"has, comma\"\n";
   }
 
-  TempConcCsv tmp(oss.str());
+  test_util::TempCsvFile tmp(oss.str());
 
   for (size_t threads : {1u, 2u, 4u, 8u}) {
     libvroom::CsvOptions opts;

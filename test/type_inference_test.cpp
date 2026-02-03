@@ -10,17 +10,16 @@
  */
 
 #include "libvroom.h"
-#include "libvroom/arrow_column_builder.h"
 #include "libvroom/types.h"
 
-#include <atomic>
+#include "test_util.h"
+
 #include <climits>
 #include <cstdio>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <sstream>
 #include <string>
-#include <unistd.h>
 
 using libvroom::can_promote;
 using libvroom::CsvOptions;
@@ -29,25 +28,6 @@ using libvroom::DataType;
 using libvroom::type_name;
 using libvroom::TypeInference;
 using libvroom::wider_type;
-
-// Counter for unique temp file names
-static std::atomic<uint64_t> g_type_temp_counter{0};
-
-class TempCsv {
-public:
-  explicit TempCsv(const std::string& content) {
-    uint64_t id = g_type_temp_counter.fetch_add(1);
-    path_ = "/tmp/type_test_" + std::to_string(getpid()) + "_" + std::to_string(id) + ".csv";
-    std::ofstream f(path_, std::ios::binary);
-    f.write(content.data(), static_cast<std::streamsize>(content.size()));
-    f.close();
-  }
-  ~TempCsv() { std::remove(path_.c_str()); }
-  const std::string& path() const { return path_; }
-
-private:
-  std::string path_;
-};
 
 // ============================================================================
 // A. infer_field() basic types
@@ -559,7 +539,7 @@ TEST_F(CustomOptionsTest, SemicolonSeparatorInInferFromSample) {
 class TypeInferenceEndToEndTest : public ::testing::Test {};
 
 TEST_F(TypeInferenceEndToEndTest, NumericCSVSchemaTypes) {
-  TempCsv csv("x,y\n1,2\n3,4\n5,6\n");
+  test_util::TempCsvFile csv("x,y\n1,2\n3,4\n5,6\n");
 
   CsvReader reader(CsvOptions{});
   auto open_result = reader.open(csv.path());
@@ -578,7 +558,7 @@ TEST_F(TypeInferenceEndToEndTest, NumericCSVSchemaTypes) {
 }
 
 TEST_F(TypeInferenceEndToEndTest, MixedCSVSchemaTypes) {
-  TempCsv csv("name,age,score\nalice,30,95.5\nbob,25,87.2\n");
+  test_util::TempCsvFile csv("name,age,score\nalice,30,95.5\nbob,25,87.2\n");
 
   CsvReader reader(CsvOptions{});
   auto open_result = reader.open(csv.path());
@@ -598,7 +578,7 @@ TEST_F(TypeInferenceEndToEndTest, MixedCSVSchemaTypes) {
 }
 
 TEST_F(TypeInferenceEndToEndTest, BooleanCSVSchemaType) {
-  TempCsv csv("flag\ntrue\nfalse\ntrue\n");
+  test_util::TempCsvFile csv("flag\ntrue\nfalse\ntrue\n");
 
   CsvReader reader(CsvOptions{});
   auto open_result = reader.open(csv.path());
@@ -613,7 +593,7 @@ TEST_F(TypeInferenceEndToEndTest, BooleanCSVSchemaType) {
 }
 
 TEST_F(TypeInferenceEndToEndTest, DateCSVSchemaType) {
-  TempCsv csv("dt\n2024-01-15\n2024-06-30\n2024-12-31\n");
+  test_util::TempCsvFile csv("dt\n2024-01-15\n2024-06-30\n2024-12-31\n");
 
   CsvReader reader(CsvOptions{});
   auto open_result = reader.open(csv.path());
@@ -628,7 +608,7 @@ TEST_F(TypeInferenceEndToEndTest, DateCSVSchemaType) {
 }
 
 TEST_F(TypeInferenceEndToEndTest, NullsDoNotWidenType) {
-  TempCsv csv("val\n1\nNA\n3\nNA\n5\n");
+  test_util::TempCsvFile csv("val\n1\nNA\n3\nNA\n5\n");
 
   CsvReader reader(CsvOptions{});
   auto open_result = reader.open(csv.path());
@@ -644,7 +624,7 @@ TEST_F(TypeInferenceEndToEndTest, NullsDoNotWidenType) {
 }
 
 TEST_F(TypeInferenceEndToEndTest, IntFloat64MixedSchemaType) {
-  TempCsv csv("val\n1\n2.5\n3\n4.5\n");
+  test_util::TempCsvFile csv("val\n1\n2.5\n3\n4.5\n");
 
   CsvReader reader(CsvOptions{});
   auto open_result = reader.open(csv.path());

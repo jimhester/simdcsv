@@ -9,33 +9,14 @@
  */
 
 #include "libvroom.h"
-#include "libvroom/arrow_column_builder.h"
 
-#include <atomic>
+#include "test_util.h"
+
 #include <cstdio>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <sstream>
 #include <string>
-#include <unistd.h>
-
-static std::atomic<uint64_t> g_comment_temp_counter{0};
-
-class TempCommentCsv {
-public:
-  explicit TempCommentCsv(const std::string& content) {
-    uint64_t id = g_comment_temp_counter.fetch_add(1);
-    path_ = "/tmp/comment_test_" + std::to_string(getpid()) + "_" + std::to_string(id) + ".csv";
-    std::ofstream f(path_, std::ios::binary);
-    f.write(content.data(), static_cast<std::streamsize>(content.size()));
-    f.close();
-  }
-  ~TempCommentCsv() { std::remove(path_.c_str()); }
-  const std::string& path() const { return path_; }
-
-private:
-  std::string path_;
-};
 
 class CommentLineTest : public ::testing::Test {
 protected:
@@ -69,7 +50,7 @@ protected:
   }
 
   ParseResult parseContent(const std::string& content, char comment_char, char sep = ',') {
-    TempCommentCsv csv(content);
+    test_util::TempCsvFile csv(content);
     return parseFile(csv.path(), comment_char, sep);
   }
 };
@@ -260,7 +241,7 @@ TEST_F(CommentLineTest, MultiThreadedWithComments) {
     oss << i << "," << (i * 2) << "," << (i * 3) << "\n";
   }
 
-  TempCommentCsv csv(oss.str());
+  test_util::TempCsvFile csv(oss.str());
   libvroom::CsvOptions opts;
   opts.comment = '#';
   opts.num_threads = 4;

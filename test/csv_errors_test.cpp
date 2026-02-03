@@ -11,35 +11,13 @@
 
 #include "libvroom.h"
 
-#include <atomic>
+#include "test_util.h"
+
 #include <cstdio>
-#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <sstream>
 #include <string>
-#include <unistd.h>
-
-namespace fs = std::filesystem;
-
-// Counter for unique temp file names
-static std::atomic<uint64_t> g_err_temp_counter{0};
-
-class TempErrCsv {
-public:
-  explicit TempErrCsv(const std::string& content) {
-    uint64_t id = g_err_temp_counter.fetch_add(1);
-    path_ = "/tmp/err_test_" + std::to_string(getpid()) + "_" + std::to_string(id) + ".csv";
-    std::ofstream f(path_, std::ios::binary);
-    f.write(content.data(), static_cast<std::streamsize>(content.size()));
-    f.close();
-  }
-  ~TempErrCsv() { std::remove(path_.c_str()); }
-  const std::string& path() const { return path_; }
-
-private:
-  std::string path_;
-};
 
 class CsvErrorsTest : public ::testing::Test {
 protected:
@@ -96,7 +74,7 @@ protected:
   ParseResult parseContent(const std::string& content, libvroom::ErrorMode mode,
                            size_t max_errors = libvroom::ErrorCollector::DEFAULT_MAX_ERRORS,
                            size_t num_threads = 1) {
-    TempErrCsv csv(content);
+    test_util::TempCsvFile csv(content);
     libvroom::CsvOptions opts;
     opts.error_mode = mode;
     opts.max_errors = max_errors;
@@ -451,7 +429,7 @@ TEST_F(CsvErrorsTest, AllMalformedFilesGenerateErrors) {
   int failures = 0;
   for (const auto& [filename, expected_error] : test_cases) {
     std::string path = getTestDataPath(filename);
-    if (!fs::exists(path)) {
+    if (!std::ifstream(path).good()) {
       std::cout << "Skipping missing file: " << filename << std::endl;
       continue;
     }

@@ -10,50 +10,15 @@
  */
 
 #include "libvroom.h"
-#include "libvroom/arrow_column_builder.h"
 #include "libvroom/types.h"
 
-#include <atomic>
+#include "test_util.h"
+
 #include <cstdio>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <sstream>
 #include <string>
-#include <unistd.h>
-
-// Counter for unique temp file names
-static std::atomic<uint64_t> g_arrow_temp_counter{0};
-
-// RAII helper for temporary CSV files
-class TempCsv {
-public:
-  explicit TempCsv(const std::string& content) {
-    uint64_t id = g_arrow_temp_counter.fetch_add(1);
-    path_ = "/tmp/arrow_test_" + std::to_string(getpid()) + "_" + std::to_string(id) + ".csv";
-    std::ofstream f(path_, std::ios::binary);
-    f.write(content.data(), static_cast<std::streamsize>(content.size()));
-    f.close();
-  }
-  ~TempCsv() { std::remove(path_.c_str()); }
-  const std::string& path() const { return path_; }
-
-private:
-  std::string path_;
-};
-
-// RAII helper for temporary Parquet output files
-class TempParquet {
-public:
-  TempParquet() {
-    uint64_t id = g_arrow_temp_counter.fetch_add(1);
-    path_ = "/tmp/arrow_test_" + std::to_string(getpid()) + "_" + std::to_string(id) + ".parquet";
-  }
-  ~TempParquet() { std::remove(path_.c_str()); }
-  const std::string& path() const { return path_; }
-
-private:
-  std::string path_;
-};
 
 // =============================================================================
 // A. ArrowColumnBuilder Factory Tests
@@ -178,8 +143,8 @@ TEST(ArrowColumnBuilderFactory, NullBitmapInitiallyEmpty) {
 // =============================================================================
 
 TEST(ConvertCsvToParquet, BasicConversion) {
-  TempCsv csv("a,b,c\n1,2,3\n4,5,6\n7,8,9\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("a,b,c\n1,2,3\n4,5,6\n7,8,9\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -193,8 +158,8 @@ TEST(ConvertCsvToParquet, BasicConversion) {
 }
 
 TEST(ConvertCsvToParquet, VerifyRowColCounts) {
-  TempCsv csv("name,age,city\nAlice,30,NYC\nBob,25,LA\nCharlie,35,SF\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("name,age,city\nAlice,30,NYC\nBob,25,LA\nCharlie,35,SF\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -207,8 +172,8 @@ TEST(ConvertCsvToParquet, VerifyRowColCounts) {
 }
 
 TEST(ConvertCsvToParquet, OutputFileExistsAndNonEmpty) {
-  TempCsv csv("x,y\n1,2\n3,4\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("x,y\n1,2\n3,4\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -225,8 +190,8 @@ TEST(ConvertCsvToParquet, OutputFileExistsAndNonEmpty) {
 }
 
 TEST(ConvertCsvToParquet, SingleColumnSingleRow) {
-  TempCsv csv("value\n42\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("value\n42\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -250,8 +215,8 @@ TEST(ConvertCsvToParquet, ManyColumns) {
     row << i;
   }
 
-  TempCsv csv(header.str() + "\n" + row.str() + "\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv(header.str() + "\n" + row.str() + "\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -270,8 +235,8 @@ TEST(ConvertCsvToParquet, LargerFile) {
         std::to_string(i) + "," + std::to_string(i * 1.5) + ",name" + std::to_string(i) + "\n";
   }
 
-  TempCsv csv(content);
-  TempParquet parquet;
+  test_util::TempCsvFile csv(content);
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -284,8 +249,8 @@ TEST(ConvertCsvToParquet, LargerFile) {
 }
 
 TEST(ConvertCsvToParquet, HeaderOnlyFile) {
-  TempCsv csv("a,b,c\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("a,b,c\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -337,8 +302,8 @@ TEST(ConvertCsvToParquet, ConversionResultErrorSummary) {
 // =============================================================================
 
 TEST(CompressionOptions, ZstdCompression) {
-  TempCsv csv("x,y\n1,2\n3,4\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("x,y\n1,2\n3,4\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -351,8 +316,8 @@ TEST(CompressionOptions, ZstdCompression) {
 }
 
 TEST(CompressionOptions, NoneCompression) {
-  TempCsv csv("x,y\n1,2\n3,4\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("x,y\n1,2\n3,4\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -365,8 +330,8 @@ TEST(CompressionOptions, NoneCompression) {
 }
 
 TEST(CompressionOptions, SnappyCompression) {
-  TempCsv csv("x,y\n1,2\n3,4\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("x,y\n1,2\n3,4\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -379,8 +344,8 @@ TEST(CompressionOptions, SnappyCompression) {
 }
 
 TEST(CompressionOptions, GzipCompression) {
-  TempCsv csv("x,y\n1,2\n3,4\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("x,y\n1,2\n3,4\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -393,8 +358,8 @@ TEST(CompressionOptions, GzipCompression) {
 }
 
 TEST(CompressionOptions, Lz4Compression) {
-  TempCsv csv("x,y\n1,2\n3,4\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("x,y\n1,2\n3,4\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -414,8 +379,8 @@ TEST(CompressionOptions, UncompressedLargerThanCompressed) {
   }
 
   // Write with no compression
-  TempCsv csv1(content);
-  TempParquet parquet_none;
+  test_util::TempCsvFile csv1(content);
+  test_util::TempOutputFile parquet_none;
   {
     libvroom::VroomOptions opts;
     opts.input_path = csv1.path();
@@ -426,8 +391,8 @@ TEST(CompressionOptions, UncompressedLargerThanCompressed) {
   }
 
   // Write with ZSTD compression
-  TempCsv csv2(content);
-  TempParquet parquet_zstd;
+  test_util::TempCsvFile csv2(content);
+  test_util::TempOutputFile parquet_zstd;
   {
     libvroom::VroomOptions opts;
     opts.input_path = csv2.path();
@@ -452,7 +417,7 @@ TEST(CompressionOptions, UncompressedLargerThanCompressed) {
 // =============================================================================
 
 TEST(ConvertErrorHandling, NonExistentInputFile) {
-  TempParquet parquet;
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = "/nonexistent/path/to/file.csv";
@@ -464,8 +429,8 @@ TEST(ConvertErrorHandling, NonExistentInputFile) {
 }
 
 TEST(ConvertErrorHandling, EmptyInputFile) {
-  TempCsv csv("");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -477,7 +442,7 @@ TEST(ConvertErrorHandling, EmptyInputFile) {
 }
 
 TEST(ConvertErrorHandling, InvalidOutputPath) {
-  TempCsv csv("a,b\n1,2\n");
+  test_util::TempCsvFile csv("a,b\n1,2\n");
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();
@@ -493,7 +458,7 @@ TEST(ConvertErrorHandling, InvalidOutputPath) {
 // =============================================================================
 
 TEST(SchemaVerification, IntegerColumnsInferredAsInt32) {
-  TempCsv csv("a,b\n1,2\n3,4\n5,6\n");
+  test_util::TempCsvFile csv("a,b\n1,2\n3,4\n5,6\n");
 
   libvroom::CsvOptions opts;
   libvroom::CsvReader reader(opts);
@@ -508,7 +473,7 @@ TEST(SchemaVerification, IntegerColumnsInferredAsInt32) {
 }
 
 TEST(SchemaVerification, FloatColumnsInferredAsFloat64) {
-  TempCsv csv("x,y\n1.5,2.7\n3.14,0.5\n");
+  test_util::TempCsvFile csv("x,y\n1.5,2.7\n3.14,0.5\n");
 
   libvroom::CsvOptions opts;
   libvroom::CsvReader reader(opts);
@@ -522,7 +487,7 @@ TEST(SchemaVerification, FloatColumnsInferredAsFloat64) {
 }
 
 TEST(SchemaVerification, StringColumnsInferredAsString) {
-  TempCsv csv("name,city\nAlice,NYC\nBob,LA\n");
+  test_util::TempCsvFile csv("name,city\nAlice,NYC\nBob,LA\n");
 
   libvroom::CsvOptions opts;
   libvroom::CsvReader reader(opts);
@@ -537,7 +502,7 @@ TEST(SchemaVerification, StringColumnsInferredAsString) {
 
 TEST(SchemaVerification, MixedTypesPromoted) {
   // First value is int, second is float -> should promote to FLOAT64
-  TempCsv csv("value\n1\n2.5\n3\n");
+  test_util::TempCsvFile csv("value\n1\n2.5\n3\n");
 
   libvroom::CsvOptions opts;
   libvroom::CsvReader reader(opts);
@@ -550,7 +515,7 @@ TEST(SchemaVerification, MixedTypesPromoted) {
 }
 
 TEST(SchemaVerification, MixedNumericAndStringPromotedToString) {
-  TempCsv csv("value\n1\nhello\n3\n");
+  test_util::TempCsvFile csv("value\n1\nhello\n3\n");
 
   libvroom::CsvOptions opts;
   libvroom::CsvReader reader(opts);
@@ -563,7 +528,7 @@ TEST(SchemaVerification, MixedNumericAndStringPromotedToString) {
 }
 
 TEST(SchemaVerification, BoolColumnInferred) {
-  TempCsv csv("flag\ntrue\nfalse\ntrue\n");
+  test_util::TempCsvFile csv("flag\ntrue\nfalse\ntrue\n");
 
   libvroom::CsvOptions opts;
   libvroom::CsvReader reader(opts);
@@ -576,7 +541,8 @@ TEST(SchemaVerification, BoolColumnInferred) {
 }
 
 TEST(SchemaVerification, MultipleColumnTypes) {
-  TempCsv csv("int_col,float_col,str_col,bool_col\n1,1.5,hello,true\n2,2.5,world,false\n");
+  test_util::TempCsvFile csv(
+      "int_col,float_col,str_col,bool_col\n1,1.5,hello,true\n2,2.5,world,false\n");
 
   libvroom::CsvOptions opts;
   libvroom::CsvReader reader(opts);
@@ -593,7 +559,7 @@ TEST(SchemaVerification, MultipleColumnTypes) {
 }
 
 TEST(SchemaVerification, ColumnBuildersMatchSchemaTypes) {
-  TempCsv csv("id,score\n1,99.5\n2,87.3\n");
+  test_util::TempCsvFile csv("id,score\n1,99.5\n2,87.3\n");
 
   libvroom::CsvOptions opts;
   libvroom::CsvReader reader(opts);
@@ -617,7 +583,7 @@ TEST(SchemaVerification, ColumnBuildersMatchSchemaTypes) {
 }
 
 TEST(SchemaVerification, ReadAllProducesCorrectRowCount) {
-  TempCsv csv("a,b\n1,2\n3,4\n5,6\n7,8\n9,10\n");
+  test_util::TempCsvFile csv("a,b\n1,2\n3,4\n5,6\n7,8\n9,10\n");
 
   libvroom::CsvOptions opts;
   libvroom::CsvReader reader(opts);
@@ -676,7 +642,7 @@ TEST(RealDataFiles, ContactsCSV) {
 }
 
 TEST(RealDataFiles, SimpleCSVToParquet) {
-  TempParquet parquet;
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = "test/data/basic/simple.csv";
@@ -694,7 +660,7 @@ TEST(RealDataFiles, SimpleCSVToParquet) {
 }
 
 TEST(RealDataFiles, ContactsCSVToParquet) {
-  TempParquet parquet;
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = "test/data/real_world/contacts.csv";
@@ -754,8 +720,8 @@ TEST(VroomOptionsTest, DefaultValues) {
 // =============================================================================
 
 TEST(ProgressCallback, CallbackInvoked) {
-  TempCsv csv("a,b\n1,2\n3,4\n5,6\n");
-  TempParquet parquet;
+  test_util::TempCsvFile csv("a,b\n1,2\n3,4\n5,6\n");
+  test_util::TempOutputFile parquet;
 
   libvroom::VroomOptions opts;
   opts.input_path = csv.path();

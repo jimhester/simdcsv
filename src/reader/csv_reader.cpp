@@ -228,6 +228,9 @@ std::pair<size_t, bool> parse_chunk_with_state(
       std::string_view field_view(field_data, field_len);
 
       // Error detection within fields
+      // Note: row number is 0 in multi-threaded path because computing absolute
+      // row offsets per chunk would require tracking the cumulative row count from
+      // all preceding chunks, which isn't available during parallel parsing.
       if (check_errors) [[unlikely]] {
         // Null byte detection
         if (std::memchr(field_data, '\0', field_len)) {
@@ -307,7 +310,7 @@ std::pair<size_t, bool> parse_chunk_with_state(
     offset += start_remaining - iter.remaining();
   }
 
-done_chunk:
+done_chunk: // Early exit target for should_stop() (FAIL_FAST error mode)
   // Note: ending quote state is already computed during the analysis phase
   // so we return false here since the caller ignores it anyway
   return {row_count, false};
@@ -983,7 +986,7 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
     row_number++;
   }
 
-done_serial:
+done_serial: // Early exit target for should_stop() (FAIL_FAST error mode)
   // Return as a single chunk
   result.total_rows = columns.empty() ? 0 : columns[0]->size();
   impl_->row_count = result.total_rows; // Set row count after parsing

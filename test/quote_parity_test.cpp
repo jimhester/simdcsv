@@ -372,6 +372,8 @@ TEST_F(QuoteMaskTest, MultiChunkStateConsistency) {
     EXPECT_EQ(simd_mask, ref_mask) << "Mask mismatch at chunk " << chunk;
 
     // Update reference state: count quote bits to determine final parity
+    // Note: __builtin_popcountll is GCC/Clang-specific. The production code in
+    // simd_chunk_finder.cpp also uses it, so this matches the project's compiler requirements.
     uint64_t total_quotes = __builtin_popcountll(pattern);
     ref_inside ^= (total_quotes & 1); // Toggle if odd number of quotes
 

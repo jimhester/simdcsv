@@ -11,13 +11,11 @@
 #include "libvroom.h"
 #include "libvroom/io_util.h"
 
+#include <cstdio>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <vector>
-
-namespace fs = std::filesystem;
 using libvroom::AlignedBuffer;
 
 // =============================================================================
@@ -288,7 +286,7 @@ TEST_F(IoUtilTest, DataIntegrity_LargeData) {
 
 TEST_F(IoUtilTest, LoadFile_SimpleCSV) {
   std::string path = testDataPath("basic/simple.csv");
-  if (!fs::exists(path)) {
+  if (!std::ifstream(path).good()) {
     GTEST_SKIP() << "Test data file not found: " << path;
   }
 
@@ -301,16 +299,16 @@ TEST_F(IoUtilTest, LoadFile_SimpleCSV) {
 
 TEST_F(IoUtilTest, LoadFile_EmptyFile) {
   // Create a temporary empty file
-  auto temp_path = fs::temp_directory_path() / "libvroom_io_util_test_empty.csv";
+  std::string temp_path = "/tmp/libvroom_io_util_test_empty.csv";
   { std::ofstream ofs(temp_path, std::ios::binary); }
 
-  auto buf = libvroom::load_file_to_ptr(temp_path.string());
+  auto buf = libvroom::load_file_to_ptr(temp_path);
 
   EXPECT_TRUE(buf.valid());
   EXPECT_EQ(buf.size(), 0);
   EXPECT_TRUE(buf.empty());
 
-  fs::remove(temp_path);
+  std::remove(temp_path.c_str());
 }
 
 TEST_F(IoUtilTest, LoadFile_NonExistentFileThrows) {
@@ -320,24 +318,24 @@ TEST_F(IoUtilTest, LoadFile_NonExistentFileThrows) {
 
 TEST_F(IoUtilTest, LoadFile_ContentIntegrity) {
   // Create a temp file with known content and verify byte-by-byte
-  auto temp_path = fs::temp_directory_path() / "libvroom_io_util_test_integrity.csv";
+  std::string temp_path = "/tmp/libvroom_io_util_test_integrity.csv";
   std::string content = "name,value\nalice,100\nbob,200\n";
   {
     std::ofstream ofs(temp_path, std::ios::binary);
     ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
   }
 
-  auto buf = libvroom::load_file_to_ptr(temp_path.string());
+  auto buf = libvroom::load_file_to_ptr(temp_path);
 
   EXPECT_EQ(buf.size(), content.size());
   EXPECT_EQ(std::memcmp(buf.data(), content.data(), content.size()), 0);
 
-  fs::remove(temp_path);
+  std::remove(temp_path.c_str());
 }
 
 TEST_F(IoUtilTest, LoadFile_Alignment) {
   std::string path = testDataPath("basic/simple.csv");
-  if (!fs::exists(path)) {
+  if (!std::ifstream(path).good()) {
     GTEST_SKIP() << "Test data file not found: " << path;
   }
 
@@ -349,14 +347,14 @@ TEST_F(IoUtilTest, LoadFile_Alignment) {
 }
 
 TEST_F(IoUtilTest, LoadFile_PaddingZeroed) {
-  auto temp_path = fs::temp_directory_path() / "libvroom_io_util_test_padding.csv";
+  std::string temp_path = "/tmp/libvroom_io_util_test_padding.csv";
   std::string content = "x,y\n1,2\n";
   {
     std::ofstream ofs(temp_path, std::ios::binary);
     ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
   }
 
-  auto buf = libvroom::load_file_to_ptr(temp_path.string());
+  auto buf = libvroom::load_file_to_ptr(temp_path);
 
   ASSERT_EQ(buf.size(), content.size());
   // Verify padding bytes after the data are zeroed
@@ -365,16 +363,18 @@ TEST_F(IoUtilTest, LoadFile_PaddingZeroed) {
         << "Padding byte at offset " << (buf.size() + i) << " should be zero";
   }
 
-  fs::remove(temp_path);
+  std::remove(temp_path.c_str());
 }
 
 TEST_F(IoUtilTest, LoadFile_LargeFile) {
   std::string path = testDataPath("large/parallel_chunk_boundary.csv");
-  if (!fs::exists(path)) {
+  if (!std::ifstream(path).good()) {
     GTEST_SKIP() << "Test data file not found: " << path;
   }
 
-  auto file_size = fs::file_size(path);
+  // Get file size without <filesystem>
+  std::ifstream size_stream(path, std::ios::ate | std::ios::binary);
+  auto file_size = static_cast<size_t>(size_stream.tellg());
   auto buf = libvroom::load_file_to_ptr(path);
 
   EXPECT_TRUE(buf.valid());
@@ -383,7 +383,7 @@ TEST_F(IoUtilTest, LoadFile_LargeFile) {
 
 TEST_F(IoUtilTest, LoadFile_QuotedFields) {
   std::string path = testDataPath("quoted/quoted_fields.csv");
-  if (!fs::exists(path)) {
+  if (!std::ifstream(path).good()) {
     GTEST_SKIP() << "Test data file not found: " << path;
   }
 
