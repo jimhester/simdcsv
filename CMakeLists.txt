@@ -422,6 +422,7 @@ set(VROOM_SOURCES
     src/simd/statistics_simd.cpp
     src/writer/arrow_ipc_writer.cpp
     src/table.cpp
+    src/cache/index_cache.cpp
 )
 
 add_library(vroom ${VROOM_SOURCES})
@@ -647,6 +648,19 @@ if(BUILD_TESTING)
     target_include_directories(arrow_conversion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_dependencies(arrow_conversion_test copy_test_data)
     gtest_discover_tests(arrow_conversion_test)
+
+    # Elias-Fano codec tests
+    add_executable(elias_fano_test test/elias_fano_test.cpp)
+    target_link_libraries(elias_fano_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(elias_fano_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(elias_fano_test)
+
+    # Index cache tests
+    add_executable(index_cache_test test/index_cache_test.cpp)
+    target_link_libraries(index_cache_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(index_cache_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_dependencies(index_cache_test copy_test_data)
+    gtest_discover_tests(index_cache_test)
 
 endif() # BUILD_TESTING
 

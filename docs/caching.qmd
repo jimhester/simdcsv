@@ -82,21 +82,19 @@ Index caching only works with file inputs. When reading from stdin, caching is a
 #include <libvroom.h>
 
 int main() {
-    // Load file
-    libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
+    libvroom::CsvOptions opts;
+    opts.cache = libvroom::CacheConfig::defaults();  // Enable caching
 
-    // Create parser
-    libvroom::Parser parser;
+    libvroom::CsvReader reader(opts);
+    reader.open("data.csv");
 
-    // Parse with caching enabled
-    auto result = parser.parse(buffer.data(), buffer.size(),
-        libvroom::ParseOptions::with_cache("data.csv"));
+    auto result = reader.read_all();
 
     // Check if cache was used
-    if (result.used_cache) {
-        std::cout << "Loaded from cache: " << result.cache_path << "\n";
+    if (result.value.used_cache) {
+        std::cout << "Loaded from cache: " << result.value.cache_path << "\n";
     } else {
-        std::cout << "Parsed fresh, cache written to: " << result.cache_path << "\n";
+        std::cout << "Parsed fresh, cache written to: " << result.value.cache_path << "\n";
     }
 
     return 0;
@@ -109,12 +107,12 @@ int main() {
 #include <libvroom.h>
 
 int main() {
-    libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
-    libvroom::Parser parser;
+    libvroom::CsvOptions opts;
+    opts.cache = libvroom::CacheConfig::custom("/tmp/csv-cache");
 
-    // Parse with caching to a custom directory
-    auto result = parser.parse(buffer.data(), buffer.size(),
-        libvroom::ParseOptions::with_cache_dir("data.csv", "/tmp/csv-cache"));
+    libvroom::CsvReader reader(opts);
+    reader.open("data.csv");
+    auto result = reader.read_all();
 
     return 0;
 }
@@ -128,16 +126,13 @@ For full control over caching behavior:
 #include <libvroom.h>
 
 int main() {
-    libvroom::FileBuffer buffer = libvroom::load_file("data.csv");
-    libvroom::Parser parser;
+    libvroom::CsvOptions opts;
+    opts.cache = libvroom::CacheConfig::defaults();
+    opts.force_cache_refresh = false;  // Set true to ignore existing cache
 
-    // Build options manually
-    libvroom::ParseOptions options;
-    options.cache = libvroom::CacheConfig::defaults();  // or CacheConfig::custom("/path")
-    options.source_path = "data.csv";
-    options.force_cache_refresh = false;  // Set true to ignore existing cache
-
-    auto result = parser.parse(buffer.data(), buffer.size(), options);
+    libvroom::CsvReader reader(opts);
+    reader.open("data.csv");
+    auto result = reader.read_all();
 
     return 0;
 }
@@ -158,8 +153,9 @@ struct CacheConfig {
     };
 
     Location location = SAME_DIR;
-    std::string custom_path;  // Only used when location == CUSTOM
+    std::string custom_path;       // Only used when location == CUSTOM
     bool resolve_symlinks = true;  // Resolve symlinks before computing cache path
+    uint16_t sample_interval = 32; // Every Kth row sampled
 
     // Factory methods
     static CacheConfig defaults();              // SAME_DIR mode
@@ -176,27 +172,21 @@ The `resolve_symlinks` option (default: `true`) ensures that files accessed thro
 
 Set to `false` if you need separate caches for different symlink paths pointing to the same file.
 
-#### ParseOptions (Cache-related fields)
+#### CsvOptions (Cache-related fields)
 
 ```cpp
-struct ParseOptions {
+struct CsvOptions {
     // ... other fields ...
 
-    std::optional<CacheConfig> cache = std::nullopt;  // nullopt = disabled
-    std::string source_path;                          // Required for caching
-    bool force_cache_refresh = false;                 // Force re-parse
-
-    // Convenience factories
-    static ParseOptions with_cache(const std::string& file_path);
-    static ParseOptions with_cache_dir(const std::string& file_path,
-                                       const std::string& cache_dir);
+    std::optional<CacheConfig> cache;      // nullopt = disabled (default)
+    bool force_cache_refresh = false;      // Force re-parse and rewrite cache
 };
 ```
 
-#### Parser::Result (Cache-related fields)
+#### ParsedChunks (Cache-related fields)
 
 ```cpp
-struct Result {
+struct ParsedChunks {
     // ... other fields ...
 
     bool used_cache{false};    // True if index was loaded from cache
@@ -206,17 +196,59 @@ struct Result {
 
 ## Cache File Format
 
-Cache files use the `.vidx` extension and contain:
+Cache files use the `.vidx` extension (version 1) and contain a compact representation of the parsing index using **sampled row offsets** with **Elias-Fano encoding**.
 
-| Field | Size | Description |
-|-------|------|-------------|
-| Version | 1 byte | Cache format version (currently 1) |
-| Modification time | 8 bytes | Source file mtime (seconds since epoch) |
-| File size | 8 bytes | Source file size in bytes |
-| Columns | 8 bytes | Number of columns in CSV |
-| Thread count | 2 bytes | Number of parsing threads |
-| Index counts | 8 × threads bytes | Field count per thread |
-| Indexes | 8 × total bytes | Field boundary positions |
+### Header (48 bytes, fixed)
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0 | 4 | magic | `"VIDX"` (0x56494458) |
+| 4 | 1 | version | Format version (currently 1) |
+| 5 | 1 | flags | Reserved (0) |
+| 6 | 2 | sample_interval | Every Kth row sampled (default 32) |
+| 8 | 8 | source_mtime | Source file mtime (seconds since epoch) |
+| 16 | 8 | source_size | Source file size in bytes |
+| 24 | 8 | header_end_offset | Byte offset where data rows start |
+| 32 | 4 | num_columns | Number of CSV columns |
+| 36 | 4 | num_chunks | Number of parallel parsing chunks |
+| 40 | 8 | total_rows | Total row count |
+
+### Section 1: Chunk Boundaries (16 × num_chunks bytes)
+
+For each chunk: `{start_offset: uint64, end_offset: uint64}`.
+
+### Section 2: Chunk Analysis (5 × num_chunks bytes)
+
+For each chunk: `{row_count: uint32, ends_inside_starting_outside: uint8}`. This is the persisted Phase 1 output, enabling skip of the SIMD analysis pass on cache hit.
+
+### Section 3: Sampled Row Offsets (Elias-Fano encoded)
+
+Every Kth row's byte offset, encoded with Elias-Fano for compact storage:
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0 | 4 | num_samples | Number of sampled offsets |
+| 4 | 4 | universe | Upper bound for encoding |
+| 8 | 4 | low_bits | Bits per low part |
+| 12 | 4 | high_bitvec_bytes | Size of high bitvector |
+| 16 | variable | high_bitvec | Unary-coded upper bits |
+| ... | variable | low_array | Packed lower bits |
+
+### Section 4: Sample Quote States
+
+Packed bit array: 1 bit per sample (ceil(num_samples/8) bytes). Records the quote state at each sample point.
+
+### Section 5: Schema
+
+For each column: `{type: uint8, name_len: uint16, name: char[name_len]}`.
+
+### Cache Size Estimates (default K=32)
+
+| File | Rows | File Size | Approximate Cache Size |
+|------|------|-----------|----------------------|
+| 1M rows | 1M | 100 MB | ~40 KB |
+| 10M rows | 10M | 1 GB | ~380 KB |
+| 100M rows | 100M | 10 GB | ~3.8 MB |
 
 ### Cache Locations
 
@@ -266,12 +298,7 @@ Caching may not be beneficial when:
 
 ### Cache File Size
 
-Cache file size depends on the CSV structure:
-
-- **Simple CSVs** (few columns, many rows): Small cache files
-- **Complex CSVs** (many columns, many embedded delimiters): Larger cache files
-
-As a rough estimate, cache files are typically 5-20% of the source file size.
+Cache files are very compact thanks to Elias-Fano encoding of sampled row offsets. With the default sample interval of 32, cache files are typically **0.004-0.04%** of the source file size (e.g., ~380 KB for a 1 GB file). The cache stores only chunk metadata and sampled positions, not the actual field boundaries.
 
 ## Troubleshooting
 

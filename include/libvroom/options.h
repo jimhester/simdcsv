@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cache.h"
 #include "error.h"
 #include "types.h"
 
@@ -33,6 +34,10 @@ struct CsvOptions {
   // Error handling (DISABLED = no collection for max performance)
   ErrorMode error_mode = ErrorMode::DISABLED;
   size_t max_errors = ErrorCollector::DEFAULT_MAX_ERRORS;
+
+  // Index caching (nullopt = disabled)
+  std::optional<CacheConfig> cache;
+  bool force_cache_refresh = false;
 };
 
 // Parquet writing options

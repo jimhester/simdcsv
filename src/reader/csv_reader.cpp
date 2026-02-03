@@ -1,4 +1,5 @@
 #include "libvroom/arrow_column_builder.h"
+#include "libvroom/cache.h"
 #include "libvroom/error.h"
 #include "libvroom/split_fields.h"
 #include "libvroom/table.h"
@@ -329,6 +330,7 @@ struct CsvReader::Impl {
   size_t num_threads = 0;
   bool file_has_quotes = false; // Detected during sampling
   ErrorCollector error_collector;
+  std::string file_path; // Stored from open() for caching
 
   Impl(const CsvOptions& opts) : options(opts), error_collector(opts.error_mode, opts.max_errors) {
     // Use options.num_threads if specified, otherwise auto-detect
@@ -347,6 +349,8 @@ CsvReader::CsvReader(const CsvOptions& options) : impl_(std::make_unique<Impl>(o
 CsvReader::~CsvReader() = default;
 
 Result<bool> CsvReader::open(const std::string& path) {
+  impl_->file_path = path;
+
   auto result = impl_->source.open(path);
   if (!result) {
     return result;
@@ -591,11 +595,170 @@ Result<ParsedChunks> CsvReader::read_all() {
   size_t data_start = impl_->header_end_offset;
   size_t data_size = size - data_start;
 
+  // ========================================================================
+  // Cache check: try to load cached index
+  // ========================================================================
+  const bool cache_enabled = impl_->options.cache.has_value() && !impl_->file_path.empty() &&
+                             !impl_->options.force_cache_refresh;
+  std::string cache_path;
+
+  if (cache_enabled) {
+    cache_path = IndexCache::compute_path(impl_->file_path, *impl_->options.cache);
+  }
+
+  // Also compute cache_path for writing even if force_refresh (we still want to write)
+  if (!cache_path.empty() && !impl_->options.force_cache_refresh) {
+    auto load_result = IndexCache::load(cache_path, impl_->file_path);
+    if (load_result.ok()) {
+      // Cache hit! Use cached chunk boundaries and analysis
+      const auto& cached = load_result.index;
+      size_t num_chunks = cached.chunk_boundaries.size();
+
+      if (num_chunks == 0) {
+        // Degenerate case: no chunks cached
+        return read_all_serial();
+      }
+
+      // Reconstruct analysis_results and use_inside_state from cache
+      std::vector<ChunkAnalysisResult> analysis_results(num_chunks);
+      std::vector<bool> use_inside_state(num_chunks, false);
+
+      for (size_t i = 0; i < num_chunks; ++i) {
+        auto& ar = analysis_results[i];
+        ar.ends_inside_starting_outside = cached.chunk_analysis[i].ends_inside_starting_outside;
+        // We only need the row count for the correct state
+        uint32_t row_count = cached.chunk_analysis[i].row_count;
+        ar.row_count_outside = row_count;
+        ar.row_count_inside = row_count;
+      }
+
+      // Phase 2: Link chunks (same logic, using cached analysis)
+      for (size_t i = 1; i < num_chunks; ++i) {
+        bool prev_used_inside = use_inside_state[i - 1];
+        bool prev_ends_inside;
+        if (prev_used_inside) {
+          prev_ends_inside = !analysis_results[i - 1].ends_inside_starting_outside;
+        } else {
+          prev_ends_inside = analysis_results[i - 1].ends_inside_starting_outside;
+        }
+        use_inside_state[i] = prev_ends_inside;
+      }
+
+      impl_->row_count = cached.total_rows;
+
+      // Phase 3: Parse chunks with cached state
+      const bool check_errors = impl_->error_collector.is_enabled();
+      std::vector<ErrorCollector> thread_error_collectors;
+      if (check_errors) {
+        thread_error_collectors.reserve(num_chunks);
+        for (size_t i = 0; i < num_chunks; ++i) {
+          thread_error_collectors.emplace_back(impl_->error_collector.mode(),
+                                               impl_->error_collector.max_errors());
+        }
+      }
+
+      size_t pool_threads = std::min(impl_->num_threads, num_chunks);
+      BS::thread_pool pool(pool_threads);
+      const CsvOptions options = impl_->options;
+      const std::vector<ColumnSchema> schema = impl_->schema;
+
+      std::vector<ChunkParseResult> chunk_results(num_chunks);
+      {
+        std::vector<std::future<void>> futures;
+        futures.reserve(num_chunks);
+
+        for (size_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+          size_t start_offset = cached.chunk_boundaries[chunk_idx].first;
+          size_t end_offset = cached.chunk_boundaries[chunk_idx].second;
+          bool start_inside = use_inside_state[chunk_idx];
+          size_t expected_rows = cached.chunk_analysis[chunk_idx].row_count;
+          ErrorCollector* chunk_error_collector =
+              check_errors ? &thread_error_collectors[chunk_idx] : nullptr;
+
+          futures.push_back(pool.submit_task([&chunk_results, data, size, chunk_idx, start_offset,
+                                              end_offset, start_inside, expected_rows, options,
+                                              &schema, chunk_error_collector]() {
+            if (start_offset >= size || end_offset > size || start_offset >= end_offset)
+              return;
+
+            auto& cr = chunk_results[chunk_idx];
+            NullChecker null_checker(options);
+
+            for (const auto& col_schema : schema) {
+              auto builder = ArrowColumnBuilder::create(col_schema.type);
+              builder->reserve(expected_rows);
+              cr.columns.push_back(std::move(builder));
+            }
+
+            auto [rows, ends_inside] = parse_chunk_with_state(
+                data + start_offset, end_offset - start_offset, options, null_checker, cr.columns,
+                start_inside, chunk_error_collector, start_offset);
+            (void)ends_inside;
+            cr.row_count = rows;
+          }));
+        }
+
+        for (auto& f : futures)
+          f.get();
+      }
+
+      if (check_errors) {
+        const auto& last_analysis = analysis_results[num_chunks - 1];
+        bool last_used_inside = use_inside_state[num_chunks - 1];
+        bool last_ends_inside = last_used_inside ? !last_analysis.ends_inside_starting_outside
+                                                 : last_analysis.ends_inside_starting_outside;
+        if (last_ends_inside) {
+          size_t last_start = cached.chunk_boundaries[num_chunks - 1].first;
+          thread_error_collectors.back().add_error(ErrorCode::UNCLOSED_QUOTE,
+                                                   ErrorSeverity::RECOVERABLE, 0, 0, last_start,
+                                                   "Quoted field not closed before end of data");
+        }
+        impl_->error_collector.merge_sorted(thread_error_collectors);
+      }
+
+      result.total_rows = 0;
+      for (auto& cr : chunk_results) {
+        result.total_rows += cr.row_count;
+        result.chunks.push_back(std::move(cr.columns));
+      }
+      result.used_cache = true;
+      result.cache_path = cache_path;
+
+      return Result<ParsedChunks>::success(std::move(result));
+    }
+    // Cache miss - fall through to normal parsing
+  }
+
+  // Compute cache_path for writing if cache is configured
+  if (impl_->options.cache.has_value() && !impl_->file_path.empty() && cache_path.empty()) {
+    cache_path = IndexCache::compute_path(impl_->file_path, *impl_->options.cache);
+  }
+
   // For small files, use single-threaded parsing
   // Use a higher threshold (1MB) to avoid overhead for medium files
   constexpr size_t PARALLEL_THRESHOLD = 1024 * 1024; // 1MB
   if (data_size < PARALLEL_THRESHOLD) {
-    return read_all_serial();
+    auto serial_result = read_all_serial();
+    // Write cache for small files too if enabled
+    if (serial_result.ok && !cache_path.empty() && impl_->options.cache.has_value()) {
+      CachedIndex cached_idx;
+      cached_idx.header_end_offset = impl_->header_end_offset;
+      cached_idx.num_columns = static_cast<uint32_t>(impl_->schema.size());
+      cached_idx.total_rows = serial_result.value.total_rows;
+      cached_idx.sample_interval = impl_->options.cache->sample_interval;
+      cached_idx.schema = impl_->schema;
+      // Single chunk boundary
+      cached_idx.chunk_boundaries.emplace_back(data_start, size);
+      ChunkMeta meta;
+      meta.row_count = static_cast<uint32_t>(serial_result.value.total_rows);
+      meta.ends_inside_starting_outside = false;
+      cached_idx.chunk_analysis.push_back(meta);
+      // Empty sampled offsets for serial (small files don't benefit much)
+      cached_idx.sampled_offsets = EliasFano::encode({}, 0);
+      IndexCache::write_atomic(cache_path, cached_idx, impl_->file_path);
+      serial_result.value.cache_path = cache_path;
+    }
+    return serial_result;
   }
 
   // Calculate chunk size based on Polars formula
@@ -632,7 +795,26 @@ Result<ParsedChunks> CsvReader::read_all() {
 
   // For single chunk, use serial processing
   if (num_chunks <= 1) {
-    return read_all_serial();
+    auto serial_result = read_all_serial();
+    if (serial_result.ok && !cache_path.empty() && impl_->options.cache.has_value()) {
+      CachedIndex cached_idx;
+      cached_idx.header_end_offset = impl_->header_end_offset;
+      cached_idx.num_columns = static_cast<uint32_t>(impl_->schema.size());
+      cached_idx.total_rows = serial_result.value.total_rows;
+      cached_idx.sample_interval = impl_->options.cache->sample_interval;
+      cached_idx.schema = impl_->schema;
+      size_t start_off = chunk_ranges.empty() ? data_start : chunk_ranges[0].first;
+      size_t end_off = chunk_ranges.empty() ? size : chunk_ranges[0].second;
+      cached_idx.chunk_boundaries.emplace_back(start_off, end_off);
+      ChunkMeta meta;
+      meta.row_count = static_cast<uint32_t>(serial_result.value.total_rows);
+      meta.ends_inside_starting_outside = false;
+      cached_idx.chunk_analysis.push_back(meta);
+      cached_idx.sampled_offsets = EliasFano::encode({}, 0);
+      IndexCache::write_atomic(cache_path, cached_idx, impl_->file_path);
+      serial_result.value.cache_path = cache_path;
+    }
+    return serial_result;
   }
 
   // Create thread pool - limit to reasonable number of threads
@@ -809,6 +991,40 @@ Result<ParsedChunks> CsvReader::read_all() {
   for (auto& chunk_result : chunk_results) {
     result.total_rows += chunk_result.row_count;
     result.chunks.push_back(std::move(chunk_result.columns));
+  }
+
+  // ========================================================================
+  // Cache write: persist chunk analysis for future reads
+  // ========================================================================
+  if (!cache_path.empty() && impl_->options.cache.has_value()) {
+    CachedIndex cached_idx;
+    cached_idx.header_end_offset = impl_->header_end_offset;
+    cached_idx.num_columns = static_cast<uint32_t>(impl_->schema.size());
+    cached_idx.total_rows = result.total_rows;
+    cached_idx.sample_interval = impl_->options.cache->sample_interval;
+    cached_idx.schema = impl_->schema;
+    cached_idx.chunk_boundaries = chunk_ranges;
+
+    cached_idx.chunk_analysis.resize(num_chunks);
+    for (size_t i = 0; i < num_chunks; ++i) {
+      cached_idx.chunk_analysis[i].row_count =
+          static_cast<uint32_t>(use_inside_state[i] ? analysis_results[i].row_count_inside
+                                                    : analysis_results[i].row_count_outside);
+      cached_idx.chunk_analysis[i].ends_inside_starting_outside =
+          analysis_results[i].ends_inside_starting_outside;
+    }
+
+    // Sampled offsets (placeholder: chunk start offsets for now)
+    std::vector<uint64_t> sample_offsets;
+    for (const auto& range : chunk_ranges) {
+      sample_offsets.push_back(range.first);
+    }
+    uint64_t universe = size > 0 ? size : 1;
+    cached_idx.sampled_offsets = EliasFano::encode(sample_offsets, universe);
+    cached_idx.sample_quote_states.resize((sample_offsets.size() + 7) / 8, 0);
+
+    IndexCache::write_atomic(cache_path, cached_idx, impl_->file_path);
+    result.cache_path = cache_path;
   }
 
   return Result<ParsedChunks>::success(std::move(result));

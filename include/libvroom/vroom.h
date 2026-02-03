@@ -108,6 +108,8 @@ ConversionResult convert_csv_to_parquet(const VroomOptions& options,
 struct ParsedChunks {
   std::vector<std::vector<std::unique_ptr<ArrowColumnBuilder>>> chunks; // One vector per chunk
   size_t total_rows = 0;
+  bool used_cache = false; // True if index was loaded from cache
+  std::string cache_path;  // Path to cache file (empty if disabled)
 };
 
 // CSV Reader - orchestrates the parsing
