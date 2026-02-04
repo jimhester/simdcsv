@@ -397,7 +397,10 @@ Result<bool> CsvReader::open(const std::string& path) {
     if (detected.success()) {
       impl_->options.separator = detected.dialect.delimiter;
       impl_->options.quote = detected.dialect.quote_char;
-      impl_->options.has_header = detected.has_header;
+      // Only override has_header from detection if user didn't explicitly disable it
+      if (impl_->options.has_header) {
+        impl_->options.has_header = detected.has_header;
+      }
       if (detected.dialect.comment_char != '\0') {
         impl_->options.comment = detected.dialect.comment_char;
       }
@@ -571,7 +574,10 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
     if (detected.success()) {
       impl_->options.separator = detected.dialect.delimiter;
       impl_->options.quote = detected.dialect.quote_char;
-      impl_->options.has_header = detected.has_header;
+      // Only override has_header from detection if user didn't explicitly disable it
+      if (impl_->options.has_header) {
+        impl_->options.has_header = detected.has_header;
+      }
       if (detected.dialect.comment_char != '\0') {
         impl_->options.comment = detected.dialect.comment_char;
       }

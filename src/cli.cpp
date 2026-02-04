@@ -228,7 +228,8 @@ CONVERT OPTIONS:
 COMMON OPTIONS:
     -n, --rows <N>           Number of rows for head/pretty (default: 10)
     -j, --threads <N>        Number of threads (default: auto)
-    -d, --delimiter <CHAR>   Field delimiter (default: ,)
+    -d, --delimiter <CHAR>   Field delimiter (default: auto)
+                             Named: auto, comma, tab, semicolon, pipe, colon
     -q, --quote <CHAR>       Quote character (default: ")
     -e, --encoding <ENC>     Force encoding (utf-8, utf-16le, utf-16be,
                              utf-32le, utf-32be, latin1, windows-1252)
@@ -268,7 +269,7 @@ For more information, visit: https://github.com/jimhester/libvroom
 
 struct CommonOptions {
   string input_path;
-  char delimiter = ',';
+  char delimiter = '\0'; // auto-detect by default
   char quote = '"';
   bool has_header = true;
   size_t num_threads = 0;
@@ -323,6 +324,8 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
       string delim_str = argv[i];
       if (delim_str == "\\t" || delim_str == "tab") {
         opts.delimiter = '\t';
+      } else if (delim_str == "auto") {
+        opts.delimiter = '\0';
       } else if (delim_str == "comma") {
         opts.delimiter = ',';
       } else if (delim_str == "semicolon") {
@@ -334,7 +337,8 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
       } else if (delim_str.length() == 1) {
         opts.delimiter = delim_str[0];
       } else {
-        cerr << "Error: --delimiter must be a single character or name (comma, tab, semicolon, "
+        cerr << "Error: --delimiter must be a single character or name (auto, comma, tab, "
+                "semicolon, "
                 "pipe, colon)"
              << endl;
         return -1;
@@ -744,6 +748,12 @@ int cmd_head(int argc, char* argv[]) {
     return 1;
   }
 
+  // Update delimiter from auto-detection for output formatting
+  if (opts.delimiter == '\0') {
+    auto detected = reader.detected_dialect();
+    opts.delimiter = detected ? detected->dialect.delimiter : ',';
+  }
+
   const auto& schema = reader.schema();
 
   auto read_result = reader.read_all();
@@ -863,6 +873,12 @@ int cmd_info(int argc, char* argv[]) {
     return 1;
   }
 
+  // Update delimiter from auto-detection for output formatting
+  if (opts.delimiter == '\0') {
+    auto detected = reader.detected_dialect();
+    opts.delimiter = detected ? detected->dialect.delimiter : ',';
+  }
+
   const auto& schema = reader.schema();
 
   auto read_result = reader.read_all();
@@ -970,6 +986,12 @@ int cmd_select(int argc, char* argv[]) {
     }
     cerr << "Error: " << open_result.error << endl;
     return 1;
+  }
+
+  // Update delimiter from auto-detection for output formatting
+  if (opts.delimiter == '\0') {
+    auto detected = reader.detected_dialect();
+    opts.delimiter = detected ? detected->dialect.delimiter : ',';
   }
 
   const auto& schema = reader.schema();
