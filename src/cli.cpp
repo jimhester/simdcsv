@@ -222,8 +222,15 @@ COMMANDS:
 
 CONVERT OPTIONS:
     -o, --output <FILE>      Output Parquet file path (required)
-    -c, --compression <TYPE> Compression: zstd, snappy, lz4, gzip, none (default: zstd)
-    -r, --row-group <SIZE>   Rows per row group (default: 1000000)
+)"
+#ifdef VROOM_HAVE_ZSTD
+          R"(    -c, --compression <TYPE> Compression: zstd, snappy, lz4, gzip, none (default: zstd)
+)"
+#else
+          R"(    -c, --compression <TYPE> Compression: snappy, lz4, gzip, none (default: gzip)
+)"
+#endif
+          R"(    -r, --row-group <SIZE>   Rows per row group (default: 1000000)
 
 COMMON OPTIONS:
     -n, --rows <N>           Number of rows for head/pretty (default: 10)
@@ -415,7 +422,11 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
 int cmd_convert(int argc, char* argv[]) {
   CommonOptions common;
   string output_path;
+#ifdef VROOM_HAVE_ZSTD
   string compression = "zstd";
+#else
+  string compression = "gzip";
+#endif
   size_t row_group_size = 1'000'000;
 
   // Parse arguments
@@ -552,7 +563,12 @@ int cmd_convert(int argc, char* argv[]) {
 
   // Set compression
   if (compression == "zstd") {
+#ifdef VROOM_HAVE_ZSTD
     opts.parquet.compression = libvroom::Compression::ZSTD;
+#else
+    cerr << "Error: zstd compression not available (not compiled in)" << endl;
+    return 1;
+#endif
   } else if (compression == "snappy") {
     opts.parquet.compression = libvroom::Compression::SNAPPY;
   } else if (compression == "lz4") {

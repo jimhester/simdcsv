@@ -46,8 +46,12 @@ struct CsvOptions {
 
 // Parquet writing options
 struct ParquetOptions {
+#ifdef VROOM_HAVE_ZSTD
   Compression compression = Compression::ZSTD;
-  int compression_level = 3; // zstd default level
+#else
+  Compression compression = Compression::GZIP;
+#endif
+  int compression_level = 3; // default level (zstd range: 1-22, gzip range: 1-9)
 
   size_t row_group_size = 1'000'000; // Rows per row group
   size_t page_size = 1'048'576;      // 1MB page size

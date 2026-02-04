@@ -145,7 +145,11 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
   // Set compression
   if (compression) {
     if (*compression == "zstd") {
+#ifdef VROOM_HAVE_ZSTD
       opts.parquet.compression = libvroom::Compression::ZSTD;
+#else
+      throw std::runtime_error("zstd compression not available (not compiled in)");
+#endif
     } else if (*compression == "snappy") {
       opts.parquet.compression = libvroom::Compression::SNAPPY;
     } else if (*compression == "lz4") {
@@ -393,7 +397,7 @@ PYBIND11_MODULE(_core, m) {
             Path to the output Parquet file.
         compression : str, optional
             Compression codec: "zstd", "snappy", "lz4", "gzip", or "none".
-            Default is "zstd".
+            Default is "zstd" if available, otherwise "gzip".
         row_group_size : int, optional
             Number of rows per row group. Default is 1,000,000.
         num_threads : int, optional
