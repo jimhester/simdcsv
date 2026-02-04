@@ -40,7 +40,8 @@ std::shared_ptr<libvroom::Table> read_csv(const std::string& path,
                                           bool has_header = true,
                                           std::optional<size_t> num_threads = std::nullopt,
                                           std::optional<std::string> error_mode = std::nullopt,
-                                          std::optional<size_t> max_errors = std::nullopt) {
+                                          std::optional<size_t> max_errors = std::nullopt,
+                                          std::optional<std::string> encoding = std::nullopt) {
   // Set up options
   libvroom::CsvOptions csv_opts;
   if (separator)
@@ -50,6 +51,18 @@ std::shared_ptr<libvroom::Table> read_csv(const std::string& path,
   csv_opts.has_header = has_header;
   if (num_threads)
     csv_opts.num_threads = *num_threads;
+
+  // Set encoding
+  if (encoding) {
+    auto enc = libvroom::parse_encoding_name(*encoding);
+    if (enc == libvroom::CharEncoding::UNKNOWN) {
+      throw std::runtime_error(
+          "Unknown encoding: " + *encoding +
+          " (use 'utf-8', 'utf-16le', 'utf-16be', 'utf-32le', 'utf-32be', 'latin1', "
+          "'windows-1252')");
+    }
+    csv_opts.encoding = enc;
+  }
 
   // Set error handling options
   if (error_mode) {
@@ -284,7 +297,7 @@ PYBIND11_MODULE(_core, m) {
   m.def("read_csv", &read_csv, py::arg("path"), py::arg("separator") = py::none(),
         py::arg("quote") = py::none(), py::arg("has_header") = true,
         py::arg("num_threads") = py::none(), py::arg("error_mode") = py::none(),
-        py::arg("max_errors") = py::none(),
+        py::arg("max_errors") = py::none(), py::arg("encoding") = py::none(),
         R"doc(
         Read a CSV file into a Table.
 
@@ -309,6 +322,10 @@ PYBIND11_MODULE(_core, m) {
         max_errors : int, optional
             Maximum number of errors to collect. Default is 10000.
             Setting this automatically enables "permissive" mode if error_mode is not set.
+        encoding : str, optional
+            Force input encoding. Default is auto-detect.
+            Supported: "utf-8", "utf-16le", "utf-16be", "utf-32le", "utf-32be",
+            "latin1", "windows-1252".
 
         Returns
         -------
@@ -329,6 +346,9 @@ PYBIND11_MODULE(_core, m) {
 
         # With error handling
         >>> table = vroom_csv.read_csv("data.csv", error_mode="permissive")
+
+        # With encoding override
+        >>> table = vroom_csv.read_csv("data.csv", encoding="latin1")
     )doc");
 
   // to_parquet function

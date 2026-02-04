@@ -199,6 +199,7 @@ endif()
 # =============================================================================
 set(LIBVROOM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(VROOM_SOURCES
+    ${LIBVROOM_ROOT}/src/encoding.cpp
     ${LIBVROOM_ROOT}/src/error.cpp
     ${LIBVROOM_ROOT}/src/io_util.cpp
     ${LIBVROOM_ROOT}/src/dialect.cpp
