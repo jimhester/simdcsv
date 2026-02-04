@@ -303,3 +303,27 @@ TEST_F(StreamingCsvReaderTest, StreamingMultipleTypes) {
   }
   EXPECT_EQ(total_rows, 5u);
 }
+
+TEST_F(StreamingCsvReaderTest, EarlyAbandonmentNoDeadlock) {
+  // Verify that destroying CsvReader without consuming all chunks doesn't deadlock.
+  // This exercises the Impl destructor's queue close + pool drain logic.
+  std::string csv = "id,name,value\n";
+  for (int i = 0; i < 50000; ++i) {
+    csv += std::to_string(i) + ",name_" + std::to_string(i) + "," + std::to_string(i * 1.5) + "\n";
+  }
+  test_util::TempCsvFile f(csv);
+
+  {
+    libvroom::CsvReader reader(libvroom::CsvOptions{});
+    reader.open(f.path());
+    auto start = reader.start_streaming();
+    ASSERT_TRUE(start.ok);
+
+    // Consume only the first chunk, then let reader go out of scope
+    auto chunk = reader.next_chunk();
+    EXPECT_TRUE(chunk.has_value());
+    // Deliberately do NOT consume remaining chunks — destructor must handle cleanup
+  }
+  // If we reach here without deadlocking, the test passes
+  SUCCEED();
+}

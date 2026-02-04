@@ -21,7 +21,8 @@ static std::vector<std::unique_ptr<ArrowColumnBuilder>> make_chunk(int32_t id_va
   std::vector<std::unique_ptr<ArrowColumnBuilder>> cols;
   auto col = ArrowColumnBuilder::create_int32();
   auto ctx = col->create_context();
-  std::string_view sv = std::to_string(id_value);
+  std::string s = std::to_string(id_value);
+  std::string_view sv = s;
   ctx.append_fn(ctx, sv);
   cols.push_back(std::move(col));
   return cols;

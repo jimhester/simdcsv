@@ -259,6 +259,17 @@ struct CsvReader::Impl {
   std::vector<std::pair<size_t, size_t>> streaming_chunk_ranges;
   bool streaming_active = false;
 
+  ~Impl() {
+    // Ensure safe shutdown of streaming state:
+    // 1. Close the queue to unblock any producers blocked on push()
+    // 2. Drain the thread pool (waits for detached tasks to finish)
+    // 3. Then remaining members are destroyed in reverse declaration order
+    if (streaming_queue) {
+      streaming_queue->close();
+    }
+    streaming_pool.reset();
+  }
+
   Impl(const CsvOptions& opts) : options(opts), error_collector(opts.error_mode, opts.max_errors) {
     // Use options.num_threads if specified, otherwise auto-detect
     if (options.num_threads > 0) {
