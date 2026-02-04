@@ -634,3 +634,88 @@ class TestMemoryMap:
 
         for row_idx in range(table_mmap.num_rows):
             assert table_mmap.row(row_idx) == table_regular.row(row_idx)
+
+
+class TestCommentAndSkipEmpty:
+    """Tests for comment and skip_empty_rows parameters."""
+
+    def test_comment_hash(self):
+        """Test skipping hash comment lines."""
+        import vroom_csv
+
+        content = "# comment\nname,value\nAlice,100\n# middle comment\nBob,200\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            path = f.name
+
+        table = vroom_csv.read_csv(path, comment="#")
+
+        assert table.num_rows == 2
+        assert table.column_names == ["name", "value"]
+
+    def test_comment_semicolon(self):
+        """Test skipping semicolon comment lines."""
+        import vroom_csv
+
+        content = "; comment\nA,B\n1,2\n; skip\n3,4\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            path = f.name
+
+        table = vroom_csv.read_csv(path, comment=";")
+
+        assert table.num_rows == 2
+
+    def test_comment_default_none(self):
+        """Test that default (no comment) treats # as data."""
+        import vroom_csv
+
+        content = "A,B\n#1,2\n3,4\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            path = f.name
+
+        table = vroom_csv.read_csv(path)
+
+        assert table.num_rows == 2  # #1 is data, not a comment
+
+    def test_skip_empty_rows_true(self):
+        """Test that empty rows are skipped by default."""
+        import vroom_csv
+
+        content = "A,B\n1,2\n\n3,4\n\n5,6\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            path = f.name
+
+        table = vroom_csv.read_csv(path, skip_empty_rows=True)
+
+        assert table.num_rows == 3
+
+    def test_skip_empty_rows_false(self):
+        """Test that empty rows are preserved when skip_empty_rows=False."""
+        import vroom_csv
+
+        content = "A,B\n1,2\n\n3,4\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            path = f.name
+
+        table = vroom_csv.read_csv(path, skip_empty_rows=False)
+
+        # Empty row should be preserved (as a row with empty fields)
+        assert table.num_rows == 3
+
+    def test_comment_and_skip_empty_combined(self):
+        """Test comment and skip_empty_rows work together."""
+        import vroom_csv
+
+        content = "# comment\nA,B\n1,2\n\n# skip\n3,4\n"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            path = f.name
+
+        table = vroom_csv.read_csv(path, comment="#", skip_empty_rows=True)
+
+        assert table.num_rows == 2
+        assert table.column_names == ["A", "B"]
