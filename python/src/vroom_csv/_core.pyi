@@ -182,6 +182,8 @@ def read_csv(
     num_threads: int = 1,
     memory_map: bool | None = None,
     progress: Callable[[int, int], None] | None = None,
+    comment: str | None = None,
+    skip_empty_rows: bool = True,
 ) -> Table:
     """Read a CSV file and return a Table object.
 
@@ -224,6 +226,12 @@ def read_csv(
         The callback receives two arguments: (bytes_read: int, total_bytes: int).
         It is called periodically during parsing at chunk boundaries (typically
         every 1-4MB). Use this to display progress bars or update UIs.
+    comment : str, optional
+        Character that marks comment lines. Lines starting with this
+        character are skipped during parsing. Default is None (no comment
+        skipping).
+    skip_empty_rows : bool, optional
+        Whether to skip empty lines in the input. Default is True.
 
     Returns
     -------

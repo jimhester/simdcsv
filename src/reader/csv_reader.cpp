@@ -108,25 +108,43 @@ std::pair<size_t, bool> parse_chunk_with_state(
   const size_t num_cols = columns.size();
 
   while (offset < size) {
-    // Skip empty lines
-    while (offset < size) {
-      char c = data[offset];
-      if (c == '\n') {
-        offset++;
-        continue;
-      }
-      if (c == '\r') {
-        offset++;
-        if (offset < size && data[offset] == '\n') {
+    // Skip empty lines (when enabled)
+    if (options.skip_empty_rows) {
+      while (offset < size) {
+        char c = data[offset];
+        if (c == '\n') {
           offset++;
+          continue;
         }
-        continue;
+        if (c == '\r') {
+          offset++;
+          if (offset < size && data[offset] == '\n') {
+            offset++;
+          }
+          continue;
+        }
+        break;
       }
-      break;
     }
 
     if (offset >= size)
       break;
+
+    // Skip comment lines (handle \n, \r\n, and bare \r)
+    if (options.comment != '\0' && data[offset] == options.comment) {
+      while (offset < size && data[offset] != '\n' && data[offset] != '\r') {
+        offset++;
+      }
+      if (offset < size && data[offset] == '\r') {
+        offset++;
+        if (offset < size && data[offset] == '\n') {
+          offset++; // CRLF
+        }
+      } else if (offset < size && data[offset] == '\n') {
+        offset++;
+      }
+      continue;
+    }
 
     // Create iterator for remaining data - it stops at EOL
     size_t row_start_offset = offset;
@@ -282,6 +300,37 @@ struct CsvReader::Impl {
   }
 };
 
+// Skip leading comment lines in the data. Returns offset past all leading comment lines.
+// A comment line starts with the comment character (at column 0) and ends at newline.
+static size_t skip_leading_comment_lines(const char* data, size_t size, char comment_char) {
+  if (comment_char == '\0' || size == 0) {
+    return 0;
+  }
+
+  size_t offset = 0;
+  while (offset < size) {
+    // Check if current line starts with comment char
+    if (data[offset] != comment_char) {
+      break; // Not a comment line, stop
+    }
+
+    // Skip to end of this comment line (handle \n, \r\n, and bare \r)
+    while (offset < size && data[offset] != '\n' && data[offset] != '\r') {
+      offset++;
+    }
+    // Skip past the line ending
+    if (offset < size && data[offset] == '\r') {
+      offset++;
+      if (offset < size && data[offset] == '\n') {
+        offset++; // CRLF
+      }
+    } else if (offset < size && data[offset] == '\n') {
+      offset++;
+    }
+  }
+  return offset;
+}
+
 CsvReader::CsvReader(const CsvOptions& options) : impl_(std::make_unique<Impl>(options)) {}
 
 CsvReader::~CsvReader() = default;
@@ -342,6 +391,18 @@ Result<bool> CsvReader::open(const std::string& path) {
 
   ChunkFinder finder(impl_->options.separator, impl_->options.quote);
   LineParser parser(impl_->options);
+
+  // Skip leading comment lines before header
+  size_t comment_skip = skip_leading_comment_lines(data, size, impl_->options.comment);
+  if (comment_skip > 0) {
+    impl_->data_ptr += comment_skip;
+    impl_->data_size -= comment_skip;
+    data = impl_->data_ptr;
+    size = impl_->data_size;
+    if (size == 0) {
+      return Result<bool>::failure("File contains only comment lines");
+    }
+  }
 
   // Parse header if present
   if (impl_->options.has_header) {
@@ -484,6 +545,18 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
 
   ChunkFinder finder(impl_->options.separator, impl_->options.quote);
   LineParser parser(impl_->options);
+
+  // Skip leading comment lines before header
+  size_t comment_skip = skip_leading_comment_lines(data, size, impl_->options.comment);
+  if (comment_skip > 0) {
+    impl_->data_ptr += comment_skip;
+    impl_->data_size -= comment_skip;
+    data = impl_->data_ptr;
+    size = impl_->data_size;
+    if (size == 0) {
+      return Result<bool>::failure("File contains only comment lines");
+    }
+  }
 
   // Parse header if present
   if (impl_->options.has_header) {
@@ -1083,25 +1156,43 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
   size_t row_number = impl_->options.has_header ? 2 : 1;
 
   while (offset < size) {
-    // Skip empty lines
-    while (offset < size) {
-      char c = data[offset];
-      if (c == '\n') {
-        offset++;
-        continue;
-      }
-      if (c == '\r') {
-        offset++;
-        if (offset < size && data[offset] == '\n') {
+    // Skip empty lines (when enabled)
+    if (impl_->options.skip_empty_rows) {
+      while (offset < size) {
+        char c = data[offset];
+        if (c == '\n') {
           offset++;
+          continue;
         }
-        continue;
+        if (c == '\r') {
+          offset++;
+          if (offset < size && data[offset] == '\n') {
+            offset++;
+          }
+          continue;
+        }
+        break;
       }
-      break;
     }
 
     if (offset >= size)
       break;
+
+    // Skip comment lines (handle \n, \r\n, and bare \r)
+    if (impl_->options.comment != '\0' && data[offset] == impl_->options.comment) {
+      while (offset < size && data[offset] != '\n' && data[offset] != '\r') {
+        offset++;
+      }
+      if (offset < size && data[offset] == '\r') {
+        offset++;
+        if (offset < size && data[offset] == '\n') {
+          offset++; // CRLF
+        }
+      } else if (offset < size && data[offset] == '\n') {
+        offset++;
+      }
+      continue;
+    }
 
     // Create iterator for remaining data - it stops at EOL
     size_t row_start_offset = offset;
