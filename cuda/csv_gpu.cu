@@ -172,6 +172,12 @@ GpuIndexResult gpu_find_field_boundaries(
     return result;
   }
 
+  // Positions are stored as uint32_t, so we can't handle files > 4 GB
+  if (len > UINT32_MAX) {
+    result.error_message = "File too large for GPU parsing (>4 GB)";
+    return result;
+  }
+
   // Device pointers (all nullptr for safe cleanup)
   char*     d_data         = nullptr;
   uint8_t*  d_quote_flags  = nullptr;
@@ -283,6 +289,13 @@ GpuIndexResult gpu_find_field_boundaries(
   result.success = true;
 
 cleanup:
+  // On error, free any host-allocated positions to prevent memory leak
+  if (!result.success && result.positions) {
+    delete[] result.positions;
+    result.positions = nullptr;
+    result.count = 0;
+  }
+
   if (d_data)        cudaFree(d_data);
   if (d_quote_flags) cudaFree(d_quote_flags);
   if (d_quote_state) cudaFree(d_quote_state);

@@ -489,7 +489,8 @@ target_link_libraries(vroom-cli PRIVATE
 # =============================================================================
 if(ENABLE_GPU)
     add_subdirectory(cuda)
-    target_link_libraries(vroom PUBLIC vroom_gpu)
+    target_link_libraries(vroom PRIVATE vroom_gpu)
+    target_compile_definitions(vroom PUBLIC LIBVROOM_ENABLE_GPU)
 endif()
 
 # =============================================================================

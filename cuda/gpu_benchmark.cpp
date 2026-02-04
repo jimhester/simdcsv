@@ -260,17 +260,14 @@ static void BM_HybridGpuCpu(benchmark::State& state) {
     }
 
     // Phase 2: CPU uses boundary positions to split into rows
+    // GPU already sorts positions, so no need to re-sort here.
     // This simulates the hybrid approach where GPU provides the index
-    // and CPU uses it for field extraction
+    // and CPU uses it for field extraction.
     size_t row_count = 0;
     if (res.count > 0 && res.positions != nullptr) {
-      // Sort positions (GPU atomics produce unordered output)
-      std::vector<uint32_t> sorted_positions(res.positions, res.positions + res.count);
-      std::sort(sorted_positions.begin(), sorted_positions.end());
-
-      // Walk through positions to count rows (newline boundaries)
+      // Walk through sorted positions to count rows (newline boundaries)
       for (uint32_t i = 0; i < res.count; i++) {
-        uint32_t pos = sorted_positions[i];
+        uint32_t pos = res.positions[i];
         if (pos < csv.size() && csv[pos] == '\n') {
           row_count++;
         }
