@@ -13,7 +13,7 @@ namespace libvroom {
 
 // CSV parsing options
 struct CsvOptions {
-  char separator = ',';
+  char separator = '\0'; // '\0' = auto-detect via DialectDetector
   char quote = '"';
   char escape = '\\';
   char comment = '\0'; // No comment char by default

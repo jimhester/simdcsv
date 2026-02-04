@@ -35,7 +35,12 @@ using libvroom::wider_type;
 
 class TypeInferenceTest : public ::testing::Test {
 protected:
-  libvroom::TypeInference default_inference{libvroom::CsvOptions{}};
+  static libvroom::CsvOptions default_csv_opts() {
+    libvroom::CsvOptions opts;
+    opts.separator = ','; // Explicit separator (bypass auto-detect sentinel)
+    return opts;
+  }
+  libvroom::TypeInference default_inference{default_csv_opts()};
 };
 
 TEST_F(TypeInferenceTest, EmptyStringIsNA) {
@@ -191,7 +196,12 @@ TEST_F(TypeInferenceTest, StringWithSpaces) {
 
 class TypeInferenceEdgeCasesTest : public ::testing::Test {
 protected:
-  libvroom::TypeInference default_inference{libvroom::CsvOptions{}};
+  static libvroom::CsvOptions default_csv_opts() {
+    libvroom::CsvOptions opts;
+    opts.separator = ','; // Explicit separator (bypass auto-detect sentinel)
+    return opts;
+  }
+  libvroom::TypeInference default_inference{default_csv_opts()};
 };
 
 TEST_F(TypeInferenceEdgeCasesTest, LeadingWhitespace) {
@@ -385,7 +395,12 @@ TEST_F(TypeNameTest, AllTypeNames) {
 
 class InferFromSampleTest : public ::testing::Test {
 protected:
-  libvroom::TypeInference default_inference{libvroom::CsvOptions{}};
+  static libvroom::CsvOptions default_csv_opts() {
+    libvroom::CsvOptions opts;
+    opts.separator = ','; // Explicit separator (bypass auto-detect sentinel)
+    return opts;
+  }
+  libvroom::TypeInference default_inference{default_csv_opts()};
 };
 
 TEST_F(InferFromSampleTest, AllIntegers) {

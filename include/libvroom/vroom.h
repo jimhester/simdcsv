@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dialect.h"
 #include "io_util.h"
 #include "options.h"
 #include "types.h"
@@ -155,6 +156,9 @@ public:
 
   // Check if any errors were collected
   bool has_errors() const;
+
+  // Get detected dialect (valid after open/open_from_buffer if auto-detection ran)
+  std::optional<DetectionResult> detected_dialect() const;
 
 private:
   // Serial implementation for small files or fallback

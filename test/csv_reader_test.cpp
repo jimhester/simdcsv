@@ -684,3 +684,88 @@ TEST_F(CsvReaderTest, SchemaWithQuotedHeaders) {
   EXPECT_EQ(schema[0].name, "First Name");
   EXPECT_EQ(schema[1].name, "Last Name");
 }
+
+// ============================================================================
+// DELIMITER AUTO-DETECTION
+// ============================================================================
+
+TEST_F(CsvReaderTest, AutoDetectTabDelimiter) {
+  libvroom::CsvOptions opts;
+  // separator defaults to '\0' (auto-detect)
+  auto [chunks, schema] = parseFile(testDataPath("separators/tab.csv"), opts);
+  EXPECT_EQ(schema.size(), 3u);
+  EXPECT_EQ(schema[0].name, "A");
+  EXPECT_EQ(chunks.total_rows, 3u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "1");
+}
+
+TEST_F(CsvReaderTest, AutoDetectPipeDelimiter) {
+  libvroom::CsvOptions opts;
+  auto [chunks, schema] = parseFile(testDataPath("separators/pipe.csv"), opts);
+  EXPECT_EQ(schema.size(), 3u);
+  EXPECT_EQ(schema[0].name, "A");
+  EXPECT_EQ(chunks.total_rows, 3u);
+}
+
+TEST_F(CsvReaderTest, AutoDetectSemicolonDelimiter) {
+  libvroom::CsvOptions opts;
+  auto [chunks, schema] = parseFile(testDataPath("separators/semicolon.csv"), opts);
+  EXPECT_EQ(schema.size(), 3u);
+  EXPECT_EQ(schema[0].name, "A");
+  EXPECT_EQ(chunks.total_rows, 3u);
+}
+
+TEST_F(CsvReaderTest, AutoDetectCommaDelimiter) {
+  libvroom::CsvOptions opts;
+  auto [chunks, schema] = parseFile(testDataPath("basic/simple.csv"), opts);
+  EXPECT_EQ(schema.size(), 3u);
+  EXPECT_EQ(schema[0].name, "A");
+  EXPECT_EQ(chunks.total_rows, 3u);
+}
+
+TEST_F(CsvReaderTest, ExplicitDelimiterSkipsAutoDetect) {
+  libvroom::CsvOptions opts;
+  opts.separator = '\t';
+  libvroom::CsvReader reader(opts);
+  auto result = reader.open(testDataPath("separators/tab.csv"));
+  ASSERT_TRUE(result.ok);
+
+  // No auto-detection should have run
+  EXPECT_FALSE(reader.detected_dialect().has_value());
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok);
+  EXPECT_EQ(read_result.value.total_rows, 3u);
+}
+
+TEST_F(CsvReaderTest, AutoDetectFromBuffer) {
+  std::string content = "A\tB\tC\n1\t2\t3\n4\t5\t6\n";
+  auto buffer = libvroom::AlignedBuffer::allocate(content.size());
+  std::memcpy(buffer.data(), content.data(), content.size());
+
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
+  auto result = reader.open_from_buffer(std::move(buffer));
+  ASSERT_TRUE(result.ok);
+
+  EXPECT_EQ(reader.schema().size(), 3u);
+  EXPECT_EQ(reader.schema()[0].name, "A");
+
+  auto dialect = reader.detected_dialect();
+  ASSERT_TRUE(dialect.has_value());
+  EXPECT_EQ(dialect->dialect.delimiter, '\t');
+}
+
+TEST_F(CsvReaderTest, DetectedDialectAccessor) {
+  // Auto-detect a comma-separated file
+  libvroom::CsvOptions opts;
+  // separator defaults to '\0' (auto-detect)
+  libvroom::CsvReader reader(opts);
+  auto result = reader.open(testDataPath("basic/simple.csv"));
+  ASSERT_TRUE(result.ok);
+
+  // Should have detected comma dialect
+  auto dialect = reader.detected_dialect();
+  ASSERT_TRUE(dialect.has_value());
+  EXPECT_EQ(dialect->dialect.delimiter, ',');
+}

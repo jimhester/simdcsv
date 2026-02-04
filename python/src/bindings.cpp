@@ -326,7 +326,7 @@ PYBIND11_MODULE(_core, m) {
         path : str
             Path to the CSV file to read.
         separator : str, optional
-            Field separator character. Default is ','.
+            Field separator character. Default is auto-detect.
         quote : str, optional
             Quote character. Default is '"'.
         has_header : bool, optional

@@ -22,6 +22,7 @@ using namespace libvroom;
 
 TEST(StreamingParserTest, FeedCompleteCSV) {
   StreamingOptions opts;
+  opts.csv.separator = ',';
   opts.batch_size = 8192;
   StreamingParser parser(opts);
 
@@ -48,7 +49,9 @@ TEST(StreamingParserTest, FeedCompleteCSV) {
 }
 
 TEST(StreamingParserTest, ColumnNamesFromHeader) {
-  StreamingParser parser;
+  StreamingOptions opts;
+  opts.csv.separator = ',';
+  StreamingParser parser(opts);
 
   std::string csv = "name,age,score\nAlice,30,95.5\n";
   auto result = parser.feed(csv.data(), csv.size());
@@ -63,7 +66,9 @@ TEST(StreamingParserTest, ColumnNamesFromHeader) {
 }
 
 TEST(StreamingParserTest, TypedColumns) {
-  StreamingParser parser;
+  StreamingOptions opts;
+  opts.csv.separator = ',';
+  StreamingParser parser(opts);
 
   std::string csv = "name,age,score\nAlice,30,95.5\nBob,25,87.3\n";
   auto result = parser.feed(csv.data(), csv.size());
@@ -82,7 +87,9 @@ TEST(StreamingParserTest, TypedColumns) {
 }
 
 TEST(StreamingParserTest, RowCountAndStatistics) {
-  StreamingParser parser;
+  StreamingOptions opts;
+  opts.csv.separator = ',';
+  StreamingParser parser(opts);
 
   std::string csv = "x,y\n1,2\n3,4\n5,6\n7,8\n9,10\n";
   parser.feed(csv.data(), csv.size());
@@ -102,7 +109,9 @@ TEST(StreamingParserTest, RowCountAndStatistics) {
 }
 
 TEST(StreamingParserTest, NullHandling) {
-  StreamingParser parser;
+  StreamingOptions opts;
+  opts.csv.separator = ',';
+  StreamingParser parser(opts);
 
   std::string csv = "a,b\n1,NA\n,3\nNULL,null\n";
   parser.feed(csv.data(), csv.size());
@@ -139,7 +148,9 @@ TEST(StreamingParserTest, EmptyInput) {
 }
 
 TEST(StreamingParserTest, HeaderOnly) {
-  StreamingParser parser;
+  StreamingOptions opts;
+  opts.csv.separator = ',';
+  StreamingParser parser(opts);
 
   std::string csv = "a,b,c\n";
   parser.feed(csv.data(), csv.size());
@@ -264,7 +275,9 @@ TEST(StreamingParserTest, SplitInsideDoubleQuoteEscape) {
 }
 
 TEST(StreamingParserTest, SplitHeaderAcrossChunks) {
-  StreamingParser parser;
+  StreamingOptions opts;
+  opts.csv.separator = ',';
+  StreamingParser parser(opts);
 
   // Split header "name,a" + "ge\n..."
   std::string part1 = "name,a";
@@ -407,6 +420,7 @@ TEST(StreamingParserTest, ExplicitSchema) {
 
 TEST(StreamingParserTest, NoHeader) {
   StreamingOptions opts;
+  opts.csv.separator = ',';
   opts.csv.has_header = false;
   StreamingParser parser(opts);
 
@@ -435,6 +449,7 @@ TEST(StreamingParserTest, NoHeader) {
 
 TEST(StreamingParserTest, FailFastMode) {
   StreamingOptions opts;
+  opts.csv.separator = ',';
   opts.csv.error_mode = ErrorMode::FAIL_FAST;
   StreamingParser parser(opts);
 
@@ -448,6 +463,7 @@ TEST(StreamingParserTest, FailFastMode) {
 
 TEST(StreamingParserTest, PermissiveMode) {
   StreamingOptions opts;
+  opts.csv.separator = ',';
   opts.csv.error_mode = ErrorMode::PERMISSIVE;
   StreamingParser parser(opts);
 
@@ -469,6 +485,7 @@ TEST(StreamingParserTest, PermissiveMode) {
 
 TEST(StreamingParserTest, ErrorCollectorAccess) {
   StreamingOptions opts;
+  opts.csv.separator = ',';
   opts.csv.error_mode = ErrorMode::PERMISSIVE;
   StreamingParser parser(opts);
 
@@ -488,7 +505,9 @@ TEST(StreamingParserTest, ErrorCollectorAccess) {
 TEST(StreamingParserTest, ReadCsvStream) {
   std::istringstream input("a,b\n1,2\n3,4\n5,6\n");
 
-  auto table = read_csv_stream(input);
+  StreamingOptions opts;
+  opts.csv.separator = ',';
+  auto table = read_csv_stream(input, opts);
   ASSERT_NE(table, nullptr);
   EXPECT_EQ(table->num_rows(), 3);
   EXPECT_EQ(table->num_columns(), 2);
@@ -501,7 +520,9 @@ TEST(StreamingParserTest, ReadCsvStream) {
 TEST(StreamingParserTest, ReadCsvStreamToArrow) {
   std::istringstream input("x,y,z\n1,2,3\n4,5,6\n");
 
-  auto table = read_csv_stream(input);
+  StreamingOptions opts;
+  opts.csv.separator = ',';
+  auto table = read_csv_stream(input, opts);
   ASSERT_NE(table, nullptr);
 
   // Export to Arrow stream and verify
@@ -539,7 +560,9 @@ TEST(StreamingParserTest, ReadCsvStreamEmpty) {
 
 TEST(StreamingParserTest, ReadCsvStreamHeaderOnly) {
   std::istringstream input("a,b,c\n");
-  auto table = read_csv_stream(input);
+  StreamingOptions opts;
+  opts.csv.separator = ',';
+  auto table = read_csv_stream(input, opts);
   ASSERT_NE(table, nullptr);
   EXPECT_EQ(table->num_rows(), 0);
   EXPECT_EQ(table->num_columns(), 3);

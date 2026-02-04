@@ -296,6 +296,7 @@ TEST_F(IntegrationTest, Schema_WideCSV_20Columns) {
 TEST_F(IntegrationTest, ErrorHandling_UnclosedQuote_Permissive) {
   // malformed/unclosed_quote.csv has an unclosed quote on row 2
   libvroom::CsvOptions opts;
+  opts.separator = ','; // Explicit separator for malformed data (bypass auto-detect)
   opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
 
   libvroom::CsvReader reader(opts);
