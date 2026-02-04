@@ -1,5 +1,113 @@
 #include "libvroom/vroom.h"
 
+#ifdef _WIN32
+
+// =============================================================================
+// Windows implementation using CreateFileMapping / MapViewOfFile
+// =============================================================================
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+namespace libvroom {
+
+struct MmapSource::Impl {
+  HANDLE file_handle = INVALID_HANDLE_VALUE;
+  HANDLE mapping_handle = nullptr;
+  const char* data = nullptr;
+  size_t size = 0;
+};
+
+MmapSource::MmapSource() : impl_(std::make_unique<Impl>()) {}
+
+MmapSource::~MmapSource() {
+  close();
+}
+
+Result<bool> MmapSource::open(const std::string& path) {
+  if (impl_->file_handle != INVALID_HANDLE_VALUE) {
+    close();
+  }
+
+  impl_->file_handle = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                   OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+  if (impl_->file_handle == INVALID_HANDLE_VALUE) {
+    return Result<bool>::failure("Failed to open file: " + path);
+  }
+
+  LARGE_INTEGER file_size;
+  if (!GetFileSizeEx(impl_->file_handle, &file_size)) {
+    CloseHandle(impl_->file_handle);
+    impl_->file_handle = INVALID_HANDLE_VALUE;
+    return Result<bool>::failure("Failed to get file size: " + path);
+  }
+
+  impl_->size = static_cast<size_t>(file_size.QuadPart);
+
+  if (impl_->size == 0) {
+    // Empty file - no need to map
+    return Result<bool>::success(true);
+  }
+
+  impl_->mapping_handle =
+      CreateFileMappingA(impl_->file_handle, nullptr, PAGE_READONLY, 0, 0, nullptr);
+  if (impl_->mapping_handle == nullptr) {
+    CloseHandle(impl_->file_handle);
+    impl_->file_handle = INVALID_HANDLE_VALUE;
+    return Result<bool>::failure("Failed to create file mapping: " + path);
+  }
+
+  void* ptr = MapViewOfFile(impl_->mapping_handle, FILE_MAP_READ, 0, 0, 0);
+  if (ptr == nullptr) {
+    CloseHandle(impl_->mapping_handle);
+    impl_->mapping_handle = nullptr;
+    CloseHandle(impl_->file_handle);
+    impl_->file_handle = INVALID_HANDLE_VALUE;
+    return Result<bool>::failure("Failed to map view of file: " + path);
+  }
+
+  impl_->data = static_cast<const char*>(ptr);
+  return Result<bool>::success(true);
+}
+
+const char* MmapSource::data() const {
+  return impl_->data;
+}
+
+size_t MmapSource::size() const {
+  return impl_->size;
+}
+
+bool MmapSource::is_open() const {
+  return impl_->file_handle != INVALID_HANDLE_VALUE;
+}
+
+void MmapSource::close() {
+  if (impl_->data != nullptr) {
+    UnmapViewOfFile(impl_->data);
+    impl_->data = nullptr;
+  }
+  if (impl_->mapping_handle != nullptr) {
+    CloseHandle(impl_->mapping_handle);
+    impl_->mapping_handle = nullptr;
+  }
+  if (impl_->file_handle != INVALID_HANDLE_VALUE) {
+    CloseHandle(impl_->file_handle);
+    impl_->file_handle = INVALID_HANDLE_VALUE;
+  }
+  impl_->size = 0;
+}
+
+} // namespace libvroom
+
+#else // POSIX
+
+// =============================================================================
+// POSIX implementation using mmap / munmap
+// =============================================================================
+
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -83,3 +191,5 @@ void MmapSource::close() {
 }
 
 } // namespace libvroom
+
+#endif // _WIN32

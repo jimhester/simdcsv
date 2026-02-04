@@ -25,6 +25,10 @@
 #include <stdexcept>
 #include <string>
 
+#ifdef _WIN32
+#include <malloc.h> // _aligned_malloc, _aligned_free
+#endif
+
 namespace libvroom {
 
 /**
@@ -93,7 +97,7 @@ public:
     buf.capacity_ = size + padding;
     buf.size_ = size;
 
-#ifdef _MSC_VER
+#ifdef _WIN32
     buf.data_ = static_cast<uint8_t*>(_aligned_malloc(buf.capacity_, 64));
 #else
     int rc = posix_memalign(reinterpret_cast<void**>(&buf.data_), 64, buf.capacity_);
@@ -117,7 +121,7 @@ public:
 private:
   void free_data() {
     if (data_) {
-#ifdef _MSC_VER
+#ifdef _WIN32
       _aligned_free(data_);
 #else
       std::free(data_);
@@ -132,6 +136,38 @@ private:
   size_t size_ = 0;
   size_t capacity_ = 0;
 };
+
+/**
+ * @brief Allocate raw aligned memory (64-byte alignment).
+ *
+ * Portable wrapper around platform-specific aligned allocation.
+ * Caller must free with aligned_free_portable().
+ *
+ * @param size Number of bytes to allocate.
+ * @return Pointer to allocated memory, or nullptr on failure.
+ */
+inline void* aligned_alloc_portable(size_t size) {
+#ifdef _WIN32
+  return _aligned_malloc(size, 64);
+#else
+  void* ptr = nullptr;
+  if (posix_memalign(&ptr, 64, size) != 0) {
+    return nullptr;
+  }
+  return ptr;
+#endif
+}
+
+/**
+ * @brief Free memory allocated with aligned_alloc_portable().
+ */
+inline void aligned_free_portable(void* ptr) {
+#ifdef _WIN32
+  _aligned_free(ptr);
+#else
+  std::free(ptr);
+#endif
+}
 
 /**
  * @brief Load a file into an aligned buffer.

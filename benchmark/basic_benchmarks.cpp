@@ -101,14 +101,14 @@ static void BM_MemoryAllocation(benchmark::State& state) {
   size_t file_size = static_cast<size_t>(state.range(0));
 
   for (auto _ : state) {
-    void* ptr;
-    if (posix_memalign(&ptr, 64, file_size + LIBVROOM_PADDING) != 0) {
+    auto* data =
+        static_cast<uint8_t*>(libvroom::aligned_alloc_portable(file_size + LIBVROOM_PADDING));
+    if (!data) {
       state.SkipWithError("Failed to allocate memory");
       return;
     }
-    auto* data = static_cast<uint8_t*>(ptr);
     benchmark::DoNotOptimize(data);
-    std::free(data);
+    libvroom::aligned_free_portable(data);
   }
 
   state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
@@ -139,12 +139,11 @@ static void BM_WriteSequential(benchmark::State& state) {
   const size_t total_bytes = total_elements * sizeof(uint64_t);
 
   // Allocate aligned memory
-  void* ptr;
-  if (posix_memalign(&ptr, 64, total_bytes) != 0) {
+  auto* data = static_cast<uint64_t*>(libvroom::aligned_alloc_portable(total_bytes));
+  if (!data) {
     state.SkipWithError("Failed to allocate memory");
     return;
   }
-  auto* data = static_cast<uint64_t*>(ptr);
 
   for (auto _ : state) {
     // Sequential write: iterate through memory linearly
@@ -155,7 +154,7 @@ static void BM_WriteSequential(benchmark::State& state) {
     benchmark::ClobberMemory();
   }
 
-  std::free(data);
+  libvroom::aligned_free_portable(data);
 
   state.SetBytesProcessed(static_cast<int64_t>(total_bytes * state.iterations()));
   state.counters["Rows"] = static_cast<double>(rows);
@@ -177,12 +176,11 @@ static void BM_WriteStrided(benchmark::State& state) {
   const size_t stride = rows; // In elements (stride in bytes = rows * 8)
 
   // Allocate aligned memory
-  void* ptr;
-  if (posix_memalign(&ptr, 64, total_bytes) != 0) {
+  auto* data = static_cast<uint64_t*>(libvroom::aligned_alloc_portable(total_bytes));
+  if (!data) {
     state.SkipWithError("Failed to allocate memory");
     return;
   }
-  auto* data = static_cast<uint64_t*>(ptr);
 
   for (auto _ : state) {
     // Strided write: for each row, write fields with stride between columns
@@ -197,7 +195,7 @@ static void BM_WriteStrided(benchmark::State& state) {
     benchmark::ClobberMemory();
   }
 
-  std::free(data);
+  libvroom::aligned_free_portable(data);
 
   state.SetBytesProcessed(static_cast<int64_t>(total_bytes * state.iterations()));
   state.counters["Rows"] = static_cast<double>(rows);
