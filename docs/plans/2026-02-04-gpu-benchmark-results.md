@@ -48,10 +48,10 @@
 | Size | Time (ms) | Throughput (GB/s) | H2D (ms) | Kernel (ms) | D2H (ms) |
 |------|-----------|-------------------|-----------|-------------|-----------|
 | 1 MB | 4.64 | 0.21 | - | - | - |
-| 10 MB | 38.7 | 0.25 | 1.57 | 37.8 | 0.003 |
+| 10 MB | 40.6 | 0.25 | 1.4 | 1.7 | 38.4 |
 | 50 MB | 246 | 0.20 | - | - | - |
-| 100 MB | 564 | 0.17 | 16.1 | 548 | 0.006 |
-| 250 MB | 1510 | 0.16 | 69.0 | 1440 | 0.003 |
+| 100 MB | 579 | 0.17 | 11.6 | 7.8 | 559 |
+| 250 MB | 1510 | 0.16 | - | - | - |
 | 10 MB (quoted) | 38.4 | 0.25 | - | - | - |
 | 100 MB (quoted) | 576 | 0.17 | - | - | - |
 
@@ -71,15 +71,15 @@
 
 ### Why GPU is slower
 
-1. **Kernel execution dominates (97% of time):** The kernel takes 37.8 ms for 10 MB and 1440 ms for 250 MB. This is only ~170 MB/s throughput on the kernel alone, far below the GPU's memory bandwidth.
+1. **D2H transfer dominates (95%+ of time):** After fixing timing events, the real bottleneck is clear: copying boundary positions from GPU to host takes 38 ms for 10 MB and 559 ms for 100 MB. This is because the positions array is large (one entry per delimiter/newline).
 
-2. **Low GPU occupancy:** The current kernel uses `atomicAdd` for unordered output, which serializes threads. Each thread processes one byte, but the atomic contention on the output counter destroys parallelism.
+2. **Kernel execution is actually fast:** The GPU kernels complete in 1.7 ms for 10 MB and 7.8 ms for 100 MB (~5.9 GB/s and ~12.8 GB/s kernel-only throughput). This is competitive with CPU SIMD.
 
-3. **H2D transfer is modest:** At 10 MB, H2D is only 1.57 ms (~6.4 GB/s). At 250 MB, H2D is 69 ms (~3.6 GB/s). PCIe transfer is not the bottleneck.
+3. **H2D transfer is efficient:** At 10 MB, H2D is only 1.4 ms (~7.1 GB/s). PCIe transfer of raw data is not the bottleneck.
 
-4. **D2H transfer is negligible:** Positions array is small, D2H < 0.01 ms.
+4. **Output size is the problem:** For a 10-column CSV, every row produces ~10 boundary positions (9 commas + 1 newline). A 100 MB file produces millions of 4-byte positions that must be copied back, taking far longer than the original data transfer.
 
-5. **Hybrid is even slower:** The sort step on CPU (`std::sort` on positions) adds significant overhead on top of GPU time.
+5. **Hybrid adds overhead:** The CPU sort + scan of positions adds additional time on top of GPU time.
 
 ### Quote handling impact
 
@@ -99,11 +99,11 @@
 
 ### Root causes
 
-1. **CSV parsing is fundamentally sequential:** Quote state is a prefix dependency — each byte's interpretation depends on all preceding quote characters. While CUB prefix scan solves this on GPU, the overhead is high for this simple operation.
+1. **Output amplification:** Field boundary detection produces output proportional to the number of fields, not the input size. For a 10-column CSV, the positions array is ~40% the size of the input data, making D2H transfer expensive.
 
-2. **CPU SIMD is already near optimal:** Highway's 64-byte-at-a-time scanning with boundary caching achieves excellent throughput. The CLMUL instruction provides 1-2 cycle prefix XOR, matching what CUB does with much more overhead.
+2. **GPU kernels are fast, PCIe is the bottleneck:** The kernel achieves 5-13 GB/s (competitive with CPU SIMD), but moving results across PCIe negates the advantage.
 
-3. **Insufficient parallelism:** Field boundary detection is a single-pass scan that processes 1 byte → 1 bit. This doesn't have enough arithmetic intensity to justify GPU transfer overhead.
+3. **CPU SIMD is already near optimal:** Highway's 64-byte-at-a-time scanning with boundary caching achieves 1.5 GB/s for full field detection and 7-10 GB/s for row counting. The CLMUL instruction provides 1-2 cycle prefix XOR, matching what CUB does with much less overhead.
 
 ### What would make GPU worthwhile
 

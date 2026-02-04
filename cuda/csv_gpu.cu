@@ -261,6 +261,11 @@ GpuIndexResult gpu_find_field_boundaries(
       d_data, len, d_quote_state, d_line_count);
   CUDA_CHECK(cudaGetLastError());
 
+  // Record event after all kernel work completes
+  if (timings) {
+    cudaEventRecord(ev_kernel);
+  }
+
   {
     uint32_t h_lines = 0;
     CUDA_CHECK(cudaMemcpy(&h_lines, d_line_count, sizeof(uint32_t), cudaMemcpyDeviceToHost));
@@ -275,8 +280,8 @@ GpuIndexResult gpu_find_field_boundaries(
     std::sort(result.positions, result.positions + result.count);
   }
 
+  // Record event after D2H transfers complete
   if (timings) {
-    cudaEventRecord(ev_kernel);
     cudaEventRecord(ev_d2h);
     cudaEventSynchronize(ev_d2h);
 
