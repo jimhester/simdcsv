@@ -107,21 +107,23 @@ std::pair<size_t, bool> parse_chunk_with_state(
   const size_t num_cols = columns.size();
 
   while (offset < size) {
-    // Skip empty lines
-    while (offset < size) {
-      char c = data[offset];
-      if (c == '\n') {
-        offset++;
-        continue;
-      }
-      if (c == '\r') {
-        offset++;
-        if (offset < size && data[offset] == '\n') {
+    // Skip empty lines (when enabled)
+    if (options.skip_empty_rows) {
+      while (offset < size) {
+        char c = data[offset];
+        if (c == '\n') {
           offset++;
+          continue;
         }
-        continue;
+        if (c == '\r') {
+          offset++;
+          if (offset < size && data[offset] == '\n') {
+            offset++;
+          }
+          continue;
+        }
+        break;
       }
-      break;
     }
 
     if (offset >= size)
@@ -1123,21 +1125,23 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
   size_t row_number = impl_->options.has_header ? 2 : 1;
 
   while (offset < size) {
-    // Skip empty lines
-    while (offset < size) {
-      char c = data[offset];
-      if (c == '\n') {
-        offset++;
-        continue;
-      }
-      if (c == '\r') {
-        offset++;
-        if (offset < size && data[offset] == '\n') {
+    // Skip empty lines (when enabled)
+    if (impl_->options.skip_empty_rows) {
+      while (offset < size) {
+        char c = data[offset];
+        if (c == '\n') {
           offset++;
+          continue;
         }
-        continue;
+        if (c == '\r') {
+          offset++;
+          if (offset < size && data[offset] == '\n') {
+            offset++;
+          }
+          continue;
+        }
+        break;
       }
-      break;
     }
 
     if (offset >= size)
