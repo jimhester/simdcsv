@@ -210,21 +210,21 @@ GpuIndexResult gpu_find_field_boundaries(
   }
 
   // Quote state computation
-  CUDA_CHECK(cudaMalloc(&d_quote_flags, len));
   CUDA_CHECK(cudaMalloc(&d_quote_state, len));
 
   if (config.handle_quotes) {
+    CUDA_CHECK(cudaMalloc(&d_quote_flags, len));
+
     build_quote_flags_kernel<<<num_blocks, block_size>>>(
         d_data, len, config.quote_char, d_quote_flags);
     CUDA_CHECK(cudaGetLastError());
 
     size_t cub_temp_bytes = 0;
-    cub::DeviceScan::InclusiveScan(
-        nullptr, cub_temp_bytes, d_quote_flags, d_quote_state, XorOp(), len);
+    CUDA_CHECK(cub::DeviceScan::InclusiveScan(
+        nullptr, cub_temp_bytes, d_quote_flags, d_quote_state, XorOp(), len));
     CUDA_CHECK(cudaMalloc(&d_cub_temp, cub_temp_bytes));
-    cub::DeviceScan::InclusiveScan(
-        d_cub_temp, cub_temp_bytes, d_quote_flags, d_quote_state, XorOp(), len);
-    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cub::DeviceScan::InclusiveScan(
+        d_cub_temp, cub_temp_bytes, d_quote_flags, d_quote_state, XorOp(), len));
   } else {
     CUDA_CHECK(cudaMemset(d_quote_state, 0, len));
   }
