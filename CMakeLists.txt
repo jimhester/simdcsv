@@ -670,6 +670,12 @@ if(BUILD_TESTING)
     target_include_directories(streaming_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     gtest_discover_tests(streaming_test)
 
+    # ParsedChunkQueue tests (Issue #645)
+    add_executable(parsed_chunk_queue_test test/parsed_chunk_queue_test.cpp)
+    target_link_libraries(parsed_chunk_queue_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(parsed_chunk_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(parsed_chunk_queue_test)
+
     # Character encoding detection and transcoding tests (Issue #636)
     add_executable(encoding_test test/encoding_test.cpp)
     target_link_libraries(encoding_test PRIVATE vroom GTest::gtest_main pthread)
