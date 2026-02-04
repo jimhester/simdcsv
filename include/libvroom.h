@@ -44,6 +44,9 @@
 // Streaming parser
 #include "libvroom/streaming.h"
 
+// Parsed chunk queue (for streaming CsvReader API)
+#include "libvroom/parsed_chunk_queue.h"
+
 // Output formats
 #include "libvroom/arrow_ipc_writer.h"
 

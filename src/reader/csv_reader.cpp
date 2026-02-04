@@ -3,6 +3,7 @@
 #include "libvroom/encoding.h"
 #include "libvroom/error.h"
 #include "libvroom/parse_utils.h"
+#include "libvroom/parsed_chunk_queue.h"
 #include "libvroom/split_fields.h"
 #include "libvroom/table.h"
 #include "libvroom/vroom.h"
@@ -248,6 +249,26 @@ struct CsvReader::Impl {
   ErrorCollector error_collector;
   std::string file_path;            // Stored from open() for caching
   EncodingResult detected_encoding; // Character encoding detection result
+
+  // Streaming state
+  std::unique_ptr<ParsedChunkQueue> streaming_queue;
+  std::unique_ptr<BS::thread_pool> streaming_pool;
+  std::vector<ErrorCollector> streaming_error_collectors;
+  std::vector<ChunkAnalysisResult> streaming_analysis;
+  std::vector<bool> streaming_use_inside;
+  std::vector<std::pair<size_t, size_t>> streaming_chunk_ranges;
+  bool streaming_active = false;
+
+  ~Impl() {
+    // Ensure safe shutdown of streaming state:
+    // 1. Close the queue to unblock any producers blocked on push()
+    // 2. Drain the thread pool (waits for detached tasks to finish)
+    // 3. Then remaining members are destroyed in reverse declaration order
+    if (streaming_queue) {
+      streaming_queue->close();
+    }
+    streaming_pool.reset();
+  }
 
   Impl(const CsvOptions& opts) : options(opts), error_collector(opts.error_mode, opts.max_errors) {
     // Use options.num_threads if specified, otherwise auto-detect
@@ -1199,6 +1220,226 @@ done_serial: // Early exit target for should_stop() (FAIL_FAST error mode)
   impl_->row_count = result.total_rows; // Set row count after parsing
   result.chunks.push_back(std::move(columns));
   return Result<ParsedChunks>::success(std::move(result));
+}
+
+// ============================================================================
+// Streaming API implementation
+// ============================================================================
+
+Result<bool> CsvReader::start_streaming() {
+  if (impl_->schema.empty()) {
+    return Result<bool>::failure("No schema - call open() first");
+  }
+  if (impl_->streaming_active) {
+    return Result<bool>::failure("Streaming already started");
+  }
+
+  const char* data = impl_->data_ptr;
+  size_t size = impl_->data_size;
+  size_t data_start = impl_->header_end_offset;
+  size_t data_size = size - data_start;
+
+  // For small files, produce a single chunk via serial parsing
+  constexpr size_t PARALLEL_THRESHOLD = 1024 * 1024; // 1MB
+  if (data_size < PARALLEL_THRESHOLD) {
+    auto serial_result = read_all_serial();
+    if (!serial_result.ok) {
+      return Result<bool>::failure(serial_result.error);
+    }
+    size_t num_chunks = serial_result.value.chunks.size();
+    impl_->streaming_queue = std::make_unique<ParsedChunkQueue>(num_chunks, 4);
+    for (size_t i = 0; i < num_chunks; ++i) {
+      impl_->streaming_queue->push(i, std::move(serial_result.value.chunks[i]));
+    }
+    impl_->streaming_active = true;
+    return Result<bool>::success(true);
+  }
+
+  // Calculate chunk boundaries (same logic as read_all)
+  size_t n_cols = impl_->schema.size();
+  size_t chunk_size = calculate_chunk_size(data_size, n_cols, impl_->num_threads);
+  auto& chunk_ranges = impl_->streaming_chunk_ranges;
+  chunk_ranges.clear();
+  size_t offset = data_start;
+  ChunkFinder finder(impl_->options.separator, impl_->options.quote);
+
+  while (offset < size) {
+    size_t target_end = std::min(offset + chunk_size, size);
+    size_t chunk_end;
+    if (target_end >= size) {
+      chunk_end = size;
+    } else {
+      chunk_end = finder.find_row_end(data, size, target_end);
+      while (chunk_end == target_end && chunk_end < size) {
+        target_end = std::min(target_end + chunk_size, size);
+        chunk_end = finder.find_row_end(data, size, target_end);
+      }
+    }
+    chunk_ranges.emplace_back(offset, chunk_end);
+    offset = chunk_end;
+  }
+
+  size_t num_chunks = chunk_ranges.size();
+  if (num_chunks <= 1) {
+    auto serial_result = read_all_serial();
+    if (!serial_result.ok) {
+      return Result<bool>::failure(serial_result.error);
+    }
+    size_t n = serial_result.value.chunks.size();
+    impl_->streaming_queue = std::make_unique<ParsedChunkQueue>(n, 4);
+    for (size_t i = 0; i < n; ++i) {
+      impl_->streaming_queue->push(i, std::move(serial_result.value.chunks[i]));
+    }
+    impl_->streaming_active = true;
+    return Result<bool>::success(true);
+  }
+
+  // Phase 1: Analyze all chunks (SIMD, parallel)
+  size_t pool_threads = std::min(impl_->num_threads, num_chunks);
+  impl_->streaming_pool = std::make_unique<BS::thread_pool>(pool_threads);
+  auto& pool = *impl_->streaming_pool;
+  const CsvOptions options = impl_->options;
+
+  auto& analysis_results = impl_->streaming_analysis;
+  analysis_results.resize(num_chunks);
+  {
+    std::vector<std::future<void>> futures;
+    futures.reserve(num_chunks);
+    for (size_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+      size_t start_offset = chunk_ranges[chunk_idx].first;
+      size_t end_offset = chunk_ranges[chunk_idx].second;
+      futures.push_back(pool.submit_task(
+          [&analysis_results, data, size, chunk_idx, start_offset, end_offset, options]() {
+            if (start_offset >= size || end_offset > size || start_offset >= end_offset)
+              return;
+            auto stats = analyze_chunk_dual_state_simd(data + start_offset,
+                                                       end_offset - start_offset, options.quote);
+            auto& result = analysis_results[chunk_idx];
+            result.row_count_outside = stats.row_count_outside;
+            result.row_count_inside = stats.row_count_inside;
+            result.ends_inside_starting_outside = stats.ends_inside_quote_from_outside;
+          }));
+    }
+    for (auto& f : futures)
+      f.get();
+  }
+
+  // Phase 2: Link chunks (serial)
+  auto& use_inside_state = impl_->streaming_use_inside;
+  use_inside_state.assign(num_chunks, false);
+  use_inside_state[0] = false;
+  for (size_t i = 1; i < num_chunks; ++i) {
+    bool prev_used_inside = use_inside_state[i - 1];
+    bool prev_ends_inside;
+    if (prev_used_inside) {
+      prev_ends_inside = !analysis_results[i - 1].ends_inside_starting_outside;
+    } else {
+      prev_ends_inside = analysis_results[i - 1].ends_inside_starting_outside;
+    }
+    use_inside_state[i] = prev_ends_inside;
+  }
+
+  // Compute total row count
+  size_t total_row_count = 0;
+  for (size_t i = 0; i < num_chunks; ++i) {
+    total_row_count += use_inside_state[i] ? analysis_results[i].row_count_inside
+                                           : analysis_results[i].row_count_outside;
+  }
+  impl_->row_count = total_row_count;
+
+  // Set up error collectors
+  const bool check_errors = impl_->error_collector.is_enabled();
+  if (check_errors) {
+    impl_->streaming_error_collectors.clear();
+    impl_->streaming_error_collectors.reserve(num_chunks);
+    for (size_t i = 0; i < num_chunks; ++i) {
+      impl_->streaming_error_collectors.emplace_back(impl_->error_collector.mode(),
+                                                     impl_->error_collector.max_errors());
+    }
+  }
+
+  // Create the bounded queue
+  impl_->streaming_queue = std::make_unique<ParsedChunkQueue>(num_chunks, /*max_buffered=*/4);
+
+  // Phase 3: Dispatch parse tasks (fire-and-forget -- they push to queue)
+  const std::vector<ColumnSchema> schema = impl_->schema;
+  auto* queue_ptr = impl_->streaming_queue.get();
+  auto* error_collectors_ptr = check_errors ? &impl_->streaming_error_collectors : nullptr;
+
+  for (size_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+    size_t start_offset = chunk_ranges[chunk_idx].first;
+    size_t end_offset = chunk_ranges[chunk_idx].second;
+    bool start_inside = use_inside_state[chunk_idx];
+    size_t expected_rows = start_inside ? analysis_results[chunk_idx].row_count_inside
+                                        : analysis_results[chunk_idx].row_count_outside;
+    ErrorCollector* chunk_error_collector =
+        check_errors ? &(*error_collectors_ptr)[chunk_idx] : nullptr;
+
+    pool.detach_task([queue_ptr, data, size, chunk_idx, start_offset, end_offset, start_inside,
+                      expected_rows, options, schema, chunk_error_collector]() {
+      if (start_offset >= size || end_offset > size || start_offset >= end_offset) {
+        std::vector<std::unique_ptr<ArrowColumnBuilder>> empty;
+        queue_ptr->push(chunk_idx, std::move(empty));
+        return;
+      }
+
+      NullChecker null_checker(options);
+      std::vector<std::unique_ptr<ArrowColumnBuilder>> columns;
+      for (const auto& col_schema : schema) {
+        auto builder = ArrowColumnBuilder::create(col_schema.type);
+        builder->reserve(expected_rows);
+        columns.push_back(std::move(builder));
+      }
+
+      auto [rows, ends_inside] = parse_chunk_with_state(
+          data + start_offset, end_offset - start_offset, options, null_checker, columns,
+          start_inside, chunk_error_collector, start_offset);
+      (void)ends_inside;
+      (void)rows;
+
+      queue_ptr->push(chunk_idx, std::move(columns));
+    });
+  }
+
+  impl_->streaming_active = true;
+  return Result<bool>::success(true);
+}
+
+std::optional<std::vector<std::unique_ptr<ArrowColumnBuilder>>> CsvReader::next_chunk() {
+  if (!impl_->streaming_active || !impl_->streaming_queue) {
+    return std::nullopt;
+  }
+
+  auto result = impl_->streaming_queue->pop();
+
+  if (!result.has_value()) {
+    // All chunks consumed -- finalize
+    if (impl_->error_collector.is_enabled() && !impl_->streaming_error_collectors.empty()) {
+      size_t num_chunks = impl_->streaming_analysis.size();
+      if (num_chunks > 0) {
+        bool last_used_inside = impl_->streaming_use_inside[num_chunks - 1];
+        bool last_ends_inside =
+            last_used_inside
+                ? !impl_->streaming_analysis[num_chunks - 1].ends_inside_starting_outside
+                : impl_->streaming_analysis[num_chunks - 1].ends_inside_starting_outside;
+        if (last_ends_inside) {
+          size_t last_start = impl_->streaming_chunk_ranges[num_chunks - 1].first;
+          impl_->streaming_error_collectors.back().add_error(
+              ErrorCode::UNCLOSED_QUOTE, ErrorSeverity::RECOVERABLE, 0, 0, last_start,
+              "Quoted field not closed before end of data");
+        }
+      }
+      impl_->error_collector.merge_sorted(impl_->streaming_error_collectors);
+      impl_->streaming_error_collectors.clear();
+    }
+
+    // Wait for thread pool tasks to complete before destroying it
+    impl_->streaming_pool.reset();
+    impl_->streaming_queue.reset();
+    impl_->streaming_active = false;
+  }
+
+  return result;
 }
 
 // Main conversion function
