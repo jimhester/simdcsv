@@ -711,7 +711,7 @@ TEST(VroomOptionsTest, DefaultValues) {
   EXPECT_TRUE(opts.output_path.empty());
   EXPECT_FALSE(opts.verbose);
   EXPECT_FALSE(opts.progress);
-  EXPECT_EQ(opts.csv.separator, ',');
+  EXPECT_EQ(opts.csv.separator, '\0'); // '\0' = auto-detect sentinel
   EXPECT_TRUE(opts.csv.has_header);
 }
 
