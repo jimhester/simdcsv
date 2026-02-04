@@ -717,9 +717,11 @@ target_include_directories(quote_mask_benchmark PRIVATE
 if(ENABLE_GPU)
     add_executable(gpu_benchmark cuda/gpu_benchmark.cpp)
     target_link_libraries(gpu_benchmark PRIVATE
+        vroom
         vroom_gpu
         benchmark::benchmark
         benchmark::benchmark_main
+        pthread
     )
 endif()
 
