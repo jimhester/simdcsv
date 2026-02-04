@@ -28,6 +28,9 @@ option(BUILD_SHARED_LIBS "Build shared library instead of static" OFF)
 option(ENABLE_COVERAGE "Enable code coverage reporting (gcov-compatible)" OFF)
 option(ENABLE_LLVM_COVERAGE "Enable LLVM source-based code coverage (requires Clang)" OFF)
 
+# GPU acceleration (experimental, requires CUDA Toolkit)
+option(ENABLE_GPU "Enable CUDA GPU-accelerated parsing (experimental)" OFF)
+
 # Sanitizer options
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
@@ -482,6 +485,14 @@ target_link_libraries(vroom-cli PRIVATE
 )
 
 # =============================================================================
+# GPU acceleration (optional, requires CUDA Toolkit 11.x+)
+# =============================================================================
+if(ENABLE_GPU)
+    add_subdirectory(cuda)
+    target_link_libraries(vroom PUBLIC vroom_gpu)
+endif()
+
+# =============================================================================
 # Testing (optional, controlled by BUILD_TESTING)
 # =============================================================================
 if(BUILD_TESTING)
@@ -565,6 +576,13 @@ add_executable(dialect_detection_test test/dialect_detection_test.cpp)
 target_link_libraries(dialect_detection_test PRIVATE vroom GTest::gtest_main)
 add_dependencies(dialect_detection_test copy_test_data)
 add_test(NAME dialect_detection_test COMMAND dialect_detection_test)
+
+# GPU parser test (only when ENABLE_GPU is ON)
+if(ENABLE_GPU)
+    add_executable(gpu_parser_test cuda/gpu_parser_test.cpp)
+    target_link_libraries(gpu_parser_test PRIVATE vroom_gpu GTest::gtest_main)
+    gtest_discover_tests(gpu_parser_test)
+endif()
 # add_executable(type_detection_test test/type_detection_test.cpp)
 # add_executable(c_api_test test/c_api_test.cpp)
 # add_executable(debug_test test/debug_test.cpp)
@@ -694,6 +712,16 @@ target_link_libraries(quote_mask_benchmark PRIVATE
 target_include_directories(quote_mask_benchmark PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+# GPU benchmark (only when ENABLE_GPU is ON)
+if(ENABLE_GPU)
+    add_executable(gpu_benchmark cuda/gpu_benchmark.cpp)
+    target_link_libraries(gpu_benchmark PRIVATE
+        vroom_gpu
+        benchmark::benchmark
+        benchmark::benchmark_main
+    )
+endif()
 
 endif() # BUILD_BENCHMARKS
 
