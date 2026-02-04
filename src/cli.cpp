@@ -455,7 +455,27 @@ int cmd_convert(int argc, char* argv[]) {
         cerr << "Error: --delimiter requires a character" << endl;
         return 1;
       }
-      common.delimiter = argv[i][0];
+      string delim_str = argv[i];
+      if (delim_str == "\\t" || delim_str == "tab") {
+        common.delimiter = '\t';
+      } else if (delim_str == "auto") {
+        common.delimiter = '\0';
+      } else if (delim_str == "comma") {
+        common.delimiter = ',';
+      } else if (delim_str == "semicolon") {
+        common.delimiter = ';';
+      } else if (delim_str == "pipe") {
+        common.delimiter = '|';
+      } else if (delim_str == "colon") {
+        common.delimiter = ':';
+      } else if (delim_str.length() == 1) {
+        common.delimiter = delim_str[0];
+      } else {
+        cerr << "Error: --delimiter must be a single character or name (auto, comma, tab, "
+                "semicolon, pipe, colon)"
+             << endl;
+        return 1;
+      }
     } else if (arg == "-q" || arg == "--quote") {
       if (++i >= argc) {
         cerr << "Error: --quote requires a character" << endl;

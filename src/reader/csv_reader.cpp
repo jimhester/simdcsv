@@ -300,6 +300,32 @@ struct CsvReader::Impl {
         num_threads = 4;
     }
   }
+
+  // Auto-detect dialect if separator is the sentinel value ('\0').
+  // Must be called after encoding detection/transcoding sets data_ptr/data_size.
+  void auto_detect_dialect() {
+    if (options.separator != '\0')
+      return;
+
+    DialectDetector detector;
+    auto detected = detector.detect(reinterpret_cast<const uint8_t*>(data_ptr), data_size);
+
+    if (detected.success()) {
+      options.separator = detected.dialect.delimiter;
+      options.quote = detected.dialect.quote_char;
+      // Only override has_header from detection if user didn't explicitly disable it
+      if (options.has_header) {
+        options.has_header = detected.has_header;
+      }
+      if (detected.dialect.comment_char != '\0') {
+        options.comment = detected.dialect.comment_char;
+      }
+      detected_dialect_result = detected;
+    } else {
+      // Fall back to comma if detection fails
+      options.separator = ',';
+    }
+  }
 };
 
 // Skip leading comment lines in the data. Returns offset past all leading comment lines.
@@ -388,28 +414,7 @@ Result<bool> CsvReader::open(const std::string& path) {
     }
   }
 
-  // Auto-detect dialect if separator is the sentinel value
-  if (impl_->options.separator == '\0') {
-    DialectDetector detector;
-    auto detected =
-        detector.detect(reinterpret_cast<const uint8_t*>(impl_->data_ptr), impl_->data_size);
-
-    if (detected.success()) {
-      impl_->options.separator = detected.dialect.delimiter;
-      impl_->options.quote = detected.dialect.quote_char;
-      // Only override has_header from detection if user didn't explicitly disable it
-      if (impl_->options.has_header) {
-        impl_->options.has_header = detected.has_header;
-      }
-      if (detected.dialect.comment_char != '\0') {
-        impl_->options.comment = detected.dialect.comment_char;
-      }
-      impl_->detected_dialect_result = detected;
-    } else {
-      // Fall back to comma if detection fails
-      impl_->options.separator = ',';
-    }
-  }
+  impl_->auto_detect_dialect();
 
   const char* data = impl_->data_ptr;
   size_t size = impl_->data_size;
@@ -566,27 +571,7 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
   }
 
   // Auto-detect dialect if separator is the sentinel value
-  if (impl_->options.separator == '\0') {
-    DialectDetector detector;
-    auto detected =
-        detector.detect(reinterpret_cast<const uint8_t*>(impl_->data_ptr), impl_->data_size);
-
-    if (detected.success()) {
-      impl_->options.separator = detected.dialect.delimiter;
-      impl_->options.quote = detected.dialect.quote_char;
-      // Only override has_header from detection if user didn't explicitly disable it
-      if (impl_->options.has_header) {
-        impl_->options.has_header = detected.has_header;
-      }
-      if (detected.dialect.comment_char != '\0') {
-        impl_->options.comment = detected.dialect.comment_char;
-      }
-      impl_->detected_dialect_result = detected;
-    } else {
-      // Fall back to comma if detection fails
-      impl_->options.separator = ',';
-    }
-  }
+  impl_->auto_detect_dialect();
 
   const char* data = impl_->data_ptr;
   size_t size = impl_->data_size;
