@@ -238,6 +238,11 @@ COMMON OPTIONS:
 SELECT OPTIONS:
     -c, --columns <COLS>     Comma-separated column names or indices
 
+INDEX CACHING:
+    --cache                  Enable index caching (stores .vidx next to source)
+    --cache-dir <PATH>       Store cache files in specified directory
+    --no-cache               Disable caching (default behavior)
+
 ERROR HANDLING:
     --strict                 Stop on first error
     --permissive             Collect all errors, continue parsing
@@ -271,7 +276,24 @@ struct CommonOptions {
   libvroom::ErrorMode error_mode = libvroom::ErrorMode::DISABLED;
   size_t max_errors = libvroom::ErrorCollector::DEFAULT_MAX_ERRORS;
   string columns; // For select command
+
+  // Index caching
+  bool enable_cache = false;
+  string cache_dir;      // Non-empty = CUSTOM mode
+  bool no_cache = false; // Explicitly disable caching
 };
+
+// Apply cache configuration from CommonOptions to CsvOptions
+static void applyCacheConfig(libvroom::CsvOptions& csv_opts, const CommonOptions& opts) {
+  if (opts.no_cache || !opts.enable_cache)
+    return;
+
+  if (!opts.cache_dir.empty()) {
+    csv_opts.cache = libvroom::CacheConfig::custom(opts.cache_dir);
+  } else {
+    csv_opts.cache = libvroom::CacheConfig::defaults();
+  }
+}
 
 // Parse common options, returns index of first unparsed argument
 static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int start_idx = 1) {
@@ -345,6 +367,18 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
         return -1;
       }
       opts.columns = argv[i];
+    } else if (arg == "--cache") {
+      opts.enable_cache = true;
+    } else if (arg == "--cache-dir") {
+      if (++i >= argc) {
+        cerr << "Error: --cache-dir requires a path" << endl;
+        return -1;
+      }
+      opts.cache_dir = argv[i];
+      opts.enable_cache = true;
+    } else if (arg == "--no-cache") {
+      opts.no_cache = true;
+      opts.enable_cache = false;
     } else if (arg == "-h" || arg == "--help") {
       print_usage();
       exit(0);
@@ -427,6 +461,18 @@ int cmd_convert(int argc, char* argv[]) {
       common.show_progress = true;
     } else if (arg == "-v" || arg == "--verbose") {
       common.verbose = true;
+    } else if (arg == "--cache") {
+      common.enable_cache = true;
+    } else if (arg == "--cache-dir") {
+      if (++i >= argc) {
+        cerr << "Error: --cache-dir requires a path" << endl;
+        return 1;
+      }
+      common.cache_dir = argv[i];
+      common.enable_cache = true;
+    } else if (arg == "--no-cache") {
+      common.no_cache = true;
+      common.enable_cache = false;
     } else if (arg == "-h" || arg == "--help") {
       print_usage();
       return 0;
@@ -469,6 +515,7 @@ int cmd_convert(int argc, char* argv[]) {
     opts.csv.num_threads = common.num_threads;
     opts.threads.num_threads = common.num_threads;
   }
+  applyCacheConfig(opts.csv, common);
 
   // Parquet options
   opts.parquet.row_group_size = row_group_size;
@@ -567,6 +614,7 @@ int cmd_count(int argc, char* argv[]) {
   if (opts.num_threads > 0) {
     csv_opts.num_threads = opts.num_threads;
   }
+  applyCacheConfig(csv_opts, opts);
 
   libvroom::CsvReader reader(csv_opts);
   libvroom::Result<bool> open_result;
@@ -638,6 +686,7 @@ int cmd_head(int argc, char* argv[]) {
   if (opts.num_threads > 0) {
     csv_opts.num_threads = opts.num_threads;
   }
+  applyCacheConfig(csv_opts, opts);
 
   libvroom::CsvReader reader(csv_opts);
   libvroom::Result<bool> open_result;
@@ -739,6 +788,7 @@ int cmd_info(int argc, char* argv[]) {
   if (opts.num_threads > 0) {
     csv_opts.num_threads = opts.num_threads;
   }
+  applyCacheConfig(csv_opts, opts);
 
   libvroom::CsvReader reader(csv_opts);
   libvroom::Result<bool> open_result;
@@ -861,6 +911,7 @@ int cmd_select(int argc, char* argv[]) {
   if (opts.num_threads > 0) {
     csv_opts.num_threads = opts.num_threads;
   }
+  applyCacheConfig(csv_opts, opts);
 
   libvroom::CsvReader reader(csv_opts);
   libvroom::Result<bool> open_result;
@@ -997,6 +1048,7 @@ int cmd_pretty(int argc, char* argv[]) {
   if (opts.num_threads > 0) {
     csv_opts.num_threads = opts.num_threads;
   }
+  applyCacheConfig(csv_opts, opts);
 
   libvroom::CsvReader reader(csv_opts);
   libvroom::Result<bool> open_result;
