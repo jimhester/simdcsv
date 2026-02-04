@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <unordered_set>
@@ -132,6 +133,16 @@ public:
   // Returns ParsedChunks with one vector of ArrowColumnBuilders per chunk
   // Each chunk can be written as a separate Parquet row group
   Result<ParsedChunks> read_all();
+
+  // Streaming API: parse chunks on background threads, consume one at a time.
+  // Call open() first, then start_streaming() to begin, then next_chunk() in a loop.
+  // start_streaming() runs SIMD analysis (phases 1-2) synchronously, then
+  // dispatches chunk parsing to the thread pool.
+  Result<bool> start_streaming();
+
+  // Returns the next parsed chunk in order, or nullopt when all chunks are consumed.
+  // Blocks if the next sequential chunk hasn't finished parsing yet.
+  std::optional<std::vector<std::unique_ptr<ArrowColumnBuilder>>> next_chunk();
 
   // Get total number of rows (only valid after read_all() is called)
   size_t row_count() const;
