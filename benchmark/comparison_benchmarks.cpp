@@ -190,13 +190,11 @@ BENCHMARK(BM_parsing_approaches_quoted)
 // Memory bandwidth benchmark
 static void BM_memory_bandwidth(benchmark::State& state) {
   size_t size = static_cast<size_t>(state.range(0));
-  void* raw = nullptr;
-  int rc = posix_memalign(&raw, 64, size);
-  if (rc != 0 || !raw) {
+  auto* data = static_cast<char*>(libvroom::aligned_alloc_portable(size));
+  if (!data) {
     state.SkipWithError("Failed to allocate aligned memory");
     return;
   }
-  auto data = static_cast<char*>(raw);
 
   // Initialize data
   for (size_t i = 0; i < size; ++i) {
@@ -215,7 +213,7 @@ static void BM_memory_bandwidth(benchmark::State& state) {
 
   // Google Benchmark calculates throughput automatically
 
-  std::free(data);
+  libvroom::aligned_free_portable(data);
 }
 BENCHMARK(BM_memory_bandwidth)
     ->Range(1024, 1024 * 1024 * 100) // 1KB to 100MB

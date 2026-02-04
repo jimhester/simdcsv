@@ -361,15 +361,11 @@ static void transpose_nontemporal_store(const uint64_t* row_major, uint64_t* col
 #endif // __x86_64__
 
 // =============================================================================
-// Helper: posix_memalign-based allocation
+// Helper: portable aligned allocation for uint64_t arrays
 // =============================================================================
 
 static uint64_t* alloc_aligned_u64(size_t count) {
-  void* raw = nullptr;
-  int rc = posix_memalign(&raw, 64, count * sizeof(uint64_t));
-  if (rc != 0)
-    return nullptr;
-  return static_cast<uint64_t*>(raw);
+  return static_cast<uint64_t*>(libvroom::aligned_alloc_portable(count * sizeof(uint64_t)));
 }
 
 // =============================================================================
@@ -392,8 +388,8 @@ static void BM_TransposeSingleThreaded(benchmark::State& state) {
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    std::free(row_major);
-    std::free(col_major);
+    libvroom::aligned_free_portable(row_major);
+    libvroom::aligned_free_portable(col_major);
     return;
   }
 
@@ -419,8 +415,8 @@ static void BM_TransposeSingleThreaded(benchmark::State& state) {
   state.counters["MemoryMB"] =
       static_cast<double>(total_elements * sizeof(uint64_t) * 2) / (1024.0 * 1024.0);
 
-  std::free(row_major);
-  std::free(col_major);
+  libvroom::aligned_free_portable(row_major);
+  libvroom::aligned_free_portable(col_major);
 }
 
 /**
@@ -439,8 +435,8 @@ static void BM_TransposeMultiThreaded(benchmark::State& state) {
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    std::free(row_major);
-    std::free(col_major);
+    libvroom::aligned_free_portable(row_major);
+    libvroom::aligned_free_portable(col_major);
     return;
   }
 
@@ -463,8 +459,8 @@ static void BM_TransposeMultiThreaded(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  std::free(row_major);
-  std::free(col_major);
+  libvroom::aligned_free_portable(row_major);
+  libvroom::aligned_free_portable(col_major);
 }
 
 /**
@@ -482,8 +478,8 @@ static void BM_TransposeBlocked(benchmark::State& state) {
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    std::free(row_major);
-    std::free(col_major);
+    libvroom::aligned_free_portable(row_major);
+    libvroom::aligned_free_portable(col_major);
     return;
   }
 
@@ -505,8 +501,8 @@ static void BM_TransposeBlocked(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  std::free(row_major);
-  std::free(col_major);
+  libvroom::aligned_free_portable(row_major);
+  libvroom::aligned_free_portable(col_major);
 }
 
 /**
@@ -525,8 +521,8 @@ static void BM_TransposeBlockedMultiThreaded(benchmark::State& state) {
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    std::free(row_major);
-    std::free(col_major);
+    libvroom::aligned_free_portable(row_major);
+    libvroom::aligned_free_portable(col_major);
     return;
   }
 
@@ -549,8 +545,8 @@ static void BM_TransposeBlockedMultiThreaded(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  std::free(row_major);
-  std::free(col_major);
+  libvroom::aligned_free_portable(row_major);
+  libvroom::aligned_free_portable(col_major);
 }
 
 /**
@@ -572,8 +568,8 @@ static void BM_TransposeScaling(benchmark::State& state) {
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    std::free(row_major);
-    std::free(col_major);
+    libvroom::aligned_free_portable(row_major);
+    libvroom::aligned_free_portable(col_major);
     return;
   }
 
@@ -617,8 +613,8 @@ static void BM_TransposeScaling(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  std::free(row_major);
-  std::free(col_major);
+  libvroom::aligned_free_portable(row_major);
+  libvroom::aligned_free_portable(col_major);
 }
 
 // =============================================================================
@@ -899,8 +895,8 @@ static void BM_TransposeSIMD(benchmark::State& state) {
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    std::free(row_major);
-    std::free(col_major);
+    libvroom::aligned_free_portable(row_major);
+    libvroom::aligned_free_portable(col_major);
     return;
   }
 
@@ -959,8 +955,8 @@ static void BM_TransposeSIMD(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  std::free(row_major);
-  std::free(col_major);
+  libvroom::aligned_free_portable(row_major);
+  libvroom::aligned_free_portable(col_major);
 }
 
 // SIMD method comparison at key sizes
@@ -1018,8 +1014,8 @@ static void BM_TransposeSIMD_MT(benchmark::State& state) {
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    std::free(row_major);
-    std::free(col_major);
+    libvroom::aligned_free_portable(row_major);
+    libvroom::aligned_free_portable(col_major);
     return;
   }
 
@@ -1065,8 +1061,8 @@ static void BM_TransposeSIMD_MT(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  std::free(row_major);
-  std::free(col_major);
+  libvroom::aligned_free_portable(row_major);
+  libvroom::aligned_free_portable(col_major);
 }
 
 // Multi-threaded comparison

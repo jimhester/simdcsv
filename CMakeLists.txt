@@ -618,6 +618,13 @@ if(BUILD_TESTING)
     add_dependencies(io_util_test copy_test_data)
     gtest_discover_tests(io_util_test WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
+    # MmapSource tests (memory-mapped file I/O)
+    add_executable(mmap_source_test test/mmap_source_test.cpp)
+    target_link_libraries(mmap_source_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(mmap_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_dependencies(mmap_source_test copy_test_data)
+    gtest_discover_tests(mmap_source_test WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
     # CLI integration tests (tests the vroom command-line tool)
     add_executable(cli_test test/cli_test.cpp)
     target_link_libraries(cli_test PRIVATE GTest::gtest_main)
