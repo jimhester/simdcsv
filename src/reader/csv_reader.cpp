@@ -1,5 +1,6 @@
 #include "libvroom/arrow_column_builder.h"
 #include "libvroom/cache.h"
+#include "libvroom/encoding.h"
 #include "libvroom/error.h"
 #include "libvroom/parse_utils.h"
 #include "libvroom/split_fields.h"
@@ -245,7 +246,8 @@ struct CsvReader::Impl {
   size_t num_threads = 0;
   bool file_has_quotes = false; // Detected during sampling
   ErrorCollector error_collector;
-  std::string file_path; // Stored from open() for caching
+  std::string file_path;            // Stored from open() for caching
+  EncodingResult detected_encoding; // Character encoding detection result
 
   Impl(const CsvOptions& opts) : options(opts), error_collector(opts.error_mode, opts.max_errors) {
     // Use options.num_threads if specified, otherwise auto-detect
@@ -275,12 +277,47 @@ Result<bool> CsvReader::open(const std::string& path) {
   impl_->data_ptr = impl_->source.data();
   impl_->data_size = impl_->source.size();
 
-  const char* data = impl_->data_ptr;
-  size_t size = impl_->data_size;
-
-  if (size == 0) {
+  if (impl_->data_size == 0) {
     return Result<bool>::failure("Empty file");
   }
+
+  // Detect encoding and transcode if needed
+  {
+    const auto* raw = reinterpret_cast<const uint8_t*>(impl_->data_ptr);
+    size_t raw_size = impl_->data_size;
+
+    if (impl_->options.encoding.has_value()) {
+      // User-specified encoding
+      impl_->detected_encoding.encoding = *impl_->options.encoding;
+      // Detect BOM even when encoding is forced
+      auto bom_result = detect_encoding(raw, raw_size);
+      if (bom_result.encoding == *impl_->options.encoding ||
+          (*impl_->options.encoding == CharEncoding::UTF8 &&
+           bom_result.encoding == CharEncoding::UTF8_BOM)) {
+        impl_->detected_encoding.bom_length = bom_result.bom_length;
+      }
+      impl_->detected_encoding.confidence = 1.0;
+      impl_->detected_encoding.needs_transcoding =
+          (*impl_->options.encoding != CharEncoding::UTF8 &&
+           *impl_->options.encoding != CharEncoding::UTF8_BOM);
+    } else {
+      impl_->detected_encoding = detect_encoding(raw, raw_size);
+    }
+
+    if (impl_->detected_encoding.needs_transcoding) {
+      impl_->owned_buffer = transcode_to_utf8(raw, raw_size, impl_->detected_encoding.encoding,
+                                              impl_->detected_encoding.bom_length);
+      impl_->data_ptr = reinterpret_cast<const char*>(impl_->owned_buffer.data());
+      impl_->data_size = impl_->owned_buffer.size();
+    } else if (impl_->detected_encoding.bom_length > 0) {
+      // UTF-8 BOM: skip past BOM bytes (no allocation/copy)
+      impl_->data_ptr += impl_->detected_encoding.bom_length;
+      impl_->data_size -= impl_->detected_encoding.bom_length;
+    }
+  }
+
+  const char* data = impl_->data_ptr;
+  size_t size = impl_->data_size;
 
   ChunkFinder finder(impl_->options.separator, impl_->options.quote);
   LineParser parser(impl_->options);
@@ -383,12 +420,46 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
   impl_->data_ptr = reinterpret_cast<const char*>(impl_->owned_buffer.data());
   impl_->data_size = impl_->owned_buffer.size();
 
-  const char* data = impl_->data_ptr;
-  size_t size = impl_->data_size;
-
-  if (size == 0) {
+  if (impl_->data_size == 0) {
     return Result<bool>::failure("Empty file");
   }
+
+  // Detect encoding and transcode if needed
+  {
+    const auto* raw = reinterpret_cast<const uint8_t*>(impl_->data_ptr);
+    size_t raw_size = impl_->data_size;
+
+    if (impl_->options.encoding.has_value()) {
+      impl_->detected_encoding.encoding = *impl_->options.encoding;
+      auto bom_result = detect_encoding(raw, raw_size);
+      if (bom_result.encoding == *impl_->options.encoding ||
+          (*impl_->options.encoding == CharEncoding::UTF8 &&
+           bom_result.encoding == CharEncoding::UTF8_BOM)) {
+        impl_->detected_encoding.bom_length = bom_result.bom_length;
+      }
+      impl_->detected_encoding.confidence = 1.0;
+      impl_->detected_encoding.needs_transcoding =
+          (*impl_->options.encoding != CharEncoding::UTF8 &&
+           *impl_->options.encoding != CharEncoding::UTF8_BOM);
+    } else {
+      impl_->detected_encoding = detect_encoding(raw, raw_size);
+    }
+
+    if (impl_->detected_encoding.needs_transcoding) {
+      // Transcode into a new buffer, replacing the owned buffer
+      AlignedBuffer transcoded = transcode_to_utf8(raw, raw_size, impl_->detected_encoding.encoding,
+                                                   impl_->detected_encoding.bom_length);
+      impl_->owned_buffer = std::move(transcoded);
+      impl_->data_ptr = reinterpret_cast<const char*>(impl_->owned_buffer.data());
+      impl_->data_size = impl_->owned_buffer.size();
+    } else if (impl_->detected_encoding.bom_length > 0) {
+      impl_->data_ptr += impl_->detected_encoding.bom_length;
+      impl_->data_size -= impl_->detected_encoding.bom_length;
+    }
+  }
+
+  const char* data = impl_->data_ptr;
+  size_t size = impl_->data_size;
 
   ChunkFinder finder(impl_->options.separator, impl_->options.quote);
   LineParser parser(impl_->options);
@@ -484,6 +555,10 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
 
 const std::vector<ColumnSchema>& CsvReader::schema() const {
   return impl_->schema;
+}
+
+const EncodingResult& CsvReader::encoding() const {
+  return impl_->detected_encoding;
 }
 
 size_t CsvReader::row_count() const {

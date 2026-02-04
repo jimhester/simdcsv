@@ -136,6 +136,9 @@ public:
   // Get total number of rows (only valid after read_all() is called)
   size_t row_count() const;
 
+  // Get detected encoding (valid after open/open_from_buffer)
+  const EncodingResult& encoding() const;
+
   // Get collected errors (only populated when error_mode != DISABLED)
   const std::vector<ParseError>& errors() const;
 

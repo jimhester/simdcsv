@@ -20,6 +20,7 @@
 #include "libvroom/common_defs.h"
 #include "libvroom/dialect.h"
 #include "libvroom/elias_fano.h"
+#include "libvroom/encoding.h"
 #include "libvroom/error.h"
 #include "libvroom/io_util.h"
 #include "libvroom/options.h"

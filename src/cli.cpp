@@ -230,6 +230,8 @@ COMMON OPTIONS:
     -j, --threads <N>        Number of threads (default: auto)
     -d, --delimiter <CHAR>   Field delimiter (default: ,)
     -q, --quote <CHAR>       Quote character (default: ")
+    -e, --encoding <ENC>     Force encoding (utf-8, utf-16le, utf-16be,
+                             utf-32le, utf-32be, latin1, windows-1252)
     --no-header              CSV has no header row
     -p, --progress           Show progress bar
     -v, --verbose            Verbose output
@@ -275,7 +277,8 @@ struct CommonOptions {
   bool verbose = false;
   libvroom::ErrorMode error_mode = libvroom::ErrorMode::DISABLED;
   size_t max_errors = libvroom::ErrorCollector::DEFAULT_MAX_ERRORS;
-  string columns; // For select command
+  string columns;                                 // For select command
+  std::optional<libvroom::CharEncoding> encoding; // Character encoding override
 
   // Index caching
   bool enable_cache = false;
@@ -342,6 +345,19 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
         return -1;
       }
       opts.quote = argv[i][0];
+    } else if (arg == "-e" || arg == "--encoding") {
+      if (++i >= argc) {
+        cerr << "Error: --encoding requires an encoding name" << endl;
+        return -1;
+      }
+      auto enc = libvroom::parse_encoding_name(argv[i]);
+      if (enc == libvroom::CharEncoding::UNKNOWN) {
+        cerr << "Error: Unknown encoding '" << argv[i]
+             << "'. Use: utf-8, utf-16le, utf-16be, utf-32le, utf-32be, latin1, windows-1252"
+             << endl;
+        return -1;
+      }
+      opts.encoding = enc;
     } else if (arg == "--no-header" || arg == "-H") {
       opts.has_header = false;
     } else if (arg == "-p" || arg == "--progress") {
@@ -442,6 +458,19 @@ int cmd_convert(int argc, char* argv[]) {
         return 1;
       }
       common.quote = argv[i][0];
+    } else if (arg == "-e" || arg == "--encoding") {
+      if (++i >= argc) {
+        cerr << "Error: --encoding requires an encoding name" << endl;
+        return 1;
+      }
+      auto enc = libvroom::parse_encoding_name(argv[i]);
+      if (enc == libvroom::CharEncoding::UNKNOWN) {
+        cerr << "Error: Unknown encoding '" << argv[i]
+             << "'. Use: utf-8, utf-16le, utf-16be, utf-32le, utf-32be, latin1, windows-1252"
+             << endl;
+        return 1;
+      }
+      common.encoding = enc;
     } else if (arg == "--no-header") {
       common.has_header = false;
     } else if (arg == "--strict") {
@@ -511,6 +540,7 @@ int cmd_convert(int argc, char* argv[]) {
   opts.csv.has_header = common.has_header;
   opts.csv.error_mode = common.error_mode;
   opts.csv.max_errors = common.max_errors;
+  opts.csv.encoding = common.encoding;
   if (common.num_threads > 0) {
     opts.csv.num_threads = common.num_threads;
     opts.threads.num_threads = common.num_threads;
@@ -611,6 +641,7 @@ int cmd_count(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
+  csv_opts.encoding = opts.encoding;
   if (opts.num_threads > 0) {
     csv_opts.num_threads = opts.num_threads;
   }
@@ -683,6 +714,7 @@ int cmd_head(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
+  csv_opts.encoding = opts.encoding;
   if (opts.num_threads > 0) {
     csv_opts.num_threads = opts.num_threads;
   }
@@ -785,6 +817,7 @@ int cmd_info(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
+  csv_opts.encoding = opts.encoding;
   if (opts.num_threads > 0) {
     csv_opts.num_threads = opts.num_threads;
   }
@@ -865,6 +898,7 @@ int cmd_info(int argc, char* argv[]) {
 
   cout << "Dialect: delimiter=" << formatDelimiter(opts.delimiter)
        << ", quote=" << (opts.quote == '"' ? "double-quote" : string(1, opts.quote)) << '\n';
+  cout << "Encoding: " << libvroom::encoding_to_string(reader.encoding().encoding) << '\n';
   cout << "Rows: " << row_count << '\n';
   cout << "Columns: " << col_count << '\n';
 
@@ -908,6 +942,7 @@ int cmd_select(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
+  csv_opts.encoding = opts.encoding;
   if (opts.num_threads > 0) {
     csv_opts.num_threads = opts.num_threads;
   }
@@ -1045,6 +1080,7 @@ int cmd_pretty(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
+  csv_opts.encoding = opts.encoding;
   if (opts.num_threads > 0) {
     csv_opts.num_threads = opts.num_threads;
   }

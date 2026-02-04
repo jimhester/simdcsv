@@ -390,6 +390,7 @@ endif()
 
 # Library target (SHARED or STATIC based on BUILD_SHARED_LIBS)
 set(VROOM_SOURCES
+    src/encoding.cpp
     src/error.cpp
     src/io_util.cpp
     src/dialect.cpp
@@ -668,6 +669,13 @@ if(BUILD_TESTING)
     target_link_libraries(streaming_test PRIVATE vroom GTest::gtest_main pthread)
     target_include_directories(streaming_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     gtest_discover_tests(streaming_test)
+
+    # Character encoding detection and transcoding tests (Issue #636)
+    add_executable(encoding_test test/encoding_test.cpp)
+    target_link_libraries(encoding_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(encoding_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_dependencies(encoding_test copy_test_data)
+    gtest_discover_tests(encoding_test)
 
 endif() # BUILD_TESTING
 
