@@ -191,21 +191,20 @@ Automatically detects performance regressions on every push and PR.
 **How it Works:**
 1. Builds the benchmark executable in Release mode
 2. Runs a subset of benchmarks from `parser_overhead_benchmarks.cpp`:
-   - `BM_RawFirstPass` - Raw SIMD first pass scanning performance
-   - `BM_RawTwoPassComplete` - Complete two-pass index building
-   - `BM_ParserWithExplicitDialect` - Full parser overhead with known dialect
-   - `BM_ParserBranchless` - Branchless algorithm variant
-   - `BM_ParserSpeculative` - Speculative multi-threaded algorithm
-   - `BM_ParserMultiThread/1` - Single-threaded parser
-   - `BM_ParserMultiThread/4` - Multi-threaded parser (4 threads)
-3. Compares results against a cached baseline (from main branch)
-4. Fails if any benchmark regresses by more than 10%
+   - `BM_CountRows` - SIMD row counting throughput
+   - `BM_CsvReaderExplicit` - Full CsvReader pipeline with explicit dialect
+   - `BM_CsvReaderAutoDetect` - Full CsvReader pipeline with auto-detection
+   - `BM_CsvReaderMultiThread/1` - Single-threaded CsvReader
+   - `BM_CsvReaderMultiThread/4` - Multi-threaded CsvReader (4 threads)
+   - `BM_CsvReaderMultiThread/8` - Multi-threaded CsvReader (8 threads)
+3. Runs HEAD and BASE benchmarks in the same job for reliable comparison
+4. Fails if any benchmark regresses by more than 15%
 
 **Baseline Management:**
-- Baseline is cached per-OS with a version key (e.g., `benchmark-baseline-v3-Linux-main`)
-- On main branch pushes, the baseline is updated with current results
-- PRs compare against the cached main branch baseline
-- If benchmark names change, increment the cache version in `benchmark.yml`
+- Uses same-job relative benchmarking: HEAD and BASE are both built and run in the same CI job
+- For PRs, BASE is the PR base commit; for pushes to main, BASE is the parent commit
+- CPU affinity (`taskset -c 0`) and scheduling priority (`nice -n -5`) reduce variance
+- Each benchmark runs with 5 repetitions and minimum 0.5s per iteration
 
 **Cache Key Versioning:**
 If you rename benchmarks or change benchmark methodology, you need to reset the baseline:

@@ -1,7 +1,5 @@
 #include "libvroom.h"
 
-#include "common_defs.h"
-
 #include <benchmark/benchmark.h>
 
 // Global variables for shared test data

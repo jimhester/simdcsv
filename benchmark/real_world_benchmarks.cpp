@@ -1,8 +1,5 @@
 #include "libvroom.h"
 
-#include "common_defs.h"
-#include "mem_util.h"
-
 #include <algorithm>
 #include <benchmark/benchmark.h>
 #include <fstream>
@@ -222,26 +219,22 @@ static void BM_financial_data(benchmark::State& state) {
   size_t num_rows = static_cast<size_t>(state.range(0));
   auto data_str = CSVDataGenerator::generate_financial_data(num_rows);
   TempFile temp_file(data_str);
+  size_t file_size = data_str.size();
 
   try {
-    auto buffer = libvroom::load_file_to_ptr(temp_file.path(), LIBVROOM_PADDING);
-    if (!buffer) {
-      state.SkipWithError("Failed to load temp file");
-      return;
-    }
-
-    libvroom::Parser parser(4);
-    // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
-    libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
+    libvroom::CsvOptions opts;
+    opts.num_threads = 4;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size, opts);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_file.path());
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
-    state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+    state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
     state.counters["Rows"] = static_cast<double>(num_rows);
-    state.counters["FileSize"] = static_cast<double>(buffer.size);
+    state.counters["FileSize"] = static_cast<double>(file_size);
 
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
@@ -257,26 +250,22 @@ static void BM_nyc_taxi_data(benchmark::State& state) {
   size_t num_rows = static_cast<size_t>(state.range(0));
   auto data_str = CSVDataGenerator::generate_nyc_taxi_data(num_rows);
   TempFile temp_file(data_str);
+  size_t file_size = data_str.size();
 
   try {
-    auto buffer = libvroom::load_file_to_ptr(temp_file.path(), LIBVROOM_PADDING);
-    if (!buffer) {
-      state.SkipWithError("Failed to load temp file");
-      return;
-    }
-
-    libvroom::Parser parser(4);
-    // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
-    libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
+    libvroom::CsvOptions opts;
+    opts.num_threads = 4;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size, opts);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_file.path());
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
-    state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+    state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
     state.counters["Rows"] = static_cast<double>(num_rows);
-    state.counters["FileSize"] = static_cast<double>(buffer.size);
+    state.counters["FileSize"] = static_cast<double>(file_size);
     state.counters["Columns"] = 19.0; // NYC taxi has 19 columns
 
   } catch (const std::exception& e) {
@@ -292,26 +281,22 @@ static void BM_genomics_data(benchmark::State& state) {
   size_t num_rows = static_cast<size_t>(state.range(0));
   auto data_str = CSVDataGenerator::generate_genomics_data(num_rows);
   TempFile temp_file(data_str);
+  size_t file_size = data_str.size();
 
   try {
-    auto buffer = libvroom::load_file_to_ptr(temp_file.path(), LIBVROOM_PADDING);
-    if (!buffer) {
-      state.SkipWithError("Failed to load temp file");
-      return;
-    }
-
-    libvroom::Parser parser(4);
-    // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
-    libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
+    libvroom::CsvOptions opts;
+    opts.num_threads = 4;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size, opts);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_file.path());
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
-    state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+    state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
     state.counters["Rows"] = static_cast<double>(num_rows);
-    state.counters["FileSize"] = static_cast<double>(buffer.size);
+    state.counters["FileSize"] = static_cast<double>(file_size);
 
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
@@ -326,26 +311,22 @@ static void BM_log_data(benchmark::State& state) {
   size_t num_rows = static_cast<size_t>(state.range(0));
   auto data_str = CSVDataGenerator::generate_log_data(num_rows);
   TempFile temp_file(data_str);
+  size_t file_size = data_str.size();
 
   try {
-    auto buffer = libvroom::load_file_to_ptr(temp_file.path(), LIBVROOM_PADDING);
-    if (!buffer) {
-      state.SkipWithError("Failed to load temp file");
-      return;
-    }
-
-    libvroom::Parser parser(4);
-    // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
-    libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
+    libvroom::CsvOptions opts;
+    opts.num_threads = 4;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size, opts);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_file.path());
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
-    state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+    state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
     state.counters["Rows"] = static_cast<double>(num_rows);
-    state.counters["FileSize"] = static_cast<double>(buffer.size);
+    state.counters["FileSize"] = static_cast<double>(file_size);
 
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
@@ -358,27 +339,23 @@ static void BM_wide_table(benchmark::State& state) {
   size_t num_cols = static_cast<size_t>(state.range(1));
   auto data_str = CSVDataGenerator::generate_wide_table(num_rows, num_cols);
   TempFile temp_file(data_str);
+  size_t file_size = data_str.size();
 
   try {
-    auto buffer = libvroom::load_file_to_ptr(temp_file.path(), LIBVROOM_PADDING);
-    if (!buffer) {
-      state.SkipWithError("Failed to load temp file");
-      return;
-    }
-
-    libvroom::Parser parser(4);
-    // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
-    libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
+    libvroom::CsvOptions opts;
+    opts.num_threads = 4;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size, opts);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_file.path());
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
-    state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+    state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["Cols"] = static_cast<double>(num_cols);
-    state.counters["FileSize"] = static_cast<double>(buffer.size);
+    state.counters["FileSize"] = static_cast<double>(file_size);
 
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
@@ -390,8 +367,7 @@ BENCHMARK(BM_wide_table)
 
 // SIMD instruction level benchmarks
 static void BM_simd_levels(benchmark::State& state) {
-  // This would require modifying the parser to expose SIMD level selection
-  // For now, we'll benchmark the default parser
+  // Benchmark the default parser on a test file
   std::string filename = "test/data/basic/many_rows.csv";
 
   if (test_data.find(filename) == test_data.end()) {
@@ -409,16 +385,17 @@ static void BM_simd_levels(benchmark::State& state) {
   }
 
   const auto& buffer = test_data.at(filename);
-  libvroom::Parser parser(1);
-  // Use explicit CSV dialect to avoid auto-detection overhead in benchmarks
-  libvroom::ParseOptions opts{.dialect = libvroom::Dialect::csv()};
+  libvroom::CsvOptions opts;
+  opts.num_threads = 1;
 
   for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size, opts);
+    libvroom::CsvReader reader(opts);
+    reader.open(filename);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+  state.SetBytesProcessed(static_cast<int64_t>(buffer.size() * state.iterations()));
   state.counters["SIMD"] = 1.0; // Default SIMD level
 }
 BENCHMARK(BM_simd_levels)->Unit(benchmark::kMillisecond);

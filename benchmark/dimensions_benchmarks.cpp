@@ -1,8 +1,5 @@
 #include "libvroom.h"
 
-#include "common_defs.h"
-#include "mem_util.h"
-
 #include <benchmark/benchmark.h>
 #include <fstream>
 #include <iomanip>
@@ -98,23 +95,21 @@ static void BM_FileSizes(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
 
   try {
-    auto buffer = libvroom::load_file_to_ptr(temp_file.path(), LIBVROOM_PADDING);
-    if (!buffer) {
-      state.SkipWithError("Failed to load temp file");
-      return;
-    }
+    size_t file_size = csv_data.size();
 
-    int n_threads = 4;
-    libvroom::Parser parser(n_threads);
+    libvroom::CsvOptions opts;
+    opts.num_threads = 4;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_file.path());
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
     // Performance metrics
-    state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-    state.counters["ActualSize"] = static_cast<double>(buffer.size);
+    state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
+    state.counters["ActualSize"] = static_cast<double>(file_size);
     state.counters["TargetSize"] = static_cast<double>(target_size);
     state.counters["Rows"] = static_cast<double>(estimated_rows);
     state.counters["Cols"] = static_cast<double>(cols);
@@ -138,23 +133,21 @@ static void BM_ColumnCounts(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
 
   try {
-    auto buffer = libvroom::load_file_to_ptr(temp_file.path(), LIBVROOM_PADDING);
-    if (!buffer) {
-      state.SkipWithError("Failed to load temp file");
-      return;
-    }
+    size_t file_size = csv_data.size();
 
-    int n_threads = 4;
-    libvroom::Parser parser(n_threads);
+    libvroom::CsvOptions opts;
+    opts.num_threads = 4;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_file.path());
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
     // Performance metrics
-    state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-    state.counters["FileSize"] = static_cast<double>(buffer.size);
+    state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
+    state.counters["FileSize"] = static_cast<double>(file_size);
     state.counters["Columns"] = static_cast<double>(num_cols);
     state.counters["Rows"] = static_cast<double>(num_rows);
 
@@ -199,23 +192,21 @@ static void BM_DataTypes(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
 
   try {
-    auto buffer = libvroom::load_file_to_ptr(temp_file.path(), LIBVROOM_PADDING);
-    if (!buffer) {
-      state.SkipWithError("Failed to load temp file");
-      return;
-    }
+    size_t file_size = csv_data.size();
 
-    int n_threads = 4;
-    libvroom::Parser parser(n_threads);
+    libvroom::CsvOptions opts;
+    opts.num_threads = 4;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_file.path());
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
     // Performance metrics
-    state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-    state.counters["FileSize"] = static_cast<double>(buffer.size);
+    state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
+    state.counters["FileSize"] = static_cast<double>(file_size);
     state.counters["DataType"] = static_cast<double>(data_type);
 
   } catch (const std::exception& e) {
@@ -237,22 +228,21 @@ static void BM_ThreadScaling(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
 
   try {
-    auto buffer = libvroom::load_file_to_ptr(temp_file.path(), LIBVROOM_PADDING);
-    if (!buffer) {
-      state.SkipWithError("Failed to load temp file");
-      return;
-    }
+    size_t file_size = csv_data.size();
 
-    libvroom::Parser parser(n_threads);
+    libvroom::CsvOptions opts;
+    opts.num_threads = static_cast<size_t>(n_threads);
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_file.path());
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
     // Performance metrics
-    state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-    state.counters["FileSize"] = static_cast<double>(buffer.size);
+    state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
+    state.counters["FileSize"] = static_cast<double>(file_size);
     state.counters["Threads"] = static_cast<double>(n_threads);
 
     // Calculate efficiency metrics
@@ -279,25 +269,23 @@ static void BM_RowScaling(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
 
   try {
-    auto buffer = libvroom::load_file_to_ptr(temp_file.path(), LIBVROOM_PADDING);
-    if (!buffer) {
-      state.SkipWithError("Failed to load temp file");
-      return;
-    }
+    size_t file_size = csv_data.size();
 
-    int n_threads = 4;
-    libvroom::Parser parser(n_threads);
+    libvroom::CsvOptions opts;
+    opts.num_threads = 4;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_file.path());
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
     // Performance metrics
-    state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-    state.counters["FileSize"] = static_cast<double>(buffer.size);
+    state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
+    state.counters["FileSize"] = static_cast<double>(file_size);
     state.counters["Rows"] = static_cast<double>(num_rows);
-    state.counters["BytesPerRecord"] = static_cast<double>(buffer.size) / num_rows;
+    state.counters["BytesPerRecord"] = static_cast<double>(file_size) / num_rows;
 
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
@@ -318,27 +306,25 @@ static void BM_RowColumnMatrix(benchmark::State& state) {
   TempCSVFile temp_file(csv_data);
 
   try {
-    auto buffer = libvroom::load_file_to_ptr(temp_file.path(), LIBVROOM_PADDING);
-    if (!buffer) {
-      state.SkipWithError("Failed to load temp file");
-      return;
-    }
+    size_t file_size = csv_data.size();
 
-    int n_threads = 4;
-    libvroom::Parser parser(n_threads);
+    libvroom::CsvOptions opts;
+    opts.num_threads = 4;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_file.path());
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
     // Comprehensive performance metrics
-    state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-    state.counters["FileSize"] = static_cast<double>(buffer.size);
+    state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
+    state.counters["FileSize"] = static_cast<double>(file_size);
     state.counters["Rows"] = static_cast<double>(num_rows);
     state.counters["Cols"] = static_cast<double>(num_cols);
     state.counters["TotalFields"] = static_cast<double>(num_rows * num_cols);
-    state.counters["BytesPerField"] = static_cast<double>(buffer.size) / (num_rows * num_cols);
+    state.counters["BytesPerField"] = static_cast<double>(file_size) / (num_rows * num_cols);
 
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());

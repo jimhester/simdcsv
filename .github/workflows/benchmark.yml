@@ -14,10 +14,6 @@ jobs:
   benchmark:
     name: Performance Regression Detection
     runs-on: ubuntu-latest
-    # Benchmarks need to be updated for libvroom2 API before this workflow can run
-    # Skip for now - see issue #XXX for tracking
-    if: false
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -69,7 +65,7 @@ jobs:
         ccache -s
 
     # Run HEAD benchmark first (current PR/commit)
-    # Multi-thread benchmarks (BM_ParserMultiThread/1, /4, /8) are critical for detecting
+    # Multi-thread benchmarks (BM_CsvReaderMultiThread/1, /4, /8) are critical for detecting
     # issue #591-type regressions where multi-threaded parsing gets slower with more threads.
     - name: Run benchmark (HEAD)
       timeout-minutes: 5
@@ -78,7 +74,7 @@ jobs:
         # Use taskset for CPU affinity (pin to CPU 0) and nice for scheduling priority
         # This reduces variance from CPU migration and context switching
         sudo nice -n -5 taskset -c 0 ./build/libvroom_benchmark \
-          --benchmark_filter="BM_RawFirstPass$|BM_RawTwoPassComplete|BM_ParserWithExplicitDialect|BM_ParserBranchless|BM_ParserSpeculative|BM_ParserMultiThread/1$|BM_ParserMultiThread/4$|BM_ParserMultiThread/8$" \
+          --benchmark_filter="BM_CountRows$|BM_CsvReaderExplicit$|BM_CsvReaderAutoDetect$|BM_CsvReaderMultiThread/1$|BM_CsvReaderMultiThread/4$|BM_CsvReaderMultiThread/8$" \
           --benchmark_repetitions=5 \
           --benchmark_min_time=0.5s \
           --benchmark_out=build/head_results.json \
@@ -92,20 +88,22 @@ jobs:
         git checkout ${{ steps.base.outputs.sha }}
 
     - name: Build benchmark (BASE)
+      id: base_build
       if: steps.base.outputs.sha != ''
+      continue-on-error: true
       run: |
         # Clean and rebuild for BASE commit
         cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BENCHMARKS=ON
         cmake --build build --target libvroom_benchmark --config Release -j$(nproc)
 
     - name: Run benchmark (BASE)
-      if: steps.base.outputs.sha != ''
+      if: steps.base.outputs.sha != '' && steps.base_build.outcome == 'success'
       timeout-minutes: 5
       run: |
         echo "=== Benchmarking BASE commit ==="
         # Use same CPU affinity and priority settings for fair comparison
         sudo nice -n -5 taskset -c 0 ./build/libvroom_benchmark \
-          --benchmark_filter="BM_RawFirstPass$|BM_RawTwoPassComplete|BM_ParserWithExplicitDialect|BM_ParserBranchless|BM_ParserSpeculative|BM_ParserMultiThread/1$|BM_ParserMultiThread/4$|BM_ParserMultiThread/8$" \
+          --benchmark_filter="BM_CountRows$|BM_CsvReaderExplicit$|BM_CsvReaderAutoDetect$|BM_CsvReaderMultiThread/1$|BM_CsvReaderMultiThread/4$|BM_CsvReaderMultiThread/8$" \
           --benchmark_repetitions=5 \
           --benchmark_min_time=0.5s \
           --benchmark_out=build/base_results.json \
@@ -118,7 +116,7 @@ jobs:
         git checkout ${{ github.sha }}
 
     - name: Compare benchmarks (same-job relative)
-      if: steps.base.outputs.sha != ''
+      if: steps.base.outputs.sha != '' && steps.base_build.outcome == 'success'
       id: compare
       run: |
         echo "=== Comparing HEAD vs BASE (same-job relative benchmarking) ==="
@@ -128,9 +126,12 @@ jobs:
           --threshold 0.15
 
     - name: Report results (no baseline)
-      if: steps.base.outputs.sha == ''
+      if: steps.base.outputs.sha == '' || steps.base_build.outcome != 'success'
       run: |
-        echo "=== No baseline commit available for comparison ==="
+        echo "=== No baseline available for comparison ==="
+        if [ "${{ steps.base_build.outcome }}" = "failure" ]; then
+          echo "BASE commit benchmarks failed to build (expected during API transitions)."
+        fi
         echo "HEAD benchmark completed successfully."
         jq -r '.benchmarks[] | select(.aggregate_name == null) | "  \(.name): \(.real_time | tostring | .[0:10]) ns"' build/head_results.json
 
