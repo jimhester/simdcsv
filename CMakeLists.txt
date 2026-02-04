@@ -693,14 +693,12 @@ set(BENCHMARK_SOURCES
     benchmark/performance_metrics.cpp
     benchmark/simd_benchmarks.cpp
     benchmark/energy_benchmarks.cpp
-    benchmark/number_parsing_benchmarks.cpp
     benchmark/error_collection_benchmark.cpp
     benchmark/parser_overhead_benchmarks.cpp
     benchmark/row_reconstruction_benchmarks.cpp
     benchmark/end_to_end_benchmarks.cpp
     benchmark/transpose_benchmarks.cpp
     benchmark/hypothesis_benchmarks.cpp
-    benchmark/escape_tracking_benchmarks.cpp
     benchmark/table_benchmarks.cpp
 )
 

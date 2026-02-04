@@ -1,10 +1,8 @@
 #include "libvroom.h"
 
-#include "common_defs.h"
-#include "mem_util.h"
-
 #include <benchmark/benchmark.h>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <random>
 #include <thread>
@@ -17,30 +15,35 @@ extern std::map<std::string, libvroom::AlignedBuffer> test_data;
 static void BM_CachePerformance(benchmark::State& state) {
   size_t data_size = static_cast<size_t>(state.range(0));
 
-  // Create data that fits in different cache levels
-  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
+  // Create data that fits in different cache levels as a CSV temp file
+  std::string csv_data;
+  csv_data.reserve(data_size);
 
   // Fill with realistic CSV-like data pattern
   for (size_t i = 0; i < data_size; ++i) {
     if (i % 100 == 0)
-      data[i] = '\n'; // Newlines
+      csv_data += '\n'; // Newlines
     else if (i % 10 == 0)
-      data[i] = ','; // Commas
+      csv_data += ','; // Commas
     else if (i % 50 == 0)
-      data[i] = '"'; // Quotes
+      csv_data += '"'; // Quotes
     else
-      data[i] = 'a' + (i % 26); // Letters
+      csv_data += static_cast<char>('a' + (i % 26)); // Letters
   }
 
-  // Add padding
-  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
-    data[i] = '\0';
+  std::string temp_path = "/tmp/libvroom_cache_" + std::to_string(data_size) + ".csv";
+  {
+    std::ofstream out(temp_path);
+    out.write(csv_data.data(), static_cast<std::streamsize>(csv_data.size()));
   }
 
-  libvroom::Parser parser(4);
+  libvroom::CsvOptions opts;
+  opts.num_threads = 4;
 
   for (auto _ : state) {
-    auto result = parser.parse(data, data_size);
+    libvroom::CsvReader reader(opts);
+    reader.open(temp_path);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
@@ -58,7 +61,7 @@ static void BM_CachePerformance(benchmark::State& state) {
     state.counters["CacheLevel"] = 4.0; // Main memory
   }
 
-  aligned_free(data);
+  std::remove(temp_path.c_str());
 }
 
 BENCHMARK(BM_CachePerformance)
@@ -88,13 +91,16 @@ static void BM_InstructionEfficiency(benchmark::State& state) {
   }
 
   const auto& buffer = test_data.at(filename);
-  libvroom::Parser parser(1);
+  libvroom::CsvOptions opts;
+  opts.num_threads = 1;
 
   // Measure cycles before and after
   auto start_time = std::chrono::high_resolution_clock::now();
 
   for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size);
+    libvroom::CsvReader reader(opts);
+    reader.open(filename);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
@@ -102,9 +108,10 @@ static void BM_InstructionEfficiency(benchmark::State& state) {
   auto duration =
       std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["NsPerByte"] = static_cast<double>(duration) / (state.iterations() * buffer.size);
-  state.counters["FileSize"] = static_cast<double>(buffer.size);
+  state.SetBytesProcessed(static_cast<int64_t>(buffer.size() * state.iterations()));
+  state.counters["NsPerByte"] =
+      static_cast<double>(duration) / (state.iterations() * buffer.size());
+  state.counters["FileSize"] = static_cast<double>(buffer.size());
 }
 
 BENCHMARK(BM_InstructionEfficiency)->Unit(benchmark::kMillisecond);
@@ -131,16 +138,19 @@ static void BM_ThreadScalingEfficiency(benchmark::State& state) {
   }
 
   const auto& buffer = test_data.at(filename);
-  libvroom::Parser parser(n_threads);
+  libvroom::CsvOptions opts;
+  opts.num_threads = static_cast<size_t>(n_threads);
 
   for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size);
+    libvroom::CsvReader reader(opts);
+    reader.open(filename);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+  state.SetBytesProcessed(static_cast<int64_t>(buffer.size() * state.iterations()));
   state.counters["Threads"] = static_cast<double>(n_threads);
-  state.counters["FileSize"] = static_cast<double>(buffer.size);
+  state.counters["FileSize"] = static_cast<double>(buffer.size());
 
   // Calculate efficiency metrics
   static double single_thread_throughput = 0.0;
@@ -159,23 +169,33 @@ BENCHMARK(BM_ThreadScalingEfficiency)
 static void BM_MemoryBandwidth(benchmark::State& state) {
   size_t data_size = static_cast<size_t>(state.range(0));
 
-  // Create synthetic data
-  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
+  // Create synthetic data as a CSV temp file
+  std::string csv_data;
+  csv_data.reserve(data_size);
 
   // Pattern that exercises memory bandwidth
   for (size_t i = 0; i < data_size; ++i) {
-    data[i] = static_cast<uint8_t>(i % 256);
+    if (i % 100 == 0)
+      csv_data += '\n';
+    else if (i % 10 == 0)
+      csv_data += ',';
+    else
+      csv_data += static_cast<char>('a' + (i % 26));
   }
 
-  // Add padding
-  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
-    data[i] = '\0';
+  std::string temp_path = "/tmp/libvroom_membw_" + std::to_string(data_size) + ".csv";
+  {
+    std::ofstream out(temp_path);
+    out.write(csv_data.data(), static_cast<std::streamsize>(csv_data.size()));
   }
 
-  libvroom::Parser parser(4);
+  libvroom::CsvOptions opts;
+  opts.num_threads = 4;
 
   for (auto _ : state) {
-    auto result = parser.parse(data, data_size);
+    libvroom::CsvReader reader(opts);
+    reader.open(temp_path);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
@@ -187,7 +207,7 @@ static void BM_MemoryBandwidth(benchmark::State& state) {
   double estimated_peak_bandwidth = 30.0; // GB/s (conservative estimate)
   (void)estimated_peak_bandwidth;
 
-  aligned_free(data);
+  std::remove(temp_path.c_str());
 }
 
 BENCHMARK(BM_MemoryBandwidth)
@@ -200,18 +220,19 @@ static void BM_BranchPrediction(benchmark::State& state) {
   size_t pattern_type = static_cast<size_t>(state.range(0));
   size_t data_size = 1024 * 1024; // 1MB
 
-  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
+  std::string csv_data;
+  csv_data.reserve(data_size);
 
   // Different branch prediction patterns
   switch (pattern_type) {
   case 0: // Predictable pattern
     for (size_t i = 0; i < data_size; ++i) {
       if (i % 100 == 0)
-        data[i] = '\n';
+        csv_data += '\n';
       else if (i % 10 == 0)
-        data[i] = ',';
+        csv_data += ',';
       else
-        data[i] = 'a';
+        csv_data += 'a';
     }
     break;
   case 1: // Random pattern (bad for branch prediction)
@@ -219,39 +240,43 @@ static void BM_BranchPrediction(benchmark::State& state) {
     std::mt19937 gen(12345); // Fixed seed for reproducibility
     std::uniform_int_distribution<> dist(0, 255);
     for (size_t i = 0; i < data_size; ++i) {
-      data[i] = static_cast<uint8_t>(dist(gen));
+      csv_data += static_cast<char>(dist(gen));
     }
   } break;
   case 2: // Quotes heavy (lots of quote state changes)
     for (size_t i = 0; i < data_size; ++i) {
       if (i % 5 == 0)
-        data[i] = '"';
+        csv_data += '"';
       else if (i % 10 == 0)
-        data[i] = ',';
+        csv_data += ',';
       else if (i % 50 == 0)
-        data[i] = '\n';
+        csv_data += '\n';
       else
-        data[i] = 'a';
+        csv_data += 'a';
     }
     break;
   }
 
-  // Add padding
-  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
-    data[i] = '\0';
+  std::string temp_path = "/tmp/libvroom_branch_" + std::to_string(pattern_type) + ".csv";
+  {
+    std::ofstream out(temp_path);
+    out.write(csv_data.data(), static_cast<std::streamsize>(csv_data.size()));
   }
 
-  libvroom::Parser parser(1); // Single thread to isolate branches
+  libvroom::CsvOptions opts;
+  opts.num_threads = 1; // Single thread to isolate branches
 
   for (auto _ : state) {
-    auto result = parser.parse(data, data_size);
+    libvroom::CsvReader reader(opts);
+    reader.open(temp_path);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
   state.SetBytesProcessed(static_cast<int64_t>(data_size * state.iterations()));
   state.counters["PatternType"] = static_cast<double>(pattern_type);
 
-  aligned_free(data);
+  std::remove(temp_path.c_str());
 }
 
 BENCHMARK(BM_BranchPrediction)
@@ -263,30 +288,33 @@ static void BM_SIMDUtilization(benchmark::State& state) {
   size_t alignment = static_cast<size_t>(state.range(0));
   size_t data_size = 1024 * 1024; // 1MB
 
-  // Test different alignments to see SIMD effectiveness
-  auto base_data =
-      static_cast<uint8_t*>(aligned_malloc(64, data_size + alignment + LIBVROOM_PADDING));
-  auto data = base_data + alignment; // Offset by alignment
+  // Create CSV data and write to temp file (alignment is handled internally by CsvReader)
+  std::string csv_data;
+  csv_data.reserve(data_size);
 
   // Fill with CSV-like pattern
   for (size_t i = 0; i < data_size; ++i) {
     if (i % 100 == 0)
-      data[i] = '\n';
+      csv_data += '\n';
     else if (i % 10 == 0)
-      data[i] = ',';
+      csv_data += ',';
     else
-      data[i] = 'a' + (i % 26);
+      csv_data += static_cast<char>('a' + (i % 26));
   }
 
-  // Add padding
-  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
-    data[i] = '\0';
+  std::string temp_path = "/tmp/libvroom_simd_" + std::to_string(alignment) + ".csv";
+  {
+    std::ofstream out(temp_path);
+    out.write(csv_data.data(), static_cast<std::streamsize>(csv_data.size()));
   }
 
-  libvroom::Parser parser(1);
+  libvroom::CsvOptions opts;
+  opts.num_threads = 1;
 
   for (auto _ : state) {
-    auto result = parser.parse(data, data_size);
+    libvroom::CsvReader reader(opts);
+    reader.open(temp_path);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
@@ -294,7 +322,7 @@ static void BM_SIMDUtilization(benchmark::State& state) {
   state.counters["Alignment"] = static_cast<double>(alignment);
   state.counters["DataSize"] = static_cast<double>(data_size);
 
-  aligned_free(base_data);
+  std::remove(temp_path.c_str());
 }
 
 BENCHMARK(BM_SIMDUtilization)

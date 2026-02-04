@@ -7,11 +7,11 @@
  * to col_indexes[col * rows + row].
  */
 
-#include "common_defs.h"
-#include "mem_util.h"
+#include "libvroom.h"
 
 #include <benchmark/benchmark.h>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
 #include <vector>
@@ -361,6 +361,18 @@ static void transpose_nontemporal_store(const uint64_t* row_major, uint64_t* col
 #endif // __x86_64__
 
 // =============================================================================
+// Helper: posix_memalign-based allocation
+// =============================================================================
+
+static uint64_t* alloc_aligned_u64(size_t count) {
+  void* raw = nullptr;
+  int rc = posix_memalign(&raw, 64, count * sizeof(uint64_t));
+  if (rc != 0)
+    return nullptr;
+  return static_cast<uint64_t*>(raw);
+}
+
+// =============================================================================
 // Benchmarks
 // =============================================================================
 
@@ -375,13 +387,13 @@ static void BM_TransposeSingleThreaded(benchmark::State& state) {
   size_t total_elements = rows * cols;
 
   // Allocate row-major and column-major arrays
-  auto row_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
-  auto col_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
+  auto row_major = alloc_aligned_u64(total_elements);
+  auto col_major = alloc_aligned_u64(total_elements);
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    aligned_free(row_major);
-    aligned_free(col_major);
+    std::free(row_major);
+    std::free(col_major);
     return;
   }
 
@@ -407,8 +419,8 @@ static void BM_TransposeSingleThreaded(benchmark::State& state) {
   state.counters["MemoryMB"] =
       static_cast<double>(total_elements * sizeof(uint64_t) * 2) / (1024.0 * 1024.0);
 
-  aligned_free(row_major);
-  aligned_free(col_major);
+  std::free(row_major);
+  std::free(col_major);
 }
 
 /**
@@ -422,13 +434,13 @@ static void BM_TransposeMultiThreaded(benchmark::State& state) {
   size_t n_threads = static_cast<size_t>(state.range(2));
   size_t total_elements = rows * cols;
 
-  auto row_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
-  auto col_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
+  auto row_major = alloc_aligned_u64(total_elements);
+  auto col_major = alloc_aligned_u64(total_elements);
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    aligned_free(row_major);
-    aligned_free(col_major);
+    std::free(row_major);
+    std::free(col_major);
     return;
   }
 
@@ -451,8 +463,8 @@ static void BM_TransposeMultiThreaded(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  aligned_free(row_major);
-  aligned_free(col_major);
+  std::free(row_major);
+  std::free(col_major);
 }
 
 /**
@@ -465,13 +477,13 @@ static void BM_TransposeBlocked(benchmark::State& state) {
   size_t cols = static_cast<size_t>(state.range(1));
   size_t total_elements = rows * cols;
 
-  auto row_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
-  auto col_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
+  auto row_major = alloc_aligned_u64(total_elements);
+  auto col_major = alloc_aligned_u64(total_elements);
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    aligned_free(row_major);
-    aligned_free(col_major);
+    std::free(row_major);
+    std::free(col_major);
     return;
   }
 
@@ -493,8 +505,8 @@ static void BM_TransposeBlocked(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  aligned_free(row_major);
-  aligned_free(col_major);
+  std::free(row_major);
+  std::free(col_major);
 }
 
 /**
@@ -508,13 +520,13 @@ static void BM_TransposeBlockedMultiThreaded(benchmark::State& state) {
   size_t n_threads = static_cast<size_t>(state.range(2));
   size_t total_elements = rows * cols;
 
-  auto row_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
-  auto col_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
+  auto row_major = alloc_aligned_u64(total_elements);
+  auto col_major = alloc_aligned_u64(total_elements);
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    aligned_free(row_major);
-    aligned_free(col_major);
+    std::free(row_major);
+    std::free(col_major);
     return;
   }
 
@@ -537,8 +549,8 @@ static void BM_TransposeBlockedMultiThreaded(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  aligned_free(row_major);
-  aligned_free(col_major);
+  std::free(row_major);
+  std::free(col_major);
 }
 
 /**
@@ -555,13 +567,13 @@ static void BM_TransposeScaling(benchmark::State& state) {
   size_t total_elements = rows * cols;
   size_t n_threads = 4;
 
-  auto row_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
-  auto col_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
+  auto row_major = alloc_aligned_u64(total_elements);
+  auto col_major = alloc_aligned_u64(total_elements);
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    aligned_free(row_major);
-    aligned_free(col_major);
+    std::free(row_major);
+    std::free(col_major);
     return;
   }
 
@@ -605,8 +617,8 @@ static void BM_TransposeScaling(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  aligned_free(row_major);
-  aligned_free(col_major);
+  std::free(row_major);
+  std::free(col_major);
 }
 
 // =============================================================================
@@ -882,13 +894,13 @@ static void BM_TransposeSIMD(benchmark::State& state) {
   int method = static_cast<int>(state.range(2));
   size_t total_elements = rows * cols;
 
-  auto row_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
-  auto col_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
+  auto row_major = alloc_aligned_u64(total_elements);
+  auto col_major = alloc_aligned_u64(total_elements);
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    aligned_free(row_major);
-    aligned_free(col_major);
+    std::free(row_major);
+    std::free(col_major);
     return;
   }
 
@@ -947,8 +959,8 @@ static void BM_TransposeSIMD(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  aligned_free(row_major);
-  aligned_free(col_major);
+  std::free(row_major);
+  std::free(col_major);
 }
 
 // SIMD method comparison at key sizes
@@ -1001,13 +1013,13 @@ static void BM_TransposeSIMD_MT(benchmark::State& state) {
   size_t n_threads = static_cast<size_t>(state.range(3));
   size_t total_elements = rows * cols;
 
-  auto row_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
-  auto col_major = static_cast<uint64_t*>(aligned_malloc(64, total_elements * sizeof(uint64_t)));
+  auto row_major = alloc_aligned_u64(total_elements);
+  auto col_major = alloc_aligned_u64(total_elements);
 
   if (!row_major || !col_major) {
     state.SkipWithError("Failed to allocate memory");
-    aligned_free(row_major);
-    aligned_free(col_major);
+    std::free(row_major);
+    std::free(col_major);
     return;
   }
 
@@ -1053,8 +1065,8 @@ static void BM_TransposeSIMD_MT(benchmark::State& state) {
   state.counters["Elements/s"] = benchmark::Counter(static_cast<double>(total_elements),
                                                     benchmark::Counter::kIsIterationInvariantRate);
 
-  aligned_free(row_major);
-  aligned_free(col_major);
+  std::free(row_major);
+  std::free(col_major);
 }
 
 // Multi-threaded comparison

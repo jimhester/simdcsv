@@ -1,10 +1,10 @@
 /**
  * @file error_collection_benchmark.cpp
- * @brief Benchmark comparing branchless parsing with and without error collection.
+ * @brief Benchmark comparing CsvReader parsing with and without error collection.
  *
  * This benchmark measures the performance gap between:
- * - parse_branchless() - SIMD-optimized fast path (no error collection)
- * - parse_branchless_with_errors() - error collection path
+ * - CsvReader with error_mode=DISABLED (no error collection, maximum performance)
+ * - CsvReader with error_mode=PERMISSIVE (error collection path)
  *
  * The goal is to optimize the error collection path to be as close to the
  * fast path as possible.
@@ -14,6 +14,8 @@
 
 #include "benchmark/benchmark.h"
 
+#include <cstdio>
+#include <fstream>
 #include <random>
 #include <sstream>
 #include <string>
@@ -52,62 +54,72 @@ static std::string generate_csv_data(size_t rows, size_t cols) {
   return oss.str();
 }
 
-// Branchless parsing without error collection (fast path)
-static void BM_Branchless_NoErrors(benchmark::State& state) {
+// CsvReader parsing without error collection (fast path)
+static void BM_CsvReader_NoErrors(benchmark::State& state) {
   size_t rows = static_cast<size_t>(state.range(0));
   std::string csv_data = generate_csv_data(rows, 10);
 
-  // Add padding for SIMD
-  std::vector<uint8_t> buffer(csv_data.size() + 64, 0);
-  std::memcpy(buffer.data(), csv_data.data(), csv_data.size());
+  // Write to temp file
+  std::string temp_path = "/tmp/libvroom_error_bench.csv";
+  {
+    std::ofstream out(temp_path);
+    out << csv_data;
+  }
 
-  libvroom::Parser parser(1);
-  libvroom::ParseOptions options;
-  options.algorithm = libvroom::ParseAlgorithm::BRANCHLESS;
+  libvroom::CsvOptions opts;
+  opts.num_threads = 1;
+  opts.error_mode = libvroom::ErrorMode::DISABLED;
 
   for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), csv_data.size(), options);
+    libvroom::CsvReader reader(opts);
+    reader.open(temp_path);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
   state.SetBytesProcessed(static_cast<int64_t>(csv_data.size() * state.iterations()));
   state.counters["MB"] = static_cast<double>(csv_data.size()) / (1024.0 * 1024.0);
+
+  std::remove(temp_path.c_str());
 }
 
-// Branchless parsing with error collection (current implementation)
-static void BM_Branchless_WithErrors(benchmark::State& state) {
+// CsvReader parsing with error collection (permissive mode)
+static void BM_CsvReader_WithErrors(benchmark::State& state) {
   size_t rows = static_cast<size_t>(state.range(0));
   std::string csv_data = generate_csv_data(rows, 10);
 
-  // Add padding for SIMD
-  std::vector<uint8_t> buffer(csv_data.size() + 64, 0);
-  std::memcpy(buffer.data(), csv_data.data(), csv_data.size());
+  // Write to temp file
+  std::string temp_path = "/tmp/libvroom_error_bench_errors.csv";
+  {
+    std::ofstream out(temp_path);
+    out << csv_data;
+  }
 
-  libvroom::Parser parser(1);
-  libvroom::ParseOptions options;
-  options.algorithm = libvroom::ParseAlgorithm::BRANCHLESS;
-  libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
-  options.errors = &errors;
+  libvroom::CsvOptions opts;
+  opts.num_threads = 1;
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
 
   for (auto _ : state) {
-    errors.clear();
-    auto result = parser.parse(buffer.data(), csv_data.size(), options);
+    libvroom::CsvReader reader(opts);
+    reader.open(temp_path);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
-    benchmark::DoNotOptimize(errors);
   }
 
   state.SetBytesProcessed(static_cast<int64_t>(csv_data.size() * state.iterations()));
   state.counters["MB"] = static_cast<double>(csv_data.size()) / (1024.0 * 1024.0);
+
+  std::remove(temp_path.c_str());
 }
 
 // Register benchmarks with varying sizes
-BENCHMARK(BM_Branchless_NoErrors)
+BENCHMARK(BM_CsvReader_NoErrors)
     ->Arg(10000)  // ~0.3 MB
     ->Arg(50000)  // ~1.5 MB
     ->Arg(100000) // ~3 MB
     ->Unit(benchmark::kMillisecond);
 
-BENCHMARK(BM_Branchless_WithErrors)
+BENCHMARK(BM_CsvReader_WithErrors)
     ->Arg(10000)  // ~0.3 MB
     ->Arg(50000)  // ~1.5 MB
     ->Arg(100000) // ~3 MB

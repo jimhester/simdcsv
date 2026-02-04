@@ -1,9 +1,7 @@
 #include "libvroom.h"
 
-#include "common_defs.h"
-#include "mem_util.h"
-
 #include <benchmark/benchmark.h>
+#include <cstdlib>
 #include <memory>
 
 extern std::map<std::string, libvroom::AlignedBuffer> test_data;
@@ -27,16 +25,20 @@ static void BM_ParseFile(benchmark::State& state, const std::string& filename) {
 
   const auto& buffer = test_data.at(filename);
   int n_threads = static_cast<int>(state.range(0));
-  libvroom::Parser parser(n_threads);
+
+  libvroom::CsvOptions opts;
+  opts.num_threads = static_cast<size_t>(n_threads);
 
   for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size);
+    libvroom::CsvReader reader(opts);
+    reader.open(filename);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
   // Performance metrics are calculated automatically by Google Benchmark
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["FileSize"] = static_cast<double>(buffer.size);
+  state.SetBytesProcessed(static_cast<int64_t>(buffer.size() * state.iterations()));
+  state.counters["FileSize"] = static_cast<double>(buffer.size());
   state.counters["Threads"] = static_cast<double>(n_threads);
 }
 
@@ -99,68 +101,20 @@ static void BM_MemoryAllocation(benchmark::State& state) {
   size_t file_size = static_cast<size_t>(state.range(0));
 
   for (auto _ : state) {
-    auto data = aligned_malloc(64, file_size + LIBVROOM_PADDING);
+    void* ptr;
+    if (posix_memalign(&ptr, 64, file_size + LIBVROOM_PADDING) != 0) {
+      state.SkipWithError("Failed to allocate memory");
+      return;
+    }
+    auto* data = static_cast<uint8_t*>(ptr);
     benchmark::DoNotOptimize(data);
-    aligned_free(data);
+    std::free(data);
   }
 
   state.SetBytesProcessed(static_cast<int64_t>(file_size * state.iterations()));
 }
 BENCHMARK(BM_MemoryAllocation)
     ->Range(1024, 1024 * 1024 * 100) // 1KB to 100MB
-    ->Unit(benchmark::kMicrosecond);
-
-// Index creation benchmark
-static void BM_IndexCreation(benchmark::State& state) {
-  size_t file_size = static_cast<size_t>(state.range(0));
-  int n_threads = static_cast<int>(state.range(1));
-
-  libvroom::TwoPass tp;
-
-  for (auto _ : state) {
-    auto result = tp.init(file_size, n_threads);
-    benchmark::DoNotOptimize(result);
-  }
-
-  state.counters["FileSize"] = static_cast<double>(file_size);
-  state.counters["Threads"] = static_cast<double>(n_threads);
-}
-BENCHMARK(BM_IndexCreation)
-    ->Ranges({{1024, 1024 * 1024 * 100}, {1, 16}}) // File sizes 1KB-100MB, threads 1-16
-    ->Unit(benchmark::kMicrosecond);
-
-// Index creation with counted allocation benchmark
-// Shows memory savings from the optimized allocation strategy
-static void BM_IndexCreationCounted(benchmark::State& state) {
-  size_t file_size = static_cast<size_t>(state.range(0));
-  int n_threads = static_cast<int>(state.range(1));
-  // Simulate different separator densities (1%, 5%, 10% of file size)
-  double separator_ratio = 0.05; // 5% separator density is typical for CSV
-  uint64_t separator_count = static_cast<uint64_t>(file_size * separator_ratio);
-
-  libvroom::TwoPass tp;
-
-  for (auto _ : state) {
-    auto result = tp.init_counted(separator_count, n_threads);
-    benchmark::DoNotOptimize(result);
-  }
-
-  // Calculate memory savings
-  // Old allocation: (file_size + 8) * n_threads * sizeof(uint64_t)
-  // New allocation: (separator_count + 8) * n_threads * sizeof(uint64_t)
-  size_t old_alloc = (file_size + 8) * n_threads * sizeof(uint64_t);
-  size_t new_alloc = (separator_count + 8) * n_threads * sizeof(uint64_t);
-  double savings_ratio = static_cast<double>(old_alloc) / static_cast<double>(new_alloc);
-
-  state.counters["FileSize"] = static_cast<double>(file_size);
-  state.counters["Threads"] = static_cast<double>(n_threads);
-  state.counters["Separators"] = static_cast<double>(separator_count);
-  state.counters["MemorySavingsRatio"] = savings_ratio;
-  state.counters["OldAllocMB"] = static_cast<double>(old_alloc) / (1024.0 * 1024.0);
-  state.counters["NewAllocMB"] = static_cast<double>(new_alloc) / (1024.0 * 1024.0);
-}
-BENCHMARK(BM_IndexCreationCounted)
-    ->Ranges({{1024, 1024 * 1024 * 100}, {1, 16}}) // File sizes 1KB-100MB, threads 1-16
     ->Unit(benchmark::kMicrosecond);
 
 // ============================================================================
@@ -185,11 +139,12 @@ static void BM_WriteSequential(benchmark::State& state) {
   const size_t total_bytes = total_elements * sizeof(uint64_t);
 
   // Allocate aligned memory
-  auto* data = static_cast<uint64_t*>(aligned_malloc(64, total_bytes));
-  if (!data) {
+  void* ptr;
+  if (posix_memalign(&ptr, 64, total_bytes) != 0) {
     state.SkipWithError("Failed to allocate memory");
     return;
   }
+  auto* data = static_cast<uint64_t*>(ptr);
 
   for (auto _ : state) {
     // Sequential write: iterate through memory linearly
@@ -200,7 +155,7 @@ static void BM_WriteSequential(benchmark::State& state) {
     benchmark::ClobberMemory();
   }
 
-  aligned_free(data);
+  std::free(data);
 
   state.SetBytesProcessed(static_cast<int64_t>(total_bytes * state.iterations()));
   state.counters["Rows"] = static_cast<double>(rows);
@@ -222,11 +177,12 @@ static void BM_WriteStrided(benchmark::State& state) {
   const size_t stride = rows; // In elements (stride in bytes = rows * 8)
 
   // Allocate aligned memory
-  auto* data = static_cast<uint64_t*>(aligned_malloc(64, total_bytes));
-  if (!data) {
+  void* ptr;
+  if (posix_memalign(&ptr, 64, total_bytes) != 0) {
     state.SkipWithError("Failed to allocate memory");
     return;
   }
+  auto* data = static_cast<uint64_t*>(ptr);
 
   for (auto _ : state) {
     // Strided write: for each row, write fields with stride between columns
@@ -241,7 +197,7 @@ static void BM_WriteStrided(benchmark::State& state) {
     benchmark::ClobberMemory();
   }
 
-  aligned_free(data);
+  std::free(data);
 
   state.SetBytesProcessed(static_cast<int64_t>(total_bytes * state.iterations()));
   state.counters["Rows"] = static_cast<double>(rows);
@@ -258,15 +214,15 @@ static void BM_WriteStrided(benchmark::State& state) {
 // Cols: 10, 100, 500 (typical CSV column counts)
 //
 // Working set sizes:
-// - 10K rows × 10 cols = 800KB (fits in L3)
-// - 10K rows × 100 cols = 8MB (borderline L3)
-// - 10K rows × 500 cols = 40MB (exceeds L3)
-// - 100K rows × 10 cols = 8MB (borderline L3)
-// - 100K rows × 100 cols = 80MB (exceeds L3)
-// - 100K rows × 500 cols = 400MB (way exceeds L3)
-// - 1M rows × 10 cols = 80MB (exceeds L3)
-// - 1M rows × 100 cols = 800MB (way exceeds L3)
-// - 1M rows × 500 cols = 4GB (very large)
+// - 10K rows x 10 cols = 800KB (fits in L3)
+// - 10K rows x 100 cols = 8MB (borderline L3)
+// - 10K rows x 500 cols = 40MB (exceeds L3)
+// - 100K rows x 10 cols = 8MB (borderline L3)
+// - 100K rows x 100 cols = 80MB (exceeds L3)
+// - 100K rows x 500 cols = 400MB (way exceeds L3)
+// - 1M rows x 10 cols = 80MB (exceeds L3)
+// - 1M rows x 100 cols = 800MB (way exceeds L3)
+// - 1M rows x 500 cols = 4GB (very large)
 
 static void WriteSequentialArgs(benchmark::internal::Benchmark* b) {
   // Rows: 10K, 100K, 1M; Cols: 10, 100, 500

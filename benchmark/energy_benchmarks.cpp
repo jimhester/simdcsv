@@ -1,10 +1,8 @@
 #include "libvroom.h"
 
-#include "common_defs.h"
-#include "mem_util.h"
-
 #include <benchmark/benchmark.h>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <thread>
 
@@ -88,25 +86,29 @@ public:
 static void BM_EnergyPerByte(benchmark::State& state) {
   size_t data_size = static_cast<size_t>(state.range(0));
 
-  // Create test data
-  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
+  // Create test data as a CSV temp file
+  std::string csv_data;
+  csv_data.reserve(data_size + LIBVROOM_PADDING);
 
   // Fill with CSV-like pattern
   for (size_t i = 0; i < data_size; ++i) {
     if (i % 100 == 0)
-      data[i] = '\n';
+      csv_data += '\n';
     else if (i % 10 == 0)
-      data[i] = ',';
+      csv_data += ',';
     else
-      data[i] = 'a' + (i % 26);
+      csv_data += static_cast<char>('a' + (i % 26));
   }
 
-  // Add padding
-  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
-    data[i] = '\0';
+  // Write to temp file
+  std::string temp_path = "/tmp/libvroom_energy_" + std::to_string(data_size) + ".csv";
+  {
+    std::ofstream out(temp_path);
+    out.write(csv_data.data(), static_cast<std::streamsize>(csv_data.size()));
   }
 
-  libvroom::Parser parser(4);
+  libvroom::CsvOptions opts;
+  opts.num_threads = 4;
 
   RAPLEnergyMonitor energy_monitor;
 
@@ -115,7 +117,9 @@ static void BM_EnergyPerByte(benchmark::State& state) {
   auto start_time = std::chrono::high_resolution_clock::now();
 
   for (auto _ : state) {
-    auto result = parser.parse(data, data_size);
+    libvroom::CsvReader reader(opts);
+    reader.open(temp_path);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
@@ -138,7 +142,7 @@ static void BM_EnergyPerByte(benchmark::State& state) {
     }
   }
 
-  aligned_free(data);
+  std::remove(temp_path.c_str());
 }
 
 BENCHMARK(BM_EnergyPerByte)
@@ -168,7 +172,8 @@ static void BM_EnergyEfficiency_ThreadCount(benchmark::State& state) {
   }
 
   const auto& buffer = test_data.at(filename);
-  libvroom::Parser parser(n_threads);
+  libvroom::CsvOptions opts;
+  opts.num_threads = static_cast<size_t>(n_threads);
 
   RAPLEnergyMonitor energy_monitor;
 
@@ -177,7 +182,9 @@ static void BM_EnergyEfficiency_ThreadCount(benchmark::State& state) {
   auto start_time = std::chrono::high_resolution_clock::now();
 
   for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size);
+    libvroom::CsvReader reader(opts);
+    reader.open(filename);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
@@ -188,9 +195,9 @@ static void BM_EnergyEfficiency_ThreadCount(benchmark::State& state) {
   (void)start_time;
   (void)end_time;
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+  state.SetBytesProcessed(static_cast<int64_t>(buffer.size() * state.iterations()));
   state.counters["Threads"] = static_cast<double>(n_threads);
-  state.counters["FileSize"] = static_cast<double>(buffer.size);
+  state.counters["FileSize"] = static_cast<double>(buffer.size());
 
   // Energy efficiency metrics
   if (energy_monitor.available() && start_energy.size() == end_energy.size()) {
@@ -210,21 +217,29 @@ BENCHMARK(BM_EnergyEfficiency_ThreadCount)
 static void BM_PowerConsumption_Estimate(benchmark::State& state) {
   size_t workload_size = static_cast<size_t>(state.range(0));
 
-  // Create synthetic workload
+  // Create synthetic workload as CSV temp file
   size_t data_size = 1024 * 1024; // 1MB base
-  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
+  std::string csv_data;
+  csv_data.reserve(data_size);
 
   // Fill with data
   for (size_t i = 0; i < data_size; ++i) {
-    data[i] = static_cast<uint8_t>(i % 256);
+    if (i % 100 == 0)
+      csv_data += '\n';
+    else if (i % 10 == 0)
+      csv_data += ',';
+    else
+      csv_data += static_cast<char>('a' + (i % 26));
   }
 
-  // Add padding
-  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
-    data[i] = '\0';
+  std::string temp_path = "/tmp/libvroom_power_estimate.csv";
+  {
+    std::ofstream out(temp_path);
+    out.write(csv_data.data(), static_cast<std::streamsize>(csv_data.size()));
   }
 
-  libvroom::Parser parser(4);
+  libvroom::CsvOptions opts;
+  opts.num_threads = 4;
 
   // Measure CPU usage time as proxy for power consumption
   auto start_time = std::chrono::high_resolution_clock::now();
@@ -232,7 +247,9 @@ static void BM_PowerConsumption_Estimate(benchmark::State& state) {
   for (auto _ : state) {
     // Repeat parsing based on workload size
     for (size_t i = 0; i < workload_size; ++i) {
-      auto result = parser.parse(data, data_size);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_path);
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
   }
@@ -254,7 +271,7 @@ static void BM_PowerConsumption_Estimate(benchmark::State& state) {
   state.counters["Est_CPU_Power_W"] = estimated_cpu_power;
   state.counters["Est_Energy_J"] = estimated_energy;
 
-  aligned_free(data);
+  std::remove(temp_path.c_str());
 }
 
 BENCHMARK(BM_PowerConsumption_Estimate)
@@ -278,27 +295,32 @@ static void BM_IdleVsActive_Power(benchmark::State& state) {
   } else {
     // Active measurement - do parsing work
     size_t data_size = 512 * 1024; // 512KB
-    auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
+    std::string csv_data;
+    csv_data.reserve(data_size);
 
     // Fill with CSV pattern
     for (size_t i = 0; i < data_size; ++i) {
       if (i % 100 == 0)
-        data[i] = '\n';
+        csv_data += '\n';
       else if (i % 10 == 0)
-        data[i] = ',';
+        csv_data += ',';
       else
-        data[i] = 'a' + (i % 26);
+        csv_data += static_cast<char>('a' + (i % 26));
     }
 
-    // Add padding
-    for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
-      data[i] = '\0';
+    std::string temp_path = "/tmp/libvroom_idle_active.csv";
+    {
+      std::ofstream out(temp_path);
+      out.write(csv_data.data(), static_cast<std::streamsize>(csv_data.size()));
     }
 
-    libvroom::Parser parser(4);
+    libvroom::CsvOptions opts;
+    opts.num_threads = 4;
 
     for (auto _ : state) {
-      auto result = parser.parse(data, data_size);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_path);
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
 
@@ -306,7 +328,7 @@ static void BM_IdleVsActive_Power(benchmark::State& state) {
     state.counters["Mode"] = 1.0; // Active
     state.counters["DataSize"] = static_cast<double>(data_size);
 
-    aligned_free(data);
+    std::remove(temp_path.c_str());
   }
 }
 
@@ -321,26 +343,29 @@ static void BM_ThermalThrottling_Impact(benchmark::State& state) {
 
   // Sustained workload to potentially trigger thermal throttling
   size_t data_size = 2 * 1024 * 1024; // 2MB
-  auto data = static_cast<uint8_t*>(aligned_malloc(64, data_size + LIBVROOM_PADDING));
+  std::string csv_data;
+  csv_data.reserve(data_size);
 
   // Fill with intensive pattern
   for (size_t i = 0; i < data_size; ++i) {
     if (i % 5 == 0)
-      data[i] = '"'; // Quote heavy for complex processing
+      csv_data += '"'; // Quote heavy for complex processing
     else if (i % 50 == 0)
-      data[i] = '\n';
+      csv_data += '\n';
     else if (i % 8 == 0)
-      data[i] = ',';
+      csv_data += ',';
     else
-      data[i] = 'a' + (i % 26);
+      csv_data += static_cast<char>('a' + (i % 26));
   }
 
-  // Add padding
-  for (size_t i = data_size; i < data_size + LIBVROOM_PADDING; ++i) {
-    data[i] = '\0';
+  std::string temp_path = "/tmp/libvroom_thermal.csv";
+  {
+    std::ofstream out(temp_path);
+    out.write(csv_data.data(), static_cast<std::streamsize>(csv_data.size()));
   }
 
-  libvroom::Parser parser(4);
+  libvroom::CsvOptions opts;
+  opts.num_threads = 4;
 
   auto start_time = std::chrono::high_resolution_clock::now();
   auto target_duration = std::chrono::milliseconds(duration_ms);
@@ -351,7 +376,9 @@ static void BM_ThermalThrottling_Impact(benchmark::State& state) {
 
     // Run for specified duration
     while (current_time - start_time < target_duration) {
-      auto result = parser.parse(data, data_size);
+      libvroom::CsvReader reader(opts);
+      reader.open(temp_path);
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
       iterations++;
       current_time = std::chrono::high_resolution_clock::now();
@@ -368,7 +395,7 @@ static void BM_ThermalThrottling_Impact(benchmark::State& state) {
   state.counters["Duration_ms"] = actual_duration * 1000.0;
   state.counters["Iterations"] = static_cast<double>(iterations);
 
-  aligned_free(data);
+  std::remove(temp_path.c_str());
 }
 
 BENCHMARK(BM_ThermalThrottling_Impact)

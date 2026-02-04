@@ -1,27 +1,25 @@
 /**
  * @file parser_overhead_benchmarks.cpp
- * @brief Benchmarks to investigate Parser::parse() overhead vs raw TwoPass operations.
+ * @brief Benchmarks for CSV parsing performance and regression detection.
  *
- * This benchmark file was created to investigate GitHub issue #443:
- * "Parser::parse() throughput overhead vs raw TwoPass"
+ * These benchmarks are used by the CI performance regression workflow
+ * (.github/workflows/benchmark.yml) to detect regressions between commits.
  *
- * The issue identified that Parser::parse() achieves ~170 MB/s while raw
- * TwoPass index building achieves 1.7-4.7 GB/s - a 10-25x difference.
- *
- * These benchmarks decompose Parser::parse() into its constituent operations
- * to identify which steps contribute most to the overhead.
+ * The workflow runs a subset of these benchmarks with strict thresholds:
+ * - BM_CountRows: SIMD row counting throughput
+ * - BM_SplitFields: SIMD field splitting throughput
+ * - BM_CsvReaderExplicit: Full CsvReader pipeline with explicit dialect
+ * - BM_CsvReaderMultiThread/N: Multi-threaded CsvReader scaling
  */
 
 #include "libvroom.h"
 
-#include "common_defs.h"
-#include "mem_util.h"
-
 #include <benchmark/benchmark.h>
+#include <cstring>
+#include <fstream>
 #include <random>
 #include <sstream>
-
-extern std::map<std::string, libvroom::AlignedBuffer> test_data;
+#include <string>
 
 namespace {
 
@@ -80,320 +78,257 @@ public:
     return data;
   }
 
-  const libvroom::AlignedBuffer& get_buffer(const std::string& name, size_t rows, size_t cols) {
+  struct DataSet {
+    libvroom::AlignedBuffer buffer;
+    std::string temp_path;
+  };
+
+  const DataSet& get(const std::string& name, size_t rows, size_t cols) {
     auto key = name + "_" + std::to_string(rows) + "x" + std::to_string(cols);
-    auto it = buffers_.find(key);
-    if (it != buffers_.end()) {
+    auto it = datasets_.find(key);
+    if (it != datasets_.end()) {
       return it->second;
     }
 
-    // Generate and store the buffer
+    // Generate CSV data
     std::string csv_data = generate_large_csv(rows, cols);
-    auto data = static_cast<uint8_t*>(aligned_malloc(64, csv_data.size() + LIBVROOM_PADDING));
-    std::memcpy(data, csv_data.data(), csv_data.size());
-    // Zero out padding
-    std::memset(data + csv_data.size(), 0, LIBVROOM_PADDING);
 
-    libvroom::AlignedBuffer buffer(AlignedPtr(data), csv_data.size());
-    auto [inserted_it, success] = buffers_.emplace(key, std::move(buffer));
+    // Create aligned buffer
+    auto buffer = libvroom::AlignedBuffer::allocate(csv_data.size());
+    std::memcpy(buffer.data(), csv_data.data(), csv_data.size());
+
+    // Write to temp file for CsvReader benchmarks
+    std::string temp_path = "/tmp/libvroom_bench_" + key + ".csv";
+    std::ofstream out(temp_path);
+    out << csv_data;
+    out.close();
+
+    auto [inserted_it, success] =
+        datasets_.emplace(key, DataSet{std::move(buffer), std::move(temp_path)});
     return inserted_it->second;
   }
 
+  ~BenchmarkData() {
+    for (auto& [key, ds] : datasets_) {
+      if (!ds.temp_path.empty()) {
+        std::remove(ds.temp_path.c_str());
+      }
+    }
+  }
+
 private:
-  std::map<std::string, libvroom::AlignedBuffer> buffers_;
+  BenchmarkData() = default;
+  std::map<std::string, DataSet> datasets_;
 };
 
 } // namespace
 
 // ============================================================================
-// DECOMPOSED BENCHMARKS - Measure each step of Parser::parse() separately
+// LOW-LEVEL SIMD BENCHMARKS - Measure public SIMD operations
 // ============================================================================
 
 /**
- * @brief Benchmark 1: Raw first_pass_simd only
+ * @brief Benchmark: SIMD row counting
  *
- * This measures just the initial SIMD scan that counts separators and finds
- * safe split points. This is the pure index-building throughput.
+ * Measures the throughput of count_rows_simd(), which scans the buffer
+ * for newlines while tracking quote state. This is the core first-pass
+ * operation for determining file structure.
  */
-static void BM_RawFirstPass(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
+static void BM_CountRows(benchmark::State& state) {
+  auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
 
   for (auto _ : state) {
-    auto stats = libvroom::TwoPass::first_pass_simd(buffer.data(), 0, buffer.size, '"', ',');
+    auto [row_count, last_row_end] = libvroom::count_rows_simd(
+        reinterpret_cast<const char*>(ds.buffer.data()), ds.buffer.size());
+    benchmark::DoNotOptimize(row_count);
+    benchmark::DoNotOptimize(last_row_end);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
+  state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
+}
+BENCHMARK(BM_CountRows)->Unit(benchmark::kMillisecond);
+
+/**
+ * @brief Benchmark: SIMD field splitting
+ *
+ * Measures the throughput of split_fields_simd() on each row.
+ * This is the core second-pass operation that identifies field boundaries.
+ */
+static void BM_SplitFields(benchmark::State& state) {
+  auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
+  const char* data = reinterpret_cast<const char*>(ds.buffer.data());
+  size_t size = ds.buffer.size();
+
+  // Find the first data line (skip header)
+  size_t start = 0;
+  while (start < size && data[start] != '\n')
+    ++start;
+  ++start; // skip newline
+
+  // Find a representative line
+  size_t line_end = start;
+  while (line_end < size && data[line_end] != '\n')
+    ++line_end;
+  size_t line_len = line_end - start;
+
+  for (auto _ : state) {
+    auto fields = libvroom::split_fields_simd(data + start, line_len);
+    benchmark::DoNotOptimize(fields);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(line_len * state.iterations()));
+  state.counters["LineLength"] = static_cast<double>(line_len);
+}
+BENCHMARK(BM_SplitFields)->Unit(benchmark::kMicrosecond);
+
+/**
+ * @brief Benchmark: Dual-state chunk analysis
+ *
+ * Measures analyze_chunk_dual_state_simd() which computes row stats
+ * for both starting-inside and starting-outside quote states in one pass.
+ */
+static void BM_DualStateAnalysis(benchmark::State& state) {
+  auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
+
+  for (auto _ : state) {
+    auto stats = libvroom::analyze_chunk_dual_state_simd(
+        reinterpret_cast<const char*>(ds.buffer.data()), ds.buffer.size());
     benchmark::DoNotOptimize(stats);
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
+  state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
+  state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_RawFirstPass)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_DualStateAnalysis)->Unit(benchmark::kMillisecond);
 
 /**
- * @brief Benchmark 2: First pass + Index allocation
- *
- * Measures first pass plus the memory allocation for the index structure.
- */
-static void BM_FirstPassPlusAllocation(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
-  libvroom::TwoPass parser;
-
-  for (auto _ : state) {
-    auto stats = libvroom::TwoPass::first_pass_simd(buffer.data(), 0, buffer.size, '"', ',');
-    auto idx = parser.init_counted(stats.n_separators, 1);
-    benchmark::DoNotOptimize(idx);
-  }
-
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
-}
-BENCHMARK(BM_FirstPassPlusAllocation)->Unit(benchmark::kMillisecond);
-
-/**
- * @brief Benchmark 3: First pass + Allocation + Second pass SIMD
- *
- * Measures the complete raw index building pipeline without any higher-level
- * Parser operations. This represents the theoretical maximum throughput.
- */
-static void BM_RawTwoPassComplete(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
-  libvroom::TwoPass parser;
-
-  for (auto _ : state) {
-    // First pass: count separators
-    auto stats = libvroom::TwoPass::first_pass_simd(buffer.data(), 0, buffer.size, '"', ',');
-
-    // Allocate index
-    auto idx = parser.init_counted(stats.n_separators, 1);
-
-    // Second pass: build index
-    auto n_indexes =
-        libvroom::TwoPass::second_pass_simd(buffer.data(), 0, buffer.size, &idx, 0, ',', '"');
-    idx.n_indexes[0] = n_indexes;
-
-    benchmark::DoNotOptimize(idx);
-  }
-
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
-}
-BENCHMARK(BM_RawTwoPassComplete)->Unit(benchmark::kMillisecond);
-
-/**
- * @brief Benchmark 4: Dialect detection only
+ * @brief Benchmark: Dialect detection only
  *
  * Measures just the dialect detection step, which samples the data
  * to determine delimiter, quote char, and line endings.
  */
-static void BM_DialectDetectionOnly(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
+static void BM_DialectDetection(benchmark::State& state) {
+  auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
+
+  libvroom::DialectDetector detector;
 
   for (auto _ : state) {
-    auto result = libvroom::detect_dialect(buffer.data(), buffer.size);
+    auto result = detector.detect(ds.buffer.data(), ds.buffer.size());
     benchmark::DoNotOptimize(result);
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
+  state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
+  state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_DialectDetectionOnly)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_DialectDetection)->Unit(benchmark::kMillisecond);
+
+// ============================================================================
+// CSVREADER BENCHMARKS - Full parsing pipeline
+// ============================================================================
 
 /**
- * @brief Benchmark 5: Parser::parse() with explicit dialect (no detection)
+ * @brief Benchmark: CsvReader with explicit dialect (no detection)
  *
- * Parser::parse() with an explicit dialect should skip detection overhead.
+ * Measures full CsvReader pipeline with a known dialect, skipping detection.
  */
-static void BM_ParserWithExplicitDialect(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
-  libvroom::Parser parser(1);
+static void BM_CsvReaderExplicit(benchmark::State& state) {
+  auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
+
+  libvroom::CsvOptions opts;
+  opts.separator = ',';
+  opts.quote = '"';
+  opts.num_threads = 1;
 
   for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size, {.dialect = libvroom::Dialect::csv()});
+    libvroom::CsvReader reader(opts);
+    reader.open(ds.temp_path);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
+  state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
+  state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_ParserWithExplicitDialect)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_CsvReaderExplicit)->Unit(benchmark::kMillisecond);
 
 /**
- * @brief Benchmark 6: Parser::parse() with auto-detection (default)
+ * @brief Benchmark: CsvReader with auto-detection (default)
  *
- * Full Parser::parse() with dialect auto-detection enabled.
+ * Full CsvReader pipeline with dialect auto-detection enabled.
  */
-static void BM_ParserWithAutoDetect(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
-  libvroom::Parser parser(1);
+static void BM_CsvReaderAutoDetect(benchmark::State& state) {
+  auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
+
+  libvroom::CsvOptions opts;
+  opts.num_threads = 1;
 
   for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size);
+    libvroom::CsvReader reader(opts);
+    reader.open(ds.temp_path);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
+  state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
+  state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_ParserWithAutoDetect)->Unit(benchmark::kMillisecond);
-
-/**
- * @brief Benchmark 7: Parser::parse() with explicit dialect + BRANCHLESS algorithm
- *
- * Using the branchless algorithm which should be faster for some patterns.
- */
-static void BM_ParserBranchless(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
-  libvroom::Parser parser(1);
-
-  for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size,
-                               libvroom::ParseOptions::branchless(libvroom::Dialect::csv()));
-    benchmark::DoNotOptimize(result);
-  }
-
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
-}
-BENCHMARK(BM_ParserBranchless)->Unit(benchmark::kMillisecond);
-
-/**
- * @brief Benchmark 8: Parser::parse() with TWO_PASS algorithm explicitly
- */
-static void BM_ParserTwoPassAlgo(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
-  libvroom::Parser parser(1);
-
-  libvroom::ParseOptions opts;
-  opts.dialect = libvroom::Dialect::csv();
-  opts.algorithm = libvroom::ParseAlgorithm::TWO_PASS;
-
-  for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size, opts);
-    benchmark::DoNotOptimize(result);
-  }
-
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
-}
-BENCHMARK(BM_ParserTwoPassAlgo)->Unit(benchmark::kMillisecond);
-
-/**
- * @brief Benchmark 9: Parser::parse() with SPECULATIVE algorithm
- */
-static void BM_ParserSpeculative(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
-  libvroom::Parser parser(1);
-
-  libvroom::ParseOptions opts;
-  opts.dialect = libvroom::Dialect::csv();
-  opts.algorithm = libvroom::ParseAlgorithm::SPECULATIVE;
-
-  for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size, opts);
-    benchmark::DoNotOptimize(result);
-  }
-
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
-}
-BENCHMARK(BM_ParserSpeculative)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_CsvReaderAutoDetect)->Unit(benchmark::kMillisecond);
 
 // ============================================================================
 // MULTI-THREADED COMPARISONS
 // ============================================================================
 
 /**
- * @brief Benchmark 10: Raw TwoPass with multiple threads
+ * @brief Benchmark: CsvReader with multiple threads
+ *
+ * Critical for detecting issue #591-type regressions where multi-threaded
+ * parsing gets slower with more threads.
  */
-static void BM_RawTwoPassMultiThread(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
+static void BM_CsvReaderMultiThread(benchmark::State& state) {
+  auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
   int n_threads = static_cast<int>(state.range(0));
-  libvroom::TwoPass parser;
+
+  libvroom::CsvOptions opts;
+  opts.separator = ',';
+  opts.quote = '"';
+  opts.num_threads = static_cast<size_t>(n_threads);
 
   for (auto _ : state) {
-    auto stats = libvroom::TwoPass::first_pass_simd(buffer.data(), 0, buffer.size, '"', ',');
-    auto idx = parser.init_counted(stats.n_separators, n_threads);
-    // For multi-threaded, we just call parse_two_pass which handles threading
-    parser.parse_two_pass(buffer.data(), idx, buffer.size, libvroom::Dialect::csv());
-    benchmark::DoNotOptimize(idx);
-  }
-
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["Threads"] = static_cast<double>(n_threads);
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
-}
-BENCHMARK(BM_RawTwoPassMultiThread)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Unit(benchmark::kMillisecond);
-
-/**
- * @brief Benchmark 11: Parser::parse() with multiple threads
- */
-static void BM_ParserMultiThread(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
-  int n_threads = static_cast<int>(state.range(0));
-  libvroom::Parser parser(n_threads);
-
-  for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size, {.dialect = libvroom::Dialect::csv()});
+    libvroom::CsvReader reader(opts);
+    reader.open(ds.temp_path);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+  state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
   state.counters["Threads"] = static_cast<double>(n_threads);
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
+  state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_ParserMultiThread)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Unit(benchmark::kMillisecond);
-
-/**
- * @brief Benchmark 11b: Raw TwoPass with optimized per-thread allocation (issue #591)
- *
- * This benchmark compares the original worst-case allocation (BM_RawTwoPassMultiThread)
- * with the new optimized per-thread allocation. For N separators and T threads:
- * - Original: allocates T * N (each thread gets space for all separators)
- * - Optimized: allocates ~N (each thread gets space for its ~N/T separators)
- */
-static void BM_RawTwoPassOptimized(benchmark::State& state) {
-  auto& buffer = BenchmarkData::instance().get_buffer("test", kDefaultRows, kDefaultCols);
-  int n_threads = static_cast<int>(state.range(0));
-  libvroom::TwoPass parser;
-
-  for (auto _ : state) {
-    // Use the optimized method that does per-thread allocation
-    auto idx =
-        parser.parse_optimized(buffer.data(), buffer.size, n_threads, libvroom::Dialect::csv());
-    benchmark::DoNotOptimize(idx);
-  }
-
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
-  state.counters["Threads"] = static_cast<double>(n_threads);
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
-}
-BENCHMARK(BM_RawTwoPassOptimized)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_CsvReaderMultiThread)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Unit(benchmark::kMillisecond);
 
 // ============================================================================
 // FILE SIZE SCALING
 // ============================================================================
 
 /**
- * @brief Benchmark 12: Raw TwoPass scaling with file size
+ * @brief Benchmark: Row counting scaling with file size
  */
-static void BM_RawTwoPassScaling(benchmark::State& state) {
+static void BM_CountRowsScaling(benchmark::State& state) {
   size_t rows = static_cast<size_t>(state.range(0));
-  auto& buffer = BenchmarkData::instance().get_buffer("scaling", rows, 10);
-  libvroom::TwoPass parser;
+  auto& ds = BenchmarkData::instance().get("scaling", rows, 10);
 
   for (auto _ : state) {
-    auto stats = libvroom::TwoPass::first_pass_simd(buffer.data(), 0, buffer.size, '"', ',');
-    auto idx = parser.init_counted(stats.n_separators, 1);
-    auto n_indexes =
-        libvroom::TwoPass::second_pass_simd(buffer.data(), 0, buffer.size, &idx, 0, ',', '"');
-    idx.n_indexes[0] = n_indexes;
-    benchmark::DoNotOptimize(idx);
+    auto [row_count, last_row_end] = libvroom::count_rows_simd(
+        reinterpret_cast<const char*>(ds.buffer.data()), ds.buffer.size());
+    benchmark::DoNotOptimize(row_count);
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+  state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
   state.counters["Rows"] = static_cast<double>(rows);
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
+  state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_RawTwoPassScaling)
+BENCHMARK(BM_CountRowsScaling)
     ->Arg(10000)
     ->Arg(50000)
     ->Arg(100000)
@@ -401,23 +336,29 @@ BENCHMARK(BM_RawTwoPassScaling)
     ->Unit(benchmark::kMillisecond);
 
 /**
- * @brief Benchmark 13: Parser::parse() scaling with file size
+ * @brief Benchmark: CsvReader scaling with file size
  */
-static void BM_ParserScaling(benchmark::State& state) {
+static void BM_CsvReaderScaling(benchmark::State& state) {
   size_t rows = static_cast<size_t>(state.range(0));
-  auto& buffer = BenchmarkData::instance().get_buffer("scaling", rows, 10);
-  libvroom::Parser parser(1);
+  auto& ds = BenchmarkData::instance().get("scaling", rows, 10);
+
+  libvroom::CsvOptions opts;
+  opts.separator = ',';
+  opts.quote = '"';
+  opts.num_threads = 1;
 
   for (auto _ : state) {
-    auto result = parser.parse(buffer.data(), buffer.size, {.dialect = libvroom::Dialect::csv()});
+    libvroom::CsvReader reader(opts);
+    reader.open(ds.temp_path);
+    auto result = reader.read_all();
     benchmark::DoNotOptimize(result);
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+  state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
   state.counters["Rows"] = static_cast<double>(rows);
-  state.counters["FileSize_MB"] = static_cast<double>(buffer.size) / (1024.0 * 1024.0);
+  state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_ParserScaling)
+BENCHMARK(BM_CsvReaderScaling)
     ->Arg(10000)
     ->Arg(50000)
     ->Arg(100000)
@@ -429,29 +370,18 @@ BENCHMARK(BM_ParserScaling)
 // ============================================================================
 
 /**
- * @brief Benchmark 14: Measure overhead of Result object creation
+ * @brief Benchmark: Measure overhead of CsvOptions creation
  */
-static void BM_ResultObjectCreation(benchmark::State& state) {
+static void BM_CsvOptionsCreation(benchmark::State& state) {
   for (auto _ : state) {
-    libvroom::Parser::Result result;
-    benchmark::DoNotOptimize(result);
-  }
-}
-BENCHMARK(BM_ResultObjectCreation)->Unit(benchmark::kNanosecond);
-
-/**
- * @brief Benchmark 15: Measure overhead of ParseOptions
- */
-static void BM_ParseOptionsCreation(benchmark::State& state) {
-  for (auto _ : state) {
-    libvroom::ParseOptions opts = libvroom::ParseOptions::defaults();
+    libvroom::CsvOptions opts;
     benchmark::DoNotOptimize(opts);
   }
 }
-BENCHMARK(BM_ParseOptionsCreation)->Unit(benchmark::kNanosecond);
+BENCHMARK(BM_CsvOptionsCreation)->Unit(benchmark::kNanosecond);
 
 /**
- * @brief Benchmark 16: Measure overhead of ErrorCollector
+ * @brief Benchmark: Measure overhead of ErrorCollector
  */
 static void BM_ErrorCollectorCreation(benchmark::State& state) {
   for (auto _ : state) {

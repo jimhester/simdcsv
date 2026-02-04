@@ -1,9 +1,7 @@
 #include "libvroom.h"
 
-#include "common_defs.h"
-#include "mem_util.h"
-
 #include <benchmark/benchmark.h>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -76,15 +74,18 @@ static void BM_libvroom_vs_naive(benchmark::State& state, const std::string& fil
   bool use_libvroom = state.range(0) == 1;
 
   if (use_libvroom) {
-    libvroom::Parser parser(1);
+    libvroom::CsvOptions opts;
+    opts.num_threads = 1;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      libvroom::CsvReader reader(opts);
+      auto open_res = reader.open(filename);
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
   } else {
     // Naive parser
-    std::string str_data(reinterpret_cast<const char*>(buffer.data()), buffer.size);
+    std::string str_data(reinterpret_cast<const char*>(buffer.data()), buffer.size());
 
     for (auto _ : state) {
       auto result = NaiveCSVParser::parse(str_data);
@@ -92,7 +93,7 @@ static void BM_libvroom_vs_naive(benchmark::State& state, const std::string& fil
     }
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+  state.SetBytesProcessed(static_cast<int64_t>(buffer.size() * state.iterations()));
   state.counters["Parser"] = use_libvroom ? 1.0 : 0.0; // 1 = libvroom, 0 = naive
 }
 
@@ -130,7 +131,7 @@ static void BM_parsing_approaches(benchmark::State& state, const std::string& fi
 
   const auto& buffer = test_data.at(filename);
   int approach = static_cast<int>(state.range(0));
-  std::string str_data(reinterpret_cast<const char*>(buffer.data()), buffer.size);
+  std::string str_data(reinterpret_cast<const char*>(buffer.data()), buffer.size());
 
   switch (approach) {
   case 0: { // Character-by-character counting
@@ -155,17 +156,20 @@ static void BM_parsing_approaches(benchmark::State& state, const std::string& fi
     break;
   }
   case 3: { // libvroom indexing
-    libvroom::Parser parser(1);
+    libvroom::CsvOptions opts;
+    opts.num_threads = 1;
 
     for (auto _ : state) {
-      auto result = parser.parse(buffer.data(), buffer.size);
+      libvroom::CsvReader reader(opts);
+      reader.open(filename);
+      auto result = reader.read_all();
       benchmark::DoNotOptimize(result);
     }
     break;
   }
   }
 
-  state.SetBytesProcessed(static_cast<int64_t>(buffer.size * state.iterations()));
+  state.SetBytesProcessed(static_cast<int64_t>(buffer.size() * state.iterations()));
   state.counters["Approach"] = static_cast<double>(approach);
 }
 
@@ -186,7 +190,13 @@ BENCHMARK(BM_parsing_approaches_quoted)
 // Memory bandwidth benchmark
 static void BM_memory_bandwidth(benchmark::State& state) {
   size_t size = static_cast<size_t>(state.range(0));
-  auto data = static_cast<char*>(aligned_malloc(64, size));
+  void* raw = nullptr;
+  int rc = posix_memalign(&raw, 64, size);
+  if (rc != 0 || !raw) {
+    state.SkipWithError("Failed to allocate aligned memory");
+    return;
+  }
+  auto data = static_cast<char*>(raw);
 
   // Initialize data
   for (size_t i = 0; i < size; ++i) {
@@ -205,7 +215,7 @@ static void BM_memory_bandwidth(benchmark::State& state) {
 
   // Google Benchmark calculates throughput automatically
 
-  aligned_free(data);
+  std::free(data);
 }
 BENCHMARK(BM_memory_bandwidth)
     ->Range(1024, 1024 * 1024 * 100) // 1KB to 100MB

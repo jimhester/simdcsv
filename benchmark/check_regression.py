@@ -19,7 +19,7 @@ import os
 import shutil
 
 REGRESSION_THRESHOLD = 0.15  # 15% regression threshold (increased for CI variability)
-EXPECTED_BENCHMARK_COUNT = 7  # Number of benchmarks we expect to run
+EXPECTED_BENCHMARK_COUNT = 6  # Number of benchmarks we expect to run
 
 
 def load_benchmark(filepath, check_errors=False):
