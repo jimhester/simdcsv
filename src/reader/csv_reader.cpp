@@ -129,13 +129,18 @@ std::pair<size_t, bool> parse_chunk_with_state(
     if (offset >= size)
       break;
 
-    // Skip comment lines
+    // Skip comment lines (handle \n, \r\n, and bare \r)
     if (options.comment != '\0' && data[offset] == options.comment) {
-      while (offset < size && data[offset] != '\n') {
+      while (offset < size && data[offset] != '\n' && data[offset] != '\r') {
         offset++;
       }
-      if (offset < size) {
-        offset++; // skip newline
+      if (offset < size && data[offset] == '\r') {
+        offset++;
+        if (offset < size && data[offset] == '\n') {
+          offset++; // CRLF
+        }
+      } else if (offset < size && data[offset] == '\n') {
+        offset++;
       }
       continue;
     }
@@ -288,12 +293,17 @@ static size_t skip_leading_comment_lines(const char* data, size_t size, char com
       break; // Not a comment line, stop
     }
 
-    // Skip to end of this comment line
-    while (offset < size && data[offset] != '\n') {
+    // Skip to end of this comment line (handle \n, \r\n, and bare \r)
+    while (offset < size && data[offset] != '\n' && data[offset] != '\r') {
       offset++;
     }
-    // Skip past the newline
-    if (offset < size && data[offset] == '\n') {
+    // Skip past the line ending
+    if (offset < size && data[offset] == '\r') {
+      offset++;
+      if (offset < size && data[offset] == '\n') {
+        offset++; // CRLF
+      }
+    } else if (offset < size && data[offset] == '\n') {
       offset++;
     }
   }
@@ -1147,13 +1157,18 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
     if (offset >= size)
       break;
 
-    // Skip comment lines
+    // Skip comment lines (handle \n, \r\n, and bare \r)
     if (impl_->options.comment != '\0' && data[offset] == impl_->options.comment) {
-      while (offset < size && data[offset] != '\n') {
+      while (offset < size && data[offset] != '\n' && data[offset] != '\r') {
         offset++;
       }
-      if (offset < size) {
-        offset++; // skip newline
+      if (offset < size && data[offset] == '\r') {
+        offset++;
+        if (offset < size && data[offset] == '\n') {
+          offset++; // CRLF
+        }
+      } else if (offset < size && data[offset] == '\n') {
+        offset++;
       }
       continue;
     }
