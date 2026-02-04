@@ -1,5 +1,6 @@
 #include "libvroom/arrow_column_builder.h"
 #include "libvroom/cache.h"
+#include "libvroom/dialect.h"
 #include "libvroom/encoding.h"
 #include "libvroom/error.h"
 #include "libvroom/parse_utils.h"
@@ -265,8 +266,9 @@ struct CsvReader::Impl {
   size_t num_threads = 0;
   bool file_has_quotes = false; // Detected during sampling
   ErrorCollector error_collector;
-  std::string file_path;            // Stored from open() for caching
-  EncodingResult detected_encoding; // Character encoding detection result
+  std::string file_path;                                  // Stored from open() for caching
+  EncodingResult detected_encoding;                       // Character encoding detection result
+  std::optional<DetectionResult> detected_dialect_result; // From DialectDetector
 
   // Streaming state
   std::unique_ptr<ParsedChunkQueue> streaming_queue;
@@ -383,6 +385,26 @@ Result<bool> CsvReader::open(const std::string& path) {
       // UTF-8 BOM: skip past BOM bytes (no allocation/copy)
       impl_->data_ptr += impl_->detected_encoding.bom_length;
       impl_->data_size -= impl_->detected_encoding.bom_length;
+    }
+  }
+
+  // Auto-detect dialect if separator is the sentinel value
+  if (impl_->options.separator == '\0') {
+    DialectDetector detector;
+    auto detected =
+        detector.detect(reinterpret_cast<const uint8_t*>(impl_->data_ptr), impl_->data_size);
+
+    if (detected.success()) {
+      impl_->options.separator = detected.dialect.delimiter;
+      impl_->options.quote = detected.dialect.quote_char;
+      impl_->options.has_header = detected.has_header;
+      if (detected.dialect.comment_char != '\0') {
+        impl_->options.comment = detected.dialect.comment_char;
+      }
+      impl_->detected_dialect_result = detected;
+    } else {
+      // Fall back to comma if detection fails
+      impl_->options.separator = ',';
     }
   }
 
@@ -540,6 +562,26 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
     }
   }
 
+  // Auto-detect dialect if separator is the sentinel value
+  if (impl_->options.separator == '\0') {
+    DialectDetector detector;
+    auto detected =
+        detector.detect(reinterpret_cast<const uint8_t*>(impl_->data_ptr), impl_->data_size);
+
+    if (detected.success()) {
+      impl_->options.separator = detected.dialect.delimiter;
+      impl_->options.quote = detected.dialect.quote_char;
+      impl_->options.has_header = detected.has_header;
+      if (detected.dialect.comment_char != '\0') {
+        impl_->options.comment = detected.dialect.comment_char;
+      }
+      impl_->detected_dialect_result = detected;
+    } else {
+      // Fall back to comma if detection fails
+      impl_->options.separator = ',';
+    }
+  }
+
   const char* data = impl_->data_ptr;
   size_t size = impl_->data_size;
 
@@ -665,6 +707,10 @@ const std::vector<ParseError>& CsvReader::errors() const {
 
 bool CsvReader::has_errors() const {
   return impl_->error_collector.has_errors();
+}
+
+std::optional<DetectionResult> CsvReader::detected_dialect() const {
+  return impl_->detected_dialect_result;
 }
 
 Result<ParsedChunks> CsvReader::read_all() {
