@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <climits>
 #include <zlib.h>
+#ifdef VROOM_HAVE_ZSTD
 #include <zstd.h>
+#endif
 
 #ifdef VROOM_HAVE_SNAPPY
 #include <snappy.h>
@@ -61,6 +63,7 @@ std::vector<uint8_t> compress(const uint8_t* data, size_t size, Compression code
     output.assign(data, data + size);
     break;
 
+#ifdef VROOM_HAVE_ZSTD
   case Compression::ZSTD: {
     size_t max_size = ZSTD_compressBound(size);
     output.resize(max_size);
@@ -75,6 +78,7 @@ std::vector<uint8_t> compress(const uint8_t* data, size_t size, Compression code
     }
     break;
   }
+#endif
 
   case Compression::GZIP: {
     // Use zlib for gzip compression
@@ -171,6 +175,7 @@ void compress_into(const uint8_t* data, size_t size, Compression codec, int leve
     output.assign(data, data + size);
     return;
 
+#ifdef VROOM_HAVE_ZSTD
   case Compression::ZSTD: {
     size_t max_size = ZSTD_compressBound(size);
     auto& buffer = pool.get_buffer(max_size);
@@ -184,6 +189,7 @@ void compress_into(const uint8_t* data, size_t size, Compression codec, int leve
     }
     break;
   }
+#endif
 
   case Compression::GZIP: {
     // Use zlib for gzip compression with buffer pooling
@@ -280,6 +286,7 @@ size_t compress_into_buffer(const uint8_t* data, size_t size, Compression codec,
     }
     return 0;
 
+#ifdef VROOM_HAVE_ZSTD
   case Compression::ZSTD: {
     size_t compressed_size = ZSTD_compress(output, output_capacity, data, size, level);
 
@@ -288,6 +295,7 @@ size_t compress_into_buffer(const uint8_t* data, size_t size, Compression codec,
     }
     return compressed_size;
   }
+#endif
 
   case Compression::GZIP: {
     z_stream stream{};
@@ -352,8 +360,10 @@ size_t max_compressed_size(Compression codec, size_t input_size) {
   case Compression::NONE:
     return input_size;
 
+#ifdef VROOM_HAVE_ZSTD
   case Compression::ZSTD:
     return ZSTD_compressBound(input_size);
+#endif
 
   case Compression::GZIP: {
     // zlib's deflateBound requires a stream, use conservative estimate

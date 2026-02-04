@@ -301,6 +301,7 @@ TEST(ConvertCsvToParquet, ConversionResultErrorSummary) {
 // C. Compression Options
 // =============================================================================
 
+#ifdef VROOM_HAVE_ZSTD
 TEST(CompressionOptions, ZstdCompression) {
   test_util::TempCsvFile csv("x,y\n1,2\n3,4\n");
   test_util::TempOutputFile parquet;
@@ -314,6 +315,7 @@ TEST(CompressionOptions, ZstdCompression) {
   ASSERT_TRUE(result.ok()) << result.error;
   EXPECT_EQ(result.rows, 2u);
 }
+#endif
 
 TEST(CompressionOptions, NoneCompression) {
   test_util::TempCsvFile csv("x,y\n1,2\n3,4\n");
@@ -371,6 +373,7 @@ TEST(CompressionOptions, Lz4Compression) {
   EXPECT_EQ(result.rows, 2u);
 }
 
+#ifdef VROOM_HAVE_ZSTD
 TEST(CompressionOptions, UncompressedLargerThanCompressed) {
   // Generate enough data so compression makes a visible difference
   std::string content = "id,value\n";
@@ -411,6 +414,7 @@ TEST(CompressionOptions, UncompressedLargerThanCompressed) {
   auto size_zstd = f_zstd.tellg();
   EXPECT_GT(size_none, size_zstd) << "Uncompressed should be larger than ZSTD compressed";
 }
+#endif
 
 // =============================================================================
 // D. Error Handling
@@ -676,9 +680,13 @@ TEST(RealDataFiles, ContactsCSVToParquet) {
 // Additional: Parquet options
 // =============================================================================
 
-TEST(ParquetOptions, DefaultCompressionIsZstd) {
+TEST(ParquetOptions, DefaultCompression) {
   libvroom::ParquetOptions opts;
+#ifdef VROOM_HAVE_ZSTD
   EXPECT_EQ(opts.compression, libvroom::Compression::ZSTD);
+#else
+  EXPECT_EQ(opts.compression, libvroom::Compression::GZIP);
+#endif
 }
 
 TEST(ParquetOptions, DefaultRowGroupSize) {

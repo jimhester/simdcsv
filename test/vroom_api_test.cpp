@@ -202,6 +202,7 @@ TEST(ConversionTest, BasicConversion) {
   EXPECT_TRUE(f.good());
 }
 
+#ifdef VROOM_HAVE_ZSTD
 TEST(ConversionTest, WithZstdCompression) {
   TempCsvFile csv("x,y\n1,2\n3,4\n");
   TempOutputFile parquet;
@@ -216,6 +217,7 @@ TEST(ConversionTest, WithZstdCompression) {
 
   EXPECT_EQ(result.rows, 2);
 }
+#endif
 
 TEST(ConversionTest, EmptyFile) {
   TempCsvFile csv("a,b,c\n");
