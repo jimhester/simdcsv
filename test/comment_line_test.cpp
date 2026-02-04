@@ -60,7 +60,7 @@ protected:
 // ============================================================================
 
 TEST_F(CommentLineTest, HashCommentsFromFile) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseFile(testDataPath("comments/hash_comments.csv"), '#');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
@@ -70,7 +70,7 @@ TEST_F(CommentLineTest, HashCommentsFromFile) {
 }
 
 TEST_F(CommentLineTest, CommentsBeforeHeader) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseContent("# comment 1\n# comment 2\nA,B\n1,2\n3,4\n", '#');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
@@ -79,21 +79,21 @@ TEST_F(CommentLineTest, CommentsBeforeHeader) {
 }
 
 TEST_F(CommentLineTest, CommentsInMiddleOfData) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseContent("A,B\n1,2\n# skip this\n3,4\n# skip this too\n5,6\n", '#');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 3u);
 }
 
 TEST_F(CommentLineTest, CommentAtEndOfFile) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseContent("A,B\n1,2\n3,4\n# trailing comment\n", '#');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 2u);
 }
 
 TEST_F(CommentLineTest, OnlyComments) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseContent("# comment 1\n# comment 2\n# comment 3\n", '#');
   // No header after comments, should fail to open
   EXPECT_FALSE(result.ok);
@@ -112,7 +112,7 @@ TEST_F(CommentLineTest, NoCommentCharSet) {
 // ============================================================================
 
 TEST_F(CommentLineTest, SemicolonComments) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseFile(testDataPath("comments/semicolon_comments.csv"), ';');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
@@ -120,14 +120,14 @@ TEST_F(CommentLineTest, SemicolonComments) {
 }
 
 TEST_F(CommentLineTest, PercentComment) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseContent("% comment\nA,B\n1,2\n", '%');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 1u);
 }
 
 TEST_F(CommentLineTest, SlashComment) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseContent("/ comment\nA,B\n1,2\n/ another\n3,4\n", '/');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 2u);
@@ -138,7 +138,7 @@ TEST_F(CommentLineTest, SlashComment) {
 // ============================================================================
 
 TEST_F(CommentLineTest, HashInsideQuotedField) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseFile(testDataPath("comments/quoted_hash.csv"), '#');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
@@ -147,7 +147,7 @@ TEST_F(CommentLineTest, HashInsideQuotedField) {
 }
 
 TEST_F(CommentLineTest, CommentCharInsideQuotedFieldIsNotComment) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseContent("A,B\n\"#not a comment\",data\nreal,data\n", '#');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 2u);
@@ -158,7 +158,7 @@ TEST_F(CommentLineTest, CommentCharInsideQuotedFieldIsNotComment) {
 // ============================================================================
 
 TEST_F(CommentLineTest, CommentsWithTabDelimiter) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseContent("# comment\nA\tB\n1\t2\n# skip\n3\t4\n", '#', '\t');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
@@ -166,7 +166,7 @@ TEST_F(CommentLineTest, CommentsWithTabDelimiter) {
 }
 
 TEST_F(CommentLineTest, CommentsWithPipeDelimiter) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseContent("# comment\nA|B\n1|2\n3|4\n", '#', '|');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
@@ -178,7 +178,7 @@ TEST_F(CommentLineTest, CommentsWithPipeDelimiter) {
 // ============================================================================
 
 TEST_F(CommentLineTest, MultiHeaderComments) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseFile(testDataPath("comments/multi_header_comments.csv"), '#');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 4u);
@@ -191,7 +191,7 @@ TEST_F(CommentLineTest, MultiHeaderComments) {
 // ============================================================================
 
 TEST_F(CommentLineTest, CommentsWithCRLF) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   auto result = parseContent("# comment\r\nA,B\r\n1,2\r\n# skip\r\n3,4\r\n", '#');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 2u);
@@ -202,7 +202,7 @@ TEST_F(CommentLineTest, CommentsWithCRLF) {
 // ============================================================================
 
 TEST_F(CommentLineTest, EmptyCommentLine) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   // A line with just the comment char
   auto result = parseContent("#\nA,B\n1,2\n#\n3,4\n", '#');
   ASSERT_TRUE(result.ok);
@@ -217,7 +217,7 @@ TEST_F(CommentLineTest, CommentCharNotAtLineStart) {
 }
 
 TEST_F(CommentLineTest, ManyConsecutiveComments) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   std::ostringstream oss;
   for (int i = 0; i < 100; ++i)
     oss << "# comment " << i << "\n";
@@ -231,7 +231,7 @@ TEST_F(CommentLineTest, ManyConsecutiveComments) {
 }
 
 TEST_F(CommentLineTest, MultiThreadedWithComments) {
-  GTEST_SKIP() << "CsvReader does not yet implement CsvOptions::comment for skipping comment lines";
+
   std::ostringstream oss;
   oss << "# header comment\n";
   oss << "A,B,C\n";
