@@ -87,6 +87,38 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
+// Fixed-width file reader - orchestrates FWF parsing
+class FwfReader {
+public:
+  explicit FwfReader(const FwfOptions& options);
+  ~FwfReader();
+
+  // Open a fixed-width file
+  Result<bool> open(const std::string& path);
+
+  // Open from a pre-loaded buffer
+  Result<bool> open_from_buffer(AlignedBuffer buffer);
+
+  // Get detected schema after opening
+  const std::vector<ColumnSchema>& schema() const;
+
+  // Streaming API: start parsing, then consume chunks one at a time
+  Result<bool> start_streaming();
+  std::optional<std::vector<std::unique_ptr<ArrowColumnBuilder>>> next_chunk();
+
+  // Get total number of rows (only valid after all chunks consumed)
+  size_t row_count() const;
+
+  // Get detected encoding (valid after open/open_from_buffer)
+  const EncodingResult& encoding() const;
+
+private:
+  Result<bool> initialize_data();
+  Result<ParsedChunks> read_all_serial();
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+
 // Memory-mapped file source
 class MmapSource {
 public:
