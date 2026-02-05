@@ -599,6 +599,12 @@ if(BUILD_TESTING)
     add_dependencies(integration_test copy_test_data)
     gtest_discover_tests(integration_test)
 
+    # Fixed-width file reader tests
+    add_executable(fwf_reader_test test/fwf_reader_test.cpp)
+    target_link_libraries(fwf_reader_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(fwf_reader_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(fwf_reader_test)
+
     # =============================================================================
     # Infrastructure tests (pre-existing, not part of the port)
     # =============================================================================
