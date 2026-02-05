@@ -47,28 +47,9 @@ inline std::string unescape_quotes(std::string_view value, char quote,
 // the number of null values is typically very small (3-5 items).
 class NullChecker {
 public:
-  explicit NullChecker(const CsvOptions& options) {
-    // Parse comma-separated null values into a vector
-    std::string_view null_values = options.null_values;
-    size_t start = 0;
-
-    while (start < null_values.size()) {
-      size_t end = null_values.find(',', start);
-      if (end == std::string_view::npos) {
-        end = null_values.size();
-      }
-
-      std::string_view null_val = null_values.substr(start, end - start);
-      if (!null_val.empty()) {
-        null_values_.emplace_back(null_val);
-        max_null_length_ = std::max(max_null_length_, null_val.size());
-      } else {
-        empty_is_null_ = true;
-      }
-
-      start = end + 1;
-    }
-  }
+  explicit NullChecker(const CsvOptions& options) { init(options.null_values); }
+  explicit NullChecker(const FwfOptions& options) { init(options.null_values); }
+  explicit NullChecker(std::string_view null_values_csv) { init(null_values_csv); }
 
   bool is_null(std::string_view value) const {
     // Fast path: empty string check
@@ -91,6 +72,27 @@ public:
   }
 
 private:
+  void init(std::string_view null_values) {
+    size_t start = 0;
+
+    while (start < null_values.size()) {
+      size_t end = null_values.find(',', start);
+      if (end == std::string_view::npos) {
+        end = null_values.size();
+      }
+
+      std::string_view null_val = null_values.substr(start, end - start);
+      if (!null_val.empty()) {
+        null_values_.emplace_back(null_val);
+        max_null_length_ = std::max(max_null_length_, null_val.size());
+      } else {
+        empty_is_null_ = true;
+      }
+
+      start = end + 1;
+    }
+  }
+
   std::vector<std::string> null_values_;
   size_t max_null_length_ = 0;
   bool empty_is_null_ = true; // Default: empty strings are null
