@@ -20,8 +20,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Build options
 option(BUILD_TESTING "Build test executables" ON)
-# Benchmarks disabled - need to be updated for libvroom2 API
-option(BUILD_BENCHMARKS "Build benchmark executables" OFF)
+option(BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(BUILD_SHARED_LIBS "Build shared library instead of static" OFF)
 
 # Code coverage options
