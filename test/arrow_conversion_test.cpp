@@ -465,6 +465,7 @@ TEST(SchemaVerification, IntegerColumnsInferredAsInt32) {
   test_util::TempCsvFile csv("a,b\n1,2\n3,4\n5,6\n");
 
   libvroom::CsvOptions opts;
+  opts.guess_integer = true;
   libvroom::CsvReader reader(opts);
   auto open_result = reader.open(csv.path());
   ASSERT_TRUE(open_result.ok) << open_result.error;

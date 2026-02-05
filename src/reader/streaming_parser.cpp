@@ -295,6 +295,18 @@ struct StreamingParser::Impl {
           field_len--;
         }
 
+        // Trim whitespace if enabled
+        if (options.csv.trim_ws) {
+          while (field_len > 0 && (field_data[0] == ' ' || field_data[0] == '\t')) {
+            field_data++;
+            field_len--;
+          }
+          while (field_len > 0 &&
+                 (field_data[field_len - 1] == ' ' || field_data[field_len - 1] == '\t')) {
+            field_len--;
+          }
+        }
+
         std::string_view field_view(field_data, field_len);
 
         // Error detection

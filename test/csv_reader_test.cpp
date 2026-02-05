@@ -769,3 +769,76 @@ TEST_F(CsvReaderTest, DetectedDialectAccessor) {
   ASSERT_TRUE(dialect.has_value());
   EXPECT_EQ(dialect->dialect.delimiter, ',');
 }
+
+// ============================================================================
+// TRIM WHITESPACE TESTS
+// ============================================================================
+
+TEST(TrimWhitespaceParsingTest, TrimWsTrueTrimsFieldValues) {
+  test_util::TempCsvFile csv("name,value\n  alice  ,  42  \n  bob  ,  99  \n");
+
+  libvroom::CsvOptions opts;
+  opts.trim_ws = true;
+  opts.guess_integer = true;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  EXPECT_EQ(test_util::getStringValue(read_result.value, 0, 0), "alice");
+  EXPECT_EQ(test_util::getStringValue(read_result.value, 0, 1), "bob");
+  EXPECT_EQ(test_util::getStringValue(read_result.value, 1, 0), "42");
+  EXPECT_EQ(test_util::getStringValue(read_result.value, 1, 1), "99");
+}
+
+TEST(TrimWhitespaceParsingTest, TrimWsFalsePreservesWhitespace) {
+  // With trim_ws=false, both type inference and parsing preserve whitespace,
+  // so "  42  " is inferred as STRING (not numeric) and stored with whitespace.
+  test_util::TempCsvFile csv("name,value\n  alice  ,  42  \n");
+
+  libvroom::CsvOptions opts;
+  opts.trim_ws = false;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  // Whitespace preserved when trim_ws=false
+  EXPECT_EQ(test_util::getStringValue(read_result.value, 0, 0), "  alice  ");
+  EXPECT_EQ(test_util::getStringValue(read_result.value, 1, 0), "  42  ");
+}
+
+TEST(TrimWhitespaceParsingTest, TrimWsWithTabs) {
+  test_util::TempCsvFile csv("a\n\t hello \t\n");
+
+  libvroom::CsvOptions opts;
+  opts.trim_ws = true;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  EXPECT_EQ(test_util::getStringValue(read_result.value, 0, 0), "hello");
+}
+
+TEST(TrimWhitespaceParsingTest, HeadersAlwaysTrimmed) {
+  // Header names are always trimmed regardless of trim_ws setting.
+  // This matches R's vroom behavior where header names are always cleaned.
+  test_util::TempCsvFile csv("  name  ,  value  \nalice,42\n");
+
+  libvroom::CsvOptions opts;
+  opts.trim_ws = false;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  const auto& schema = reader.schema();
+  EXPECT_EQ(schema[0].name, "name");
+  EXPECT_EQ(schema[1].name, "value");
+}

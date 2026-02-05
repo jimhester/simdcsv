@@ -19,6 +19,8 @@ struct CsvOptions {
   char comment = '\0'; // No comment char by default
   bool has_header = true;
   bool skip_empty_rows = true;
+  bool guess_integer = false;                // When false, integer-like values infer as FLOAT64
+  bool trim_ws = true;                       // Trim leading/trailing whitespace from fields
   std::string null_values = "NA,null,NULL,"; // Comma-separated
   std::string true_values = "true,TRUE,True,yes,YES,Yes";
   std::string false_values = "false,FALSE,False,no,NO,No";
@@ -50,6 +52,7 @@ struct FwfOptions {
   std::vector<int> col_ends;          // Exclusive end offsets (-1 = to end of line)
   std::vector<std::string> col_names; // Column names
   bool trim_ws = true;
+  bool guess_integer = false; // When false, integer-like values infer as FLOAT64
   char comment = '\0';
   bool skip_empty_rows = true;
   std::string null_values = "NA,null,NULL,";

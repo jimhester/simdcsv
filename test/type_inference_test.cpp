@@ -38,6 +38,7 @@ protected:
   static libvroom::CsvOptions default_csv_opts() {
     libvroom::CsvOptions opts;
     opts.separator = ','; // Explicit separator (bypass auto-detect sentinel)
+    opts.guess_integer = true;
     return opts;
   }
   libvroom::TypeInference default_inference{default_csv_opts()};
@@ -199,6 +200,7 @@ protected:
   static libvroom::CsvOptions default_csv_opts() {
     libvroom::CsvOptions opts;
     opts.separator = ','; // Explicit separator (bypass auto-detect sentinel)
+    opts.guess_integer = true;
     return opts;
   }
   libvroom::TypeInference default_inference{default_csv_opts()};
@@ -398,13 +400,15 @@ protected:
   static libvroom::CsvOptions default_csv_opts() {
     libvroom::CsvOptions opts;
     opts.separator = ','; // Explicit separator (bypass auto-detect sentinel)
+    opts.guess_integer = true;
     return opts;
   }
   libvroom::TypeInference default_inference{default_csv_opts()};
 };
 
 TEST_F(InferFromSampleTest, AllIntegers) {
-  std::string data = "a,b\n1,2\n3,4\n5,6\n";
+  // Callers pass data with header already stripped
+  std::string data = "1,2\n3,4\n5,6\n";
   auto types = default_inference.infer_from_sample(data.data(), data.size(), 2);
   EXPECT_EQ(types.size(), 2u);
   EXPECT_EQ(types[0], DataType::INT32);
@@ -412,7 +416,7 @@ TEST_F(InferFromSampleTest, AllIntegers) {
 }
 
 TEST_F(InferFromSampleTest, MixedIntAndFloat) {
-  std::string data = "a,b\n1,2.5\n3,4.5\n5,6.5\n";
+  std::string data = "1,2.5\n3,4.5\n5,6.5\n";
   auto types = default_inference.infer_from_sample(data.data(), data.size(), 2);
   EXPECT_EQ(types.size(), 2u);
   EXPECT_EQ(types[0], DataType::INT32);
@@ -420,7 +424,7 @@ TEST_F(InferFromSampleTest, MixedIntAndFloat) {
 }
 
 TEST_F(InferFromSampleTest, MixedWithString) {
-  std::string data = "a,b\n1,hello\n3,world\n";
+  std::string data = "1,hello\n3,world\n";
   auto types = default_inference.infer_from_sample(data.data(), data.size(), 2);
   EXPECT_EQ(types.size(), 2u);
   EXPECT_EQ(types[0], DataType::INT32);
@@ -428,7 +432,7 @@ TEST_F(InferFromSampleTest, MixedWithString) {
 }
 
 TEST_F(InferFromSampleTest, MixedWithNulls) {
-  std::string data = "a,b\n1,NA\n3,4\nNA,5\n";
+  std::string data = "1,NA\n3,4\nNA,5\n";
   auto types = default_inference.infer_from_sample(data.data(), data.size(), 2);
   EXPECT_EQ(types.size(), 2u);
   // NA should not widen the type: wider_type(INT32, NA) = INT32
@@ -446,20 +450,20 @@ TEST_F(InferFromSampleTest, EmptyDataReturnsUnknown) {
 }
 
 TEST_F(InferFromSampleTest, ZeroColumnsReturnsEmpty) {
-  std::string data = "a\n1\n2\n";
+  std::string data = "1\n2\n";
   auto types = default_inference.infer_from_sample(data.data(), data.size(), 0);
   EXPECT_EQ(types.size(), 0u);
 }
 
 TEST_F(InferFromSampleTest, IntegerAndBooleanColumn) {
-  std::string data = "a,b\n1,true\n2,false\n3,true\n";
+  std::string data = "1,true\n2,false\n3,true\n";
   auto types = default_inference.infer_from_sample(data.data(), data.size(), 2);
   EXPECT_EQ(types[0], DataType::INT32);
   EXPECT_EQ(types[1], DataType::BOOL);
 }
 
 TEST_F(InferFromSampleTest, DateColumn) {
-  std::string data = "a,b\n2024-01-01,hello\n2024-06-15,world\n";
+  std::string data = "2024-01-01,hello\n2024-06-15,world\n";
   auto types = default_inference.infer_from_sample(data.data(), data.size(), 2);
   EXPECT_EQ(types[0], DataType::DATE);
   EXPECT_EQ(types[1], DataType::STRING);
@@ -467,7 +471,7 @@ TEST_F(InferFromSampleTest, DateColumn) {
 
 TEST_F(InferFromSampleTest, MaxRowsLimitsInference) {
   // Build data with many rows but limit sample to 2
-  std::string data = "a\n1\n2\nhello\nworld\n";
+  std::string data = "1\n2\nhello\nworld\n";
   auto types = default_inference.infer_from_sample(data.data(), data.size(), 1, 2);
   EXPECT_EQ(types.size(), 1u);
   // Only the first 2 data rows (1, 2) are sampled -- result is INT32
@@ -476,9 +480,21 @@ TEST_F(InferFromSampleTest, MaxRowsLimitsInference) {
 
 TEST_F(InferFromSampleTest, IntPromotesToFloat) {
   // First row is int, second row is float -> should widen to FLOAT64
-  std::string data = "a\n1\n2.5\n";
+  std::string data = "1\n2.5\n";
   auto types = default_inference.infer_from_sample(data.data(), data.size(), 1);
   EXPECT_EQ(types[0], DataType::FLOAT64);
+}
+
+TEST_F(InferFromSampleTest, SingleRowFile) {
+  // Regression: infer_from_sample() used to skip the header internally,
+  // but callers already pass data + header_end_offset, causing the only
+  // data row to be skipped in single-row files (all types → STRING).
+  std::string data = "1,2.5,hello\n";
+  auto types = default_inference.infer_from_sample(data.data(), data.size(), 3);
+  EXPECT_EQ(types.size(), 3u);
+  EXPECT_EQ(types[0], DataType::INT32);
+  EXPECT_EQ(types[1], DataType::FLOAT64);
+  EXPECT_EQ(types[2], DataType::STRING);
 }
 
 // ============================================================================
@@ -538,9 +554,11 @@ TEST_F(CustomOptionsTest, EmptyBoolValuesDisablesBoolDetection) {
 TEST_F(CustomOptionsTest, SemicolonSeparatorInInferFromSample) {
   CsvOptions opts;
   opts.separator = ';';
+  opts.guess_integer = true;
   TypeInference inference(opts);
 
-  std::string data = "a;b\n1;2.5\n3;4.5\n";
+  // Callers pass data with header already stripped
+  std::string data = "1;2.5\n3;4.5\n";
   auto types = inference.infer_from_sample(data.data(), data.size(), 2);
   EXPECT_EQ(types.size(), 2u);
   EXPECT_EQ(types[0], DataType::INT32);
@@ -548,7 +566,114 @@ TEST_F(CustomOptionsTest, SemicolonSeparatorInInferFromSample) {
 }
 
 // ============================================================================
-// F. End-to-end: CsvReader schema types
+// E2. guess_integer option tests
+// ============================================================================
+
+class GuessIntegerTest : public ::testing::Test {};
+
+TEST_F(GuessIntegerTest, DefaultGuessIntegerFalse_IntegersInferAsFloat) {
+  // Default guess_integer = false: integer-like values infer as FLOAT64
+  CsvOptions opts;
+  opts.separator = ',';
+  TypeInference inference(opts);
+  EXPECT_EQ(inference.infer_field("42"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("0"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("-1"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("2147483647"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("9999999999"), DataType::FLOAT64);
+}
+
+TEST_F(GuessIntegerTest, DefaultGuessIntegerFalse_FloatsStillFloat) {
+  CsvOptions opts;
+  opts.separator = ',';
+  TypeInference inference(opts);
+  EXPECT_EQ(inference.infer_field("1.5"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("1e10"), DataType::FLOAT64);
+}
+
+TEST_F(GuessIntegerTest, DefaultGuessIntegerFalse_OtherTypesUnaffected) {
+  CsvOptions opts;
+  opts.separator = ',';
+  TypeInference inference(opts);
+  EXPECT_EQ(inference.infer_field("true"), DataType::BOOL);
+  EXPECT_EQ(inference.infer_field("hello"), DataType::STRING);
+  EXPECT_EQ(inference.infer_field("2024-01-15"), DataType::DATE);
+  EXPECT_EQ(inference.infer_field("NA"), DataType::NA);
+}
+
+TEST_F(GuessIntegerTest, GuessIntegerTrue_IntegersInferAsInt) {
+  CsvOptions opts;
+  opts.separator = ',';
+  opts.guess_integer = true;
+  TypeInference inference(opts);
+  EXPECT_EQ(inference.infer_field("42"), DataType::INT32);
+  EXPECT_EQ(inference.infer_field("0"), DataType::INT32);
+  EXPECT_EQ(inference.infer_field("-1"), DataType::INT32);
+  EXPECT_EQ(inference.infer_field("2147483647"), DataType::INT32);
+  EXPECT_EQ(inference.infer_field("2147483648"), DataType::INT64);
+  EXPECT_EQ(inference.infer_field("9999999999"), DataType::INT64);
+}
+
+TEST_F(GuessIntegerTest, InferFromSample_DefaultNoIntegers) {
+  CsvOptions opts;
+  opts.separator = ',';
+  TypeInference inference(opts);
+  std::string data = "1,2.5,hello\n3,4.5,world\n";
+  auto types = inference.infer_from_sample(data.data(), data.size(), 3);
+  EXPECT_EQ(types[0], DataType::FLOAT64); // integers -> float when guess_integer=false
+  EXPECT_EQ(types[1], DataType::FLOAT64);
+  EXPECT_EQ(types[2], DataType::STRING);
+}
+
+TEST_F(GuessIntegerTest, InferFromSample_GuessIntegerTrue) {
+  CsvOptions opts;
+  opts.separator = ',';
+  opts.guess_integer = true;
+  TypeInference inference(opts);
+  std::string data = "1,2.5,hello\n3,4.5,world\n";
+  auto types = inference.infer_from_sample(data.data(), data.size(), 3);
+  EXPECT_EQ(types[0], DataType::INT32);
+  EXPECT_EQ(types[1], DataType::FLOAT64);
+  EXPECT_EQ(types[2], DataType::STRING);
+}
+
+// ============================================================================
+// F. Trim whitespace in infer_from_sample()
+// ============================================================================
+
+class TrimWhitespaceInferenceTest : public ::testing::Test {};
+
+TEST_F(TrimWhitespaceInferenceTest, TrimWsTrueTrimsForInference) {
+  // With trim_ws=true (default), whitespace around values is trimmed
+  // during inference so "  42  " infers as numeric
+  CsvOptions opts;
+  opts.separator = ',';
+  opts.guess_integer = true;
+  TypeInference inference(opts);
+  std::string data = "  42  ,  2.5  ,  hello  \n";
+  auto types = inference.infer_from_sample(data.data(), data.size(), 3);
+  EXPECT_EQ(types[0], DataType::INT32);
+  EXPECT_EQ(types[1], DataType::FLOAT64);
+  EXPECT_EQ(types[2], DataType::STRING);
+}
+
+TEST_F(TrimWhitespaceInferenceTest, TrimWsFalsePreservesWhitespace) {
+  // With trim_ws=false, whitespace is preserved during inference
+  // so "  42  " infers as STRING (leading space fails digit check)
+  CsvOptions opts;
+  opts.separator = ',';
+  opts.trim_ws = false;
+  opts.guess_integer = true;
+  TypeInference inference(opts);
+  std::string data = "  42  ,  2.5  ,  hello  \n";
+  auto types = inference.infer_from_sample(data.data(), data.size(), 3);
+  EXPECT_EQ(types[0], DataType::STRING);
+  EXPECT_EQ(types[1], DataType::STRING);
+  EXPECT_EQ(types[2], DataType::STRING);
+}
+
+// ============================================================================
+// G. End-to-end: CsvReader schema types
 // ============================================================================
 
 class TypeInferenceEndToEndTest : public ::testing::Test {};
@@ -556,7 +681,9 @@ class TypeInferenceEndToEndTest : public ::testing::Test {};
 TEST_F(TypeInferenceEndToEndTest, NumericCSVSchemaTypes) {
   test_util::TempCsvFile csv("x,y\n1,2\n3,4\n5,6\n");
 
-  CsvReader reader(CsvOptions{});
+  CsvOptions opts;
+  opts.guess_integer = true;
+  CsvReader reader(opts);
   auto open_result = reader.open(csv.path());
   ASSERT_TRUE(open_result.ok) << open_result.error;
 
@@ -575,7 +702,9 @@ TEST_F(TypeInferenceEndToEndTest, NumericCSVSchemaTypes) {
 TEST_F(TypeInferenceEndToEndTest, MixedCSVSchemaTypes) {
   test_util::TempCsvFile csv("name,age,score\nalice,30,95.5\nbob,25,87.2\n");
 
-  CsvReader reader(CsvOptions{});
+  CsvOptions opts;
+  opts.guess_integer = true;
+  CsvReader reader(opts);
   auto open_result = reader.open(csv.path());
   ASSERT_TRUE(open_result.ok) << open_result.error;
 
@@ -625,7 +754,9 @@ TEST_F(TypeInferenceEndToEndTest, DateCSVSchemaType) {
 TEST_F(TypeInferenceEndToEndTest, NullsDoNotWidenType) {
   test_util::TempCsvFile csv("val\n1\nNA\n3\nNA\n5\n");
 
-  CsvReader reader(CsvOptions{});
+  CsvOptions opts;
+  opts.guess_integer = true;
+  CsvReader reader(opts);
   auto open_result = reader.open(csv.path());
   ASSERT_TRUE(open_result.ok) << open_result.error;
 
@@ -641,7 +772,9 @@ TEST_F(TypeInferenceEndToEndTest, NullsDoNotWidenType) {
 TEST_F(TypeInferenceEndToEndTest, IntFloat64MixedSchemaType) {
   test_util::TempCsvFile csv("val\n1\n2.5\n3\n4.5\n");
 
-  CsvReader reader(CsvOptions{});
+  CsvOptions opts;
+  opts.guess_integer = true;
+  CsvReader reader(opts);
   auto open_result = reader.open(csv.path());
   ASSERT_TRUE(open_result.ok) << open_result.error;
 
