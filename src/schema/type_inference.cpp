@@ -176,9 +176,11 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
 
       if (c == '\n' || c == '\r') {
         // End of line
-        while (!current_field.empty() &&
-               (current_field.back() == ' ' || current_field.back() == '\t')) {
-          current_field.pop_back();
+        if (options_.trim_ws) {
+          while (!current_field.empty() &&
+                 (current_field.back() == ' ' || current_field.back() == '\t')) {
+            current_field.pop_back();
+          }
         }
         fields.push_back(std::move(current_field));
         break;
@@ -192,14 +194,16 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
           in_quote = !in_quote;
         }
       } else if (c == options_.separator && !in_quote) {
-        while (!current_field.empty() &&
-               (current_field.back() == ' ' || current_field.back() == '\t')) {
-          current_field.pop_back();
+        if (options_.trim_ws) {
+          while (!current_field.empty() &&
+                 (current_field.back() == ' ' || current_field.back() == '\t')) {
+            current_field.pop_back();
+          }
         }
         fields.push_back(std::move(current_field));
         current_field.clear();
       } else {
-        if (current_field.empty() && !in_quote && (c == ' ' || c == '\t')) {
+        if (options_.trim_ws && current_field.empty() && !in_quote && (c == ' ' || c == '\t')) {
           continue;
         }
         current_field += c;
@@ -208,9 +212,11 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
 
     // If the line ended without a newline
     if (!current_field.empty()) {
-      while (!current_field.empty() &&
-             (current_field.back() == ' ' || current_field.back() == '\t')) {
-        current_field.pop_back();
+      if (options_.trim_ws) {
+        while (!current_field.empty() &&
+               (current_field.back() == ' ' || current_field.back() == '\t')) {
+          current_field.pop_back();
+        }
       }
       fields.push_back(std::move(current_field));
     }

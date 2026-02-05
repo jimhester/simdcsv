@@ -20,6 +20,7 @@ struct CsvOptions {
   bool has_header = true;
   bool skip_empty_rows = true;
   bool guess_integer = false;                // When false, integer-like values infer as FLOAT64
+  bool trim_ws = true;                       // Trim leading/trailing whitespace from fields
   std::string null_values = "NA,null,NULL,"; // Comma-separated
   std::string true_values = "true,TRUE,True,yes,YES,Yes";
   std::string false_values = "false,FALSE,False,no,NO,No";

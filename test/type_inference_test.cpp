@@ -638,7 +638,42 @@ TEST_F(GuessIntegerTest, InferFromSample_GuessIntegerTrue) {
 }
 
 // ============================================================================
-// F. End-to-end: CsvReader schema types
+// F. Trim whitespace in infer_from_sample()
+// ============================================================================
+
+class TrimWhitespaceInferenceTest : public ::testing::Test {};
+
+TEST_F(TrimWhitespaceInferenceTest, TrimWsTrueTrimsForInference) {
+  // With trim_ws=true (default), whitespace around values is trimmed
+  // during inference so "  42  " infers as numeric
+  CsvOptions opts;
+  opts.separator = ',';
+  opts.guess_integer = true;
+  TypeInference inference(opts);
+  std::string data = "  42  ,  2.5  ,  hello  \n";
+  auto types = inference.infer_from_sample(data.data(), data.size(), 3);
+  EXPECT_EQ(types[0], DataType::INT32);
+  EXPECT_EQ(types[1], DataType::FLOAT64);
+  EXPECT_EQ(types[2], DataType::STRING);
+}
+
+TEST_F(TrimWhitespaceInferenceTest, TrimWsFalsePreservesWhitespace) {
+  // With trim_ws=false, whitespace is preserved during inference
+  // so "  42  " infers as STRING (leading space fails digit check)
+  CsvOptions opts;
+  opts.separator = ',';
+  opts.trim_ws = false;
+  opts.guess_integer = true;
+  TypeInference inference(opts);
+  std::string data = "  42  ,  2.5  ,  hello  \n";
+  auto types = inference.infer_from_sample(data.data(), data.size(), 3);
+  EXPECT_EQ(types[0], DataType::STRING);
+  EXPECT_EQ(types[1], DataType::STRING);
+  EXPECT_EQ(types[2], DataType::STRING);
+}
+
+// ============================================================================
+// G. End-to-end: CsvReader schema types
 // ============================================================================
 
 class TypeInferenceEndToEndTest : public ::testing::Test {};
