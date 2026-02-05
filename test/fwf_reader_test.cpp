@@ -109,6 +109,7 @@ TEST_F(FwfReaderTest, TypeInference) {
   opts.col_starts = {0, 4, 9, 14};
   opts.col_ends = {4, 9, 14, -1};
   opts.col_names = {"int_col", "dbl_col", "bool_col", "date_col"};
+  opts.guess_integer = true;
 
   auto result = parseContent(content, opts);
   ASSERT_EQ(result.total_rows, 3u);

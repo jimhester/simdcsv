@@ -52,6 +52,7 @@ struct FwfOptions {
   std::vector<int> col_ends;          // Exclusive end offsets (-1 = to end of line)
   std::vector<std::string> col_names; // Column names
   bool trim_ws = true;
+  bool guess_integer = false; // When false, integer-like values infer as FLOAT64
   char comment = '\0';
   bool skip_empty_rows = true;
   std::string null_values = "NA,null,NULL,";

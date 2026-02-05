@@ -157,6 +157,8 @@ static std::vector<DataType> infer_fwf_types(const char* data, size_t size,
   csv_opts.null_values = options.null_values;
   csv_opts.true_values = options.true_values;
   csv_opts.false_values = options.false_values;
+  csv_opts.guess_integer = options.guess_integer;
+  csv_opts.trim_ws = options.trim_ws;
   TypeInference inference(csv_opts);
 
   const bool trim = options.trim_ws;
