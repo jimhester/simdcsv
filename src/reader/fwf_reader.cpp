@@ -108,17 +108,17 @@ static size_t parse_fwf_chunk(const char* data, size_t size, const FwfOptions& o
     }
 
     for (size_t col_idx = 0; col_idx < num_cols; ++col_idx) {
-      int col_start = options.col_starts[col_idx];
+      size_t cs = static_cast<size_t>(options.col_starts[col_idx]);
       int col_end = options.col_ends[col_idx];
 
       std::string_view field;
-      if (static_cast<size_t>(col_start) >= line_len) {
+      if (cs >= line_len) {
         field = std::string_view();
       } else if (col_end == -1) {
-        field = std::string_view(line_start + col_start, line_len - col_start);
+        field = std::string_view(line_start + cs, line_len - cs);
       } else {
         size_t end = std::min(static_cast<size_t>(col_end), line_len);
-        field = std::string_view(line_start + col_start, end - col_start);
+        field = std::string_view(line_start + cs, end - cs);
       }
 
       if (trim && !field.empty()) {
@@ -191,17 +191,17 @@ static std::vector<DataType> infer_fwf_types(const char* data, size_t size,
     }
 
     for (size_t col_idx = 0; col_idx < num_cols; ++col_idx) {
-      int col_start = options.col_starts[col_idx];
+      size_t cs = static_cast<size_t>(options.col_starts[col_idx]);
       int col_end = options.col_ends[col_idx];
 
       std::string_view field;
-      if (static_cast<size_t>(col_start) >= line_len) {
+      if (cs >= line_len) {
         field = std::string_view();
       } else if (col_end == -1) {
-        field = std::string_view(line_start + col_start, line_len - col_start);
+        field = std::string_view(line_start + cs, line_len - cs);
       } else {
         size_t end = std::min(static_cast<size_t>(col_end), line_len);
-        field = std::string_view(line_start + col_start, end - col_start);
+        field = std::string_view(line_start + cs, end - cs);
       }
 
       if (trim && !field.empty()) {

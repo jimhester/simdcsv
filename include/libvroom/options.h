@@ -61,8 +61,6 @@ struct FwfOptions {
   size_t chunk_size = 0;
   size_t num_threads = 0;
   std::optional<CharEncoding> encoding;
-  ErrorMode error_mode = ErrorMode::DISABLED;
-  size_t max_errors = ErrorCollector::DEFAULT_MAX_ERRORS;
 };
 
 // Parquet writing options
