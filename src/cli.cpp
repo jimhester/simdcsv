@@ -202,6 +202,15 @@ static std::string formatDelimiter(char delim) {
 
 void print_version() {
   cout << "vroom " << VERSION << endl;
+  cout << "SIMD target: " << libvroom::simd_best_target() << endl;
+  cout << "Supported targets: ";
+  auto targets = libvroom::simd_supported_targets();
+  for (size_t i = 0; i < targets.size(); ++i) {
+    if (i > 0)
+      cout << ", ";
+    cout << targets[i];
+  }
+  cout << endl;
 }
 
 void print_usage() {
