@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.14)
 project(libvroom VERSION 0.1.0 LANGUAGES CXX C)
 
+# Always generate compile_commands.json for clangd
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # =============================================================================
 # Compiler cache (ccache) for faster rebuilds
 # =============================================================================
@@ -20,8 +23,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Build options
 option(BUILD_TESTING "Build test executables" ON)
-# Benchmarks disabled - need to be updated for libvroom2 API
-option(BUILD_BENCHMARKS "Build benchmark executables" OFF)
+option(BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(BUILD_SHARED_LIBS "Build shared library instead of static" OFF)
 
 # Code coverage options

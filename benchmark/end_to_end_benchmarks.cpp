@@ -4,11 +4,13 @@
  *
  * This file benchmarks the complete parsing pipeline to measure:
  * 1. BM_ParseOnly - Parse CSV via CsvReader (baseline)
- *
- * Migrated to libvroom v2 API (CsvReader).
+ * 2. BM_CsvToArrow - CSV parse + Table construction (CSV→Arrow)
+ * 3. BM_CsvToParquet - CSV to Parquet conversion (CSV→Parquet)
  */
 
 #include "libvroom.h"
+#include "libvroom/convert.h"
+#include "libvroom/table.h"
 
 #include <benchmark/benchmark.h>
 #include <cstring>
@@ -168,3 +170,73 @@ static void CustomArguments(benchmark::internal::Benchmark* b) {
 }
 
 BENCHMARK(BM_ParseOnly)->Apply(CustomArguments)->Unit(benchmark::kMillisecond)->UseRealTime();
+
+// ============================================================================
+// BM_CsvToArrow - End-to-end CSV to Arrow Table conversion
+// ============================================================================
+
+static void BM_CsvToArrow(benchmark::State& state) {
+  size_t target_size = static_cast<size_t>(state.range(0));
+  size_t cols = static_cast<size_t>(state.range(1));
+  int n_threads = static_cast<int>(state.range(2));
+
+  auto& cached = get_or_create_csv(target_size, cols);
+
+  for (auto _ : state) {
+    libvroom::CsvOptions opts;
+    opts.num_threads = static_cast<size_t>(n_threads);
+
+    libvroom::CsvReader reader(opts);
+    reader.open(cached.temp_file->path());
+    auto result = reader.read_all();
+    if (!result.ok) {
+      state.SkipWithError(result.error.c_str());
+      return;
+    }
+    auto table = libvroom::Table::from_parsed_chunks(reader.schema(), std::move(result.value));
+    benchmark::DoNotOptimize(table);
+  }
+
+  state.SetBytesProcessed(static_cast<int64_t>(cached.actual_size * state.iterations()));
+  state.counters["Size_MB"] = static_cast<double>(cached.actual_size) / (1024.0 * 1024.0);
+  state.counters["Cols"] = static_cast<double>(cols);
+  state.counters["Threads"] = static_cast<double>(n_threads);
+}
+
+BENCHMARK(BM_CsvToArrow)->Apply(CustomArguments)->Unit(benchmark::kMillisecond)->UseRealTime();
+
+// ============================================================================
+// BM_CsvToParquet - End-to-end CSV to Parquet conversion
+// ============================================================================
+
+static void BM_CsvToParquet(benchmark::State& state) {
+  size_t target_size = static_cast<size_t>(state.range(0));
+  size_t cols = static_cast<size_t>(state.range(1));
+  int n_threads = static_cast<int>(state.range(2));
+
+  auto& cached = get_or_create_csv(target_size, cols);
+  std::string parquet_path = cached.temp_file->path() + ".parquet";
+
+  for (auto _ : state) {
+    libvroom::VroomOptions opts;
+    opts.input_path = cached.temp_file->path();
+    opts.output_path = parquet_path;
+    opts.csv.num_threads = static_cast<size_t>(n_threads);
+
+    auto result = libvroom::convert_csv_to_parquet(opts);
+    if (!result.ok()) {
+      state.SkipWithError(result.error.c_str());
+      return;
+    }
+    benchmark::DoNotOptimize(result);
+  }
+
+  std::remove(parquet_path.c_str());
+
+  state.SetBytesProcessed(static_cast<int64_t>(cached.actual_size * state.iterations()));
+  state.counters["Size_MB"] = static_cast<double>(cached.actual_size) / (1024.0 * 1024.0);
+  state.counters["Cols"] = static_cast<double>(cols);
+  state.counters["Threads"] = static_cast<double>(n_threads);
+}
+
+BENCHMARK(BM_CsvToParquet)->Apply(CustomArguments)->Unit(benchmark::kMillisecond)->UseRealTime();

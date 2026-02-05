@@ -74,12 +74,9 @@ ccache dramatically speeds up rebuilds by caching compilation results. View stat
 
 ## Language Server
 
-clangd is available for code intelligence (go-to-definition, find references, diagnostics). To enable it in a fresh checkout or worktree:
+clangd is available for code intelligence (go-to-definition, find references, diagnostics). `CMAKE_EXPORT_COMPILE_COMMANDS` is enabled unconditionally in `CMakeLists.txt`, and a tracked symlink `compile_commands.json -> build/compile_commands.json` is checked into the repo. After any `cmake -B build` command, clangd will work automatically.
 
-```bash
-cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-ln -sf build/compile_commands.json .
-```
+**Note**: clangd diagnostics (missing includes, unknown types) are **not real build errors** if the actual build succeeds. They indicate `build/compile_commands.json` hasn't been generated yet. Run any `cmake -B build` command to fix.
 
 ## Code Formatting
 
