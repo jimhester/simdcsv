@@ -93,7 +93,7 @@ ConversionResult convert_csv_to_parquet(const VroomOptions& options,
                                         ProgressCallback progress = nullptr);
 
 /// Read a CSV file and return a Table (Arrow-exportable).
-/// This is the primary high-level API for consumers that want Arrow output.
+/// Convenience wrapper that throws std::runtime_error on failure.
 std::shared_ptr<Table> read_csv_to_table(const std::string& path,
                                          const CsvOptions& opts = CsvOptions{});
 

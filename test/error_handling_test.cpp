@@ -1,3 +1,4 @@
+#include "libvroom/convert.h"
 #include "libvroom/error.h"
 #include "libvroom/vroom.h"
 

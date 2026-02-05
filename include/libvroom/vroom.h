@@ -384,8 +384,3 @@ bool parse_date(std::string_view value, int32_t& days_since_epoch);
 bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch);
 
 } // namespace libvroom
-
-// CLI-only convenience functions (convert_csv_to_parquet, read_csv_to_table).
-// Separated so embedded consumers (e.g. R packages) can omit the source file
-// that pulls in <iostream> / std::cerr.
-#include "convert.h"
