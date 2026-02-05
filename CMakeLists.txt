@@ -399,6 +399,7 @@ set(VROOM_SOURCES
     src/convert.cpp
     src/reader/mmap_source.cpp
     src/reader/csv_reader.cpp
+    src/reader/fwf_reader.cpp
     src/parser/chunk_finder.cpp
     src/parser/simd_chunk_finder.cpp
     src/parser/line_parser.cpp
