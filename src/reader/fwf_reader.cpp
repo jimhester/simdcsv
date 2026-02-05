@@ -118,7 +118,7 @@ static size_t parse_fwf_chunk(const char* data, size_t size, const FwfOptions& o
         field = std::string_view(line_start + cs, line_len - cs);
       } else {
         size_t end = std::min(static_cast<size_t>(col_end), line_len);
-        field = std::string_view(line_start + cs, end - cs);
+        field = (end > cs) ? std::string_view(line_start + cs, end - cs) : std::string_view();
       }
 
       if (trim && !field.empty()) {
@@ -201,7 +201,7 @@ static std::vector<DataType> infer_fwf_types(const char* data, size_t size,
         field = std::string_view(line_start + cs, line_len - cs);
       } else {
         size_t end = std::min(static_cast<size_t>(col_end), line_len);
-        field = std::string_view(line_start + cs, end - cs);
+        field = (end > cs) ? std::string_view(line_start + cs, end - cs) : std::string_view();
       }
 
       if (trim && !field.empty()) {
@@ -275,6 +275,16 @@ FwfReader::~FwfReader() = default;
 Result<bool> FwfReader::initialize_data() {
   if (impl_->data_size == 0)
     return Result<bool>::failure("Empty file");
+
+  // Validate column specifications
+  if (impl_->options.col_starts.empty())
+    return Result<bool>::failure("col_starts must not be empty");
+  if (impl_->options.col_starts.size() != impl_->options.col_ends.size())
+    return Result<bool>::failure("col_starts and col_ends must have the same length");
+  for (size_t i = 0; i < impl_->options.col_starts.size(); ++i) {
+    if (impl_->options.col_starts[i] < 0)
+      return Result<bool>::failure("col_starts values must be non-negative");
+  }
 
   // Encoding detection and transcoding
   {
