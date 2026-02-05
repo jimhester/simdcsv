@@ -10,6 +10,7 @@
  */
 
 #include "libvroom.h"
+#include "libvroom/simd_info.h"
 #include "libvroom/table.h"
 
 #include <memory>
@@ -462,4 +463,5 @@ PYBIND11_MODULE(_core, m) {
 
   // Version info
   m.attr("__version__") = "2.0.0";
+  m.attr("simd_target") = libvroom::simd_best_target();
 }
