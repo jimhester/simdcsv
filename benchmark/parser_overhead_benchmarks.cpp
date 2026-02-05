@@ -13,6 +13,7 @@
  */
 
 #include "libvroom.h"
+#include "libvroom/simd_info.h"
 
 #include <benchmark/benchmark.h>
 #include <cstring>
@@ -135,6 +136,7 @@ private:
  * operation for determining file structure.
  */
 static void BM_CountRows(benchmark::State& state) {
+  state.SetLabel(libvroom::simd_best_target());
   auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
 
   for (auto _ : state) {
@@ -156,6 +158,7 @@ BENCHMARK(BM_CountRows)->Unit(benchmark::kMillisecond);
  * This is the core second-pass operation that identifies field boundaries.
  */
 static void BM_SplitFields(benchmark::State& state) {
+  state.SetLabel(libvroom::simd_best_target());
   auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
   const char* data = reinterpret_cast<const char*>(ds.buffer.data());
   size_t size = ds.buffer.size();
@@ -189,6 +192,7 @@ BENCHMARK(BM_SplitFields)->Unit(benchmark::kMicrosecond);
  * for both starting-inside and starting-outside quote states in one pass.
  */
 static void BM_DualStateAnalysis(benchmark::State& state) {
+  state.SetLabel(libvroom::simd_best_target());
   auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
 
   for (auto _ : state) {
@@ -209,6 +213,7 @@ BENCHMARK(BM_DualStateAnalysis)->Unit(benchmark::kMillisecond);
  * to determine delimiter, quote char, and line endings.
  */
 static void BM_DialectDetection(benchmark::State& state) {
+  state.SetLabel(libvroom::simd_best_target());
   auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
 
   libvroom::DialectDetector detector;
@@ -233,6 +238,7 @@ BENCHMARK(BM_DialectDetection)->Unit(benchmark::kMillisecond);
  * Measures full CsvReader pipeline with a known dialect, skipping detection.
  */
 static void BM_CsvReaderExplicit(benchmark::State& state) {
+  state.SetLabel(libvroom::simd_best_target());
   auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
 
   libvroom::CsvOptions opts;
@@ -258,6 +264,7 @@ BENCHMARK(BM_CsvReaderExplicit)->Unit(benchmark::kMillisecond);
  * Full CsvReader pipeline with dialect auto-detection enabled.
  */
 static void BM_CsvReaderAutoDetect(benchmark::State& state) {
+  state.SetLabel(libvroom::simd_best_target());
   auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
 
   libvroom::CsvOptions opts;
@@ -286,6 +293,7 @@ BENCHMARK(BM_CsvReaderAutoDetect)->Unit(benchmark::kMillisecond);
  * parsing gets slower with more threads.
  */
 static void BM_CsvReaderMultiThread(benchmark::State& state) {
+  state.SetLabel(libvroom::simd_best_target());
   auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
   int n_threads = static_cast<int>(state.range(0));
 
@@ -315,6 +323,7 @@ BENCHMARK(BM_CsvReaderMultiThread)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Unit(benchma
  * @brief Benchmark: Row counting scaling with file size
  */
 static void BM_CountRowsScaling(benchmark::State& state) {
+  state.SetLabel(libvroom::simd_best_target());
   size_t rows = static_cast<size_t>(state.range(0));
   auto& ds = BenchmarkData::instance().get("scaling", rows, 10);
 
@@ -339,6 +348,7 @@ BENCHMARK(BM_CountRowsScaling)
  * @brief Benchmark: CsvReader scaling with file size
  */
 static void BM_CsvReaderScaling(benchmark::State& state) {
+  state.SetLabel(libvroom::simd_best_target());
   size_t rows = static_cast<size_t>(state.range(0));
   auto& ds = BenchmarkData::instance().get("scaling", rows, 10);
 
@@ -373,6 +383,7 @@ BENCHMARK(BM_CsvReaderScaling)
  * @brief Benchmark: Measure overhead of CsvOptions creation
  */
 static void BM_CsvOptionsCreation(benchmark::State& state) {
+  state.SetLabel(libvroom::simd_best_target());
   for (auto _ : state) {
     libvroom::CsvOptions opts;
     benchmark::DoNotOptimize(opts);
@@ -384,6 +395,7 @@ BENCHMARK(BM_CsvOptionsCreation)->Unit(benchmark::kNanosecond);
  * @brief Benchmark: Measure overhead of ErrorCollector
  */
 static void BM_ErrorCollectorCreation(benchmark::State& state) {
+  state.SetLabel(libvroom::simd_best_target());
   for (auto _ : state) {
     libvroom::ErrorCollector errors(libvroom::ErrorMode::PERMISSIVE);
     benchmark::DoNotOptimize(errors);
