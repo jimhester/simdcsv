@@ -68,6 +68,7 @@ TEST(StreamingParserTest, ColumnNamesFromHeader) {
 TEST(StreamingParserTest, TypedColumns) {
   StreamingOptions opts;
   opts.csv.separator = ',';
+  opts.csv.guess_integer = true;
   StreamingParser parser(opts);
 
   std::string csv = "name,age,score\nAlice,30,95.5\nBob,25,87.3\n";

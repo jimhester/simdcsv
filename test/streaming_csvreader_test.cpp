@@ -268,7 +268,9 @@ TEST_F(StreamingCsvReaderTest, StreamingMultipleTypes) {
                     "5,9.81,baz,true\n";
   test_util::TempCsvFile f(csv);
 
-  libvroom::CsvReader reader(libvroom::CsvOptions{});
+  libvroom::CsvOptions csv_opts;
+  csv_opts.guess_integer = true;
+  libvroom::CsvReader reader(csv_opts);
   auto open_result = reader.open(f.path());
   ASSERT_TRUE(open_result.ok);
 

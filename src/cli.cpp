@@ -250,6 +250,7 @@ COMMON OPTIONS:
     -e, --encoding <ENC>     Force encoding (utf-8, utf-16le, utf-16be,
                              utf-32le, utf-32be, latin1, windows-1252)
     --no-header              CSV has no header row
+    --guess-integer          Infer integer types (INT32/INT64) instead of FLOAT64
     -p, --progress           Show progress bar
     -v, --verbose            Verbose output
     -h, --help               Show this help message
@@ -296,6 +297,9 @@ struct CommonOptions {
   size_t max_errors = libvroom::ErrorCollector::DEFAULT_MAX_ERRORS;
   string columns;                                 // For select command
   std::optional<libvroom::CharEncoding> encoding; // Character encoding override
+
+  // Type inference
+  bool guess_integer = false; // When false, integer-like values infer as FLOAT64
 
   // Index caching
   bool enable_cache = false;
@@ -380,6 +384,8 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
       opts.encoding = enc;
     } else if (arg == "--no-header" || arg == "-H") {
       opts.has_header = false;
+    } else if (arg == "--guess-integer") {
+      opts.guess_integer = true;
     } else if (arg == "-p" || arg == "--progress") {
       opts.show_progress = true;
     } else if (arg == "-v" || arg == "--verbose") {
@@ -517,6 +523,8 @@ int cmd_convert(int argc, char* argv[]) {
       common.encoding = enc;
     } else if (arg == "--no-header") {
       common.has_header = false;
+    } else if (arg == "--guess-integer") {
+      common.guess_integer = true;
     } else if (arg == "--strict") {
       common.error_mode = libvroom::ErrorMode::FAIL_FAST;
     } else if (arg == "--permissive") {
@@ -582,6 +590,7 @@ int cmd_convert(int argc, char* argv[]) {
   opts.csv.separator = common.delimiter;
   opts.csv.quote = common.quote;
   opts.csv.has_header = common.has_header;
+  opts.csv.guess_integer = common.guess_integer;
   opts.csv.error_mode = common.error_mode;
   opts.csv.max_errors = common.max_errors;
   opts.csv.encoding = common.encoding;
@@ -688,6 +697,7 @@ int cmd_count(int argc, char* argv[]) {
   csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
+  csv_opts.guess_integer = opts.guess_integer;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -761,6 +771,7 @@ int cmd_head(int argc, char* argv[]) {
   csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
+  csv_opts.guess_integer = opts.guess_integer;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -870,6 +881,7 @@ int cmd_info(int argc, char* argv[]) {
   csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
+  csv_opts.guess_integer = opts.guess_integer;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -1001,6 +1013,7 @@ int cmd_select(int argc, char* argv[]) {
   csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
+  csv_opts.guess_integer = opts.guess_integer;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -1145,6 +1158,7 @@ int cmd_pretty(int argc, char* argv[]) {
   csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
+  csv_opts.guess_integer = opts.guess_integer;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;

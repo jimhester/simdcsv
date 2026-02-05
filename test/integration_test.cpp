@@ -260,7 +260,9 @@ TEST_F(IntegrationTest, Schema_ColumnNamesMatchHeader) {
 
 TEST_F(IntegrationTest, Schema_TypeInferenceProducesNonUnknown) {
   // financial.csv has dates, floats, and integers
-  auto [chunks, schema] = parseFile(testDataPath("real_world/financial.csv"));
+  libvroom::CsvOptions opts;
+  opts.guess_integer = true;
+  auto [chunks, schema] = parseFile(testDataPath("real_world/financial.csv"), opts);
 
   ASSERT_EQ(schema.size(), 6u);
   for (size_t i = 0; i < schema.size(); ++i) {

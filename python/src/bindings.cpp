@@ -35,14 +35,16 @@ static PyObject* IOError_custom = nullptr;
 // read_csv function - main entry point
 // =============================================================================
 
-std::shared_ptr<libvroom::Table>
-read_csv(const std::string& path, std::optional<char> separator = std::nullopt,
-         std::optional<char> quote = std::nullopt, bool has_header = true,
-         std::optional<size_t> num_threads = std::nullopt,
-         std::optional<std::string> error_mode = std::nullopt,
-         std::optional<size_t> max_errors = std::nullopt,
-         std::optional<std::string> encoding = std::nullopt,
-         std::optional<char> comment = std::nullopt, bool skip_empty_rows = true) {
+std::shared_ptr<libvroom::Table> read_csv(const std::string& path,
+                                          std::optional<char> separator = std::nullopt,
+                                          std::optional<char> quote = std::nullopt,
+                                          bool has_header = true,
+                                          std::optional<size_t> num_threads = std::nullopt,
+                                          std::optional<std::string> error_mode = std::nullopt,
+                                          std::optional<size_t> max_errors = std::nullopt,
+                                          std::optional<std::string> encoding = std::nullopt,
+                                          std::optional<char> comment = std::nullopt,
+                                          bool skip_empty_rows = true, bool guess_integer = false) {
   // Set up options
   libvroom::CsvOptions csv_opts;
   if (separator)
@@ -71,6 +73,9 @@ read_csv(const std::string& path, std::optional<char> separator = std::nullopt,
 
   // Set skip_empty_rows
   csv_opts.skip_empty_rows = skip_empty_rows;
+
+  // Set guess_integer
+  csv_opts.guess_integer = guess_integer;
 
   // Set error handling options
   if (error_mode) {
@@ -138,7 +143,8 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
                 std::optional<size_t> num_threads = std::nullopt,
                 std::optional<std::string> error_mode = std::nullopt,
                 std::optional<size_t> max_errors = std::nullopt,
-                std::optional<char> comment = std::nullopt, bool skip_empty_rows = true) {
+                std::optional<char> comment = std::nullopt, bool skip_empty_rows = true,
+                bool guess_integer = false) {
   libvroom::VroomOptions opts;
   opts.input_path = input_path;
   opts.output_path = output_path;
@@ -178,6 +184,9 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
 
   // Set skip_empty_rows
   opts.csv.skip_empty_rows = skip_empty_rows;
+
+  // Set guess_integer
+  opts.csv.guess_integer = guess_integer;
 
   // Set error handling options
   if (error_mode) {
@@ -319,6 +328,7 @@ PYBIND11_MODULE(_core, m) {
         py::arg("num_threads") = py::none(), py::arg("error_mode") = py::none(),
         py::arg("max_errors") = py::none(), py::arg("encoding") = py::none(),
         py::arg("comment") = py::none(), py::arg("skip_empty_rows") = true,
+        py::arg("guess_integer") = false,
         R"doc(
         Read a CSV file into a Table.
 
@@ -353,6 +363,10 @@ PYBIND11_MODULE(_core, m) {
             skipping).
         skip_empty_rows : bool, optional
             Whether to skip empty lines in the input. Default is True.
+        guess_integer : bool, optional
+            Whether to infer integer types (INT32/INT64) for integer-like values.
+            When False (default), integer-like values are inferred as FLOAT64.
+            Set to True to match traditional CSV parser behavior.
 
         Returns
         -------
@@ -386,7 +400,7 @@ PYBIND11_MODULE(_core, m) {
         py::arg("compression") = py::none(), py::arg("row_group_size") = py::none(),
         py::arg("num_threads") = py::none(), py::arg("error_mode") = py::none(),
         py::arg("max_errors") = py::none(), py::arg("comment") = py::none(),
-        py::arg("skip_empty_rows") = true,
+        py::arg("skip_empty_rows") = true, py::arg("guess_integer") = false,
         R"doc(
         Convert a CSV file to Parquet format.
 
@@ -418,6 +432,10 @@ PYBIND11_MODULE(_core, m) {
             skipping).
         skip_empty_rows : bool, optional
             Whether to skip empty lines in the input. Default is True.
+        guess_integer : bool, optional
+            Whether to infer integer types (INT32/INT64) for integer-like values.
+            When False (default), integer-like values are inferred as FLOAT64.
+            Set to True to match traditional CSV parser behavior.
 
         Raises
         ------

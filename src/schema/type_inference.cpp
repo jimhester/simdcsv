@@ -71,6 +71,9 @@ DataType TypeInference::infer_field(std::string_view value) {
   }
 
   if (all_digits && has_digit) {
+    if (!options_.guess_integer) {
+      return DataType::FLOAT64;
+    }
     // Check if it fits in int32
     if (value.size() <= 10) { // Max int32 is 10 digits
       // Try to parse as int32
