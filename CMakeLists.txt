@@ -428,6 +428,7 @@ set(VROOM_SOURCES
     src/table.cpp
     src/cache/index_cache.cpp
     src/reader/streaming_parser.cpp
+    src/simd_info.cpp
 )
 
 add_library(vroom ${VROOM_SOURCES})
@@ -699,6 +700,12 @@ if(BUILD_TESTING)
     target_include_directories(encoding_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_dependencies(encoding_test copy_test_data)
     gtest_discover_tests(encoding_test)
+
+    # SIMD target query API tests (Issue #40)
+    add_executable(simd_info_test test/simd_info_test.cpp)
+    target_link_libraries(simd_info_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(simd_info_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(simd_info_test)
 
 endif() # BUILD_TESTING
 

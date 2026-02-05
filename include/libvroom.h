@@ -44,6 +44,9 @@
 // Streaming parser
 #include "libvroom/streaming.h"
 
+// SIMD target information
+#include "libvroom/simd_info.h"
+
 // Parsed chunk queue (for streaming CsvReader API)
 #include "libvroom/parsed_chunk_queue.h"
 

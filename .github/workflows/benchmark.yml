@@ -58,7 +58,12 @@ jobs:
 
     - name: Build benchmark (HEAD)
       run: |
-        cmake --build build --target libvroom_benchmark --config Release -j$(nproc)
+        cmake --build build --target libvroom_benchmark vroom-cli --config Release -j$(nproc)
+
+    - name: Report SIMD target
+      run: |
+        echo "=== SIMD Configuration ==="
+        ./build/vroom version
 
     - name: Show ccache stats
       run: |
