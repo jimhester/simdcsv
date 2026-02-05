@@ -181,16 +181,16 @@ TEST(ParsedChunkQueueTest, ConsumerBlocksWhenNextChunkNotReady) {
 // =============================================================================
 
 TEST(ParsedChunkQueueTest, BackpressureBlocksProducer) {
-  // max_buffered=2 and num_chunks=4, so after 2 pushes producer blocks
+  // max_buffered=2: producers block when chunk_idx >= next_pop_idx + 2
   ParsedChunkQueue queue(/*num_chunks=*/4, /*max_buffered=*/2);
 
-  // Fill the buffer
+  // Chunks 0 and 1 can push immediately (within distance 2 of consumer at 0)
   queue.push(0, make_chunk(0));
   queue.push(1, make_chunk(10));
 
   std::atomic<bool> producer_completed{false};
 
-  // Producer thread — should block because buffer is full
+  // Chunk 2 should block: 2 >= 0 + 2
   std::thread producer([&] {
     queue.push(2, make_chunk(20));
     producer_completed = true;
@@ -199,13 +199,53 @@ TEST(ParsedChunkQueueTest, BackpressureBlocksProducer) {
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
   EXPECT_FALSE(producer_completed.load());
 
-  // Pop one chunk — frees space, unblocks producer
+  // Pop chunk 0 — advances consumer to 1, unblocks chunk 2 (2 < 1 + 2)
   auto c = queue.pop();
   ASSERT_TRUE(c.has_value());
   EXPECT_EQ(chunk_id(*c), 0);
 
   producer.join();
   EXPECT_TRUE(producer_completed.load());
+}
+
+// Regression test: with count-based backpressure, out-of-order chunks could fill
+// the buffer before the next sequential chunk arrived, causing deadlock.
+// Distance-based backpressure prevents this.
+TEST(ParsedChunkQueueTest, NoDeadlockWithOutOfOrderSmallBuffer) {
+  constexpr size_t kNumChunks = 8;
+  // Small buffer — would deadlock with count-based backpressure
+  ParsedChunkQueue queue(kNumChunks, /*max_buffered=*/4);
+
+  std::vector<int32_t> received_ids;
+  std::thread consumer([&] {
+    while (true) {
+      auto c = queue.pop();
+      if (!c.has_value())
+        break;
+      received_ids.push_back(chunk_id(*c));
+    }
+  });
+
+  // Producers push in reverse order: chunk 7 first, chunk 0 last.
+  // With count-based backpressure, chunks 7,6,5,4 would fill the buffer,
+  // blocking chunk 0's producer. Consumer needs chunk 0 -> deadlock.
+  std::vector<std::thread> producers;
+  for (size_t i = 0; i < kNumChunks; ++i) {
+    producers.emplace_back([&queue, i, kNumChunks] {
+      // Higher indices push first
+      std::this_thread::sleep_for(std::chrono::milliseconds((kNumChunks - i) * 2));
+      queue.push(i, make_chunk(static_cast<int32_t>(i * 10)));
+    });
+  }
+
+  for (auto& t : producers)
+    t.join();
+  consumer.join();
+
+  ASSERT_EQ(received_ids.size(), kNumChunks);
+  for (size_t i = 0; i < kNumChunks; ++i) {
+    EXPECT_EQ(received_ids[i], static_cast<int32_t>(i * 10));
+  }
 }
 
 // =============================================================================
@@ -287,10 +327,8 @@ TEST(ParsedChunkQueueTest, IsClosedReflectsState) {
 
 TEST(ParsedChunkQueueTest, FullPipelineMultipleProducers) {
   constexpr size_t kNumChunks = 8;
-  // Buffer must be large enough to hold all out-of-order chunks to avoid deadlock:
-  // if chunk 0 has the longest delay, earlier-arriving high-index chunks must not
-  // fill the buffer and block the producer of chunk 0.
-  ParsedChunkQueue queue(kNumChunks, /*max_buffered=*/kNumChunks);
+  // With distance-based backpressure, any max_buffered value works safely.
+  ParsedChunkQueue queue(kNumChunks, /*max_buffered=*/4);
 
   // Consumer thread — collects all chunks in order
   std::vector<int32_t> received_ids;

@@ -15,28 +15,30 @@ namespace libvroom {
 ///
 /// Producers push chunks by index (out of order as parsing completes).
 /// The consumer pops chunks in order: 0, 1, 2, ...
-/// Backpressure: producer blocks when buffered_count >= max_buffered.
+/// Backpressure: producer blocks when its chunk_idx >= next_pop_idx + max_buffered.
+/// This distance-based backpressure avoids deadlock: chunks near the consumer's
+/// read position always get through, while chunks far ahead block to limit memory.
 /// Consumer blocks when the next sequential chunk hasn't arrived yet.
 /// close() unblocks all waiting threads.
 class ParsedChunkQueue {
 public:
   /// @param num_chunks  Total number of chunks expected (determines end-of-stream).
-  /// @param max_buffered  Maximum number of chunks buffered before producers block.
+  /// @param max_buffered  Maximum distance ahead of consumer before producers block.
   explicit ParsedChunkQueue(size_t num_chunks, size_t max_buffered = 4)
       : num_chunks_(num_chunks), max_buffered_(max_buffered) {}
 
   /// Producer: push a parsed chunk by its index.
-  /// Blocks if buffered_count >= max_buffered (backpressure).
+  /// Blocks if chunk_idx >= next_pop_idx + max_buffered (distance-based backpressure).
   /// Returns false if the queue was closed.
   bool push(size_t chunk_idx, std::vector<std::unique_ptr<ArrowColumnBuilder>>&& columns) {
     std::unique_lock<std::mutex> lock(mutex_);
-    not_full_.wait(lock, [this] { return buffered_count_ < max_buffered_ || closed_; });
+    not_full_.wait(
+        lock, [this, chunk_idx] { return chunk_idx < next_pop_idx_ + max_buffered_ || closed_; });
 
     if (closed_)
       return false;
 
     ready_chunks_[chunk_idx] = std::move(columns);
-    buffered_count_++;
     not_empty_.notify_all();
     return true;
   }
@@ -60,8 +62,7 @@ public:
     auto result = std::move(it->second);
     ready_chunks_.erase(it);
     next_pop_idx_++;
-    buffered_count_--;
-    not_full_.notify_one();
+    not_full_.notify_all();
     return result;
   }
 
@@ -87,7 +88,6 @@ private:
   size_t num_chunks_;
   size_t max_buffered_;
   size_t next_pop_idx_ = 0;
-  size_t buffered_count_ = 0;
   bool closed_ = false;
 };
 
