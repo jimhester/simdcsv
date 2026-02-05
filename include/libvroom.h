@@ -50,4 +50,10 @@
 // Output formats
 #include "libvroom/arrow_ipc_writer.h"
 
+// Convenience functions (convert_csv_to_parquet, read_csv_to_table)
+// Separated from vroom.h so embedded consumers (e.g. R packages) can include
+// vroom.h without pulling in these declarations. The implementations live in
+// src/convert.cpp which embedded builds can exclude to avoid std::cerr.
+#include "libvroom/convert.h"
+
 #endif // LIBVROOM_H

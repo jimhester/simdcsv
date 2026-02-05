@@ -203,6 +203,7 @@ set(VROOM_SOURCES
     ${LIBVROOM_ROOT}/src/error.cpp
     ${LIBVROOM_ROOT}/src/io_util.cpp
     ${LIBVROOM_ROOT}/src/dialect.cpp
+    ${LIBVROOM_ROOT}/src/convert.cpp
     ${LIBVROOM_ROOT}/src/table.cpp
     ${LIBVROOM_ROOT}/src/reader/mmap_source.cpp
     ${LIBVROOM_ROOT}/src/reader/csv_reader.cpp

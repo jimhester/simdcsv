@@ -394,6 +394,7 @@ set(VROOM_SOURCES
     src/error.cpp
     src/io_util.cpp
     src/dialect.cpp
+    src/convert.cpp
     src/reader/mmap_source.cpp
     src/reader/csv_reader.cpp
     src/parser/chunk_finder.cpp
