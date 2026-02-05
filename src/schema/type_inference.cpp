@@ -150,10 +150,8 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
   size_t offset = 0;
   size_t rows_sampled = 0;
 
-  // Skip header if present
-  if (options_.has_header && offset < size) {
-    offset = finder.find_row_end(data, size, offset);
-  }
+  // Note: callers already pass data + header_end_offset, so we do not skip
+  // the header here.
 
   // Sample rows
   while (offset < size && rows_sampled < max_rows) {
