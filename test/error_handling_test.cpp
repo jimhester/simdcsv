@@ -977,3 +977,79 @@ TEST(TypeCoercionErrorTest, CsvReaderSerialReportsCoercionErrors) {
 
   std::remove(tmp.c_str());
 }
+
+TEST(TypeCoercionErrorTest, CsvReaderMultiThreadedReportsCoercionErrors) {
+  // Create CSV large enough for multi-threaded path (>1MB PARALLEL_THRESHOLD)
+  // Each valid row is ~20 bytes, so we need ~60K rows to exceed 1MB
+  std::string csv = "a,b\n";
+  const int num_rows = 100000;
+  csv.reserve(num_rows * 20);
+  for (int i = 0; i < num_rows; ++i) {
+    if (i == 500 || i == 50000 || i == 99999) {
+      csv += "abc,xyz\n";
+    } else {
+      csv += std::to_string(i) + "," + std::to_string(i * 1.5) + "\n";
+    }
+  }
+  auto tmp = write_temp_file(csv);
+  ASSERT_FALSE(tmp.empty());
+
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+  opts.guess_integer = true;
+  opts.sample_rows = 100;
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(tmp);
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+
+  size_t coercion_count = 0;
+  for (const auto& err : reader.errors()) {
+    if (err.code == libvroom::ErrorCode::TYPE_COERCION) {
+      coercion_count++;
+    }
+  }
+  EXPECT_EQ(coercion_count, 6); // 3 bad rows x 2 columns
+
+  std::remove(tmp.c_str());
+}
+
+TEST(TypeCoercionErrorTest, FailFastStopsOnFirstCoercionError) {
+  // Use enough valid rows first so type inference sees them, then bad data
+  std::string csv = "a\n";
+  for (int i = 0; i < 10; ++i) {
+    csv += std::to_string(i) + "\n";
+  }
+  csv += "abc\ndef\n";
+  auto tmp = write_temp_file(csv);
+  ASSERT_FALSE(tmp.empty());
+
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::FAIL_FAST;
+  opts.num_threads = 1;
+  opts.guess_integer = true;
+  opts.sample_rows = 5; // Only sample first 5 rows (all valid ints)
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(tmp);
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  // Verify type inference picked INT32
+  ASSERT_EQ(reader.schema().size(), 1);
+  EXPECT_EQ(reader.schema()[0].type, libvroom::DataType::INT32);
+
+  auto result = reader.read_all();
+  EXPECT_TRUE(reader.has_errors());
+  // FAIL_FAST should stop after first error
+  size_t coercion_count = 0;
+  for (const auto& err : reader.errors()) {
+    if (err.code == libvroom::ErrorCode::TYPE_COERCION)
+      coercion_count++;
+  }
+  EXPECT_EQ(coercion_count, 1);
+
+  std::remove(tmp.c_str());
+}

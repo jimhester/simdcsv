@@ -363,13 +363,13 @@ TEST_F(CsvErrorsTest, MultiThreadedErrorsSortedByOffset) {
   std::string content;
   content += "A,B,C\n";
   for (int i = 0; i < 500; ++i)
-    content += "1,2,3\n";
+    content += "aaa,bbb,ccc\n";
   content += "error1\n"; // Missing fields
   for (int i = 0; i < 500; ++i)
-    content += "4,5,6\n";
+    content += "ddd,eee,fff\n";
   content += "error2,extra\n"; // Wrong field count
   for (int i = 0; i < 500; ++i)
-    content += "7,8,9\n";
+    content += "ggg,hhh,iii\n";
 
   auto result = parseContent(content, libvroom::ErrorMode::PERMISSIVE,
                              libvroom::ErrorCollector::DEFAULT_MAX_ERRORS, 4);
