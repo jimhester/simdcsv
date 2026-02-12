@@ -1,5 +1,6 @@
 #include "libvroom/arrow_column_builder.h"
 #include "libvroom/error.h"
+#include "libvroom/format_parser.h"
 #include "libvroom/parse_utils.h"
 #include "libvroom/split_fields.h"
 #include "libvroom/streaming.h"
@@ -12,6 +13,25 @@
 #include <vector>
 
 namespace libvroom {
+
+// Create a column builder, using format-aware parsing if format string is specified
+static std::unique_ptr<ArrowColumnBuilder> create_builder_for_schema(const ColumnSchema& col_schema,
+                                                                     const FormatLocale& locale) {
+  if (!col_schema.format.empty()) {
+    auto parser = std::make_shared<const FormatParser>(col_schema.format, locale);
+    switch (col_schema.type) {
+    case DataType::DATE:
+      return ArrowColumnBuilder::create_date(std::move(parser));
+    case DataType::TIMESTAMP:
+      return ArrowColumnBuilder::create_timestamp(std::move(parser));
+    case DataType::TIME:
+      return ArrowColumnBuilder::create_time(std::move(parser));
+    default:
+      break;
+    }
+  }
+  return ArrowColumnBuilder::create(col_schema.type);
+}
 
 // =============================================================================
 // StreamingParser::Impl
@@ -26,6 +46,7 @@ struct StreamingParser::Impl {
 
   // Schema state
   std::vector<ColumnSchema> schema;
+  FormatLocale format_locale = FormatLocale::english();
   bool schema_ready = false;
   bool schema_explicit = false; // Set by set_schema()
   bool header_parsed = false;
@@ -79,7 +100,7 @@ struct StreamingParser::Impl {
     current_batch_rows = 0;
 
     for (const auto& col_schema : schema) {
-      auto builder = ArrowColumnBuilder::create(col_schema.type);
+      auto builder = create_builder_for_schema(col_schema, format_locale);
       current_columns.push_back(std::move(builder));
     }
 
@@ -640,6 +661,10 @@ void StreamingParser::set_schema(const std::vector<ColumnSchema>& schema) {
   impl_->schema_explicit = true;
   impl_->schema_ready = true;
   // Don't initialize batch yet - wait until feed() is called so we know we have data
+}
+
+void StreamingParser::set_format_locale(const FormatLocale& locale) {
+  impl_->format_locale = locale;
 }
 
 bool StreamingParser::schema_ready() const {

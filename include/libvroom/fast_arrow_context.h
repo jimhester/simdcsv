@@ -2,6 +2,7 @@
 
 #include "arrow_buffer.h"
 #include "error.h"
+#include "format_parser.h"
 #include "simd_atoi.h"
 #include "types.h"
 
@@ -44,6 +45,9 @@ public:
 
   // Parsing options (set from CsvOptions before use)
   char decimal_mark = '.';
+
+  // Format parser for custom date/time/timestamp formats (null = use ISO8601)
+  const FormatParser* format_parser = nullptr;
 
   // Error reporting (optional - null when error collection is disabled)
   ErrorCollector* error_collector = nullptr;
@@ -308,6 +312,60 @@ public:
   static void append_null_time(FastArrowContext& ctx) {
     ctx.int64_buffer->push_back(0);
     ctx.null_bitmap->push_back_null();
+  }
+
+  // Format-aware date
+  static void append_formatted_date(FastArrowContext& ctx, std::string_view value) {
+    if (value.empty()) {
+      ctx.int32_buffer->push_back(0);
+      ctx.null_bitmap->push_back_null();
+      return;
+    }
+    ParsedDateTime dt;
+    if (ctx.format_parser->parse(value, dt)) {
+      ctx.int32_buffer->push_back(dt.to_epoch_days());
+      ctx.null_bitmap->push_back_valid();
+    } else {
+      ctx.report_coercion_error(value);
+      ctx.int32_buffer->push_back(0);
+      ctx.null_bitmap->push_back_null();
+    }
+  }
+
+  // Format-aware timestamp
+  static void append_formatted_timestamp(FastArrowContext& ctx, std::string_view value) {
+    if (value.empty()) {
+      ctx.int64_buffer->push_back(0);
+      ctx.null_bitmap->push_back_null();
+      return;
+    }
+    ParsedDateTime dt;
+    if (ctx.format_parser->parse(value, dt)) {
+      ctx.int64_buffer->push_back(dt.to_epoch_micros());
+      ctx.null_bitmap->push_back_valid();
+    } else {
+      ctx.report_coercion_error(value);
+      ctx.int64_buffer->push_back(0);
+      ctx.null_bitmap->push_back_null();
+    }
+  }
+
+  // Format-aware time
+  static void append_formatted_time(FastArrowContext& ctx, std::string_view value) {
+    if (value.empty()) {
+      ctx.int64_buffer->push_back(0);
+      ctx.null_bitmap->push_back_null();
+      return;
+    }
+    ParsedDateTime dt;
+    if (ctx.format_parser->parse(value, dt)) {
+      ctx.int64_buffer->push_back(dt.to_seconds_since_midnight_micros());
+      ctx.null_bitmap->push_back_valid();
+    } else {
+      ctx.report_coercion_error(value);
+      ctx.int64_buffer->push_back(0);
+      ctx.null_bitmap->push_back_null();
+    }
   }
 
   // Dispatch methods
