@@ -50,12 +50,14 @@ protected:
   };
 
   ParseResult parseFile(const std::string& path, libvroom::ErrorMode mode,
-                        size_t max_errors = libvroom::ErrorCollector::DEFAULT_MAX_ERRORS) {
+                        size_t max_errors = libvroom::ErrorCollector::DEFAULT_MAX_ERRORS,
+                        bool skip_empty_rows = true) {
     libvroom::CsvOptions opts;
     opts.separator = ","; // Explicit separator for malformed data tests (bypass auto-detect)
     opts.error_mode = mode;
     opts.max_errors = max_errors;
     opts.num_threads = 1; // Deterministic for error detection
+    opts.skip_empty_rows = skip_empty_rows;
     libvroom::CsvReader reader(opts);
 
     auto open_result = reader.open(path);
@@ -201,7 +203,9 @@ TEST_F(CsvErrorsTest, InconsistentColumnsAllRows) {
 // ============================================================================
 
 TEST_F(CsvErrorsTest, EmptyHeader) {
-  auto result = parseFile(getTestDataPath("empty_header.csv"), libvroom::ErrorMode::PERMISSIVE);
+  // Disable skip_empty_rows so the leading empty line is treated as the header
+  auto result = parseFile(getTestDataPath("empty_header.csv"), libvroom::ErrorMode::PERMISSIVE,
+                          libvroom::ErrorCollector::DEFAULT_MAX_ERRORS, false);
   EXPECT_TRUE(hasErrorCode(result.errors, libvroom::ErrorCode::EMPTY_HEADER))
       << "Should detect empty header row";
 }
@@ -436,7 +440,11 @@ TEST_F(CsvErrorsTest, AllMalformedFilesGenerateErrors) {
       continue;
     }
 
-    auto result = parseFile(path, libvroom::ErrorMode::PERMISSIVE);
+    // empty_header.csv requires skip_empty_rows=false so the leading empty
+    // line is treated as the header rather than skipped
+    bool skip_empty = (filename != "empty_header.csv");
+    auto result = parseFile(path, libvroom::ErrorMode::PERMISSIVE,
+                            libvroom::ErrorCollector::DEFAULT_MAX_ERRORS, skip_empty);
 
     if (!hasErrorCode(result.errors, expected_error)) {
       std::cout << "FAIL: " << filename << " - expected "

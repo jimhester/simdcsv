@@ -463,7 +463,12 @@ struct StreamingParser::Impl {
             fast_contexts[col_idx].append(unescaped);
           }
         } else {
-          fast_contexts[col_idx].append(field_view);
+          if (options.csv.escape_backslash && field_view.find('\\') != std::string_view::npos) {
+            std::string unescaped = unescape_backslash(field_view, quote);
+            fast_contexts[col_idx].append(unescaped);
+          } else {
+            fast_contexts[col_idx].append(field_view);
+          }
         }
         col_idx++;
       }

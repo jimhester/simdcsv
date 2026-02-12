@@ -270,14 +270,16 @@ private:
       uint64_t eol_mask = detail::scan_for_char(bytes, detail::SIMD_SIZE, eol_char_);
       uint64_t quote_mask = detail::scan_for_char(bytes, detail::SIMD_SIZE, quote_char_);
 
+      uint64_t escaped = 0;
       if (escape_backslash_) {
         uint64_t bs_mask = detail::scan_for_char(bytes, detail::SIMD_SIZE, '\\');
-        auto [escaped, escape] = compute_escaped_mask(bs_mask, prev_escaped_);
+        auto [esc, escape] = compute_escaped_mask(bs_mask, prev_escaped_);
+        escaped = esc;
         // Remove escaped quotes from quote mask - they don't toggle quote state
         quote_mask &= ~escaped;
       }
 
-      uint64_t end_mask = sep_mask | eol_mask;
+      uint64_t end_mask = (sep_mask | eol_mask) & ~escaped;
 
       uint64_t not_in_quote_field = prefix_xorsum_inclusive(quote_mask);
 
@@ -309,7 +311,12 @@ private:
     size_t len = remaining_ - total_idx;
 
     if (escape_backslash_) {
-      for (size_t i = 0; i < len; ++i) {
+      size_t i = 0;
+      // If previous SIMD block ended with a backslash, first byte is escaped
+      if (prev_escaped_ != 0 && len > 0) {
+        i = 1; // Skip the escaped character
+      }
+      for (; i < len; ++i) {
         char c = bytes[i];
         if (c == '\\' && i + 1 < len) {
           ++i; // Skip escaped character
@@ -339,12 +346,20 @@ private:
 
   VROOM_FORCE_INLINE size_t scan_unquoted_field() {
     size_t total_idx = 0;
+    uint64_t prev_esc = 0;
 
     while (remaining_ - total_idx > detail::SIMD_SIZE) {
       const char* bytes = v_ + total_idx;
 
       uint64_t end_mask =
           detail::scan_for_two_chars(bytes, detail::SIMD_SIZE, separator_, eol_char_);
+
+      if (escape_backslash_) {
+        uint64_t bs_mask = detail::scan_for_char(bytes, detail::SIMD_SIZE, '\\');
+        auto [escaped, escape] = compute_escaped_mask(bs_mask, prev_esc);
+        // prev_esc is already updated by compute_escaped_mask via reference
+        end_mask &= ~escaped;
+      }
 
       if (end_mask != 0) {
         size_t pos = VROOM_CTZ64(end_mask);
@@ -366,9 +381,26 @@ private:
     const char* bytes = v_ + total_idx;
     size_t len = remaining_ - total_idx;
 
-    for (size_t i = 0; i < len; ++i) {
-      if (eof_eol(bytes[i])) {
-        return total_idx + i;
+    if (escape_backslash_) {
+      size_t i = 0;
+      // If previous SIMD block ended with a backslash, first byte is escaped
+      if (prev_esc != 0 && len > 0) {
+        i = 1; // Skip the escaped character
+      }
+      for (; i < len; ++i) {
+        if (bytes[i] == '\\' && i + 1 < len) {
+          ++i; // Skip escaped character
+          continue;
+        }
+        if (eof_eol(bytes[i])) {
+          return total_idx + i;
+        }
+      }
+    } else {
+      for (size_t i = 0; i < len; ++i) {
+        if (eof_eol(bytes[i])) {
+          return total_idx + i;
+        }
       }
     }
 

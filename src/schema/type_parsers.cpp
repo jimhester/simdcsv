@@ -167,17 +167,17 @@ static bool parse_timezone(std::string_view value, size_t start_pos, int& offset
 }
 
 // Parse ISO8601 timestamp to microseconds since epoch (UTC)
-// Supports formats:
-//   YYYY-MM-DDTHH:MM:SS
-//   YYYY-MM-DD HH:MM:SS
+// Supports formats (both colon-separated and compact):
+//   YYYY-MM-DDTHH:MM:SS        YYYY-MM-DDTHHMMSS
+//   YYYY-MM-DD HH:MM:SS        YYYY-MM-DD HHMMSS
 //   YYYY-MM-DDTHH:MM:SS.ffffff
-//   YYYY-MM-DDTHH:MM:SSZ
-//   YYYY-MM-DDTHH:MM:SS+HH:MM
-//   YYYY-MM-DDTHH:MM:SS-HH:MM
-//   YYYY-MM-DDTHH:MM:SS.ffffffZ
-//   YYYY-MM-DDTHH:MM:SS.ffffff+HH:MM
+//   YYYY-MM-DDTHH:MM:SSZ       YYYY-MM-DDTHHMMSSZ
+//   YYYY-MM-DDTHH:MM:SS+HH:MM  YYYY-MM-DDTHHMMSS+HHMM
+//   YYYY-MM-DDTHH:MM           YYYY-MM-DDTHHMM
+//   YYYY-MM-DDTHH:MMZ          YYYY-MM-DDTHHMMZ
 bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch) {
-  if (value.size() < 19) {
+  // Minimum: YYYY-MM-DDTHHMM (15 chars) or YYYY-MM-DD HH:MM (16 chars)
+  if (value.size() < 15) {
     return false;
   }
 
@@ -192,26 +192,39 @@ bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch) {
     return false;
   }
 
-  // Parse time part (HH:MM:SS)
-  if (value[13] != ':' || value[16] != ':') {
-    return false;
-  }
-
+  // Parse time part flexibly: HH:MM:SS, HH:MM, HHMMSS, HHMM
   int hour = 0, minute = 0, second = 0;
-  for (int i = 11; i < 13; ++i) {
-    if (value[i] < '0' || value[i] > '9')
+  size_t pos = 11;
+
+  // Parse hours (always 2 digits)
+  if (pos + 2 > value.size() || value[pos] < '0' || value[pos] > '9' || value[pos + 1] < '0' ||
+      value[pos + 1] > '9')
+    return false;
+  hour = (value[pos] - '0') * 10 + (value[pos + 1] - '0');
+  pos += 2;
+
+  // Check for colon separator (HH:MM vs HHMM)
+  bool has_colon = (pos < value.size() && value[pos] == ':');
+  if (has_colon)
+    pos++;
+
+  // Parse minutes
+  if (pos + 2 > value.size() || value[pos] < '0' || value[pos] > '9' || value[pos + 1] < '0' ||
+      value[pos + 1] > '9')
+    return false;
+  minute = (value[pos] - '0') * 10 + (value[pos + 1] - '0');
+  pos += 2;
+
+  // Parse seconds (optional)
+  if (pos < value.size() && ((has_colon && value[pos] == ':') ||
+                             (!has_colon && value[pos] >= '0' && value[pos] <= '9'))) {
+    if (has_colon)
+      pos++; // skip ':'
+    if (pos + 2 > value.size() || value[pos] < '0' || value[pos] > '9' || value[pos + 1] < '0' ||
+        value[pos + 1] > '9')
       return false;
-    hour = hour * 10 + (value[i] - '0');
-  }
-  for (int i = 14; i < 16; ++i) {
-    if (value[i] < '0' || value[i] > '9')
-      return false;
-    minute = minute * 10 + (value[i] - '0');
-  }
-  for (int i = 17; i < 19; ++i) {
-    if (value[i] < '0' || value[i] > '9')
-      return false;
-    second = second * 10 + (value[i] - '0');
+    second = (value[pos] - '0') * 10 + (value[pos + 1] - '0');
+    pos += 2;
   }
 
   if (hour > 23 || minute > 59 || second > 59) {
@@ -220,11 +233,11 @@ bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch) {
 
   // Parse fractional seconds and timezone
   int64_t micros = 0;
-  size_t tz_start = 19;
+  size_t tz_start = pos;
 
-  if (value.size() > 19 && value[19] == '.') {
+  if (pos < value.size() && value[pos] == '.') {
     // Parse up to 6 digits of fractional seconds
-    size_t frac_start = 20;
+    size_t frac_start = pos + 1;
     size_t frac_end = value.size();
 
     // Find end of fractional part (start of timezone or end of string)
@@ -255,7 +268,7 @@ bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch) {
     }
 
     micros = frac;
-    if (tz_start == 19) {
+    if (tz_start == pos) {
       tz_start = frac_end;
     }
   }

@@ -33,4 +33,47 @@ inline size_t skip_to_next_line(const char* data, size_t size, size_t offset) {
   return offset;
 }
 
+/// Skip leading empty/whitespace-only lines and comment lines before the header.
+/// Returns the number of bytes to skip. Handles interleaved blank and comment
+/// lines, and comment lines with leading whitespace (e.g., "  # comment").
+inline size_t skip_leading_empty_and_comment_lines(const char* data, size_t size,
+                                                   const std::string& comment) {
+  size_t offset = 0;
+  while (offset < size) {
+    size_t line_start = offset;
+
+    // Skip leading whitespace on this line
+    while (offset < size && data[offset] != '\n' && data[offset] != '\r' &&
+           (data[offset] == ' ' || data[offset] == '\t')) {
+      offset++;
+    }
+
+    // Check what follows the whitespace
+    if (offset >= size || data[offset] == '\n' || data[offset] == '\r') {
+      // Empty/whitespace-only line - skip past line ending
+      if (offset < size && data[offset] == '\r') {
+        offset++;
+        if (offset < size && data[offset] == '\n') {
+          offset++; // CRLF
+        }
+      } else if (offset < size && data[offset] == '\n') {
+        offset++;
+      }
+      continue;
+    }
+
+    // Check if this line is a comment (possibly after whitespace)
+    if (!comment.empty() && size - offset >= comment.size() &&
+        std::memcmp(data + offset, comment.data(), comment.size()) == 0) {
+      // Comment line - skip to end
+      offset = skip_to_next_line(data, size, offset);
+      continue;
+    }
+
+    // This line has real content - stop here
+    return line_start;
+  }
+  return offset; // All lines were empty/comments
+}
+
 } // namespace libvroom

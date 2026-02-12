@@ -128,20 +128,22 @@ DataType TypeInference::infer_field(std::string_view value) {
   }
 
   // Check for ISO8601 timestamp format
-  // Formats: YYYY-MM-DDTHH:MM:SS, YYYY-MM-DD HH:MM:SS
+  // Formats: YYYY-MM-DDTHH:MM:SS, YYYY-MM-DD HH:MM:SS, YYYY-MM-DDTHH:MM, YYYY-MM-DDTHHMMSS
   // Optional: fractional seconds (.ffffff), timezone (Z, +HH:MM, -HH:MM)
-  if (value.size() >= 19 && (value[4] == '-' || value[4] == '/') &&
+  if (value.size() >= 15 && (value[4] == '-' || value[4] == '/') &&
       value[7] == value[4] && // Separators must match
-      (value[10] == 'T' || value[10] == ' ') && value[13] == ':' && value[16] == ':') {
-    // Validate hour, minute, second digits
-    bool valid_time = true;
-    for (int i : {11, 12, 14, 15, 17, 18}) {
-      if (!std::isdigit(static_cast<unsigned char>(value[i]))) {
-        valid_time = false;
-        break;
-      }
+      (value[10] == 'T' || value[10] == ' ') &&
+      std::isdigit(static_cast<unsigned char>(value[11])) &&
+      std::isdigit(static_cast<unsigned char>(value[12]))) {
+    // Validate at least HH:MM (with colon) or HHMM (compact)
+    if (value.size() >= 16 && value[13] == ':' &&
+        std::isdigit(static_cast<unsigned char>(value[14])) &&
+        std::isdigit(static_cast<unsigned char>(value[15]))) {
+      // Standard format: YYYY-MM-DDTHH:MM[:SS]
+      return DataType::TIMESTAMP;
     }
-    if (valid_time) {
+    if (value.size() >= 14 && std::isdigit(static_cast<unsigned char>(value[13]))) {
+      // Compact format: YYYY-MM-DDTHHMM[SS]
       return DataType::TIMESTAMP;
     }
   }
@@ -178,33 +180,34 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
 
   // Sample rows
   while (offset < size && rows_sampled < max_rows) {
+    // Skip empty lines before quote-aware row scanning
+    if (data[offset] == '\n' || data[offset] == '\r' || data[offset] == ' ' ||
+        data[offset] == '\t') {
+      // Check if entire line is whitespace
+      size_t scan = offset;
+      while (scan < size && data[scan] != '\n' && data[scan] != '\r' &&
+             (data[scan] == ' ' || data[scan] == '\t')) {
+        scan++;
+      }
+      if (scan >= size || data[scan] == '\n' || data[scan] == '\r') {
+        // Empty/whitespace-only line - skip past line ending without find_row_end
+        offset = skip_to_next_line(data, size, offset);
+        continue;
+      }
+    }
+
+    // Skip comment lines BEFORE find_row_end to prevent unbalanced quotes
+    // in comment lines from corrupting quote parity tracking
+    if (starts_with_comment(data + offset, size - offset, options_.comment)) {
+      offset = skip_to_next_line(data, size, offset);
+      continue;
+    }
+
     size_t row_end = finder.find_row_end(data, size, offset);
     size_t row_size = row_end - offset;
 
     if (row_size == 0) {
       ++offset;
-      continue;
-    }
-
-    // Skip empty lines (only whitespace/newlines)
-    {
-      bool is_empty = true;
-      for (size_t i = offset; i < row_end; ++i) {
-        char c = data[i];
-        if (c != '\n' && c != '\r' && c != ' ' && c != '\t') {
-          is_empty = false;
-          break;
-        }
-      }
-      if (is_empty) {
-        offset = row_end;
-        continue;
-      }
-    }
-
-    // Skip comment lines
-    if (starts_with_comment(data + offset, size - offset, options_.comment)) {
-      offset = row_end;
       continue;
     }
 

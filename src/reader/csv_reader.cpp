@@ -265,8 +265,14 @@ std::pair<size_t, bool> parse_chunk_with_state(
         // Set byte offset for type coercion error reporting
         fast_contexts[col_idx].error_byte_offset =
             base_byte_offset + static_cast<size_t>(field_data - data);
-        // Devirtualized append call
-        fast_contexts[col_idx].append(field_view);
+        // Unescape backslash sequences in unquoted fields when enabled
+        if (options.escape_backslash && field_view.find('\\') != std::string_view::npos) {
+          std::string unescaped = unescape_backslash(field_view, quote);
+          fast_contexts[col_idx].append(unescaped);
+        } else {
+          // Devirtualized append call
+          fast_contexts[col_idx].append(field_view);
+        }
         if (check_errors && error_collector->should_stop()) [[unlikely]]
           goto done_chunk;
       }
@@ -500,6 +506,31 @@ Result<bool> CsvReader::open(const std::string& path) {
     }
   }
 
+  // Skip leading empty/whitespace-only lines and comment lines before dialect detection.
+  // When skip_empty_rows is true, skip both empty lines and comment lines (interleaved).
+  // Otherwise, only skip leading comment lines.
+  if (impl_->options.skip_empty_rows) {
+    size_t skip = skip_leading_empty_and_comment_lines(impl_->data_ptr, impl_->data_size,
+                                                       impl_->options.comment);
+    if (skip > 0) {
+      impl_->data_ptr += skip;
+      impl_->data_size -= skip;
+      if (impl_->data_size == 0) {
+        return Result<bool>::failure("All data skipped");
+      }
+    }
+  } else if (!impl_->options.comment.empty()) {
+    size_t skip =
+        skip_leading_comment_lines(impl_->data_ptr, impl_->data_size, impl_->options.comment);
+    if (skip > 0) {
+      impl_->data_ptr += skip;
+      impl_->data_size -= skip;
+      if (impl_->data_size == 0) {
+        return Result<bool>::failure("File contains only comment lines");
+      }
+    }
+  }
+
   impl_->auto_detect_dialect();
 
   // Validate decimal_mark doesn't conflict with separator
@@ -515,18 +546,6 @@ Result<bool> CsvReader::open(const std::string& path) {
   ChunkFinder finder(impl_->options.separator.empty() ? ',' : impl_->options.separator[0],
                      impl_->options.quote, impl_->options.escape_backslash);
   LineParser parser(impl_->options);
-
-  // Skip leading comment lines before header
-  size_t comment_skip = skip_leading_comment_lines(data, size, impl_->options.comment);
-  if (comment_skip > 0) {
-    impl_->data_ptr += comment_skip;
-    impl_->data_size -= comment_skip;
-    data = impl_->data_ptr;
-    size = impl_->data_size;
-    if (size == 0) {
-      return Result<bool>::failure("File contains only comment lines");
-    }
-  }
 
   // Parse header if present
   if (impl_->options.has_header) {
@@ -693,6 +712,29 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
     }
   }
 
+  // Skip leading empty/whitespace-only lines and comment lines before dialect detection
+  if (impl_->options.skip_empty_rows) {
+    size_t skip = skip_leading_empty_and_comment_lines(impl_->data_ptr, impl_->data_size,
+                                                       impl_->options.comment);
+    if (skip > 0) {
+      impl_->data_ptr += skip;
+      impl_->data_size -= skip;
+      if (impl_->data_size == 0) {
+        return Result<bool>::failure("All data skipped");
+      }
+    }
+  } else if (!impl_->options.comment.empty()) {
+    size_t skip =
+        skip_leading_comment_lines(impl_->data_ptr, impl_->data_size, impl_->options.comment);
+    if (skip > 0) {
+      impl_->data_ptr += skip;
+      impl_->data_size -= skip;
+      if (impl_->data_size == 0) {
+        return Result<bool>::failure("File contains only comment lines");
+      }
+    }
+  }
+
   // Auto-detect dialect if separator is the sentinel value
   impl_->auto_detect_dialect();
 
@@ -709,18 +751,6 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
   ChunkFinder finder(impl_->options.separator.empty() ? ',' : impl_->options.separator[0],
                      impl_->options.quote, impl_->options.escape_backslash);
   LineParser parser(impl_->options);
-
-  // Skip leading comment lines before header
-  size_t comment_skip = skip_leading_comment_lines(data, size, impl_->options.comment);
-  if (comment_skip > 0) {
-    impl_->data_ptr += comment_skip;
-    impl_->data_size -= comment_skip;
-    data = impl_->data_ptr;
-    size = impl_->data_size;
-    if (size == 0) {
-      return Result<bool>::failure("File contains only comment lines");
-    }
-  }
 
   // Parse header if present
   if (impl_->options.has_header) {
@@ -1511,8 +1541,14 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
       } else {
         // Set byte offset for type coercion error reporting
         fast_contexts[col_idx].error_byte_offset = static_cast<size_t>(field_data - data);
-        // Devirtualized append call
-        fast_contexts[col_idx].append(field_view);
+        // Unescape backslash sequences in unquoted fields when enabled
+        if (options.escape_backslash && field_view.find('\\') != std::string_view::npos) {
+          std::string unescaped = unescape_backslash(field_view, quote);
+          fast_contexts[col_idx].append(unescaped);
+        } else {
+          // Devirtualized append call
+          fast_contexts[col_idx].append(field_view);
+        }
         if (check_errors && impl_->error_collector.should_stop()) [[unlikely]]
           goto done_serial;
       }
