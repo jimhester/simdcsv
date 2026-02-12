@@ -11,7 +11,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <string>
 #include <string_view>
 
 // Force inline macro for hot path functions
@@ -103,8 +102,11 @@ public:
       : v_(slice), remaining_(size), separator_(separator.size() == 1 ? separator[0] : '\0'),
         finished_(false), finished_inside_quote_(false), quote_char_(quote_char),
         quoting_(quote_char != 0), eol_char_(eol_char), previous_valid_ends_(0),
-        multi_sep_(separator.size() > 1 ? std::string(separator) : std::string()),
-        multi_byte_(separator.size() > 1) {}
+        multi_byte_(separator.size() > 1) {
+    if (multi_byte_) {
+      multi_sep_ = separator;
+    }
+  }
 
   VROOM_FORCE_INLINE bool next(const char*& field_data, size_t& field_len, bool& needs_escaping) {
     if (finished_) {
@@ -182,7 +184,7 @@ private:
   bool quoting_;
   char eol_char_;
   uint64_t previous_valid_ends_;
-  std::string multi_sep_;
+  std::string_view multi_sep_;
   bool multi_byte_ = false;
 
   VROOM_FORCE_INLINE bool eof_eol(char c) const { return c == separator_ || c == eol_char_; }
