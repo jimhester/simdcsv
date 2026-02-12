@@ -145,7 +145,7 @@ struct StreamingParser::Impl {
           } else {
             in_q = !in_q;
           }
-        } else if (c == options.csv.separator && !in_q) {
+        } else if (!options.csv.separator.empty() && c == options.csv.separator[0] && !in_q) {
           ++col_count;
         }
       }
@@ -252,7 +252,7 @@ struct StreamingParser::Impl {
       return;
 
     const char quote = options.csv.quote;
-    const char sep = options.csv.separator;
+    const char sep = options.csv.separator.empty() ? ',' : options.csv.separator[0];
     const size_t num_cols = schema.size();
     const bool check_errors = error_collector.is_enabled();
     const size_t batch_size = options.batch_size;

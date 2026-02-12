@@ -22,7 +22,7 @@ using namespace libvroom;
 
 TEST(StreamingParserTest, FeedCompleteCSV) {
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   opts.batch_size = 8192;
   StreamingParser parser(opts);
 
@@ -50,7 +50,7 @@ TEST(StreamingParserTest, FeedCompleteCSV) {
 
 TEST(StreamingParserTest, ColumnNamesFromHeader) {
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   StreamingParser parser(opts);
 
   std::string csv = "name,age,score\nAlice,30,95.5\n";
@@ -67,7 +67,7 @@ TEST(StreamingParserTest, ColumnNamesFromHeader) {
 
 TEST(StreamingParserTest, TypedColumns) {
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   opts.csv.guess_integer = true;
   StreamingParser parser(opts);
 
@@ -89,7 +89,7 @@ TEST(StreamingParserTest, TypedColumns) {
 
 TEST(StreamingParserTest, RowCountAndStatistics) {
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   StreamingParser parser(opts);
 
   std::string csv = "x,y\n1,2\n3,4\n5,6\n7,8\n9,10\n";
@@ -111,7 +111,7 @@ TEST(StreamingParserTest, RowCountAndStatistics) {
 
 TEST(StreamingParserTest, NullHandling) {
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   StreamingParser parser(opts);
 
   std::string csv = "a,b\n1,NA\n,3\nNULL,null\n";
@@ -150,7 +150,7 @@ TEST(StreamingParserTest, EmptyInput) {
 
 TEST(StreamingParserTest, HeaderOnly) {
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   StreamingParser parser(opts);
 
   std::string csv = "a,b,c\n";
@@ -277,7 +277,7 @@ TEST(StreamingParserTest, SplitInsideDoubleQuoteEscape) {
 
 TEST(StreamingParserTest, SplitHeaderAcrossChunks) {
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   StreamingParser parser(opts);
 
   // Split header "name,a" + "ge\n..."
@@ -421,7 +421,7 @@ TEST(StreamingParserTest, ExplicitSchema) {
 
 TEST(StreamingParserTest, NoHeader) {
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   opts.csv.has_header = false;
   StreamingParser parser(opts);
 
@@ -450,7 +450,7 @@ TEST(StreamingParserTest, NoHeader) {
 
 TEST(StreamingParserTest, FailFastMode) {
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   opts.csv.error_mode = ErrorMode::FAIL_FAST;
   StreamingParser parser(opts);
 
@@ -464,7 +464,7 @@ TEST(StreamingParserTest, FailFastMode) {
 
 TEST(StreamingParserTest, PermissiveMode) {
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   opts.csv.error_mode = ErrorMode::PERMISSIVE;
   StreamingParser parser(opts);
 
@@ -486,7 +486,7 @@ TEST(StreamingParserTest, PermissiveMode) {
 
 TEST(StreamingParserTest, ErrorCollectorAccess) {
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   opts.csv.error_mode = ErrorMode::PERMISSIVE;
   StreamingParser parser(opts);
 
@@ -507,7 +507,7 @@ TEST(StreamingParserTest, ReadCsvStream) {
   std::istringstream input("a,b\n1,2\n3,4\n5,6\n");
 
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   auto table = read_csv_stream(input, opts);
   ASSERT_NE(table, nullptr);
   EXPECT_EQ(table->num_rows(), 3);
@@ -522,7 +522,7 @@ TEST(StreamingParserTest, ReadCsvStreamToArrow) {
   std::istringstream input("x,y,z\n1,2,3\n4,5,6\n");
 
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   auto table = read_csv_stream(input, opts);
   ASSERT_NE(table, nullptr);
 
@@ -562,7 +562,7 @@ TEST(StreamingParserTest, ReadCsvStreamEmpty) {
 TEST(StreamingParserTest, ReadCsvStreamHeaderOnly) {
   std::istringstream input("a,b,c\n");
   StreamingOptions opts;
-  opts.csv.separator = ',';
+  opts.csv.separator = ",";
   auto table = read_csv_stream(input, opts);
   ASSERT_NE(table, nullptr);
   EXPECT_EQ(table->num_rows(), 0);

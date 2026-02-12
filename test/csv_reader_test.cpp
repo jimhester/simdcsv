@@ -144,7 +144,7 @@ TEST_F(CsvReaderTest, EmbeddedSeparators) {
 
 TEST_F(CsvReaderTest, SemicolonSeparator) {
   libvroom::CsvOptions opts;
-  opts.separator = ';';
+  opts.separator = ";";
   auto [chunks, schema] = parseFile(testDataPath("separators/semicolon.csv"), opts);
   EXPECT_EQ(schema.size(), 3u);
   EXPECT_EQ(chunks.total_rows, 3u);
@@ -154,7 +154,7 @@ TEST_F(CsvReaderTest, SemicolonSeparator) {
 
 TEST_F(CsvReaderTest, TabSeparator) {
   libvroom::CsvOptions opts;
-  opts.separator = '\t';
+  opts.separator = "\t";
   auto [chunks, schema] = parseFile(testDataPath("separators/tab.csv"), opts);
   EXPECT_EQ(schema.size(), 3u);
   EXPECT_EQ(chunks.total_rows, 3u);
@@ -163,7 +163,7 @@ TEST_F(CsvReaderTest, TabSeparator) {
 
 TEST_F(CsvReaderTest, PipeSeparator) {
   libvroom::CsvOptions opts;
-  opts.separator = '|';
+  opts.separator = "|";
   auto [chunks, schema] = parseFile(testDataPath("separators/pipe.csv"), opts);
   EXPECT_EQ(schema.size(), 3u);
   EXPECT_EQ(chunks.total_rows, 3u);
@@ -725,7 +725,7 @@ TEST_F(CsvReaderTest, AutoDetectCommaDelimiter) {
 
 TEST_F(CsvReaderTest, ExplicitDelimiterSkipsAutoDetect) {
   libvroom::CsvOptions opts;
-  opts.separator = '\t';
+  opts.separator = "\t";
   libvroom::CsvReader reader(opts);
   auto result = reader.open(testDataPath("separators/tab.csv"));
   ASSERT_TRUE(result.ok);

@@ -593,7 +593,8 @@ int cmd_convert(int argc, char* argv[]) {
   opts.progress = common.show_progress;
 
   // CSV options
-  opts.csv.separator = common.delimiter;
+  if (common.delimiter != '\0')
+    opts.csv.separator = std::string(1, common.delimiter);
   opts.csv.quote = common.quote;
   opts.csv.has_header = common.has_header;
   opts.csv.guess_integer = common.guess_integer;
@@ -701,7 +702,8 @@ int cmd_count(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  csv_opts.separator = opts.delimiter;
+  if (opts.delimiter != '\0')
+    csv_opts.separator = std::string(1, opts.delimiter);
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
@@ -776,7 +778,8 @@ int cmd_head(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  csv_opts.separator = opts.delimiter;
+  if (opts.delimiter != '\0')
+    csv_opts.separator = std::string(1, opts.delimiter);
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
@@ -887,7 +890,8 @@ int cmd_info(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  csv_opts.separator = opts.delimiter;
+  if (opts.delimiter != '\0')
+    csv_opts.separator = std::string(1, opts.delimiter);
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
@@ -1020,7 +1024,8 @@ int cmd_select(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  csv_opts.separator = opts.delimiter;
+  if (opts.delimiter != '\0')
+    csv_opts.separator = std::string(1, opts.delimiter);
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
@@ -1166,7 +1171,8 @@ int cmd_pretty(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  csv_opts.separator = opts.delimiter;
+  if (opts.delimiter != '\0')
+    csv_opts.separator = std::string(1, opts.delimiter);
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;

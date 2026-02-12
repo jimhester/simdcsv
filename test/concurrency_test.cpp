@@ -321,7 +321,7 @@ TEST_F(ConcurrencyTest, MultipleReadersWithDifferentOptionsSimultaneously) {
 
   auto parse_with_sep = [](const std::string& path, char sep) -> size_t {
     libvroom::CsvOptions opts;
-    opts.separator = sep;
+    opts.separator = std::string(1, sep);
     opts.num_threads = 2;
     libvroom::CsvReader reader(opts);
     auto open_result = reader.open(path);

@@ -64,7 +64,8 @@ std::vector<std::string> LineParser::parse_header(const char* data, size_t size)
       } else {
         in_quote = !in_quote;
       }
-    } else if (c == options_.separator && !in_quote) {
+    } else if (!options_.separator.empty() && options_.separator.size() == 1 &&
+               c == options_.separator[0] && !in_quote) {
       // Trim trailing whitespace from field
       while (!current_field.empty() &&
              (current_field.back() == ' ' || current_field.back() == '\t')) {
@@ -134,7 +135,8 @@ size_t LineParser::parse_line(const char* data, size_t size,
       } else {
         in_quote = !in_quote;
       }
-    } else if (c == options_.separator && !in_quote) {
+    } else if (!options_.separator.empty() && options_.separator.size() == 1 &&
+               c == options_.separator[0] && !in_quote) {
       // End of field - trim and append
       while (!current_field.empty() &&
              (current_field.back() == ' ' || current_field.back() == '\t')) {
