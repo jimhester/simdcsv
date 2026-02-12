@@ -401,6 +401,10 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
         return -1;
       }
       opts.decimal_mark = argv[i][0];
+      if (opts.decimal_mark != '.' && opts.decimal_mark != ',') {
+        cerr << "Error: --decimal-mark must be '.' or ','" << endl;
+        return -1;
+      }
     } else if (arg == "--skip") {
       if (++i >= argc) {
         cerr << "Error: --skip requires a number" << endl;
@@ -558,6 +562,10 @@ int cmd_convert(int argc, char* argv[]) {
         return 1;
       }
       common.decimal_mark = argv[i][0];
+      if (common.decimal_mark != '.' && common.decimal_mark != ',') {
+        cerr << "Error: --decimal-mark must be '.' or ','" << endl;
+        return 1;
+      }
     } else if (arg == "--skip") {
       if (++i >= argc) {
         cerr << "Error: --skip requires a number" << endl;
