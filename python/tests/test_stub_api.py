@@ -267,14 +267,14 @@ class TestErrorHandling:
         import vroom_csv
 
         with pytest.raises(RuntimeError, match="empty"):
-            vroom_csv.read_csv(empty_header_csv, separator=",", error_mode="permissive")
+            vroom_csv.read_csv(empty_header_csv, separator=",", error_mode="permissive", skip_empty_rows=False)
 
     def test_error_details_in_exception(self, empty_header_csv):
         """Test that error details are included in exception message."""
         import vroom_csv
 
         try:
-            vroom_csv.read_csv(empty_header_csv, separator=",", error_mode="permissive")
+            vroom_csv.read_csv(empty_header_csv, separator=",", error_mode="permissive", skip_empty_rows=False)
             assert False, "Should have raised RuntimeError"
         except RuntimeError as e:
             error_msg = str(e)
