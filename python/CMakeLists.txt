@@ -216,6 +216,7 @@ set(VROOM_SOURCES
     ${LIBVROOM_ROOT}/src/parser/simd_atoi.cpp
     ${LIBVROOM_ROOT}/src/schema/type_inference.cpp
     ${LIBVROOM_ROOT}/src/schema/type_parsers.cpp
+    ${LIBVROOM_ROOT}/src/schema/format_parser.cpp
     ${LIBVROOM_ROOT}/src/columns/column_builder.cpp
     ${LIBVROOM_ROOT}/src/encoding/plain.cpp
     ${LIBVROOM_ROOT}/src/encoding/rle.cpp
