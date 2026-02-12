@@ -146,6 +146,14 @@ DataType TypeInference::infer_field(std::string_view value) {
     }
   }
 
+  // Check for time-of-day format (HH:MM:SS, HH:MM, with optional fractional seconds and AM/PM)
+  {
+    int64_t time_micros;
+    if (parse_time(value, time_micros)) {
+      return DataType::TIME;
+    }
+  }
+
   // Default to string
   return DataType::STRING;
 }

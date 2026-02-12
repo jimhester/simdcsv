@@ -280,4 +280,122 @@ bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch) {
   return true;
 }
 
+// Parse time-of-day to microseconds since midnight
+// Supports formats:
+//   HH:MM:SS, HH:MM:SS.ffffff, HH:MM
+//   H:MM:SS AM/PM (12-hour, case-insensitive)
+bool parse_time(std::string_view value, int64_t& micros_since_midnight) {
+  if (value.size() < 4) {
+    return false;
+  }
+
+  size_t pos = 0;
+
+  // Parse hour (1 or 2 digits)
+  int hour = 0;
+  if (value[pos] < '0' || value[pos] > '9')
+    return false;
+  hour = value[pos] - '0';
+  pos++;
+
+  if (pos < value.size() && value[pos] >= '0' && value[pos] <= '9') {
+    hour = hour * 10 + (value[pos] - '0');
+    pos++;
+  }
+
+  // Expect colon
+  if (pos >= value.size() || value[pos] != ':')
+    return false;
+  pos++;
+
+  // Parse minute (2 digits)
+  if (pos + 2 > value.size())
+    return false;
+  if (value[pos] < '0' || value[pos] > '9' || value[pos + 1] < '0' || value[pos + 1] > '9')
+    return false;
+  int minute = (value[pos] - '0') * 10 + (value[pos + 1] - '0');
+  pos += 2;
+
+  int second = 0;
+  int64_t frac_micros = 0;
+
+  // Optional seconds
+  if (pos < value.size() && value[pos] == ':') {
+    pos++;
+    if (pos + 2 > value.size())
+      return false;
+    if (value[pos] < '0' || value[pos] > '9' || value[pos + 1] < '0' || value[pos + 1] > '9')
+      return false;
+    second = (value[pos] - '0') * 10 + (value[pos + 1] - '0');
+    pos += 2;
+
+    // Optional fractional seconds
+    if (pos < value.size() && value[pos] == '.') {
+      pos++;
+      int digits = 0;
+      while (pos < value.size() && value[pos] >= '0' && value[pos] <= '9' && digits < 6) {
+        frac_micros = frac_micros * 10 + (value[pos] - '0');
+        digits++;
+        pos++;
+      }
+      // Skip remaining fractional digits beyond microsecond precision
+      while (pos < value.size() && value[pos] >= '0' && value[pos] <= '9') {
+        pos++;
+      }
+      // Pad to microseconds
+      while (digits < 6) {
+        frac_micros *= 10;
+        digits++;
+      }
+    }
+  }
+
+  // Check for AM/PM
+  bool is_12hour = false;
+  bool is_pm = false;
+  if (pos < value.size() && value[pos] == ' ') {
+    pos++;
+    if (pos + 2 <= value.size()) {
+      char a = value[pos];
+      char m = value[pos + 1];
+      if ((a == 'A' || a == 'a') && (m == 'M' || m == 'm')) {
+        is_12hour = true;
+        is_pm = false;
+        pos += 2;
+      } else if ((a == 'P' || a == 'p') && (m == 'M' || m == 'm')) {
+        is_12hour = true;
+        is_pm = true;
+        pos += 2;
+      }
+    }
+  }
+
+  // Must have consumed all input
+  if (pos != value.size())
+    return false;
+
+  // Validate ranges
+  if (is_12hour) {
+    if (hour < 1 || hour > 12)
+      return false;
+    if (hour == 12) {
+      hour = is_pm ? 12 : 0;
+    } else if (is_pm) {
+      hour += 12;
+    }
+  } else {
+    if (hour > 23)
+      return false;
+  }
+
+  if (minute > 59 || second > 59)
+    return false;
+
+  micros_since_midnight = static_cast<int64_t>(hour) * 3600000000LL +
+                          static_cast<int64_t>(minute) * 60000000LL +
+                          static_cast<int64_t>(second) * 1000000LL + frac_micros;
+
+  return true;
+}
+
 } // namespace libvroom

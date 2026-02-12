@@ -150,6 +150,21 @@ static std::string getColumnValueAsString(const libvroom::ArrowColumnBuilder* co
     strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", tm_info);
     return buf;
   }
+  case libvroom::DataType::TIME: {
+    auto* typed = static_cast<const libvroom::ArrowTimeColumnBuilder*>(col);
+    int64_t us = typed->values().get(row_idx);
+    int hours = static_cast<int>(us / 3600000000LL);
+    int minutes = static_cast<int>((us % 3600000000LL) / 60000000LL);
+    int seconds = static_cast<int>((us % 60000000LL) / 1000000LL);
+    int micros = static_cast<int>(us % 1000000LL);
+    char buf[16];
+    if (micros > 0) {
+      snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%06d", hours, minutes, seconds, micros);
+    } else {
+      snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hours, minutes, seconds);
+    }
+    return buf;
+  }
   default:
     return "<unknown>";
   }

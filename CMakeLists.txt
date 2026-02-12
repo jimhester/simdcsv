@@ -714,6 +714,12 @@ if(BUILD_TESTING)
     target_include_directories(simd_info_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     gtest_discover_tests(simd_info_test)
 
+    # Time parsing tests (Issue #670)
+    add_executable(time_parsing_test test/time_parsing_test.cpp)
+    target_link_libraries(time_parsing_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(time_parsing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(time_parsing_test)
+
 endif() # BUILD_TESTING
 
 # =============================================================================

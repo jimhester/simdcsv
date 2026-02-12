@@ -64,6 +64,7 @@ enum class ConvertedType : int32_t {
   DATE = 6,
   TIMESTAMP_MILLIS = 9,
   TIMESTAMP_MICROS = 10,
+  TIME_MICROS = 11,
   INT_8 = 15,
   INT_16 = 16,
   INT_32 = 17,

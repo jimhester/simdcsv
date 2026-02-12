@@ -73,6 +73,13 @@ TEST(ArrowColumnBuilderFactory, CreateTimestamp) {
   EXPECT_EQ(builder->size(), 0u);
 }
 
+TEST(ArrowColumnBuilderFactory, CreateTime) {
+  auto builder = libvroom::ArrowColumnBuilder::create(libvroom::DataType::TIME);
+  ASSERT_NE(builder, nullptr);
+  EXPECT_EQ(builder->type(), libvroom::DataType::TIME);
+  EXPECT_EQ(builder->size(), 0u);
+}
+
 TEST(ArrowColumnBuilderFactory, CreateUnknownDefaultsToString) {
   auto builder = libvroom::ArrowColumnBuilder::create(libvroom::DataType::UNKNOWN);
   ASSERT_NE(builder, nullptr);
@@ -116,6 +123,12 @@ TEST(ArrowColumnBuilderFactory, ConvenienceCreateTimestamp) {
   EXPECT_EQ(builder->type(), libvroom::DataType::TIMESTAMP);
 }
 
+TEST(ArrowColumnBuilderFactory, ConvenienceCreateTime) {
+  auto builder = libvroom::ArrowColumnBuilder::create_time();
+  ASSERT_NE(builder, nullptr);
+  EXPECT_EQ(builder->type(), libvroom::DataType::TIME);
+}
+
 TEST(ArrowColumnBuilderFactory, ConvenienceCreateString) {
   auto builder = libvroom::ArrowColumnBuilder::create_string();
   ASSERT_NE(builder, nullptr);
@@ -136,6 +149,26 @@ TEST(ArrowColumnBuilderFactory, NullBitmapInitiallyEmpty) {
   auto builder = libvroom::ArrowColumnBuilder::create_string();
   ASSERT_NE(builder, nullptr);
   EXPECT_EQ(builder->null_count(), 0u);
+}
+
+TEST(ArrowColumnBuilderFactory, TimeColumnAppendAndExport) {
+  auto builder = libvroom::ArrowColumnBuilder::create_time();
+  auto ctx = builder->create_context();
+
+  ctx.append("14:30:00");
+  ctx.append("00:00:00");
+  ctx.append_null();
+  ctx.append("23:59:59.999");
+
+  EXPECT_EQ(builder->size(), 4u);
+  EXPECT_EQ(builder->null_count(), 1u);
+
+  // Verify Arrow schema export
+  libvroom::ArrowSchema schema;
+  builder->export_schema(&schema, "time_col");
+  EXPECT_STREQ(schema.format, "ttu");
+  EXPECT_STREQ(schema.name, "time_col");
+  schema.release(&schema);
 }
 
 // =============================================================================
@@ -776,5 +809,6 @@ TEST(TypeHelpers, TypeNames) {
   EXPECT_STREQ(libvroom::type_name(libvroom::DataType::STRING), "STRING");
   EXPECT_STREQ(libvroom::type_name(libvroom::DataType::DATE), "DATE");
   EXPECT_STREQ(libvroom::type_name(libvroom::DataType::TIMESTAMP), "TIMESTAMP");
+  EXPECT_STREQ(libvroom::type_name(libvroom::DataType::TIME), "TIME");
   EXPECT_STREQ(libvroom::type_name(libvroom::DataType::UNKNOWN), "UNKNOWN");
 }
