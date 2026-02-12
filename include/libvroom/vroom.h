@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dialect.h"
+#include "format_parser.h"
 #include "io_util.h"
 #include "options.h"
 #include "types.h"
@@ -55,6 +56,10 @@ public:
   // Must be called after open() and before start_streaming()/read_all().
   // Schema length must match the number of detected columns.
   Result<bool> set_schema(const std::vector<ColumnSchema>& schema);
+
+  // Set locale for format-string datetime parsing.
+  // Must be called before read_all() / start_streaming().
+  void set_format_locale(const FormatLocale& locale);
 
   // Parse the file into column builders
   // Returns ParsedChunks with one vector of ArrowColumnBuilders per chunk
