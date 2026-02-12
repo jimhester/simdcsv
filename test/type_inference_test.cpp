@@ -180,6 +180,30 @@ TEST_F(TypeInferenceTest, TimestampWithSpace) {
   EXPECT_EQ(default_inference.infer_field("2024-01-15 10:30:00"), DataType::TIMESTAMP);
 }
 
+TEST_F(TypeInferenceTest, TimeHHMMSS) {
+  EXPECT_EQ(default_inference.infer_field("14:30:00"), DataType::TIME);
+}
+
+TEST_F(TypeInferenceTest, TimeHHMM) {
+  EXPECT_EQ(default_inference.infer_field("14:30"), DataType::TIME);
+}
+
+TEST_F(TypeInferenceTest, TimeFractional) {
+  EXPECT_EQ(default_inference.infer_field("23:59:59.999"), DataType::TIME);
+}
+
+TEST_F(TypeInferenceTest, TimeAMPM) {
+  EXPECT_EQ(default_inference.infer_field("2:15:30 PM"), DataType::TIME);
+}
+
+TEST_F(TypeInferenceTest, TimeMidnight) {
+  EXPECT_EQ(default_inference.infer_field("00:00:00"), DataType::TIME);
+}
+
+TEST_F(TypeInferenceTest, TimeTwoDigitAMPM) {
+  EXPECT_EQ(default_inference.infer_field("02:15:30 PM"), DataType::TIME);
+}
+
 TEST_F(TypeInferenceTest, StringPlain) {
   EXPECT_EQ(default_inference.infer_field("hello"), DataType::STRING);
 }
@@ -494,6 +518,19 @@ TEST_F(InferFromSampleTest, DateColumn) {
   auto types = default_inference.infer_from_sample(data.data(), data.size(), 2);
   EXPECT_EQ(types[0], DataType::DATE);
   EXPECT_EQ(types[1], DataType::STRING);
+}
+
+TEST_F(InferFromSampleTest, TimeColumn) {
+  std::string data = "14:30:00,hello\n23:59:59,world\n";
+  auto types = default_inference.infer_from_sample(data.data(), data.size(), 2);
+  EXPECT_EQ(types[0], DataType::TIME);
+  EXPECT_EQ(types[1], DataType::STRING);
+}
+
+TEST_F(InferFromSampleTest, TimeColumnMixedFallsToString) {
+  std::string data = "14:30:00\n42\n";
+  auto types = default_inference.infer_from_sample(data.data(), data.size(), 1);
+  EXPECT_EQ(types[0], DataType::STRING);
 }
 
 TEST_F(InferFromSampleTest, MaxRowsLimitsInference) {
