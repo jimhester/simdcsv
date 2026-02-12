@@ -37,7 +37,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     opts.num_threads = 1;
     opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
     if (detected.success()) {
-      opts.separator = detected.dialect.delimiter;
+      opts.separator = std::string(1, detected.dialect.delimiter);
       opts.quote = detected.dialect.quote_char;
       opts.has_header = detected.has_header;
       if (detected.dialect.comment_char != '\0') {

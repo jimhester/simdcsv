@@ -94,7 +94,7 @@ TEST_F(IntegrationTest, BasicE2E_ContactsCSV_RowCountAndColumns) {
 
 TEST_F(IntegrationTest, BasicE2E_SemicolonDelimiter) {
   libvroom::CsvOptions opts;
-  opts.separator = ';';
+  opts.separator = ";";
   auto [chunks, schema] = parseFile(testDataPath("separators/semicolon.csv"), opts);
 
   ASSERT_EQ(schema.size(), 3u);
@@ -108,7 +108,7 @@ TEST_F(IntegrationTest, BasicE2E_SemicolonDelimiter) {
 
 TEST_F(IntegrationTest, BasicE2E_TabDelimiter) {
   libvroom::CsvOptions opts;
-  opts.separator = '\t';
+  opts.separator = "\t";
   auto [chunks, schema] = parseFile(testDataPath("separators/tab.csv"), opts);
 
   ASSERT_EQ(schema.size(), 3u);
@@ -298,7 +298,7 @@ TEST_F(IntegrationTest, Schema_WideCSV_20Columns) {
 TEST_F(IntegrationTest, ErrorHandling_UnclosedQuote_Permissive) {
   // malformed/unclosed_quote.csv has an unclosed quote on row 2
   libvroom::CsvOptions opts;
-  opts.separator = ','; // Explicit separator for malformed data (bypass auto-detect)
+  opts.separator = ","; // Explicit separator for malformed data (bypass auto-detect)
   opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
 
   libvroom::CsvReader reader(opts);

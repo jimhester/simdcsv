@@ -52,7 +52,7 @@ protected:
   ParseResult parseFile(const std::string& path, libvroom::ErrorMode mode,
                         size_t max_errors = libvroom::ErrorCollector::DEFAULT_MAX_ERRORS) {
     libvroom::CsvOptions opts;
-    opts.separator = ','; // Explicit separator for malformed data tests (bypass auto-detect)
+    opts.separator = ","; // Explicit separator for malformed data tests (bypass auto-detect)
     opts.error_mode = mode;
     opts.max_errors = max_errors;
     opts.num_threads = 1; // Deterministic for error detection
@@ -77,7 +77,7 @@ protected:
                            size_t num_threads = 1) {
     test_util::TempCsvFile csv(content);
     libvroom::CsvOptions opts;
-    opts.separator = ','; // Explicit separator for malformed data tests (bypass auto-detect)
+    opts.separator = ","; // Explicit separator for malformed data tests (bypass auto-detect)
     opts.error_mode = mode;
     opts.max_errors = max_errors;
     opts.num_threads = num_threads;
