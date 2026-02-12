@@ -1,6 +1,7 @@
 #include "libvroom/vroom.h"
 
 #include <cctype>
+#include <cstring>
 #include <fast_float/fast_float.h>
 
 namespace libvroom {
@@ -171,6 +172,16 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
     bool in_quote = false;
     std::string current_field;
 
+    // Helper to match separator at a given position
+    auto matches_sep_at = [&](size_t pos) -> bool {
+      if (options_.separator.empty())
+        return false;
+      if (options_.separator.size() == 1)
+        return data[pos] == options_.separator[0];
+      return pos + options_.separator.size() <= row_end &&
+             std::memcmp(data + pos, options_.separator.data(), options_.separator.size()) == 0;
+    };
+
     for (size_t i = offset; i < row_end; ++i) {
       char c = data[i];
 
@@ -193,7 +204,7 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
         } else {
           in_quote = !in_quote;
         }
-      } else if (!options_.separator.empty() && c == options_.separator[0] && !in_quote) {
+      } else if (!in_quote && matches_sep_at(i)) {
         if (options_.trim_ws) {
           while (!current_field.empty() &&
                  (current_field.back() == ' ' || current_field.back() == '\t')) {
@@ -202,6 +213,8 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
         }
         fields.push_back(std::move(current_field));
         current_field.clear();
+        // Advance past multi-byte separator (loop will do +1)
+        i += options_.separator.size() - 1;
       } else {
         if (options_.trim_ws && current_field.empty() && !in_quote && (c == ' ' || c == '\t')) {
           continue;

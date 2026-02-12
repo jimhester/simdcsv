@@ -1,5 +1,7 @@
 #include "libvroom/vroom.h"
 
+#include <cstring>
+
 namespace libvroom {
 
 LineParser::LineParser(const CsvOptions& options) : options_(options) {
@@ -37,6 +39,16 @@ std::vector<std::string> LineParser::parse_header(const char* data, size_t size)
     return headers;
   }
 
+  // Helper to match separator at a given position
+  auto matches_sep_at = [&](size_t pos) -> bool {
+    if (options_.separator.empty())
+      return false;
+    if (options_.separator.size() == 1)
+      return data[pos] == options_.separator[0];
+    return pos + options_.separator.size() <= size &&
+           std::memcmp(data + pos, options_.separator.data(), options_.separator.size()) == 0;
+  };
+
   bool in_quote = false;
   std::string current_field;
   current_field.reserve(64);
@@ -64,8 +76,7 @@ std::vector<std::string> LineParser::parse_header(const char* data, size_t size)
       } else {
         in_quote = !in_quote;
       }
-    } else if (!options_.separator.empty() && options_.separator.size() == 1 &&
-               c == options_.separator[0] && !in_quote) {
+    } else if (!in_quote && matches_sep_at(i)) {
       // Trim trailing whitespace from field
       while (!current_field.empty() &&
              (current_field.back() == ' ' || current_field.back() == '\t')) {
@@ -73,6 +84,8 @@ std::vector<std::string> LineParser::parse_header(const char* data, size_t size)
       }
       headers.push_back(std::move(current_field));
       current_field.clear();
+      // Advance past multi-byte separator (loop will do +1)
+      i += options_.separator.size() - 1;
     } else {
       // Skip leading whitespace if field is empty and not in quote
       if (current_field.empty() && !in_quote && (c == ' ' || c == '\t')) {
@@ -99,6 +112,16 @@ size_t LineParser::parse_line(const char* data, size_t size,
   if (size == 0 || columns.empty()) {
     return 0;
   }
+
+  // Helper to match separator at a given position
+  auto matches_sep_at = [&](size_t pos) -> bool {
+    if (options_.separator.empty())
+      return false;
+    if (options_.separator.size() == 1)
+      return data[pos] == options_.separator[0];
+    return pos + options_.separator.size() <= size &&
+           std::memcmp(data + pos, options_.separator.data(), options_.separator.size()) == 0;
+  };
 
   bool in_quote = false;
   std::string current_field;
@@ -135,8 +158,7 @@ size_t LineParser::parse_line(const char* data, size_t size,
       } else {
         in_quote = !in_quote;
       }
-    } else if (!options_.separator.empty() && options_.separator.size() == 1 &&
-               c == options_.separator[0] && !in_quote) {
+    } else if (!in_quote && matches_sep_at(i)) {
       // End of field - trim and append
       while (!current_field.empty() &&
              (current_field.back() == ' ' || current_field.back() == '\t')) {
@@ -151,6 +173,8 @@ size_t LineParser::parse_line(const char* data, size_t size,
 
       current_field.clear();
       ++field_index;
+      // Advance past multi-byte separator (loop will do +1)
+      i += options_.separator.size() - 1;
     } else {
       // Skip leading whitespace if field is empty and not in quote
       if (current_field.empty() && !in_quote && (c == ' ' || c == '\t')) {
