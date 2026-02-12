@@ -139,7 +139,7 @@ struct StreamingParser::Impl {
       if (options.csv.separator.size() > 1) {
         // Multi-byte separator: use SplitFields to count fields
         SplitFields iter(data, content_end, std::string_view(options.csv.separator),
-                         options.csv.quote, '\n');
+                         options.csv.quote, '\n', options.csv.escape_backslash);
         const char* fd;
         size_t fl;
         bool ne;
@@ -151,8 +151,13 @@ struct StreamingParser::Impl {
         col_count = 1;
         for (size_t i = 0; i < content_end; ++i) {
           char c = data[i];
+          if (options.csv.escape_backslash && c == '\\' && i + 1 < content_end) {
+            ++i; // Skip escaped character
+            continue;
+          }
           if (c == options.csv.quote) {
-            if (in_q && i + 1 < content_end && data[i + 1] == options.csv.quote) {
+            if (!options.csv.escape_backslash && in_q && i + 1 < content_end &&
+                data[i + 1] == options.csv.quote) {
               ++i;
             } else {
               in_q = !in_q;
@@ -225,13 +230,22 @@ struct StreamingParser::Impl {
     bool in_q = false;
     for (size_t i = 0; i < size; ++i) {
       char c = data[i];
-      if (c == options.csv.quote) {
+      if (options.csv.escape_backslash) {
+        if (c == '\\' && i + 1 < size) {
+          ++i; // Skip escaped character
+          continue;
+        }
+        if (c == options.csv.quote) {
+          in_q = !in_q;
+        }
+      } else if (c == options.csv.quote) {
         if (in_q && i + 1 < size && data[i + 1] == options.csv.quote) {
           ++i; // Skip escaped quote
         } else {
           in_q = !in_q;
         }
-      } else if (!in_q && c == '\n') {
+      }
+      if (!in_q && c == '\n') {
         return i + 1;
       } else if (!in_q && c == '\r') {
         if (i + 1 < size && data[i + 1] == '\n') {
@@ -297,7 +311,8 @@ struct StreamingParser::Impl {
 
       // Parse one row using SplitFields
       size_t row_remaining = parseable_size - offset;
-      SplitFields iter(data + offset, row_remaining, std::string_view(sep), quote, '\n');
+      SplitFields iter(data + offset, row_remaining, std::string_view(sep), quote, '\n',
+                       options.csv.escape_backslash);
 
       const char* field_data;
       size_t field_len;
@@ -358,18 +373,24 @@ struct StreamingParser::Impl {
           if (field_len >= 2 && field_data[0] == quote && field_data[field_len - 1] == quote) {
             field_view = std::string_view(field_data + 1, field_len - 2);
           }
-          bool has_invalid_escape = false;
-          std::string unescaped =
-              unescape_quotes(field_view, quote, check_errors ? &has_invalid_escape : nullptr);
 
-          if (has_invalid_escape) [[unlikely]] {
-            error_collector.add_error(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::RECOVERABLE,
-                                      0, col_idx + 1, 0, "Invalid quote escape sequence");
-            if (error_collector.should_stop())
-              return;
+          if (options.csv.escape_backslash) {
+            std::string unescaped = unescape_backslash(field_view, quote);
+            fast_contexts[col_idx].append(unescaped);
+          } else {
+            bool has_invalid_escape = false;
+            std::string unescaped =
+                unescape_quotes(field_view, quote, check_errors ? &has_invalid_escape : nullptr);
+
+            if (has_invalid_escape) [[unlikely]] {
+              error_collector.add_error(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::RECOVERABLE,
+                                        0, col_idx + 1, 0, "Invalid quote escape sequence");
+              if (error_collector.should_stop())
+                return;
+            }
+
+            fast_contexts[col_idx].append(unescaped);
           }
-
-          fast_contexts[col_idx].append(unescaped);
         } else {
           fast_contexts[col_idx].append(field_view);
         }

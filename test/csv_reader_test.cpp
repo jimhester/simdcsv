@@ -10,6 +10,7 @@
  */
 
 #include "libvroom.h"
+#include "libvroom/parse_utils.h"
 
 #include "test_util.h"
 
@@ -1030,6 +1031,152 @@ TEST(TrimWhitespaceParsingTest, HeadersAlwaysTrimmed) {
   const auto& schema = reader.schema();
   EXPECT_EQ(schema[0].name, "name");
   EXPECT_EQ(schema[1].name, "value");
+}
+
+// ============================================================================
+// UNESCAPE BACKSLASH TESTS
+// ============================================================================
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedQuote) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(he said \"hello\")", '"'), "he said \"hello\"");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedBackslash) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(C:\\Users\\jane)", '"'), "C:\\Users\\jane");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedTab) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(Tab:\there)", '"'), "Tab:\there");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedNewline) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(line1\nline2)", '"'), "line1\nline2");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedCR) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(before\rafter)", '"'), "before\rafter");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_NoEscapes) {
+  EXPECT_EQ(libvroom::unescape_backslash("plain text", '"'), "plain text");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EmptyString) {
+  EXPECT_EQ(libvroom::unescape_backslash("", '"'), "");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_UnknownEscape) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(\x)", '"'), "x");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_TrailingBackslash) {
+  EXPECT_EQ(libvroom::unescape_backslash("trail\\", '"'), "trail\\");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_MultipleEscapes) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(\"\\\")", '"'), "\"\\\"");
+}
+
+// ============================================================================
+// BACKSLASH ESCAPE MODE - INTEGRATION TESTS
+// ============================================================================
+
+TEST_F(CsvReaderTest, BackslashEscape_BasicFile) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+
+  auto [chunks, schema] = parseFile(testDataPath("escape/backslash_escape.csv"), opts);
+  ASSERT_EQ(schema.size(), 3u);
+  EXPECT_EQ(schema[0].name, "Name");
+  EXPECT_EQ(schema[1].name, "Description");
+  EXPECT_EQ(schema[2].name, "Value");
+
+  ASSERT_EQ(chunks.total_rows, 3u);
+
+  // Row 1: "John \"The Boss\" Smith" → John "The Boss" Smith
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "John \"The Boss\" Smith");
+  // Row 1: "Says \"Hello\"" → Says "Hello"
+  EXPECT_EQ(getStringValue(chunks, 1, 0), "Says \"Hello\"");
+  // Row 1: 100
+  EXPECT_EQ(getStringValue(chunks, 2, 0), "100");
+
+  // Row 2: "Jane Doe" → Jane Doe
+  EXPECT_EQ(getStringValue(chunks, 0, 1), "Jane Doe");
+  // Row 2: "Path: C:\\Users\\jane" → Path: C:\Users\jane
+  EXPECT_EQ(getStringValue(chunks, 1, 1), "Path: C:\\Users\\jane");
+
+  // Row 3: "Bob's Place" → Bob's Place
+  EXPECT_EQ(getStringValue(chunks, 0, 2), "Bob's Place");
+  // Row 3: "Tab:\there" → Tab:<TAB>here
+  EXPECT_EQ(getStringValue(chunks, 1, 2), "Tab:\there");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_FromString) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+
+  std::string csv = "a,b\n\"he said \\\"hello\\\"\",world\n";
+  auto [chunks, schema] = parseContent(csv, opts);
+  ASSERT_EQ(chunks.total_rows, 1u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "he said \"hello\"");
+  EXPECT_EQ(getStringValue(chunks, 1, 0), "world");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_DoubleBackslash) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+
+  std::string csv = "a\n\"C:\\\\path\\\\to\\\\file\"\n";
+  auto [chunks, schema] = parseContent(csv, opts);
+  ASSERT_EQ(chunks.total_rows, 1u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "C:\\path\\to\\file");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_EscapedNewline) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+
+  std::string csv = "a\n\"line1\\nline2\"\n";
+  auto [chunks, schema] = parseContent(csv, opts);
+  ASSERT_EQ(chunks.total_rows, 1u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "line1\nline2");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_DefaultFalseRegression) {
+  // escape_backslash=false (default) should behave identically to before
+  auto [chunks, schema] = parseFile(testDataPath("basic/simple.csv"));
+  EXPECT_EQ(chunks.total_rows, 3u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "1");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_MixedQuotedUnquoted) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+
+  std::string csv = "a,b,c\nunquoted,\"quoted \\\"value\\\"\",123\n";
+  auto [chunks, schema] = parseContent(csv, opts);
+  ASSERT_EQ(chunks.total_rows, 1u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "unquoted");
+  EXPECT_EQ(getStringValue(chunks, 1, 0), "quoted \"value\"");
+  EXPECT_EQ(getStringValue(chunks, 2, 0), "123");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_NoHeader) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+  opts.has_header = false;
+
+  std::string csv = "\"hello \\\"world\\\"\",42\n";
+  auto [chunks, schema] = parseContent(csv, opts);
+  ASSERT_EQ(chunks.total_rows, 1u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "hello \"world\"");
+  EXPECT_EQ(getStringValue(chunks, 1, 0), "42");
 }
 
 // ============================================================================

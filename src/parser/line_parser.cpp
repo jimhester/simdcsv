@@ -68,9 +68,34 @@ std::vector<std::string> LineParser::parse_header(const char* data, size_t size)
       break;
     }
 
-    if (c == options_.quote) {
-      if (in_quote && i + 1 < size && data[i + 1] == options_.quote) {
-        // Escaped quote (doubled)
+    if (options_.escape_backslash && c == '\\' && i + 1 < size) {
+      // Backslash escape: add the escaped character
+      char next = data[i + 1];
+      switch (next) {
+      case '\\':
+        current_field += '\\';
+        break;
+      case 'n':
+        current_field += '\n';
+        break;
+      case 't':
+        current_field += '\t';
+        break;
+      case 'r':
+        current_field += '\r';
+        break;
+      default:
+        if (next == options_.quote) {
+          current_field += options_.quote;
+        } else {
+          current_field += next;
+        }
+        break;
+      }
+      ++i; // Skip escaped character
+    } else if (c == options_.quote) {
+      if (!options_.escape_backslash && in_quote && i + 1 < size && data[i + 1] == options_.quote) {
+        // Escaped quote (doubled) - only in non-backslash mode
         current_field += options_.quote;
         ++i; // Skip next quote
       } else {
@@ -150,9 +175,34 @@ size_t LineParser::parse_line(const char* data, size_t size,
       break;
     }
 
-    if (c == options_.quote) {
-      if (in_quote && i + 1 < size && data[i + 1] == options_.quote) {
-        // Escaped quote (doubled)
+    if (options_.escape_backslash && c == '\\' && i + 1 < size) {
+      // Backslash escape: add the escaped character
+      char next = data[i + 1];
+      switch (next) {
+      case '\\':
+        current_field += '\\';
+        break;
+      case 'n':
+        current_field += '\n';
+        break;
+      case 't':
+        current_field += '\t';
+        break;
+      case 'r':
+        current_field += '\r';
+        break;
+      default:
+        if (next == options_.quote) {
+          current_field += options_.quote;
+        } else {
+          current_field += next;
+        }
+        break;
+      }
+      ++i; // Skip escaped character
+    } else if (c == options_.quote) {
+      if (!options_.escape_backslash && in_quote && i + 1 < size && data[i + 1] == options_.quote) {
+        // Escaped quote (doubled) - only in non-backslash mode
         current_field += options_.quote;
         ++i;
       } else {

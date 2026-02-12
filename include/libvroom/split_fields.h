@@ -6,6 +6,7 @@
 // we find ALL field boundaries in that block and cache them. Subsequent
 // next() calls extract from the cache without re-scanning.
 
+#include "libvroom/escape_mask.h"
 #include "libvroom/quote_parity.h"
 
 #include <cstddef>
@@ -92,17 +93,18 @@ VROOM_FORCE_INLINE uint64_t scan_for_two_chars(const char* data, size_t len, cha
 class SplitFields {
 public:
   VROOM_FORCE_INLINE SplitFields(const char* slice, size_t size, char separator, char quote_char,
-                                 char eol_char)
+                                 char eol_char, bool escape_backslash = false)
       : v_(slice), remaining_(size), separator_(separator), finished_(false),
         finished_inside_quote_(false), quote_char_(quote_char), quoting_(quote_char != 0),
-        eol_char_(eol_char), previous_valid_ends_(0) {}
+        eol_char_(eol_char), escape_backslash_(escape_backslash), previous_valid_ends_(0),
+        prev_escaped_(0) {}
 
   VROOM_FORCE_INLINE SplitFields(const char* slice, size_t size, std::string_view separator,
-                                 char quote_char, char eol_char)
+                                 char quote_char, char eol_char, bool escape_backslash = false)
       : v_(slice), remaining_(size), separator_(separator.size() == 1 ? separator[0] : '\0'),
         finished_(false), finished_inside_quote_(false), quote_char_(quote_char),
-        quoting_(quote_char != 0), eol_char_(eol_char), previous_valid_ends_(0),
-        multi_byte_(separator.size() > 1) {
+        quoting_(quote_char != 0), eol_char_(eol_char), escape_backslash_(escape_backslash),
+        previous_valid_ends_(0), prev_escaped_(0), multi_byte_(separator.size() > 1) {
     if (multi_byte_) {
       multi_sep_ = separator;
     }
@@ -183,7 +185,9 @@ private:
   char quote_char_;
   bool quoting_;
   char eol_char_;
+  bool escape_backslash_;
   uint64_t previous_valid_ends_;
+  uint64_t prev_escaped_; // Cross-block state for escape mask computation
   std::string_view multi_sep_;
   bool multi_byte_ = false;
 
@@ -257,6 +261,7 @@ private:
 
   VROOM_FORCE_INLINE size_t scan_quoted_field(bool& not_in_field_previous_iter) {
     size_t total_idx = 0;
+    prev_escaped_ = 0; // Reset escape state for new field scan
 
     while (remaining_ - total_idx > detail::SIMD_SIZE) {
       const char* bytes = v_ + total_idx;
@@ -264,6 +269,13 @@ private:
       uint64_t sep_mask = detail::scan_for_char(bytes, detail::SIMD_SIZE, separator_);
       uint64_t eol_mask = detail::scan_for_char(bytes, detail::SIMD_SIZE, eol_char_);
       uint64_t quote_mask = detail::scan_for_char(bytes, detail::SIMD_SIZE, quote_char_);
+
+      if (escape_backslash_) {
+        uint64_t bs_mask = detail::scan_for_char(bytes, detail::SIMD_SIZE, '\\');
+        auto [escaped, escape] = compute_escaped_mask(bs_mask, prev_escaped_);
+        // Remove escaped quotes from quote mask - they don't toggle quote state
+        quote_mask &= ~escaped;
+      }
 
       uint64_t end_mask = sep_mask | eol_mask;
 
@@ -296,13 +308,29 @@ private:
     const char* bytes = v_ + total_idx;
     size_t len = remaining_ - total_idx;
 
-    for (size_t i = 0; i < len; ++i) {
-      char c = bytes[i];
-      if (c == quote_char_) {
-        in_field = !in_field;
+    if (escape_backslash_) {
+      for (size_t i = 0; i < len; ++i) {
+        char c = bytes[i];
+        if (c == '\\' && i + 1 < len) {
+          ++i; // Skip escaped character
+          continue;
+        }
+        if (c == quote_char_) {
+          in_field = !in_field;
+        }
+        if (!in_field && eof_eol(c)) {
+          return total_idx + i;
+        }
       }
-      if (!in_field && eof_eol(c)) {
-        return total_idx + i;
+    } else {
+      for (size_t i = 0; i < len; ++i) {
+        char c = bytes[i];
+        if (c == quote_char_) {
+          in_field = !in_field;
+        }
+        if (!in_field && eof_eol(c)) {
+          return total_idx + i;
+        }
       }
     }
 

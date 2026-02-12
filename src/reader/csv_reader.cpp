@@ -64,9 +64,13 @@ std::pair<size_t, bool> parse_chunk_with_state(
     // Find the closing quote
     while (offset < size) {
       char c = data[offset];
+      if (options.escape_backslash && c == '\\' && offset + 1 < size) {
+        offset += 2; // Skip backslash + escaped char
+        continue;
+      }
       if (c == options.quote) {
-        // Check for escaped quote
-        if (offset + 1 < size && data[offset + 1] == options.quote) {
+        // In backslash mode, no doubled-quote check needed
+        if (!options.escape_backslash && offset + 1 < size && data[offset + 1] == options.quote) {
           offset += 2;
           continue;
         }
@@ -81,8 +85,13 @@ std::pair<size_t, bool> parse_chunk_with_state(
     // Now skip to the end of this partial row (we can't use it)
     while (offset < size) {
       char c = data[offset];
+      if (options.escape_backslash && c == '\\' && offset + 1 < size) {
+        offset += 2;
+        continue;
+      }
       if (c == options.quote) {
-        if (in_quote && offset + 1 < size && data[offset + 1] == options.quote) {
+        if (!options.escape_backslash && in_quote && offset + 1 < size &&
+            data[offset + 1] == options.quote) {
           offset += 2;
           continue;
         }
@@ -148,7 +157,8 @@ std::pair<size_t, bool> parse_chunk_with_state(
     // Create iterator for remaining data - it stops at EOL
     size_t row_start_offset = offset;
     size_t start_remaining = size - offset;
-    SplitFields iter(data + offset, start_remaining, std::string_view(sep), quote, '\n');
+    SplitFields iter(data + offset, start_remaining, std::string_view(sep), quote, '\n',
+                     options.escape_backslash);
 
     const char* field_data;
     size_t field_len;
@@ -216,21 +226,26 @@ std::pair<size_t, bool> parse_chunk_with_state(
         if (field_len >= 2 && field_data[0] == quote && field_data[field_len - 1] == quote) {
           field_view = std::string_view(field_data + 1, field_len - 2);
         }
-        bool has_invalid_escape = false;
-        std::string unescaped =
-            unescape_quotes(field_view, quote, check_errors ? &has_invalid_escape : nullptr);
+        if (options.escape_backslash) {
+          std::string unescaped = unescape_backslash(field_view, quote);
+          fast_contexts[col_idx].append(unescaped);
+        } else {
+          bool has_invalid_escape = false;
+          std::string unescaped =
+              unescape_quotes(field_view, quote, check_errors ? &has_invalid_escape : nullptr);
 
-        // Invalid quote escape detection
-        if (has_invalid_escape) [[unlikely]] {
-          size_t byte_off = base_byte_offset + static_cast<size_t>(field_data - data);
-          error_collector->add_error(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::RECOVERABLE, 0,
-                                     col_idx + 1, byte_off, "Invalid quote escape sequence");
-          if (error_collector->should_stop())
-            goto done_chunk;
+          // Invalid quote escape detection
+          if (has_invalid_escape) [[unlikely]] {
+            size_t byte_off = base_byte_offset + static_cast<size_t>(field_data - data);
+            error_collector->add_error(ErrorCode::INVALID_QUOTE_ESCAPE, ErrorSeverity::RECOVERABLE,
+                                       0, col_idx + 1, byte_off, "Invalid quote escape sequence");
+            if (error_collector->should_stop())
+              goto done_chunk;
+          }
+
+          // Devirtualized append call
+          fast_contexts[col_idx].append(unescaped);
         }
-
-        // Devirtualized append call
-        fast_contexts[col_idx].append(unescaped);
       } else {
         // Devirtualized append call
         fast_contexts[col_idx].append(field_view);
@@ -430,7 +445,7 @@ Result<bool> CsvReader::open(const std::string& path) {
   size_t size = impl_->data_size;
 
   ChunkFinder finder(impl_->options.separator.empty() ? ',' : impl_->options.separator[0],
-                     impl_->options.quote);
+                     impl_->options.quote, impl_->options.escape_backslash);
   LineParser parser(impl_->options);
 
   // Skip leading comment lines before header
@@ -492,7 +507,7 @@ Result<bool> CsvReader::open(const std::string& path) {
     if (impl_->options.separator.size() > 1) {
       // Multi-byte separator: use SplitFields to count fields
       SplitFields iter(data, first_row_end, std::string_view(impl_->options.separator),
-                       impl_->options.quote, '\n');
+                       impl_->options.quote, '\n', impl_->options.escape_backslash);
       const char* fd;
       size_t fl;
       bool ne;
@@ -505,8 +520,13 @@ Result<bool> CsvReader::open(const std::string& path) {
       col_count = 1;
       for (size_t i = 0; i < first_row_end; ++i) {
         char c = data[i];
+        if (impl_->options.escape_backslash && c == '\\' && i + 1 < first_row_end) {
+          ++i; // Skip escaped character
+          continue;
+        }
         if (c == impl_->options.quote) {
-          if (in_quote && i + 1 < first_row_end && data[i + 1] == impl_->options.quote) {
+          if (!impl_->options.escape_backslash && in_quote && i + 1 < first_row_end &&
+              data[i + 1] == impl_->options.quote) {
             ++i;
           } else {
             in_quote = !in_quote;
@@ -602,7 +622,7 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
   size_t size = impl_->data_size;
 
   ChunkFinder finder(impl_->options.separator.empty() ? ',' : impl_->options.separator[0],
-                     impl_->options.quote);
+                     impl_->options.quote, impl_->options.escape_backslash);
   LineParser parser(impl_->options);
 
   // Skip leading comment lines before header
@@ -664,7 +684,7 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
     if (impl_->options.separator.size() > 1) {
       // Multi-byte separator: use SplitFields to count fields
       SplitFields iter(data, first_row_end, std::string_view(impl_->options.separator),
-                       impl_->options.quote, '\n');
+                       impl_->options.quote, '\n', impl_->options.escape_backslash);
       const char* fd;
       size_t fl;
       bool ne;
@@ -677,8 +697,13 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
       col_count = 1;
       for (size_t i = 0; i < first_row_end; ++i) {
         char c = data[i];
+        if (impl_->options.escape_backslash && c == '\\' && i + 1 < first_row_end) {
+          ++i; // Skip escaped character
+          continue;
+        }
         if (c == impl_->options.quote) {
-          if (in_quote && i + 1 < first_row_end && data[i + 1] == impl_->options.quote) {
+          if (!impl_->options.escape_backslash && in_quote && i + 1 < first_row_end &&
+              data[i + 1] == impl_->options.quote) {
             ++i;
           } else {
             in_quote = !in_quote;
@@ -947,7 +972,7 @@ Result<ParsedChunks> CsvReader::read_all() {
   size_t offset = data_start;
 
   ChunkFinder finder(impl_->options.separator.empty() ? ',' : impl_->options.separator[0],
-                     impl_->options.quote);
+                     impl_->options.quote, impl_->options.escape_backslash);
 
   while (offset < size) {
     size_t target_end = std::min(offset + chunk_size, size);
@@ -1035,7 +1060,8 @@ Result<ParsedChunks> CsvReader::read_all() {
             size_t chunk_size = end_offset - start_offset;
 
             // Single-pass dual-state analysis using SIMD
-            auto stats = analyze_chunk_dual_state_simd(chunk_data, chunk_size, options.quote);
+            auto stats = analyze_chunk_dual_state_simd(chunk_data, chunk_size, options.quote,
+                                                       options.escape_backslash);
 
             auto& result = analysis_results[chunk_idx];
             result.row_count_outside = stats.row_count_outside;
@@ -1292,7 +1318,8 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
     // Create iterator for remaining data - it stops at EOL
     size_t row_start_offset = offset;
     size_t start_remaining = size - offset;
-    SplitFields iter(data + offset, start_remaining, std::string_view(sep), quote, '\n');
+    SplitFields iter(data + offset, start_remaining, std::string_view(sep), quote, '\n',
+                     options.escape_backslash);
 
     const char* field_data;
     size_t field_len;
@@ -1360,22 +1387,27 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
         if (field_len >= 2 && field_data[0] == quote && field_data[field_len - 1] == quote) {
           field_view = std::string_view(field_data + 1, field_len - 2);
         }
-        bool has_invalid_escape = false;
-        std::string unescaped =
-            unescape_quotes(field_view, quote, check_errors ? &has_invalid_escape : nullptr);
+        if (options.escape_backslash) {
+          std::string unescaped = unescape_backslash(field_view, quote);
+          fast_contexts[col_idx].append(unescaped);
+        } else {
+          bool has_invalid_escape = false;
+          std::string unescaped =
+              unescape_quotes(field_view, quote, check_errors ? &has_invalid_escape : nullptr);
 
-        // Invalid quote escape detection
-        if (has_invalid_escape) [[unlikely]] {
-          size_t byte_off = static_cast<size_t>(field_data - data);
-          impl_->error_collector.add_error(ErrorCode::INVALID_QUOTE_ESCAPE,
-                                           ErrorSeverity::RECOVERABLE, row_number, col_idx + 1,
-                                           byte_off, "Invalid quote escape sequence");
-          if (impl_->error_collector.should_stop())
-            goto done_serial;
+          // Invalid quote escape detection
+          if (has_invalid_escape) [[unlikely]] {
+            size_t byte_off = static_cast<size_t>(field_data - data);
+            impl_->error_collector.add_error(ErrorCode::INVALID_QUOTE_ESCAPE,
+                                             ErrorSeverity::RECOVERABLE, row_number, col_idx + 1,
+                                             byte_off, "Invalid quote escape sequence");
+            if (impl_->error_collector.should_stop())
+              goto done_serial;
+          }
+
+          // Devirtualized append call
+          fast_contexts[col_idx].append(unescaped);
         }
-
-        // Devirtualized append call
-        fast_contexts[col_idx].append(unescaped);
       } else {
         // Devirtualized append call
         fast_contexts[col_idx].append(field_view);
@@ -1460,7 +1492,7 @@ Result<bool> CsvReader::start_streaming() {
   chunk_ranges.clear();
   size_t offset = data_start;
   ChunkFinder finder(impl_->options.separator.empty() ? ',' : impl_->options.separator[0],
-                     impl_->options.quote);
+                     impl_->options.quote, impl_->options.escape_backslash);
 
   while (offset < size) {
     size_t target_end = std::min(offset + chunk_size, size);
@@ -1507,17 +1539,17 @@ Result<bool> CsvReader::start_streaming() {
     for (size_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
       size_t start_offset = chunk_ranges[chunk_idx].first;
       size_t end_offset = chunk_ranges[chunk_idx].second;
-      futures.push_back(pool.submit_task(
-          [&analysis_results, data, size, chunk_idx, start_offset, end_offset, options]() {
-            if (start_offset >= size || end_offset > size || start_offset >= end_offset)
-              return;
-            auto stats = analyze_chunk_dual_state_simd(data + start_offset,
-                                                       end_offset - start_offset, options.quote);
-            auto& result = analysis_results[chunk_idx];
-            result.row_count_outside = stats.row_count_outside;
-            result.row_count_inside = stats.row_count_inside;
-            result.ends_inside_starting_outside = stats.ends_inside_quote_from_outside;
-          }));
+      futures.push_back(pool.submit_task([&analysis_results, data, size, chunk_idx, start_offset,
+                                          end_offset, options]() {
+        if (start_offset >= size || end_offset > size || start_offset >= end_offset)
+          return;
+        auto stats = analyze_chunk_dual_state_simd(data + start_offset, end_offset - start_offset,
+                                                   options.quote, options.escape_backslash);
+        auto& result = analysis_results[chunk_idx];
+        result.row_count_outside = stats.row_count_outside;
+        result.row_count_inside = stats.row_count_inside;
+        result.ends_inside_starting_outside = stats.ends_inside_quote_from_outside;
+      }));
     }
     for (auto& f : futures)
       f.get();
