@@ -38,6 +38,9 @@ public:
   AppendFn append_fn;
   AppendNullFn append_null_fn;
 
+  // Parsing options (set from CsvOptions before use)
+  char decimal_mark = '.';
+
   // ============================================
   // Static append implementations
   // ============================================
@@ -176,7 +179,8 @@ public:
       start++;
       len--;
     }
-    auto [ptr, ec] = fast_float::from_chars(start, start + len, result);
+    fast_float::parse_options ff_opts{fast_float::chars_format::general, ctx.decimal_mark};
+    auto [ptr, ec] = fast_float::from_chars_advanced(start, start + len, result, ff_opts);
     if (ec == std::errc() && ptr == start + len) {
       ctx.float64_buffer->push_back(result);
       ctx.null_bitmap->push_back_valid();

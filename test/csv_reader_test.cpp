@@ -842,3 +842,56 @@ TEST(TrimWhitespaceParsingTest, HeadersAlwaysTrimmed) {
   EXPECT_EQ(schema[0].name, "name");
   EXPECT_EQ(schema[1].name, "value");
 }
+
+// ============================================================================
+// Skip option tests
+// ============================================================================
+
+class SkipLinesTest : public ::testing::Test {};
+
+TEST_F(SkipLinesTest, SkipZeroLines) {
+  test_util::TempCsvFile csv("name,val\nalice,1\nbob,2\n");
+
+  libvroom::CsvOptions opts;
+  opts.skip = 0;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2u);
+  EXPECT_EQ(schema[0].name, "name");
+}
+
+TEST_F(SkipLinesTest, SkipTwoLines) {
+  test_util::TempCsvFile csv("junk line 1\njunk line 2\nname,val\nalice,1\nbob,2\n");
+
+  libvroom::CsvOptions opts;
+  opts.skip = 2;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2u);
+  EXPECT_EQ(schema[0].name, "name");
+  EXPECT_EQ(schema[1].name, "val");
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+  EXPECT_EQ(read_result.value.total_rows, 2u);
+}
+
+TEST_F(SkipLinesTest, SkipWithCRLF) {
+  test_util::TempCsvFile csv("skip me\r\nname,val\r\nalice,1\r\n");
+
+  libvroom::CsvOptions opts;
+  opts.skip = 1;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2u);
+  EXPECT_EQ(schema[0].name, "name");
+}

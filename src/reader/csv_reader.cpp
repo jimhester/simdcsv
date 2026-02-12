@@ -52,6 +52,10 @@ std::pair<size_t, bool> parse_chunk_with_state(
   for (auto& col : columns) {
     fast_contexts.push_back(col->create_context());
   }
+  // Thread parsing options to contexts
+  for (auto& fc : fast_contexts) {
+    fc.decimal_mark = options.decimal_mark;
+  }
 
   bool in_quote = start_inside_quote;
   size_t offset = 0;
@@ -337,6 +341,27 @@ struct CsvReader::Impl {
   }
 };
 
+// Skip N lines unconditionally. Returns offset past the skipped lines.
+static size_t skip_n_lines(const char* data, size_t size, size_t n) {
+  size_t offset = 0;
+  size_t lines_skipped = 0;
+  while (offset < size && lines_skipped < n) {
+    while (offset < size && data[offset] != '\n' && data[offset] != '\r') {
+      offset++;
+    }
+    if (offset < size && data[offset] == '\r') {
+      offset++;
+      if (offset < size && data[offset] == '\n') {
+        offset++; // CRLF
+      }
+    } else if (offset < size && data[offset] == '\n') {
+      offset++;
+    }
+    lines_skipped++;
+  }
+  return offset;
+}
+
 // Skip leading comment lines in the data. Returns offset past all leading comment lines.
 // A comment line starts with the comment character (at column 0) and ends at newline.
 static size_t skip_leading_comment_lines(const char* data, size_t size, char comment_char) {
@@ -420,6 +445,16 @@ Result<bool> CsvReader::open(const std::string& path) {
       // UTF-8 BOM: skip past BOM bytes (no allocation/copy)
       impl_->data_ptr += impl_->detected_encoding.bom_length;
       impl_->data_size -= impl_->detected_encoding.bom_length;
+    }
+  }
+
+  // Skip N lines before processing (before dialect detection and header)
+  if (impl_->options.skip > 0) {
+    size_t skip_offset = skip_n_lines(impl_->data_ptr, impl_->data_size, impl_->options.skip);
+    impl_->data_ptr += skip_offset;
+    impl_->data_size -= skip_offset;
+    if (impl_->data_size == 0) {
+      return Result<bool>::failure("All data skipped");
     }
   }
 
@@ -576,6 +611,16 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
     } else if (impl_->detected_encoding.bom_length > 0) {
       impl_->data_ptr += impl_->detected_encoding.bom_length;
       impl_->data_size -= impl_->detected_encoding.bom_length;
+    }
+  }
+
+  // Skip N lines before processing (before dialect detection and header)
+  if (impl_->options.skip > 0) {
+    size_t skip_offset = skip_n_lines(impl_->data_ptr, impl_->data_size, impl_->options.skip);
+    impl_->data_ptr += skip_offset;
+    impl_->data_size -= skip_offset;
+    if (impl_->data_size == 0) {
+      return Result<bool>::failure("All data skipped");
     }
   }
 
@@ -1182,6 +1227,10 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
   fast_contexts.reserve(columns.size());
   for (auto& col : columns) {
     fast_contexts.push_back(col->create_context());
+  }
+  // Thread parsing options to contexts
+  for (auto& fc : fast_contexts) {
+    fc.decimal_mark = impl_->options.decimal_mark;
   }
 
   const char* data = impl_->data_ptr;

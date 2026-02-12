@@ -887,3 +887,71 @@ TEST_F(ExtendedBoolTest, EndToEndSingleLetterBools) {
   EXPECT_EQ(schema[0].type, DataType::BOOL);
   EXPECT_EQ(read_result.value.total_rows, 4u);
 }
+
+// ============================================================================
+// J. Decimal mark option
+// ============================================================================
+
+class DecimalMarkTest : public ::testing::Test {};
+
+TEST_F(DecimalMarkTest, CommaDecimalMarkInference) {
+  CsvOptions opts;
+  opts.separator = ';';
+  opts.decimal_mark = ',';
+  TypeInference inference(opts);
+  EXPECT_EQ(inference.infer_field("1,5"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("3,14"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("-2,7"), DataType::FLOAT64);
+}
+
+TEST_F(DecimalMarkTest, CommaDecimalMarkEndToEnd) {
+  test_util::TempCsvFile csv("x;y\n1,5;hello\n2,7;world\n");
+
+  CsvOptions opts;
+  opts.separator = ';';
+  opts.decimal_mark = ',';
+  CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2u);
+  EXPECT_EQ(schema[0].type, DataType::FLOAT64);
+  EXPECT_EQ(schema[1].type, DataType::STRING);
+}
+
+// ============================================================================
+// K. Type inference sampling improvements
+// ============================================================================
+
+class InferenceSamplingTest : public ::testing::Test {};
+
+TEST_F(InferenceSamplingTest, SkipCommentLinesDuringSampling) {
+  CsvOptions opts;
+  opts.separator = ',';
+  opts.comment = '#';
+  opts.guess_integer = true;
+  TypeInference inference(opts);
+
+  std::string data = "1,hello\n# this is a comment\n2,world\n";
+  auto types = inference.infer_from_sample(data.data(), data.size(), 2);
+  EXPECT_EQ(types.size(), 2u);
+  EXPECT_EQ(types[0], DataType::INT32);
+  EXPECT_EQ(types[1], DataType::STRING);
+}
+
+TEST_F(InferenceSamplingTest, SkipEmptyLinesDuringSampling) {
+  CsvOptions opts;
+  opts.separator = ',';
+  opts.guess_integer = true;
+  TypeInference inference(opts);
+
+  std::string data = "1,hello\n\n\n2,world\n";
+  auto types = inference.infer_from_sample(data.data(), data.size(), 2);
+  EXPECT_EQ(types.size(), 2u);
+  EXPECT_EQ(types[0], DataType::INT32);
+  EXPECT_EQ(types[1], DataType::STRING);
+}
