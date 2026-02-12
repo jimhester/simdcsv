@@ -374,6 +374,31 @@ TEST_F(TypePromotionTest, WiderTypeTimestampAndFloat64FallsBackToString) {
   EXPECT_EQ(wider_type(DataType::TIMESTAMP, DataType::FLOAT64), DataType::STRING);
 }
 
+TEST_F(TypePromotionTest, WiderTypeTimeAndNumericFallsBackToString) {
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::INT32), DataType::STRING);
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::INT64), DataType::STRING);
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::FLOAT64), DataType::STRING);
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::BOOL), DataType::STRING);
+}
+
+TEST_F(TypePromotionTest, WiderTypeTimeAndDateFallsBackToString) {
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::DATE), DataType::STRING);
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::TIMESTAMP), DataType::STRING);
+}
+
+TEST_F(TypePromotionTest, WiderTypeTimeAndTimeSameType) {
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::TIME), DataType::TIME);
+}
+
+TEST_F(TypePromotionTest, WiderTypeTimeAndNAReturnsTime) {
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::NA), DataType::TIME);
+  EXPECT_EQ(wider_type(DataType::NA, DataType::TIME), DataType::TIME);
+}
+
+TEST_F(TypePromotionTest, WiderTypeTimeAndStringReturnsString) {
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::STRING), DataType::STRING);
+}
+
 // ============================================================================
 // type_name()
 // ============================================================================
@@ -389,6 +414,7 @@ TEST_F(TypeNameTest, AllTypeNames) {
   EXPECT_STREQ(type_name(DataType::STRING), "STRING");
   EXPECT_STREQ(type_name(DataType::DATE), "DATE");
   EXPECT_STREQ(type_name(DataType::TIMESTAMP), "TIMESTAMP");
+  EXPECT_STREQ(type_name(DataType::TIME), "TIME");
   EXPECT_STREQ(type_name(DataType::NA), "NA");
 }
 
