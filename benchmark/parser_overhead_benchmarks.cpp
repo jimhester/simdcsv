@@ -149,7 +149,7 @@ static void BM_CountRows(benchmark::State& state) {
   state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
   state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_CountRows)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_CountRows)->Unit(benchmark::kMillisecond)->UseRealTime();
 
 /**
  * @brief Benchmark: SIMD field splitting
@@ -183,7 +183,7 @@ static void BM_SplitFields(benchmark::State& state) {
   state.SetBytesProcessed(static_cast<int64_t>(line_len * state.iterations()));
   state.counters["LineLength"] = static_cast<double>(line_len);
 }
-BENCHMARK(BM_SplitFields)->Unit(benchmark::kMicrosecond);
+BENCHMARK(BM_SplitFields)->Unit(benchmark::kMicrosecond)->UseRealTime();
 
 /**
  * @brief Benchmark: Dual-state chunk analysis
@@ -204,7 +204,7 @@ static void BM_DualStateAnalysis(benchmark::State& state) {
   state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
   state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_DualStateAnalysis)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_DualStateAnalysis)->Unit(benchmark::kMillisecond)->UseRealTime();
 
 /**
  * @brief Benchmark: Dialect detection only
@@ -226,7 +226,7 @@ static void BM_DialectDetection(benchmark::State& state) {
   state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
   state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_DialectDetection)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_DialectDetection)->Unit(benchmark::kMillisecond)->UseRealTime();
 
 // ============================================================================
 // CSVREADER BENCHMARKS - Full parsing pipeline
@@ -256,7 +256,7 @@ static void BM_CsvReaderExplicit(benchmark::State& state) {
   state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
   state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_CsvReaderExplicit)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_CsvReaderExplicit)->Unit(benchmark::kMillisecond)->UseRealTime();
 
 /**
  * @brief Benchmark: CsvReader with auto-detection (default)
@@ -280,7 +280,7 @@ static void BM_CsvReaderAutoDetect(benchmark::State& state) {
   state.SetBytesProcessed(static_cast<int64_t>(ds.buffer.size() * state.iterations()));
   state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_CsvReaderAutoDetect)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_CsvReaderAutoDetect)->Unit(benchmark::kMillisecond)->UseRealTime();
 
 // ============================================================================
 // MULTI-THREADED COMPARISONS
@@ -313,7 +313,13 @@ static void BM_CsvReaderMultiThread(benchmark::State& state) {
   state.counters["Threads"] = static_cast<double>(n_threads);
   state.counters["FileSize_MB"] = static_cast<double>(ds.buffer.size()) / (1024.0 * 1024.0);
 }
-BENCHMARK(BM_CsvReaderMultiThread)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_CsvReaderMultiThread)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
 
 // ============================================================================
 // FILE SIZE SCALING
@@ -342,7 +348,8 @@ BENCHMARK(BM_CountRowsScaling)
     ->Arg(50000)
     ->Arg(100000)
     ->Arg(500000)
-    ->Unit(benchmark::kMillisecond);
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
 
 /**
  * @brief Benchmark: CsvReader scaling with file size
@@ -373,7 +380,8 @@ BENCHMARK(BM_CsvReaderScaling)
     ->Arg(50000)
     ->Arg(100000)
     ->Arg(500000)
-    ->Unit(benchmark::kMillisecond);
+    ->Unit(benchmark::kMillisecond)
+    ->UseRealTime();
 
 // ============================================================================
 // OVERHEAD BREAKDOWN - Detailed analysis of each overhead component
@@ -389,7 +397,7 @@ static void BM_CsvOptionsCreation(benchmark::State& state) {
     benchmark::DoNotOptimize(opts);
   }
 }
-BENCHMARK(BM_CsvOptionsCreation)->Unit(benchmark::kNanosecond);
+BENCHMARK(BM_CsvOptionsCreation)->Unit(benchmark::kNanosecond)->UseRealTime();
 
 /**
  * @brief Benchmark: Measure overhead of ErrorCollector
@@ -401,4 +409,4 @@ static void BM_ErrorCollectorCreation(benchmark::State& state) {
     benchmark::DoNotOptimize(errors);
   }
 }
-BENCHMARK(BM_ErrorCollectorCreation)->Unit(benchmark::kNanosecond);
+BENCHMARK(BM_ErrorCollectorCreation)->Unit(benchmark::kNanosecond)->UseRealTime();
