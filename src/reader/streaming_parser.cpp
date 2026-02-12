@@ -29,6 +29,7 @@ struct StreamingParser::Impl {
   bool schema_explicit = false; // Set by set_schema()
   bool header_parsed = false;
   bool batch_initialized = false;
+  size_t lines_skipped = 0; // For skip option
 
   // Error handling
   ErrorCollector error_collector;
@@ -126,6 +127,19 @@ struct StreamingParser::Impl {
 
     if (avail == 0)
       return false;
+
+    // Skip leading lines if requested
+    while (lines_skipped < options.csv.skip) {
+      size_t row_end = find_row_end_in_buffer(data, avail);
+      if (row_end == 0)
+        return false; // Not enough data to skip this line yet
+      consumed += row_end;
+      data = buffer.data() + consumed;
+      avail = buffer.size() - consumed;
+      ++lines_skipped;
+      if (avail == 0)
+        return false;
+    }
 
     if (!options.csv.has_header) {
       // No header mode - infer column count from the first row
