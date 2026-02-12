@@ -460,6 +460,12 @@ Result<bool> CsvReader::open(const std::string& path) {
 
   impl_->auto_detect_dialect();
 
+  // Validate decimal_mark doesn't conflict with separator
+  if (impl_->options.decimal_mark == impl_->options.separator) {
+    return Result<bool>::failure("decimal_mark and separator cannot be the same character ('" +
+                                 std::string(1, impl_->options.decimal_mark) + "')");
+  }
+
   const char* data = impl_->data_ptr;
   size_t size = impl_->data_size;
 
@@ -626,6 +632,12 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
 
   // Auto-detect dialect if separator is the sentinel value
   impl_->auto_detect_dialect();
+
+  // Validate decimal_mark doesn't conflict with separator
+  if (impl_->options.decimal_mark == impl_->options.separator) {
+    return Result<bool>::failure("decimal_mark and separator cannot be the same character ('" +
+                                 std::string(1, impl_->options.decimal_mark) + "')");
+  }
 
   const char* data = impl_->data_ptr;
   size_t size = impl_->data_size;
