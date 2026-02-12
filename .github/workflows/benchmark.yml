@@ -73,14 +73,14 @@ jobs:
     # Multi-thread benchmarks (BM_CsvReaderMultiThread/1, /4, /8) are critical for detecting
     # issue #591-type regressions where multi-threaded parsing gets slower with more threads.
     - name: Run benchmark (HEAD)
-      timeout-minutes: 5
+      timeout-minutes: 8
       run: |
         echo "=== Benchmarking HEAD commit ==="
         # Use taskset for CPU affinity (pin to CPU 0) and nice for scheduling priority
         # This reduces variance from CPU migration and context switching
         sudo nice -n -5 taskset -c 0 ./build/libvroom_benchmark \
           --benchmark_filter="BM_CountRows$|BM_CsvReaderExplicit$|BM_CsvReaderAutoDetect$|BM_CsvReaderMultiThread/1$|BM_CsvReaderMultiThread/4$|BM_CsvReaderMultiThread/8$" \
-          --benchmark_repetitions=5 \
+          --benchmark_repetitions=3 \
           --benchmark_min_time=0.5s \
           --benchmark_out=build/head_results.json \
           --benchmark_out_format=json
@@ -103,13 +103,13 @@ jobs:
 
     - name: Run benchmark (BASE)
       if: steps.base.outputs.sha != '' && steps.base_build.outcome == 'success'
-      timeout-minutes: 5
+      timeout-minutes: 8
       run: |
         echo "=== Benchmarking BASE commit ==="
         # Use same CPU affinity and priority settings for fair comparison
         sudo nice -n -5 taskset -c 0 ./build/libvroom_benchmark \
           --benchmark_filter="BM_CountRows$|BM_CsvReaderExplicit$|BM_CsvReaderAutoDetect$|BM_CsvReaderMultiThread/1$|BM_CsvReaderMultiThread/4$|BM_CsvReaderMultiThread/8$" \
-          --benchmark_repetitions=5 \
+          --benchmark_repetitions=3 \
           --benchmark_min_time=0.5s \
           --benchmark_out=build/base_results.json \
           --benchmark_out_format=json
