@@ -260,6 +260,7 @@ COMMON OPTIONS:
     --guess-integer          Infer integer types (default; use --no-guess-integer to disable)
     --no-guess-integer       Infer all numeric values as FLOAT64
     --no-trim-ws             Don't trim leading/trailing whitespace from fields
+    --escape-backslash       Use backslash escaping (\") instead of doubled quotes ("")
     --decimal-mark <CHAR>    Decimal separator ('.' or ',', default: '.')
     --skip <N>               Lines to skip before header (default: 0)
     -p, --progress           Show progress bar
@@ -310,10 +311,11 @@ struct CommonOptions {
   std::optional<libvroom::CharEncoding> encoding; // Character encoding override
 
   // Type inference
-  bool guess_integer = true; // When true, integer-like values infer as INT32/INT64
-  bool trim_ws = true;       // Trim leading/trailing whitespace from fields
-  char decimal_mark = '.';   // Decimal separator ('.' or ',')
-  size_t skip = 0;           // Lines to skip before header
+  bool guess_integer = true;     // When true, integer-like values infer as INT32/INT64
+  bool trim_ws = true;           // Trim leading/trailing whitespace from fields
+  bool escape_backslash = false; // Use backslash escaping instead of doubled quotes
+  char decimal_mark = '.';       // Decimal separator ('.' or ',')
+  size_t skip = 0;               // Lines to skip before header
 
   // Index caching
   bool enable_cache = false;
@@ -415,6 +417,8 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
       opts.skip = stoul(argv[i]);
     } else if (arg == "--no-trim-ws") {
       opts.trim_ws = false;
+    } else if (arg == "--escape-backslash") {
+      opts.escape_backslash = true;
     } else if (arg == "-p" || arg == "--progress") {
       opts.show_progress = true;
     } else if (arg == "-v" || arg == "--verbose") {
@@ -554,6 +558,8 @@ int cmd_convert(int argc, char* argv[]) {
       common.guess_integer = false;
     } else if (arg == "--no-trim-ws") {
       common.trim_ws = false;
+    } else if (arg == "--escape-backslash") {
+      common.escape_backslash = true;
     } else if (arg == "--decimal-mark") {
       if (++i >= argc) {
         cerr << "Error: --decimal-mark requires a character" << endl;
@@ -638,6 +644,7 @@ int cmd_convert(int argc, char* argv[]) {
   opts.csv.has_header = common.has_header;
   opts.csv.guess_integer = common.guess_integer;
   opts.csv.trim_ws = common.trim_ws;
+  opts.csv.escape_backslash = common.escape_backslash;
   opts.csv.decimal_mark = common.decimal_mark;
   opts.csv.skip = common.skip;
   opts.csv.error_mode = common.error_mode;
@@ -749,6 +756,7 @@ int cmd_count(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.escape_backslash = opts.escape_backslash;
   csv_opts.decimal_mark = opts.decimal_mark;
   csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
@@ -827,6 +835,7 @@ int cmd_head(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.escape_backslash = opts.escape_backslash;
   csv_opts.decimal_mark = opts.decimal_mark;
   csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
@@ -941,6 +950,7 @@ int cmd_info(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.escape_backslash = opts.escape_backslash;
   csv_opts.decimal_mark = opts.decimal_mark;
   csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
@@ -1077,6 +1087,7 @@ int cmd_select(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.escape_backslash = opts.escape_backslash;
   csv_opts.decimal_mark = opts.decimal_mark;
   csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
@@ -1226,6 +1237,7 @@ int cmd_pretty(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.escape_backslash = opts.escape_backslash;
   csv_opts.decimal_mark = opts.decimal_mark;
   csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;

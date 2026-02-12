@@ -15,8 +15,8 @@ namespace libvroom {
 struct CsvOptions {
   std::string separator; // empty = auto-detect via DialectDetector
   char quote = '"';
-  char escape = '\\';
-  char comment = '\0'; // No comment char by default
+  bool escape_backslash = false; // Use backslash escaping (\") instead of doubled quotes ("")
+  char comment = '\0';           // No comment char by default
   bool has_header = true;
   bool skip_empty_rows = true;
   bool guess_integer = true;                 // When false, integer-like values infer as FLOAT64

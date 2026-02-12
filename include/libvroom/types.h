@@ -131,7 +131,8 @@ struct ColumnSchema {
   std::string name;
   DataType type = DataType::STRING;
   bool nullable = true;
-  size_t index = 0; // Original column index in CSV
+  size_t index = 0;   // Original column index in CSV
+  std::string format; // Format string (e.g., for date/time parsing)
 };
 
 // Result type for operations that can fail

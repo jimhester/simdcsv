@@ -10,6 +10,7 @@
  */
 
 #include "libvroom.h"
+#include "libvroom/parse_utils.h"
 
 #include "test_util.h"
 
@@ -686,6 +687,199 @@ TEST_F(CsvReaderTest, SchemaWithQuotedHeaders) {
 }
 
 // ============================================================================
+// SCHEMA OVERRIDE (set_schema)
+// ============================================================================
+
+TEST_F(CsvReaderTest, SetSchemaOverridesAllColumns) {
+  // CSV with numeric data that would be inferred as FLOAT64 with guess_integer=false
+  std::string csv = "a,b,c\n1,2,3\n4,5,6\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvOptions opts;
+  opts.guess_integer = false;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+
+  // Verify inference gave us FLOAT64 (guess_integer=false)
+  ASSERT_EQ(reader.schema().size(), 3u);
+  for (const auto& col : reader.schema()) {
+    EXPECT_EQ(col.type, libvroom::DataType::FLOAT64);
+  }
+
+  // Override all columns to STRING
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"a", libvroom::DataType::STRING, true, 0},
+      {"b", libvroom::DataType::STRING, true, 1},
+      {"c", libvroom::DataType::STRING, true, 2},
+  };
+  auto result = reader.set_schema(override_schema);
+  ASSERT_TRUE(result.ok);
+
+  // Verify schema was replaced
+  ASSERT_EQ(reader.schema().size(), 3u);
+  for (const auto& col : reader.schema()) {
+    EXPECT_EQ(col.type, libvroom::DataType::STRING);
+  }
+}
+
+TEST_F(CsvReaderTest, SetSchemaPartialOverride) {
+  // Override only the type, keeping names from inference
+  std::string csv = "x,y\n1.5,2020-01-01\n2.5,2021-06-15\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+  ASSERT_EQ(reader.schema().size(), 2u);
+
+  // Override: keep FLOAT64 for x, force STRING for y
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"x", libvroom::DataType::FLOAT64, true, 0},
+      {"y", libvroom::DataType::STRING, true, 1},
+  };
+  auto result = reader.set_schema(override_schema);
+  ASSERT_TRUE(result.ok);
+
+  EXPECT_EQ(reader.schema()[0].type, libvroom::DataType::FLOAT64);
+  EXPECT_EQ(reader.schema()[1].type, libvroom::DataType::STRING);
+}
+
+TEST_F(CsvReaderTest, SetSchemaWithFormatStrings) {
+  std::string csv = "date_col,ts_col\n2024-01-15,2024-01-15T10:30:00\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"date_col", libvroom::DataType::DATE, true, 0, "%Y-%m-%d"},
+      {"ts_col", libvroom::DataType::TIMESTAMP, true, 1, "%Y-%m-%dT%H:%M:%S"},
+  };
+  auto result = reader.set_schema(override_schema);
+  ASSERT_TRUE(result.ok);
+
+  // Verify format strings are preserved
+  EXPECT_EQ(reader.schema()[0].format, "%Y-%m-%d");
+  EXPECT_EQ(reader.schema()[1].format, "%Y-%m-%dT%H:%M:%S");
+}
+
+TEST_F(CsvReaderTest, SetSchemaMismatchedLengthFails) {
+  std::string csv = "a,b,c\n1,2,3\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvOptions opts;
+  opts.guess_integer = false;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+  ASSERT_EQ(reader.schema().size(), 3u);
+
+  // Try to set schema with wrong number of columns
+  std::vector<libvroom::ColumnSchema> bad_schema = {
+      {"a", libvroom::DataType::STRING, true, 0},
+      {"b", libvroom::DataType::STRING, true, 1},
+  };
+  auto result = reader.set_schema(bad_schema);
+  EXPECT_FALSE(result.ok);
+  EXPECT_FALSE(result.error.empty());
+
+  // Original schema should be unchanged
+  EXPECT_EQ(reader.schema().size(), 3u);
+  EXPECT_EQ(reader.schema()[0].type, libvroom::DataType::FLOAT64);
+}
+
+TEST_F(CsvReaderTest, SetSchemaAffectsStreaming) {
+  // Verify that set_schema between open() and start_streaming() works
+  std::string csv = "val\n42\n100\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+
+  // Override INT32 -> STRING
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"val", libvroom::DataType::STRING, true, 0},
+  };
+  auto result = reader.set_schema(override_schema);
+  ASSERT_TRUE(result.ok);
+
+  // Use streaming API
+  auto stream_result = reader.start_streaming();
+  ASSERT_TRUE(stream_result.ok);
+
+  // Consume all chunks and verify column type is STRING
+  size_t total_rows = 0;
+  while (auto chunk = reader.next_chunk()) {
+    ASSERT_EQ(chunk->size(), 1u);
+    EXPECT_EQ((*chunk)[0]->type(), libvroom::DataType::STRING);
+    total_rows += (*chunk)[0]->size();
+  }
+  EXPECT_EQ(total_rows, 2u);
+}
+
+TEST_F(CsvReaderTest, SetSchemaBeforeOpenFails) {
+  libvroom::CsvReader reader({});
+  // No open() called
+  std::vector<libvroom::ColumnSchema> schema = {
+      {"a", libvroom::DataType::STRING, true, 0},
+  };
+  auto result = reader.set_schema(schema);
+  EXPECT_FALSE(result.ok);
+  EXPECT_NE(result.error.find("before calling open"), std::string::npos);
+}
+
+TEST_F(CsvReaderTest, SetSchemaAfterStreamingFails) {
+  std::string csv = "val\n42\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+
+  auto stream_result = reader.start_streaming();
+  ASSERT_TRUE(stream_result.ok);
+
+  // Try to set schema after streaming started
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"val", libvroom::DataType::STRING, true, 0},
+  };
+  auto result = reader.set_schema(override_schema);
+  EXPECT_FALSE(result.ok);
+  EXPECT_NE(result.error.find("streaming has started"), std::string::npos);
+
+  // Drain chunks to avoid thread pool destruction issues
+  while (reader.next_chunk()) {
+  }
+}
+
+TEST_F(CsvReaderTest, SetSchemaAffectsReadAll) {
+  std::string csv = "val\n42\n100\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+
+  // Override to STRING
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"val", libvroom::DataType::STRING, true, 0},
+  };
+  auto result = reader.set_schema(override_schema);
+  ASSERT_TRUE(result.ok);
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok);
+
+  // Verify column type is STRING
+  ASSERT_FALSE(read_result.value.chunks.empty());
+  ASSERT_EQ(read_result.value.chunks[0].size(), 1u);
+  EXPECT_EQ(read_result.value.chunks[0][0]->type(), libvroom::DataType::STRING);
+}
+
+// ============================================================================
 // DELIMITER AUTO-DETECTION
 // ============================================================================
 
@@ -894,6 +1088,152 @@ TEST_F(SkipLinesTest, SkipWithCRLF) {
   const auto& schema = reader.schema();
   ASSERT_EQ(schema.size(), 2u);
   EXPECT_EQ(schema[0].name, "name");
+}
+
+// ============================================================================
+// UNESCAPE BACKSLASH TESTS
+// ============================================================================
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedQuote) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(he said \"hello\")", '"'), "he said \"hello\"");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedBackslash) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(C:\\Users\\jane)", '"'), "C:\\Users\\jane");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedTab) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(Tab:\there)", '"'), "Tab:\there");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedNewline) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(line1\nline2)", '"'), "line1\nline2");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedCR) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(before\rafter)", '"'), "before\rafter");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_NoEscapes) {
+  EXPECT_EQ(libvroom::unescape_backslash("plain text", '"'), "plain text");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EmptyString) {
+  EXPECT_EQ(libvroom::unescape_backslash("", '"'), "");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_UnknownEscape) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(\x)", '"'), "x");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_TrailingBackslash) {
+  EXPECT_EQ(libvroom::unescape_backslash("trail\\", '"'), "trail\\");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_MultipleEscapes) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(\"\\\")", '"'), "\"\\\"");
+}
+
+// ============================================================================
+// BACKSLASH ESCAPE MODE - INTEGRATION TESTS
+// ============================================================================
+
+TEST_F(CsvReaderTest, BackslashEscape_BasicFile) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+
+  auto [chunks, schema] = parseFile(testDataPath("escape/backslash_escape.csv"), opts);
+  ASSERT_EQ(schema.size(), 3u);
+  EXPECT_EQ(schema[0].name, "Name");
+  EXPECT_EQ(schema[1].name, "Description");
+  EXPECT_EQ(schema[2].name, "Value");
+
+  ASSERT_EQ(chunks.total_rows, 3u);
+
+  // Row 1: "John \"The Boss\" Smith" → John "The Boss" Smith
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "John \"The Boss\" Smith");
+  // Row 1: "Says \"Hello\"" → Says "Hello"
+  EXPECT_EQ(getStringValue(chunks, 1, 0), "Says \"Hello\"");
+  // Row 1: 100
+  EXPECT_EQ(getStringValue(chunks, 2, 0), "100");
+
+  // Row 2: "Jane Doe" → Jane Doe
+  EXPECT_EQ(getStringValue(chunks, 0, 1), "Jane Doe");
+  // Row 2: "Path: C:\\Users\\jane" → Path: C:\Users\jane
+  EXPECT_EQ(getStringValue(chunks, 1, 1), "Path: C:\\Users\\jane");
+
+  // Row 3: "Bob's Place" → Bob's Place
+  EXPECT_EQ(getStringValue(chunks, 0, 2), "Bob's Place");
+  // Row 3: "Tab:\there" → Tab:<TAB>here
+  EXPECT_EQ(getStringValue(chunks, 1, 2), "Tab:\there");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_FromString) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+
+  std::string csv = "a,b\n\"he said \\\"hello\\\"\",world\n";
+  auto [chunks, schema] = parseContent(csv, opts);
+  ASSERT_EQ(chunks.total_rows, 1u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "he said \"hello\"");
+  EXPECT_EQ(getStringValue(chunks, 1, 0), "world");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_DoubleBackslash) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+
+  std::string csv = "a\n\"C:\\\\path\\\\to\\\\file\"\n";
+  auto [chunks, schema] = parseContent(csv, opts);
+  ASSERT_EQ(chunks.total_rows, 1u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "C:\\path\\to\\file");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_EscapedNewline) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+
+  std::string csv = "a\n\"line1\\nline2\"\n";
+  auto [chunks, schema] = parseContent(csv, opts);
+  ASSERT_EQ(chunks.total_rows, 1u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "line1\nline2");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_DefaultFalseRegression) {
+  // escape_backslash=false (default) should behave identically to before
+  auto [chunks, schema] = parseFile(testDataPath("basic/simple.csv"));
+  EXPECT_EQ(chunks.total_rows, 3u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "1");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_MixedQuotedUnquoted) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+
+  std::string csv = "a,b,c\nunquoted,\"quoted \\\"value\\\"\",123\n";
+  auto [chunks, schema] = parseContent(csv, opts);
+  ASSERT_EQ(chunks.total_rows, 1u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "unquoted");
+  EXPECT_EQ(getStringValue(chunks, 1, 0), "quoted \"value\"");
+  EXPECT_EQ(getStringValue(chunks, 2, 0), "123");
+}
+
+TEST_F(CsvReaderTest, BackslashEscape_NoHeader) {
+  libvroom::CsvOptions opts;
+  opts.escape_backslash = true;
+  opts.separator = ",";
+  opts.has_header = false;
+
+  std::string csv = "\"hello \\\"world\\\"\",42\n";
+  auto [chunks, schema] = parseContent(csv, opts);
+  ASSERT_EQ(chunks.total_rows, 1u);
+  EXPECT_EQ(getStringValue(chunks, 0, 0), "hello \"world\"");
+  EXPECT_EQ(getStringValue(chunks, 1, 0), "42");
 }
 
 // ============================================================================

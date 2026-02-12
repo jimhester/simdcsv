@@ -43,7 +43,8 @@ read_csv(const std::string& path, std::optional<std::string> separator = std::nu
          std::optional<size_t> max_errors = std::nullopt,
          std::optional<std::string> encoding = std::nullopt,
          std::optional<char> comment = std::nullopt, bool skip_empty_rows = true,
-         bool guess_integer = true, bool trim_ws = true, char decimal_mark = '.', size_t skip = 0) {
+         bool guess_integer = true, bool trim_ws = true, bool escape_backslash = false,
+         char decimal_mark = '.', size_t skip = 0) {
   // Set up options
   libvroom::CsvOptions csv_opts;
   if (separator)
@@ -78,6 +79,9 @@ read_csv(const std::string& path, std::optional<std::string> separator = std::nu
 
   // Set trim_ws
   csv_opts.trim_ws = trim_ws;
+
+  // Set escape_backslash
+  csv_opts.escape_backslash = escape_backslash;
 
   // Set decimal mark
   csv_opts.decimal_mark = decimal_mark;
@@ -152,8 +156,8 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
                 std::optional<std::string> error_mode = std::nullopt,
                 std::optional<size_t> max_errors = std::nullopt,
                 std::optional<char> comment = std::nullopt, bool skip_empty_rows = true,
-                bool guess_integer = true, bool trim_ws = true, char decimal_mark = '.',
-                size_t skip = 0) {
+                bool guess_integer = true, bool trim_ws = true, bool escape_backslash = false,
+                char decimal_mark = '.', size_t skip = 0) {
   libvroom::VroomOptions opts;
   opts.input_path = input_path;
   opts.output_path = output_path;
@@ -199,6 +203,9 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
 
   // Set trim_ws
   opts.csv.trim_ws = trim_ws;
+
+  // Set escape_backslash
+  opts.csv.escape_backslash = escape_backslash;
 
   // Set decimal mark
   opts.csv.decimal_mark = decimal_mark;
@@ -250,13 +257,15 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
 void to_arrow_ipc(const std::string& input_path, const std::string& output_path,
                   std::optional<size_t> batch_size = std::nullopt,
                   std::optional<size_t> num_threads = std::nullopt, bool guess_integer = true,
-                  bool trim_ws = true, char decimal_mark = '.', size_t skip = 0) {
+                  bool trim_ws = true, bool escape_backslash = false, char decimal_mark = '.',
+                  size_t skip = 0) {
   libvroom::CsvOptions csv_opts;
   if (num_threads) {
     csv_opts.num_threads = *num_threads;
   }
   csv_opts.guess_integer = guess_integer;
   csv_opts.trim_ws = trim_ws;
+  csv_opts.escape_backslash = escape_backslash;
   csv_opts.decimal_mark = decimal_mark;
   csv_opts.skip = skip;
 
@@ -351,8 +360,8 @@ PYBIND11_MODULE(_core, m) {
         py::arg("num_threads") = py::none(), py::arg("error_mode") = py::none(),
         py::arg("max_errors") = py::none(), py::arg("encoding") = py::none(),
         py::arg("comment") = py::none(), py::arg("skip_empty_rows") = true,
-        py::arg("guess_integer") = true, py::arg("trim_ws") = true, py::arg("decimal_mark") = '.',
-        py::arg("skip") = 0,
+        py::arg("guess_integer") = true, py::arg("trim_ws") = true,
+        py::arg("escape_backslash") = false, py::arg("decimal_mark") = '.', py::arg("skip") = 0,
         R"doc(
         Read a CSV file into a Table.
 
@@ -393,6 +402,11 @@ PYBIND11_MODULE(_core, m) {
         trim_ws : bool, optional
             Whether to trim leading and trailing whitespace from field values.
             Default is True.
+        escape_backslash : bool, optional
+            Whether to use backslash escaping (\") instead of doubled quotes ("").
+            When True, backslash sequences are interpreted: \" -> quote,
+            \\\\ -> backslash, \\n -> newline, \\t -> tab, \\r -> carriage return.
+            Default is False.
         decimal_mark : str, optional
             Decimal separator character ('.' or ','). Default is '.'.
         skip : int, optional
@@ -431,7 +445,8 @@ PYBIND11_MODULE(_core, m) {
         py::arg("num_threads") = py::none(), py::arg("error_mode") = py::none(),
         py::arg("max_errors") = py::none(), py::arg("comment") = py::none(),
         py::arg("skip_empty_rows") = true, py::arg("guess_integer") = true,
-        py::arg("trim_ws") = true, py::arg("decimal_mark") = '.', py::arg("skip") = 0,
+        py::arg("trim_ws") = true, py::arg("escape_backslash") = false,
+        py::arg("decimal_mark") = '.', py::arg("skip") = 0,
         R"doc(
         Convert a CSV file to Parquet format.
 
@@ -469,6 +484,9 @@ PYBIND11_MODULE(_core, m) {
         trim_ws : bool, optional
             Whether to trim leading and trailing whitespace from field values.
             Default is True.
+        escape_backslash : bool, optional
+            Whether to use backslash escaping instead of doubled quotes.
+            Default is False.
         decimal_mark : str, optional
             Decimal separator character ('.' or ','). Default is '.'.
         skip : int, optional
@@ -492,8 +510,8 @@ PYBIND11_MODULE(_core, m) {
   // to_arrow_ipc function
   m.def("to_arrow_ipc", &to_arrow_ipc, py::arg("input_path"), py::arg("output_path"),
         py::arg("batch_size") = py::none(), py::arg("num_threads") = py::none(),
-        py::arg("guess_integer") = true, py::arg("trim_ws") = true, py::arg("decimal_mark") = '.',
-        py::arg("skip") = 0,
+        py::arg("guess_integer") = true, py::arg("trim_ws") = true,
+        py::arg("escape_backslash") = false, py::arg("decimal_mark") = '.', py::arg("skip") = 0,
         R"doc(
         Convert a CSV file to Arrow IPC format.
 
