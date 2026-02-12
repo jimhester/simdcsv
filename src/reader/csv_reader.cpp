@@ -693,6 +693,22 @@ const std::vector<ColumnSchema>& CsvReader::schema() const {
   return impl_->schema;
 }
 
+Result<bool> CsvReader::set_schema(const std::vector<ColumnSchema>& schema) {
+  if (impl_->schema.empty()) {
+    return Result<bool>::failure("Cannot set schema before calling open()");
+  }
+  if (impl_->streaming_active) {
+    return Result<bool>::failure("Cannot set schema after streaming has started");
+  }
+  if (schema.size() != impl_->schema.size()) {
+    return Result<bool>::failure("Schema length mismatch: provided " +
+                                 std::to_string(schema.size()) + " columns but file has " +
+                                 std::to_string(impl_->schema.size()));
+  }
+  impl_->schema = schema;
+  return Result<bool>::success(true);
+}
+
 const EncodingResult& CsvReader::encoding() const {
   return impl_->detected_encoding;
 }

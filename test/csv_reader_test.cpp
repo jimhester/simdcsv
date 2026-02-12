@@ -686,6 +686,195 @@ TEST_F(CsvReaderTest, SchemaWithQuotedHeaders) {
 }
 
 // ============================================================================
+// SCHEMA OVERRIDE (set_schema)
+// ============================================================================
+
+TEST_F(CsvReaderTest, SetSchemaOverridesAllColumns) {
+  // CSV with numeric data that would be inferred as FLOAT64 (guess_integer defaults to false)
+  std::string csv = "a,b,c\n1,2,3\n4,5,6\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+
+  // Verify inference gave us FLOAT64 (guess_integer defaults to false)
+  ASSERT_EQ(reader.schema().size(), 3u);
+  for (const auto& col : reader.schema()) {
+    EXPECT_EQ(col.type, libvroom::DataType::FLOAT64);
+  }
+
+  // Override all columns to STRING
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"a", libvroom::DataType::STRING, true, 0},
+      {"b", libvroom::DataType::STRING, true, 1},
+      {"c", libvroom::DataType::STRING, true, 2},
+  };
+  auto result = reader.set_schema(override_schema);
+  ASSERT_TRUE(result.ok);
+
+  // Verify schema was replaced
+  ASSERT_EQ(reader.schema().size(), 3u);
+  for (const auto& col : reader.schema()) {
+    EXPECT_EQ(col.type, libvroom::DataType::STRING);
+  }
+}
+
+TEST_F(CsvReaderTest, SetSchemaPartialOverride) {
+  // Override only the type, keeping names from inference
+  std::string csv = "x,y\n1.5,2020-01-01\n2.5,2021-06-15\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+  ASSERT_EQ(reader.schema().size(), 2u);
+
+  // Override: keep FLOAT64 for x, force STRING for y
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"x", libvroom::DataType::FLOAT64, true, 0},
+      {"y", libvroom::DataType::STRING, true, 1},
+  };
+  auto result = reader.set_schema(override_schema);
+  ASSERT_TRUE(result.ok);
+
+  EXPECT_EQ(reader.schema()[0].type, libvroom::DataType::FLOAT64);
+  EXPECT_EQ(reader.schema()[1].type, libvroom::DataType::STRING);
+}
+
+TEST_F(CsvReaderTest, SetSchemaWithFormatStrings) {
+  std::string csv = "date_col,ts_col\n2024-01-15,2024-01-15T10:30:00\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"date_col", libvroom::DataType::DATE, true, 0, "%Y-%m-%d"},
+      {"ts_col", libvroom::DataType::TIMESTAMP, true, 1, "%Y-%m-%dT%H:%M:%S"},
+  };
+  auto result = reader.set_schema(override_schema);
+  ASSERT_TRUE(result.ok);
+
+  // Verify format strings are preserved
+  EXPECT_EQ(reader.schema()[0].format, "%Y-%m-%d");
+  EXPECT_EQ(reader.schema()[1].format, "%Y-%m-%dT%H:%M:%S");
+}
+
+TEST_F(CsvReaderTest, SetSchemaMismatchedLengthFails) {
+  std::string csv = "a,b,c\n1,2,3\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+  ASSERT_EQ(reader.schema().size(), 3u);
+
+  // Try to set schema with wrong number of columns
+  std::vector<libvroom::ColumnSchema> bad_schema = {
+      {"a", libvroom::DataType::STRING, true, 0},
+      {"b", libvroom::DataType::STRING, true, 1},
+  };
+  auto result = reader.set_schema(bad_schema);
+  EXPECT_FALSE(result.ok);
+  EXPECT_FALSE(result.error.empty());
+
+  // Original schema should be unchanged
+  EXPECT_EQ(reader.schema().size(), 3u);
+  EXPECT_EQ(reader.schema()[0].type, libvroom::DataType::FLOAT64);
+}
+
+TEST_F(CsvReaderTest, SetSchemaAffectsStreaming) {
+  // Verify that set_schema between open() and start_streaming() works
+  std::string csv = "val\n42\n100\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+
+  // Override INT32 -> STRING
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"val", libvroom::DataType::STRING, true, 0},
+  };
+  auto result = reader.set_schema(override_schema);
+  ASSERT_TRUE(result.ok);
+
+  // Use streaming API
+  auto stream_result = reader.start_streaming();
+  ASSERT_TRUE(stream_result.ok);
+
+  // Consume all chunks and verify column type is STRING
+  size_t total_rows = 0;
+  while (auto chunk = reader.next_chunk()) {
+    ASSERT_EQ(chunk->size(), 1u);
+    EXPECT_EQ((*chunk)[0]->type(), libvroom::DataType::STRING);
+    total_rows += (*chunk)[0]->size();
+  }
+  EXPECT_EQ(total_rows, 2u);
+}
+
+TEST_F(CsvReaderTest, SetSchemaBeforeOpenFails) {
+  libvroom::CsvReader reader({});
+  // No open() called
+  std::vector<libvroom::ColumnSchema> schema = {
+      {"a", libvroom::DataType::STRING, true, 0},
+  };
+  auto result = reader.set_schema(schema);
+  EXPECT_FALSE(result.ok);
+  EXPECT_NE(result.error.find("before calling open"), std::string::npos);
+}
+
+TEST_F(CsvReaderTest, SetSchemaAfterStreamingFails) {
+  std::string csv = "val\n42\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+
+  auto stream_result = reader.start_streaming();
+  ASSERT_TRUE(stream_result.ok);
+
+  // Try to set schema after streaming started
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"val", libvroom::DataType::STRING, true, 0},
+  };
+  auto result = reader.set_schema(override_schema);
+  EXPECT_FALSE(result.ok);
+  EXPECT_NE(result.error.find("streaming has started"), std::string::npos);
+
+  // Drain chunks to avoid thread pool destruction issues
+  while (reader.next_chunk()) {
+  }
+}
+
+TEST_F(CsvReaderTest, SetSchemaAffectsReadAll) {
+  std::string csv = "val\n42\n100\n";
+  test_util::TempCsvFile file(csv);
+
+  libvroom::CsvReader reader({});
+  auto open_result = reader.open(file.path());
+  ASSERT_TRUE(open_result.ok);
+
+  // Override to STRING
+  std::vector<libvroom::ColumnSchema> override_schema = {
+      {"val", libvroom::DataType::STRING, true, 0},
+  };
+  auto result = reader.set_schema(override_schema);
+  ASSERT_TRUE(result.ok);
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok);
+
+  // Verify column type is STRING
+  ASSERT_FALSE(read_result.value.chunks.empty());
+  ASSERT_EQ(read_result.value.chunks[0].size(), 1u);
+  EXPECT_EQ(read_result.value.chunks[0][0]->type(), libvroom::DataType::STRING);
+}
+
+// ============================================================================
 // DELIMITER AUTO-DETECTION
 // ============================================================================
 
