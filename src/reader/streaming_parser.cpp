@@ -78,6 +78,11 @@ struct StreamingParser::Impl {
       fast_contexts.push_back(col->create_context());
     }
 
+    // Propagate decimal_mark to all fast contexts
+    for (auto& fc : fast_contexts) {
+      fc.decimal_mark = options.csv.decimal_mark;
+    }
+
     batch_initialized = true;
   }
 
