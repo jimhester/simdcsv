@@ -167,6 +167,12 @@ AnalyzeChunkSimdImpl(const char* data, size_t size, char quote_char,
   }
 
   // Handle remaining bytes with scalar code
+  // Consume carried escape state from last SIMD block
+  if (escape_backslash && escape_state != 0 && offset < size) {
+    offset++; // First byte of scalar tail is already escaped
+    escape_state = 0;
+  }
+
   while (offset < size) {
     char c = data[offset];
 
@@ -357,14 +363,18 @@ HWY_NOINLINE DualStateResultInternal AnalyzeChunkDualStateSimdImpl(const char* d
   // At this point, global_quote_parity_mask is 0 or ~0ULL
   bool global_quote_parity = (global_quote_parity_mask != 0);
 
+  // Consume carried escape state from last SIMD block
+  if (escape_backslash && escape_state != 0 && offset < size) {
+    offset++; // First byte of scalar tail is already escaped
+    escape_state = 0;
+  }
+
   while (offset < size) {
     char c = data[offset];
 
     if (escape_backslash) {
       if (c == '\\' && offset + 1 < size) {
-        offset++;
-        // Skip one more below
-        offset++;
+        offset += 2; // Skip backslash + escaped character
         continue;
       }
       if (c == quote_char) {
@@ -577,6 +587,13 @@ HWY_NOINLINE size_t FindRowEndSimdImpl(const char* data, size_t size, size_t sta
 
   // Handle remaining bytes with scalar
   in_quote = (quote_state != 0);
+
+  // Consume carried escape state from last SIMD block
+  if (escape_backslash && escape_state != 0 && offset < size) {
+    offset++; // First byte of scalar tail is already escaped
+    escape_state = 0;
+  }
+
   while (offset < size) {
     char c = data[offset];
     if (escape_backslash) {

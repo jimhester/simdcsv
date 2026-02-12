@@ -184,6 +184,8 @@ def read_csv(
     progress: Callable[[int, int], None] | None = None,
     comment: str | None = None,
     skip_empty_rows: bool = True,
+    guess_integer: bool = False,
+    trim_ws: bool = True,
     escape_backslash: bool = False,
 ) -> Table:
     """Read a CSV file and return a Table object.

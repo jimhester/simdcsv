@@ -906,16 +906,20 @@ TEST_F(SIMDParsingTest, LargeMultiThreadedMixedQuotePatterns) {
 // ============================================================================
 
 TEST(SimdParsingTest, BackslashEscape_SIMDBoundary) {
-  // Create data where a backslash escape spans the 64-byte SIMD boundary
+  // Create data where a backslash escape spans the 64-byte SIMD boundary.
+  // Backslash at position 63 escapes the quote at position 64.
+  // The field must still be properly closed with a separate quote.
   std::string data(64, 'x');
-  data[0] = '"'; // opening quote
-  data[63] = '\\';
-  // Position 64 (first byte of second block) is the escaped character
-  data += "\""; // this " at position 64 should be escaped, not close the quote
+  data[0] = '"';   // opening quote
+  data[63] = '\\'; // backslash at end of first SIMD block
+  // Position 64: escaped quote (literal, NOT closing the field)
+  // Position 65: closing quote
+  data += "\"\""; // escaped " then closing "
   data += ",rest";
   data += "\n";
 
   auto [row_count, last_end] = libvroom::count_rows_simd(data.data(), data.size(), '"', true);
+  // The newline is outside quotes (field closed at position 65), so 1 row
   EXPECT_EQ(row_count, 1u);
 }
 
