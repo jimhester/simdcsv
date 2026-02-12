@@ -10,6 +10,7 @@
  */
 
 #include "libvroom.h"
+#include "libvroom/parse_utils.h"
 #include "libvroom/types.h"
 
 #include "test_util.h"
@@ -563,6 +564,43 @@ TEST_F(CustomOptionsTest, SemicolonSeparatorInInferFromSample) {
   EXPECT_EQ(types.size(), 2u);
   EXPECT_EQ(types[0], DataType::INT32);
   EXPECT_EQ(types[1], DataType::FLOAT64);
+}
+
+// ============================================================================
+// E1b. NullChecker refactor tests
+// ============================================================================
+
+class NullCheckerTest : public ::testing::Test {};
+
+TEST_F(NullCheckerTest, EmptyNullValuesNothingIsNull) {
+  libvroom::NullChecker checker(std::string_view(""));
+  EXPECT_FALSE(checker.is_null(""));
+  EXPECT_FALSE(checker.is_null("NA"));
+  EXPECT_FALSE(checker.is_null("anything"));
+}
+
+TEST_F(NullCheckerTest, EmptyStringNotNullByDefault) {
+  // Only explicit trailing comma enables empty-is-null
+  libvroom::NullChecker checker(std::string_view("NA"));
+  EXPECT_FALSE(checker.is_null(""));
+  EXPECT_TRUE(checker.is_null("NA"));
+}
+
+TEST_F(NullCheckerTest, TrailingCommaEnablesEmptyIsNull) {
+  libvroom::NullChecker checker(std::string_view("NA,"));
+  EXPECT_TRUE(checker.is_null(""));
+  EXPECT_TRUE(checker.is_null("NA"));
+  EXPECT_FALSE(checker.is_null("other"));
+}
+
+TEST_F(NullCheckerTest, DeferredInitialization) {
+  libvroom::NullChecker checker(std::string_view(""));
+  EXPECT_FALSE(checker.is_null("NA"));
+
+  checker.init("NA,NULL,");
+  EXPECT_TRUE(checker.is_null("NA"));
+  EXPECT_TRUE(checker.is_null("NULL"));
+  EXPECT_TRUE(checker.is_null(""));
 }
 
 // ============================================================================
