@@ -13,17 +13,19 @@ namespace libvroom {
 
 // CSV parsing options
 struct CsvOptions {
-  char separator = '\0'; // '\0' = auto-detect via DialectDetector
+  std::string separator; // empty = auto-detect via DialectDetector
   char quote = '"';
-  char escape = '\\';
-  std::string comment; // No comment by default (empty string)
+  bool escape_backslash = false; // Use backslash escaping (\") instead of doubled quotes ("")
+  std::string comment;           // No comment by default (empty string)
   bool has_header = true;
   bool skip_empty_rows = true;
-  bool guess_integer = false;                // When false, integer-like values infer as FLOAT64
+  bool guess_integer = true;                 // When false, integer-like values infer as FLOAT64
   bool trim_ws = true;                       // Trim leading/trailing whitespace from fields
-  std::string null_values = "NA,null,NULL,"; // Comma-separated
-  std::string true_values = "true,TRUE,True,yes,YES,Yes";
-  std::string false_values = "false,FALSE,False,no,NO,No";
+  char decimal_mark = '.';                   // Decimal separator ('.' or ',')
+  size_t skip = 0;                           // Lines to skip before header
+  std::string null_values = "NA,null,NULL,"; // Comma-separated (trailing comma = empty is null)
+  std::string true_values = "true,TRUE,True,T,t,yes,YES,Yes";
+  std::string false_values = "false,FALSE,False,F,f,no,NO,No";
 
   // Performance tuning
   size_t sample_rows = 1000; // Rows to sample for type inference
@@ -52,12 +54,12 @@ struct FwfOptions {
   std::vector<int> col_ends;          // Exclusive end offsets (-1 = to end of line)
   std::vector<std::string> col_names; // Column names
   bool trim_ws = true;
-  bool guess_integer = false; // When false, integer-like values infer as FLOAT64
-  std::string comment;        // No comment by default (empty string)
+  bool guess_integer = true; // When false, integer-like values infer as FLOAT64
+  std::string comment;       // No comment by default (empty string)
   bool skip_empty_rows = true;
   std::string null_values = "NA,null,NULL,";
-  std::string true_values = "true,TRUE,True,yes,YES,Yes";
-  std::string false_values = "false,FALSE,False,no,NO,No";
+  std::string true_values = "true,TRUE,True,T,t,yes,YES,Yes";
+  std::string false_values = "false,FALSE,False,F,f,no,NO,No";
   size_t skip = 0;       // Lines to skip after comments
   int64_t max_rows = -1; // Max rows (-1 = unlimited)
   size_t sample_rows = 1000;

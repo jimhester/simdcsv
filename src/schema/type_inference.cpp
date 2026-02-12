@@ -1,6 +1,8 @@
+#include "libvroom/comment_util.h"
 #include "libvroom/vroom.h"
 
 #include <cctype>
+#include <cstring>
 #include <fast_float/fast_float.h>
 
 namespace libvroom {
@@ -97,8 +99,17 @@ DataType TypeInference::infer_field(std::string_view value) {
 
   // Try to parse as float
   double result;
-  auto [ptr, ec] = fast_float::from_chars(value.data(), value.data() + value.size(), result);
-  if (ec == std::errc() && ptr == value.data() + value.size()) {
+  const char* float_start = value.data();
+  size_t float_len = value.size();
+  // Strip leading '+' that fast_float doesn't accept (C++17 spec forbids it)
+  if (float_len > 0 && *float_start == '+') {
+    float_start++;
+    float_len--;
+  }
+  fast_float::parse_options ff_opts{fast_float::chars_format::general, options_.decimal_mark};
+  auto [ptr, ec] =
+      fast_float::from_chars_advanced(float_start, float_start + float_len, result, ff_opts);
+  if (ec == std::errc() && ptr == float_start + float_len) {
     return DataType::FLOAT64;
   }
 
@@ -148,7 +159,8 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
   }
 
   LineParser parser(options_);
-  ChunkFinder finder(options_.separator, options_.quote);
+  ChunkFinder finder(options_.separator.empty() ? ',' : options_.separator[0], options_.quote,
+                     options_.escape_backslash);
 
   size_t offset = 0;
   size_t rows_sampled = 0;
@@ -166,10 +178,42 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
       continue;
     }
 
+    // Skip empty lines (only whitespace/newlines)
+    {
+      bool is_empty = true;
+      for (size_t i = offset; i < row_end; ++i) {
+        char c = data[i];
+        if (c != '\n' && c != '\r' && c != ' ' && c != '\t') {
+          is_empty = false;
+          break;
+        }
+      }
+      if (is_empty) {
+        offset = row_end;
+        continue;
+      }
+    }
+
+    // Skip comment lines
+    if (starts_with_comment(data + offset, size - offset, options_.comment)) {
+      offset = row_end;
+      continue;
+    }
+
     // Parse this row's fields
     std::vector<std::string> fields;
     bool in_quote = false;
     std::string current_field;
+
+    // Helper to match separator at a given position
+    auto matches_sep_at = [&](size_t pos) -> bool {
+      if (options_.separator.empty())
+        return false;
+      if (options_.separator.size() == 1)
+        return data[pos] == options_.separator[0];
+      return pos + options_.separator.size() <= row_end &&
+             std::memcmp(data + pos, options_.separator.data(), options_.separator.size()) == 0;
+    };
 
     for (size_t i = offset; i < row_end; ++i) {
       char c = data[i];
@@ -186,14 +230,39 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
         break;
       }
 
-      if (c == options_.quote) {
-        if (in_quote && i + 1 < row_end && data[i + 1] == options_.quote) {
+      if (options_.escape_backslash && c == '\\' && i + 1 < row_end) {
+        char next = data[i + 1];
+        switch (next) {
+        case '\\':
+          current_field += '\\';
+          break;
+        case 'n':
+          current_field += '\n';
+          break;
+        case 't':
+          current_field += '\t';
+          break;
+        case 'r':
+          current_field += '\r';
+          break;
+        default:
+          if (next == options_.quote) {
+            current_field += options_.quote;
+          } else {
+            current_field += next;
+          }
+          break;
+        }
+        ++i;
+      } else if (c == options_.quote) {
+        if (!options_.escape_backslash && in_quote && i + 1 < row_end &&
+            data[i + 1] == options_.quote) {
           current_field += options_.quote;
           ++i;
         } else {
           in_quote = !in_quote;
         }
-      } else if (c == options_.separator && !in_quote) {
+      } else if (!in_quote && matches_sep_at(i)) {
         if (options_.trim_ws) {
           while (!current_field.empty() &&
                  (current_field.back() == ' ' || current_field.back() == '\t')) {
@@ -202,6 +271,8 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
         }
         fields.push_back(std::move(current_field));
         current_field.clear();
+        // Advance past multi-byte separator (loop will do +1)
+        i += options_.separator.size() - 1;
       } else {
         if (options_.trim_ws && current_field.empty() && !in_quote && (c == ' ' || c == '\t')) {
           continue;

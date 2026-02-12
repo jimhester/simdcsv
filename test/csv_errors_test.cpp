@@ -52,7 +52,7 @@ protected:
   ParseResult parseFile(const std::string& path, libvroom::ErrorMode mode,
                         size_t max_errors = libvroom::ErrorCollector::DEFAULT_MAX_ERRORS) {
     libvroom::CsvOptions opts;
-    opts.separator = ','; // Explicit separator for malformed data tests (bypass auto-detect)
+    opts.separator = ","; // Explicit separator for malformed data tests (bypass auto-detect)
     opts.error_mode = mode;
     opts.max_errors = max_errors;
     opts.num_threads = 1; // Deterministic for error detection
@@ -77,7 +77,7 @@ protected:
                            size_t num_threads = 1) {
     test_util::TempCsvFile csv(content);
     libvroom::CsvOptions opts;
-    opts.separator = ','; // Explicit separator for malformed data tests (bypass auto-detect)
+    opts.separator = ","; // Explicit separator for malformed data tests (bypass auto-detect)
     opts.error_mode = mode;
     opts.max_errors = max_errors;
     opts.num_threads = num_threads;
@@ -363,13 +363,13 @@ TEST_F(CsvErrorsTest, MultiThreadedErrorsSortedByOffset) {
   std::string content;
   content += "A,B,C\n";
   for (int i = 0; i < 500; ++i)
-    content += "1,2,3\n";
+    content += "aaa,bbb,ccc\n";
   content += "error1\n"; // Missing fields
   for (int i = 0; i < 500; ++i)
-    content += "4,5,6\n";
+    content += "ddd,eee,fff\n";
   content += "error2,extra\n"; // Wrong field count
   for (int i = 0; i < 500; ++i)
-    content += "7,8,9\n";
+    content += "ggg,hhh,iii\n";
 
   auto result = parseContent(content, libvroom::ErrorMode::PERMISSIVE,
                              libvroom::ErrorCollector::DEFAULT_MAX_ERRORS, 4);

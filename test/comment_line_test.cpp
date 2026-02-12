@@ -32,7 +32,7 @@ protected:
   ParseResult parseFile(const std::string& path, const std::string& comment_str, char sep = ',') {
     libvroom::CsvOptions opts;
     opts.comment = comment_str;
-    opts.separator = sep;
+    opts.separator = std::string(1, sep);
     opts.num_threads = 1;
     libvroom::CsvReader reader(opts);
 

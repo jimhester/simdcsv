@@ -42,6 +42,48 @@ inline std::string unescape_quotes(std::string_view value, char quote,
   return result;
 }
 
+// Helper function to unescape backslash escape sequences in a field
+// Handles: \\ -> \, \" -> quote, \n -> newline, \t -> tab, \r -> CR
+// Unknown escapes: drop backslash, keep character
+// Trailing backslash: keep as-is
+inline std::string unescape_backslash(std::string_view value, char quote) {
+  if (value.find('\\') == std::string_view::npos) {
+    return std::string(value);
+  }
+  std::string result;
+  result.reserve(value.size());
+  for (size_t i = 0; i < value.size(); ++i) {
+    if (value[i] == '\\' && i + 1 < value.size()) {
+      char next = value[i + 1];
+      switch (next) {
+      case '\\':
+        result += '\\';
+        break;
+      case 'n':
+        result += '\n';
+        break;
+      case 't':
+        result += '\t';
+        break;
+      case 'r':
+        result += '\r';
+        break;
+      default:
+        if (next == quote) {
+          result += quote;
+        } else {
+          result += next;
+        }
+        break;
+      }
+      ++i;
+    } else {
+      result += value[i];
+    }
+  }
+  return result;
+}
+
 // Helper class for fast null value checking
 // Pre-parses the null values string once. Uses simple linear search since
 // the number of null values is typically very small (3-5 items).
@@ -71,11 +113,20 @@ public:
     return false;
   }
 
-private:
+  // Public init for deferred initialization (resets and re-parses)
   void init(std::string_view null_values) {
+    null_values_.clear();
+    max_null_length_ = 0;
+    empty_is_null_ = false;
+
+    if (null_values.empty()) {
+      return; // Empty null_values = nothing is null
+    }
+
     size_t start = 0;
 
-    while (start < null_values.size()) {
+    // Use <= to handle trailing comma (e.g. "NA," has an empty token at end)
+    while (start <= null_values.size()) {
       size_t end = null_values.find(',', start);
       if (end == std::string_view::npos) {
         end = null_values.size();
@@ -93,9 +144,10 @@ private:
     }
   }
 
+private:
   std::vector<std::string> null_values_;
   size_t max_null_length_ = 0;
-  bool empty_is_null_ = true; // Default: empty strings are null
+  bool empty_is_null_ = false; // Only true when null_values has trailing comma
 };
 
 } // namespace libvroom

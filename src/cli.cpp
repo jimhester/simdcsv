@@ -156,7 +156,8 @@ static std::string getColumnValueAsString(const libvroom::ArrowColumnBuilder* co
 }
 
 // Output a row with proper CSV quoting
-static void outputRow(const std::vector<std::string>& row, char delimiter, char quote_char) {
+static void outputRow(const std::vector<std::string>& row, const std::string& delimiter,
+                      char quote_char) {
   for (size_t i = 0; i < row.size(); ++i) {
     if (i > 0)
       cout << delimiter;
@@ -179,21 +180,26 @@ static void outputRow(const std::vector<std::string>& row, char delimiter, char 
 }
 
 // Format delimiter for display
-static std::string formatDelimiter(char delim) {
-  switch (delim) {
-  case ',':
+static std::string formatDelimiter(const std::string& delim) {
+  if (delim == ",")
     return "comma";
-  case '\t':
+  if (delim == "\t")
     return "tab";
-  case ';':
+  if (delim == ";")
     return "semicolon";
-  case '|':
+  if (delim == "|")
     return "pipe";
-  case ':':
+  if (delim == ":")
     return "colon";
-  default:
-    return std::string(1, delim);
+  // Escape non-printable characters
+  std::string result;
+  for (char c : delim) {
+    if (c == '\t')
+      result += "\\t";
+    else
+      result += c;
   }
+  return result;
 }
 
 // =============================================================================
@@ -244,14 +250,19 @@ CONVERT OPTIONS:
 COMMON OPTIONS:
     -n, --rows <N>           Number of rows for head/pretty (default: 10)
     -j, --threads <N>        Number of threads (default: auto)
-    -d, --delimiter <CHAR>   Field delimiter (default: auto)
+    -d, --delimiter <STR>    Field delimiter (default: auto)
                              Named: auto, comma, tab, semicolon, pipe, colon
+                             Or any string (e.g., "|~|", "\\t\\t")
     -q, --quote <CHAR>       Quote character (default: ")
     -e, --encoding <ENC>     Force encoding (utf-8, utf-16le, utf-16be,
                              utf-32le, utf-32be, latin1, windows-1252)
     --no-header              CSV has no header row
-    --guess-integer          Infer integer types (INT32/INT64) instead of FLOAT64
+    --guess-integer          Infer integer types (default; use --no-guess-integer to disable)
+    --no-guess-integer       Infer all numeric values as FLOAT64
     --no-trim-ws             Don't trim leading/trailing whitespace from fields
+    --escape-backslash       Use backslash escaping (\") instead of doubled quotes ("")
+    --decimal-mark <CHAR>    Decimal separator ('.' or ',', default: '.')
+    --skip <N>               Lines to skip before header (default: 0)
     -p, --progress           Show progress bar
     -v, --verbose            Verbose output
     -h, --help               Show this help message
@@ -287,7 +298,7 @@ For more information, visit: https://github.com/jimhester/libvroom
 
 struct CommonOptions {
   string input_path;
-  char delimiter = '\0'; // auto-detect by default
+  string delimiter; // empty = auto-detect
   char quote = '"';
   bool has_header = true;
   size_t num_threads = 0;
@@ -300,8 +311,11 @@ struct CommonOptions {
   std::optional<libvroom::CharEncoding> encoding; // Character encoding override
 
   // Type inference
-  bool guess_integer = false; // When false, integer-like values infer as FLOAT64
-  bool trim_ws = true;        // Trim leading/trailing whitespace from fields
+  bool guess_integer = true;     // When true, integer-like values infer as INT32/INT64
+  bool trim_ws = true;           // Trim leading/trailing whitespace from fields
+  bool escape_backslash = false; // Use backslash escaping instead of doubled quotes
+  char decimal_mark = '.';       // Decimal separator ('.' or ',')
+  size_t skip = 0;               // Lines to skip before header
 
   // Index caching
   bool enable_cache = false;
@@ -340,30 +354,25 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
       opts.num_threads = stoul(argv[i]);
     } else if (arg == "-d" || arg == "--delimiter") {
       if (++i >= argc) {
-        cerr << "Error: --delimiter requires a character" << endl;
+        cerr << "Error: --delimiter requires a value" << endl;
         return -1;
       }
       string delim_str = argv[i];
       if (delim_str == "\\t" || delim_str == "tab") {
-        opts.delimiter = '\t';
+        opts.delimiter = "\t";
       } else if (delim_str == "auto") {
-        opts.delimiter = '\0';
+        opts.delimiter.clear();
       } else if (delim_str == "comma") {
-        opts.delimiter = ',';
+        opts.delimiter = ",";
       } else if (delim_str == "semicolon") {
-        opts.delimiter = ';';
+        opts.delimiter = ";";
       } else if (delim_str == "pipe") {
-        opts.delimiter = '|';
+        opts.delimiter = "|";
       } else if (delim_str == "colon") {
-        opts.delimiter = ':';
-      } else if (delim_str.length() == 1) {
-        opts.delimiter = delim_str[0];
+        opts.delimiter = ":";
       } else {
-        cerr << "Error: --delimiter must be a single character or name (auto, comma, tab, "
-                "semicolon, "
-                "pipe, colon)"
-             << endl;
-        return -1;
+        // Accept any string as delimiter (including multi-byte)
+        opts.delimiter = delim_str;
       }
     } else if (arg == "-q" || arg == "--quote") {
       if (++i >= argc) {
@@ -388,8 +397,28 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
       opts.has_header = false;
     } else if (arg == "--guess-integer") {
       opts.guess_integer = true;
+    } else if (arg == "--no-guess-integer") {
+      opts.guess_integer = false;
+    } else if (arg == "--decimal-mark") {
+      if (++i >= argc) {
+        cerr << "Error: --decimal-mark requires a character" << endl;
+        return -1;
+      }
+      opts.decimal_mark = argv[i][0];
+      if (opts.decimal_mark != '.' && opts.decimal_mark != ',') {
+        cerr << "Error: --decimal-mark must be '.' or ','" << endl;
+        return -1;
+      }
+    } else if (arg == "--skip") {
+      if (++i >= argc) {
+        cerr << "Error: --skip requires a number" << endl;
+        return -1;
+      }
+      opts.skip = stoul(argv[i]);
     } else if (arg == "--no-trim-ws") {
       opts.trim_ws = false;
+    } else if (arg == "--escape-backslash") {
+      opts.escape_backslash = true;
     } else if (arg == "-p" || arg == "--progress") {
       opts.show_progress = true;
     } else if (arg == "-v" || arg == "--verbose") {
@@ -482,29 +511,25 @@ int cmd_convert(int argc, char* argv[]) {
       common.num_threads = stoul(argv[i]);
     } else if (arg == "-d" || arg == "--delimiter") {
       if (++i >= argc) {
-        cerr << "Error: --delimiter requires a character" << endl;
+        cerr << "Error: --delimiter requires a value" << endl;
         return 1;
       }
       string delim_str = argv[i];
       if (delim_str == "\\t" || delim_str == "tab") {
-        common.delimiter = '\t';
+        common.delimiter = "\t";
       } else if (delim_str == "auto") {
-        common.delimiter = '\0';
+        common.delimiter.clear();
       } else if (delim_str == "comma") {
-        common.delimiter = ',';
+        common.delimiter = ",";
       } else if (delim_str == "semicolon") {
-        common.delimiter = ';';
+        common.delimiter = ";";
       } else if (delim_str == "pipe") {
-        common.delimiter = '|';
+        common.delimiter = "|";
       } else if (delim_str == "colon") {
-        common.delimiter = ':';
-      } else if (delim_str.length() == 1) {
-        common.delimiter = delim_str[0];
+        common.delimiter = ":";
       } else {
-        cerr << "Error: --delimiter must be a single character or name (auto, comma, tab, "
-                "semicolon, pipe, colon)"
-             << endl;
-        return 1;
+        // Accept any string as delimiter (including multi-byte)
+        common.delimiter = delim_str;
       }
     } else if (arg == "-q" || arg == "--quote") {
       if (++i >= argc) {
@@ -529,8 +554,28 @@ int cmd_convert(int argc, char* argv[]) {
       common.has_header = false;
     } else if (arg == "--guess-integer") {
       common.guess_integer = true;
+    } else if (arg == "--no-guess-integer") {
+      common.guess_integer = false;
     } else if (arg == "--no-trim-ws") {
       common.trim_ws = false;
+    } else if (arg == "--escape-backslash") {
+      common.escape_backslash = true;
+    } else if (arg == "--decimal-mark") {
+      if (++i >= argc) {
+        cerr << "Error: --decimal-mark requires a character" << endl;
+        return 1;
+      }
+      common.decimal_mark = argv[i][0];
+      if (common.decimal_mark != '.' && common.decimal_mark != ',') {
+        cerr << "Error: --decimal-mark must be '.' or ','" << endl;
+        return 1;
+      }
+    } else if (arg == "--skip") {
+      if (++i >= argc) {
+        cerr << "Error: --skip requires a number" << endl;
+        return 1;
+      }
+      common.skip = stoul(argv[i]);
     } else if (arg == "--strict") {
       common.error_mode = libvroom::ErrorMode::FAIL_FAST;
     } else if (arg == "--permissive") {
@@ -593,11 +638,15 @@ int cmd_convert(int argc, char* argv[]) {
   opts.progress = common.show_progress;
 
   // CSV options
-  opts.csv.separator = common.delimiter;
+  if (!common.delimiter.empty())
+    opts.csv.separator = common.delimiter;
   opts.csv.quote = common.quote;
   opts.csv.has_header = common.has_header;
   opts.csv.guess_integer = common.guess_integer;
   opts.csv.trim_ws = common.trim_ws;
+  opts.csv.escape_backslash = common.escape_backslash;
+  opts.csv.decimal_mark = common.decimal_mark;
+  opts.csv.skip = common.skip;
   opts.csv.error_mode = common.error_mode;
   opts.csv.max_errors = common.max_errors;
   opts.csv.encoding = common.encoding;
@@ -701,11 +750,15 @@ int cmd_count(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  csv_opts.separator = opts.delimiter;
+  if (!opts.delimiter.empty())
+    csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.escape_backslash = opts.escape_backslash;
+  csv_opts.decimal_mark = opts.decimal_mark;
+  csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -776,11 +829,15 @@ int cmd_head(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  csv_opts.separator = opts.delimiter;
+  if (!opts.delimiter.empty())
+    csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.escape_backslash = opts.escape_backslash;
+  csv_opts.decimal_mark = opts.decimal_mark;
+  csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -814,9 +871,9 @@ int cmd_head(int argc, char* argv[]) {
   }
 
   // Update delimiter from auto-detection for output formatting
-  if (opts.delimiter == '\0') {
+  if (opts.delimiter.empty()) {
     auto detected = reader.detected_dialect();
-    opts.delimiter = detected ? detected->dialect.delimiter : ',';
+    opts.delimiter = std::string(1, detected ? detected->dialect.delimiter : ',');
   }
 
   const auto& schema = reader.schema();
@@ -887,11 +944,15 @@ int cmd_info(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  csv_opts.separator = opts.delimiter;
+  if (!opts.delimiter.empty())
+    csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.escape_backslash = opts.escape_backslash;
+  csv_opts.decimal_mark = opts.decimal_mark;
+  csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -941,9 +1002,9 @@ int cmd_info(int argc, char* argv[]) {
   }
 
   // Update delimiter from auto-detection for output formatting
-  if (opts.delimiter == '\0') {
+  if (opts.delimiter.empty()) {
     auto detected = reader.detected_dialect();
-    opts.delimiter = detected ? detected->dialect.delimiter : ',';
+    opts.delimiter = std::string(1, detected ? detected->dialect.delimiter : ',');
   }
 
   const auto& schema = reader.schema();
@@ -1020,11 +1081,15 @@ int cmd_select(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  csv_opts.separator = opts.delimiter;
+  if (!opts.delimiter.empty())
+    csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.escape_backslash = opts.escape_backslash;
+  csv_opts.decimal_mark = opts.decimal_mark;
+  csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -1058,9 +1123,9 @@ int cmd_select(int argc, char* argv[]) {
   }
 
   // Update delimiter from auto-detection for output formatting
-  if (opts.delimiter == '\0') {
+  if (opts.delimiter.empty()) {
     auto detected = reader.detected_dialect();
-    opts.delimiter = detected ? detected->dialect.delimiter : ',';
+    opts.delimiter = std::string(1, detected ? detected->dialect.delimiter : ',');
   }
 
   const auto& schema = reader.schema();
@@ -1166,11 +1231,15 @@ int cmd_pretty(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  csv_opts.separator = opts.delimiter;
+  if (!opts.delimiter.empty())
+    csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.escape_backslash = opts.escape_backslash;
+  csv_opts.decimal_mark = opts.decimal_mark;
+  csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;

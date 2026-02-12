@@ -35,6 +35,9 @@ public:
   AppendFn append_fn;
   AppendNullFn append_null_fn;
 
+  // Parsing options (set from CsvOptions before use)
+  char decimal_mark = '.';
+
   // Static inline append implementations - these get inlined and avoid virtual dispatch
 
   // String
@@ -174,8 +177,16 @@ public:
   // Note: empty strings are handled as nulls by caller, so we don't check here
   static void append_float64(FastColumnContext& ctx, std::string_view value) {
     double result;
-    auto [ptr, ec] = fast_float::from_chars(value.data(), value.data() + value.size(), result);
-    if (ec == std::errc() && ptr == value.data() + value.size()) {
+    const char* start = value.data();
+    size_t len = value.size();
+    // Strip leading '+' that fast_float doesn't accept (C++17 spec forbids it)
+    if (len > 0 && *start == '+') {
+      start++;
+      len--;
+    }
+    fast_float::parse_options ff_opts{fast_float::chars_format::general, ctx.decimal_mark};
+    auto [ptr, ec] = fast_float::from_chars_advanced(start, start + len, result, ff_opts);
+    if (ec == std::errc() && ptr == start + len) {
       ctx.float64_values->push_back(result);
       ctx.null_bitmap->push_back(false);
     } else {
@@ -192,15 +203,15 @@ public:
   // Note: empty strings are handled as nulls by caller, so we don't check here
   static void append_bool(FastColumnContext& ctx, std::string_view value) {
     // Check for common true values
-    if (value == "true" || value == "TRUE" || value == "True" || value == "1" || value == "yes" ||
-        value == "YES") {
+    if (value == "true" || value == "TRUE" || value == "True" || value == "T" || value == "t" ||
+        value == "1" || value == "yes" || value == "YES" || value == "Yes") {
       ctx.bool_values->push_back(true);
       ctx.null_bitmap->push_back(false);
       return;
     }
     // Check for common false values
-    if (value == "false" || value == "FALSE" || value == "False" || value == "0" || value == "no" ||
-        value == "NO") {
+    if (value == "false" || value == "FALSE" || value == "False" || value == "F" || value == "f" ||
+        value == "0" || value == "no" || value == "NO" || value == "No") {
       ctx.bool_values->push_back(false);
       ctx.null_bitmap->push_back(false);
       return;
