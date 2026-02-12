@@ -240,8 +240,8 @@ std::string Dialect::to_string() const {
     ss << "'" << escape_char << "'";
   }
 
-  if (comment_char != '\0') {
-    ss << ", comment='" << comment_char << "'";
+  if (!comment_str.empty()) {
+    ss << ", comment=\"" << comment_str << "\"";
   }
 
   ss << "}";
@@ -263,12 +263,12 @@ DetectionResult DialectDetector::detect(const uint8_t* buf, size_t len) const {
   }
 
   // Skip leading comment lines before dialect detection
-  char comment_char = '\0';
+  std::string comment_str;
   size_t comment_lines_skipped = 0;
-  size_t comment_offset = skip_comment_lines(buf, len, comment_char, comment_lines_skipped);
+  size_t comment_offset = skip_comment_lines(buf, len, comment_str, comment_lines_skipped);
 
   // Record detected comment info
-  result.comment_char = comment_char;
+  result.comment_str = comment_str;
   result.comment_lines_skipped = comment_lines_skipped;
 
   // Adjust buffer to skip comment lines
@@ -336,7 +336,7 @@ DetectionResult DialectDetector::detect(const uint8_t* buf, size_t len) const {
     const auto& best = result.candidates[0];
     result.dialect = best.dialect;
     result.dialect.line_ending = detect_line_ending(data_buf, sample_len);
-    result.dialect.comment_char = comment_char; // Propagate detected comment char
+    result.dialect.comment_str = comment_str; // Propagate detected comment string
     result.confidence = best.consistency_score;
     result.detected_columns = best.num_columns;
 
@@ -719,7 +719,7 @@ bool DialectDetector::detect_header(const Dialect& dialect, const uint8_t* buf, 
   return (string_ratio > 0.5) && (data_non_strings > 0 || header_strings == header_fields.size());
 }
 
-/// Check if a row starts with a comment character (after optional leading whitespace)
+/// Check if a row starts with a comment string (after optional leading whitespace)
 bool DialectDetector::is_comment_line(const uint8_t* row_start, size_t row_len) const {
   if (options_.comment_chars.empty() || row_len == 0) {
     return false;
@@ -735,10 +735,11 @@ bool DialectDetector::is_comment_line(const uint8_t* row_start, size_t row_len) 
     return false; // Empty line (all whitespace)
   }
 
-  // Check if first non-whitespace character is a comment character
-  char first_char = static_cast<char>(row_start[i]);
-  for (char c : options_.comment_chars) {
-    if (first_char == c) {
+  // Check if the remaining content starts with any comment string
+  size_t remaining = row_len - i;
+  const char* data = reinterpret_cast<const char*>(row_start + i);
+  for (const auto& cs : options_.comment_chars) {
+    if (!cs.empty() && remaining >= cs.size() && std::memcmp(data, cs.data(), cs.size()) == 0) {
       return true;
     }
   }
@@ -1060,9 +1061,9 @@ const char* DialectDetector::cell_type_to_string(CellType type) {
   }
 }
 
-size_t DialectDetector::skip_comment_lines(const uint8_t* buf, size_t len, char& comment_char,
+size_t DialectDetector::skip_comment_lines(const uint8_t* buf, size_t len, std::string& comment_str,
                                            size_t& lines_skipped) const {
-  comment_char = '\0';
+  comment_str.clear();
   lines_skipped = 0;
 
   if (buf == nullptr || len == 0 || options_.comment_chars.empty()) {
@@ -1082,16 +1083,17 @@ size_t DialectDetector::skip_comment_lines(const uint8_t* buf, size_t len, char&
       break;
     }
 
-    // Check if this line starts with a comment character
-    char current_char = static_cast<char>(buf[offset]);
+    // Check if this line starts with any comment string
     bool is_comment = false;
+    size_t remaining = len - offset;
+    const char* data = reinterpret_cast<const char*>(buf + offset);
 
-    for (char c : options_.comment_chars) {
-      if (current_char == c) {
+    for (const auto& cs : options_.comment_chars) {
+      if (!cs.empty() && remaining >= cs.size() && std::memcmp(data, cs.data(), cs.size()) == 0) {
         is_comment = true;
-        // Record the comment character (first one found wins)
-        if (comment_char == '\0') {
-          comment_char = c;
+        // Record the comment string (first one found wins)
+        if (comment_str.empty()) {
+          comment_str = cs;
         }
         break;
       }

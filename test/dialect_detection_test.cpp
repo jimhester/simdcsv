@@ -2029,7 +2029,7 @@ TEST_F(DialectDetectionTest, DetectHashCommentLines) {
   EXPECT_TRUE(result.success()) << "Detection should succeed for hash_comments.csv";
   EXPECT_EQ(result.dialect.delimiter, ',') << "Should detect comma delimiter";
   EXPECT_EQ(result.detected_columns, 2) << "hash_comments.csv has 2 columns";
-  EXPECT_EQ(result.comment_char, '#') << "Should detect hash comment character";
+  EXPECT_EQ(result.comment_str, "#") << "Should detect hash comment string";
   EXPECT_EQ(result.comment_lines_skipped, 2) << "Should skip 2 leading comment lines";
 }
 
@@ -2041,7 +2041,7 @@ TEST_F(DialectDetectionTest, DetectMultiHeaderComments) {
   EXPECT_TRUE(result.success()) << "Detection should succeed for multi_header_comments.csv";
   EXPECT_EQ(result.dialect.delimiter, ',') << "Should detect comma delimiter";
   EXPECT_EQ(result.detected_columns, 4) << "multi_header_comments.csv has 4 columns";
-  EXPECT_EQ(result.comment_char, '#') << "Should detect hash comment character";
+  EXPECT_EQ(result.comment_str, "#") << "Should detect hash comment string";
   EXPECT_EQ(result.comment_lines_skipped, 4) << "Should skip 4 leading comment lines";
   // The key success criteria is that detection succeeds with correct results.
   // An ambiguity warning may still occur if multiple dialects score similarly,
@@ -2051,7 +2051,7 @@ TEST_F(DialectDetectionTest, DetectMultiHeaderComments) {
 TEST_F(DialectDetectionTest, CommentLinesWithSemicolon) {
   // Test semicolon comment character
   libvroom::DetectionOptions opts;
-  opts.comment_chars = {';'}; // Only semicolon as comment char
+  opts.comment_chars = {";"}; // Only semicolon as comment string
 
   libvroom::DialectDetector custom_detector(opts);
   std::string path = getTestDataPath("comments", "semicolon_comments.csv");
@@ -2059,7 +2059,7 @@ TEST_F(DialectDetectionTest, CommentLinesWithSemicolon) {
 
   EXPECT_TRUE(result.success()) << "Detection should succeed for semicolon_comments.csv";
   EXPECT_EQ(result.dialect.delimiter, ',') << "Should detect comma delimiter";
-  EXPECT_EQ(result.comment_char, ';') << "Should detect semicolon comment character";
+  EXPECT_EQ(result.comment_str, ";") << "Should detect semicolon comment string";
   EXPECT_EQ(result.comment_lines_skipped, 2) << "Should skip 2 leading comment lines";
 }
 
@@ -2069,7 +2069,7 @@ TEST_F(DialectDetectionTest, NoCommentLines) {
   auto result = detector.detect_file(path);
 
   EXPECT_TRUE(result.success()) << "Detection should succeed for simple.csv";
-  EXPECT_EQ(result.comment_char, '\0') << "No comment character should be detected";
+  EXPECT_EQ(result.comment_str, "") << "No comment string should be detected";
   EXPECT_EQ(result.comment_lines_skipped, 0) << "No comment lines to skip";
 }
 
@@ -2086,7 +2086,7 @@ TEST_F(DialectDetectionTest, CommentLinesInMemoryBuffer) {
   EXPECT_TRUE(result.success()) << "In-memory detection with comments should succeed";
   EXPECT_EQ(result.dialect.delimiter, ',');
   EXPECT_EQ(result.detected_columns, 3);
-  EXPECT_EQ(result.comment_char, '#');
+  EXPECT_EQ(result.comment_str, "#");
   EXPECT_EQ(result.comment_lines_skipped, 2);
 }
 
@@ -2101,7 +2101,7 @@ TEST_F(DialectDetectionTest, CommentLineWithLeadingWhitespace) {
   auto result = detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
 
   EXPECT_TRUE(result.success());
-  EXPECT_EQ(result.comment_char, '#');
+  EXPECT_EQ(result.comment_str, "#");
   EXPECT_EQ(result.comment_lines_skipped, 2);
 }
 
@@ -2114,7 +2114,7 @@ TEST_F(DialectDetectionTest, AllLinesAreComments) {
   auto result = detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
 
   EXPECT_FALSE(result.success()) << "File with only comments should fail detection";
-  EXPECT_EQ(result.comment_char, '#');
+  EXPECT_EQ(result.comment_str, "#");
   EXPECT_EQ(result.comment_lines_skipped, 3);
   EXPECT_FALSE(result.warning.empty());
 }
@@ -2135,7 +2135,7 @@ TEST_F(DialectDetectionTest, EmptyCommentCharsDisablesCommentDetection) {
 
   // Without comment detection, the first row is treated as data
   // which will likely cause inconsistent column counts
-  EXPECT_EQ(result.comment_char, '\0');
+  EXPECT_EQ(result.comment_str, "");
   EXPECT_EQ(result.comment_lines_skipped, 0);
 }
 
@@ -2148,14 +2148,14 @@ TEST_F(DialectDetectionTest, QuotedHashIsNotComment) {
   EXPECT_EQ(result.dialect.delimiter, ',');
   EXPECT_EQ(result.detected_columns, 2);
   // First line is data (name,description), not a comment
-  EXPECT_EQ(result.comment_char, '\0') << "No leading comment lines";
+  EXPECT_EQ(result.comment_str, "") << "No leading comment lines";
   EXPECT_EQ(result.comment_lines_skipped, 0);
 }
 
 TEST_F(DialectDetectionTest, MultipleCommentCharTypes) {
   // Test detection with multiple comment character options
   libvroom::DetectionOptions opts;
-  opts.comment_chars = {'#', ';', '%'}; // Multiple single-char comment prefixes
+  opts.comment_chars = {"#", ";", "%"}; // Multiple single-char comment prefixes
 
   libvroom::DialectDetector custom_detector(opts);
 
@@ -2168,7 +2168,7 @@ TEST_F(DialectDetectionTest, MultipleCommentCharTypes) {
       custom_detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
 
   EXPECT_TRUE(result.success());
-  EXPECT_EQ(result.comment_char, ';');
+  EXPECT_EQ(result.comment_str, ";");
   EXPECT_EQ(result.comment_lines_skipped, 1);
 }
 
@@ -2183,7 +2183,7 @@ TEST_F(DialectDetectionTest, CommentLinesCRLF) {
   auto result = detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
 
   EXPECT_TRUE(result.success());
-  EXPECT_EQ(result.comment_char, '#');
+  EXPECT_EQ(result.comment_str, "#");
   EXPECT_EQ(result.comment_lines_skipped, 2);
   EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::CRLF);
 }
@@ -2199,7 +2199,7 @@ TEST_F(DialectDetectionTest, CommentLinesCR) {
   auto result = detector.detect(reinterpret_cast<const uint8_t*>(csv_data.data()), csv_data.size());
 
   EXPECT_TRUE(result.success());
-  EXPECT_EQ(result.comment_char, '#');
+  EXPECT_EQ(result.comment_str, "#");
   EXPECT_EQ(result.comment_lines_skipped, 2);
   EXPECT_EQ(result.dialect.line_ending, libvroom::Dialect::LineEnding::CR);
 }

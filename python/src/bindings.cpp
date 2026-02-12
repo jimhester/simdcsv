@@ -42,7 +42,7 @@ read_csv(const std::string& path, std::optional<char> separator = std::nullopt,
          std::optional<std::string> error_mode = std::nullopt,
          std::optional<size_t> max_errors = std::nullopt,
          std::optional<std::string> encoding = std::nullopt,
-         std::optional<char> comment = std::nullopt, bool skip_empty_rows = true,
+         std::optional<std::string> comment = std::nullopt, bool skip_empty_rows = true,
          bool guess_integer = false, bool trim_ws = true) {
   // Set up options
   libvroom::CsvOptions csv_opts;
@@ -66,7 +66,7 @@ read_csv(const std::string& path, std::optional<char> separator = std::nullopt,
     csv_opts.encoding = enc;
   }
 
-  // Set comment character
+  // Set comment string
   if (comment)
     csv_opts.comment = *comment;
 
@@ -145,7 +145,7 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
                 std::optional<size_t> num_threads = std::nullopt,
                 std::optional<std::string> error_mode = std::nullopt,
                 std::optional<size_t> max_errors = std::nullopt,
-                std::optional<char> comment = std::nullopt, bool skip_empty_rows = true,
+                std::optional<std::string> comment = std::nullopt, bool skip_empty_rows = true,
                 bool guess_integer = false, bool trim_ws = true) {
   libvroom::VroomOptions opts;
   opts.input_path = input_path;
@@ -180,7 +180,7 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
     opts.threads.num_threads = *num_threads;
   }
 
-  // Set comment character
+  // Set comment string
   if (comment)
     opts.csv.comment = *comment;
 
@@ -366,9 +366,9 @@ PYBIND11_MODULE(_core, m) {
             Supported: "utf-8", "utf-16le", "utf-16be", "utf-32le", "utf-32be",
             "latin1", "windows-1252".
         comment : str, optional
-            Character that marks comment lines. Lines starting with this
-            character are skipped during parsing. Default is None (no comment
-            skipping).
+            String that marks comment lines. Lines starting with this
+            string are skipped during parsing. Supports multi-character
+            prefixes like "//" or "##". Default is None (no comment skipping).
         skip_empty_rows : bool, optional
             Whether to skip empty lines in the input. Default is True.
         guess_integer : bool, optional
@@ -439,9 +439,9 @@ PYBIND11_MODULE(_core, m) {
             Maximum number of errors to collect. Default is 10000.
             Setting this automatically enables "permissive" mode if error_mode is not set.
         comment : str, optional
-            Character that marks comment lines. Lines starting with this
-            character are skipped during parsing. Default is None (no comment
-            skipping).
+            String that marks comment lines. Lines starting with this
+            string are skipped during parsing. Supports multi-character
+            prefixes like "//" or "##". Default is None (no comment skipping).
         skip_empty_rows : bool, optional
             Whether to skip empty lines in the input. Default is True.
         guess_integer : bool, optional

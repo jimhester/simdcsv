@@ -40,8 +40,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       opts.separator = detected.dialect.delimiter;
       opts.quote = detected.dialect.quote_char;
       opts.has_header = detected.has_header;
-      if (detected.dialect.comment_char != '\0') {
-        opts.comment = detected.dialect.comment_char;
+      if (!detected.dialect.comment_str.empty()) {
+        opts.comment = detected.dialect.comment_str;
       }
     }
 

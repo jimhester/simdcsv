@@ -1,4 +1,5 @@
 #include "libvroom/arrow_column_builder.h"
+#include "libvroom/comment_util.h"
 #include "libvroom/encoding.h"
 #include "libvroom/parse_utils.h"
 #include "libvroom/parsed_chunk_queue.h"
@@ -16,23 +17,16 @@ namespace libvroom {
 // ============================================================================
 // Helper: skip leading comment lines
 // ============================================================================
-static size_t skip_leading_comment_lines_fwf(const char* data, size_t size, char comment_char) {
-  if (comment_char == '\0' || size == 0)
+static size_t skip_leading_comment_lines_fwf(const char* data, size_t size,
+                                             const std::string& comment) {
+  if (comment.empty() || size == 0)
     return 0;
 
   size_t offset = 0;
   while (offset < size) {
-    if (data[offset] != comment_char)
+    if (!starts_with_comment(data + offset, size - offset, comment))
       break;
-    while (offset < size && data[offset] != '\n' && data[offset] != '\r')
-      offset++;
-    if (offset < size && data[offset] == '\r') {
-      offset++;
-      if (offset < size && data[offset] == '\n')
-        offset++;
-    } else if (offset < size && data[offset] == '\n') {
-      offset++;
-    }
+    offset = skip_to_next_line(data, size, offset);
   }
   return offset;
 }
@@ -73,7 +67,7 @@ static size_t parse_fwf_chunk(const char* data, size_t size, const FwfOptions& o
 
   const size_t num_cols = columns.size();
   const bool trim = options.trim_ws;
-  const char comment = options.comment;
+  const std::string& comment = options.comment;
   const bool skip_empty = options.skip_empty_rows;
 
   size_t offset = 0;
@@ -102,7 +96,7 @@ static size_t parse_fwf_chunk(const char* data, size_t size, const FwfOptions& o
       continue;
     }
 
-    if (comment != '\0' && line_len > 0 && line_start[0] == comment) {
+    if (starts_with_comment(line_start, line_len, comment)) {
       offset = line_end_offset;
       continue;
     }
@@ -162,7 +156,7 @@ static std::vector<DataType> infer_fwf_types(const char* data, size_t size,
   TypeInference inference(csv_opts);
 
   const bool trim = options.trim_ws;
-  const char comment = options.comment;
+  const std::string& comment = options.comment;
   const bool skip_empty = options.skip_empty_rows;
 
   size_t offset = 0;
@@ -187,7 +181,7 @@ static std::vector<DataType> infer_fwf_types(const char* data, size_t size,
       offset = line_end_offset;
       continue;
     }
-    if (comment != '\0' && line_len > 0 && line_start[0] == comment) {
+    if (starts_with_comment(line_start, line_len, comment)) {
       offset = line_end_offset;
       continue;
     }

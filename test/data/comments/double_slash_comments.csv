@@ -1,0 +1,7 @@
+// C-style comment
+// Another comment
+name,value
+Alice,100
+// comment in middle
+Bob,200
+Charlie,300
