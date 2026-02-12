@@ -153,16 +153,21 @@ TEST(ErrorCollectorTest, FatalErrorStopsEvenInPermissiveMode) {
 }
 
 TEST(ErrorCollectorTest, WarningsDontStopParsing) {
+  // FAIL_FAST mode should NOT stop on warnings (only RECOVERABLE and FATAL)
   ErrorCollector collector(ErrorMode::FAIL_FAST);
 
   collector.add_error(ErrorCode::MIXED_LINE_ENDINGS, ErrorSeverity::WARNING, 1, 1, 10,
                       "Mixed line endings detected");
 
-  // In strict mode, warnings should still allow continuation
-  // (only ERROR and FATAL severity should trigger stops)
-  EXPECT_TRUE(collector.should_stop()); // Actually, strict mode stops on ANY error
+  EXPECT_FALSE(collector.should_stop());
+  EXPECT_TRUE(collector.has_errors());
 
-  // Let's test permissive mode for warnings
+  // But FAIL_FAST should stop on RECOVERABLE errors
+  collector.add_error(ErrorCode::TYPE_COERCION, ErrorSeverity::RECOVERABLE, 1, 1, 10,
+                      "Cannot convert to integer");
+  EXPECT_TRUE(collector.should_stop());
+
+  // Permissive mode should not stop on warnings either
   ErrorCollector collector2(ErrorMode::PERMISSIVE);
   collector2.add_error(ErrorCode::MIXED_LINE_ENDINGS, ErrorSeverity::WARNING, 1, 1, 10,
                        "Mixed line endings detected");

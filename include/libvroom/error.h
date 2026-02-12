@@ -227,7 +227,8 @@ public:
    */
   explicit ErrorCollector(ErrorMode mode = ErrorMode::FAIL_FAST,
                           size_t max_errors = DEFAULT_MAX_ERRORS)
-      : mode_(mode), max_errors_(max_errors), has_fatal_(false), suppressed_count_(0) {}
+      : mode_(mode), max_errors_(max_errors), has_fatal_(false), has_non_warning_(false),
+        suppressed_count_(0) {}
 
   /**
    * @brief Check if error collection is enabled.
@@ -248,9 +249,12 @@ public:
    * @param error The ParseError to add
    */
   void add_error(const ParseError& error) {
-    // Always track fatal errors, even if suppressed, so should_stop() works correctly
+    // Track severity flags, even if suppressed, so should_stop() works correctly
     if (error.severity == ErrorSeverity::FATAL) {
       has_fatal_ = true;
+    }
+    if (error.severity != ErrorSeverity::WARNING) {
+      has_non_warning_ = true;
     }
     if (errors_.size() >= max_errors_) {
       ++suppressed_count_;
@@ -286,7 +290,7 @@ public:
    * @brief Check if parsing should stop based on current errors and mode.
    *
    * Returns true in the following cases:
-   * - FAIL_FAST mode and any error has been recorded
+   * - FAIL_FAST mode and any non-WARNING error has been recorded
    * - Any FATAL error has been recorded (regardless of mode, except DISABLED)
    *
    * @return true if parsing should stop
@@ -294,7 +298,7 @@ public:
   bool should_stop() const {
     if (mode_ == ErrorMode::DISABLED)
       return false;
-    if (mode_ == ErrorMode::FAIL_FAST && !errors_.empty())
+    if (mode_ == ErrorMode::FAIL_FAST && has_non_warning_)
       return true;
     if (mode_ != ErrorMode::BEST_EFFORT && has_fatal_)
       return true;
@@ -337,6 +341,7 @@ public:
   void clear() {
     errors_.clear();
     has_fatal_ = false;
+    has_non_warning_ = false;
     suppressed_count_ = 0;
   }
 
@@ -381,6 +386,9 @@ public:
       if (other.has_fatal_) {
         has_fatal_ = true;
       }
+      if (other.has_non_warning_) {
+        has_non_warning_ = true;
+      }
       return;
     }
 
@@ -399,6 +407,9 @@ public:
     }
     if (other.has_fatal_) {
       has_fatal_ = true;
+    }
+    if (other.has_non_warning_) {
+      has_non_warning_ = true;
     }
   }
 
@@ -451,6 +462,7 @@ private:
   size_t max_errors_;
   std::vector<ParseError> errors_;
   bool has_fatal_;
+  bool has_non_warning_;
   size_t suppressed_count_;
 };
 
