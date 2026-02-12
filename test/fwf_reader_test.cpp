@@ -348,3 +348,142 @@ TEST_F(FwfReaderTest, NoTrailingNewline) {
   ASSERT_EQ(result.total_rows, 2u);
   EXPECT_EQ(getValue(result, 1, 1), "world");
 }
+
+// ============================================================================
+// SCHEMA OVERRIDE
+// ============================================================================
+
+TEST_F(FwfReaderTest, SchemaOverride) {
+  std::string content = "  1 hello\n"
+                        "  2 world\n"
+                        "  3 foo  \n";
+
+  test_util::TempCsvFile f(content, ".fwf");
+
+  libvroom::FwfOptions opts;
+  opts.col_starts = {0, 4};
+  opts.col_ends = {4, -1};
+  opts.col_names = {"num", "str"};
+  opts.guess_integer = true;
+
+  // First open and verify auto-inferred types
+  libvroom::FwfReader reader(opts);
+  auto open_result = reader.open(f.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+  EXPECT_EQ(reader.schema()[0].type, libvroom::DataType::INT32);
+  EXPECT_EQ(reader.schema()[1].type, libvroom::DataType::STRING);
+
+  // Override first column to STRING
+  auto schema = reader.schema();
+  schema[0].type = libvroom::DataType::STRING;
+  auto set_result = reader.set_schema(schema);
+  ASSERT_TRUE(set_result.ok) << set_result.error;
+  EXPECT_EQ(reader.schema()[0].type, libvroom::DataType::STRING);
+
+  // Parse and verify values come through as strings
+  auto stream_result = reader.start_streaming();
+  ASSERT_TRUE(stream_result.ok) << stream_result.error;
+
+  size_t total = 0;
+  std::vector<std::vector<std::unique_ptr<libvroom::ArrowColumnBuilder>>> chunks;
+  while (auto chunk = reader.next_chunk()) {
+    total += chunk->empty() ? 0 : (*chunk)[0]->size();
+    chunks.push_back(std::move(*chunk));
+  }
+  ASSERT_EQ(total, 3u);
+
+  // First column should be string type now
+  EXPECT_EQ(chunks[0][0]->type(), libvroom::DataType::STRING);
+  EXPECT_EQ(test_util::getValue(chunks[0][0].get(), 0), "1");
+  EXPECT_EQ(test_util::getValue(chunks[0][0].get(), 1), "2");
+  EXPECT_EQ(test_util::getValue(chunks[0][0].get(), 2), "3");
+}
+
+TEST_F(FwfReaderTest, SchemaOverrideErrors) {
+  std::string content = "  1 hello\n";
+
+  test_util::TempCsvFile f(content, ".fwf");
+
+  libvroom::FwfOptions opts;
+  opts.col_starts = {0, 4};
+  opts.col_ends = {4, -1};
+  opts.col_names = {"num", "str"};
+
+  // Cannot set schema before open()
+  libvroom::FwfReader reader1(opts);
+  std::vector<libvroom::ColumnSchema> dummy_schema;
+  auto result1 = reader1.set_schema(dummy_schema);
+  EXPECT_FALSE(result1.ok);
+
+  // Schema length mismatch
+  libvroom::FwfReader reader2(opts);
+  auto open2 = reader2.open(f.path());
+  ASSERT_TRUE(open2.ok);
+  std::vector<libvroom::ColumnSchema> wrong_size(3);
+  auto result2 = reader2.set_schema(wrong_size);
+  EXPECT_FALSE(result2.ok);
+}
+
+// ============================================================================
+// STREAMING MULTIPLE CHUNKS
+// ============================================================================
+
+TEST_F(FwfReaderTest, StreamingMultipleChunks) {
+  // Generate >1MB of FWF data to trigger parallel path
+  std::string line = "  12345 hello world   \n"; // ~22 bytes per line
+  size_t lines_needed = (1024 * 1024 * 2) / line.size() + 1;
+
+  std::string content;
+  content.reserve(lines_needed * line.size());
+  for (size_t i = 0; i < lines_needed; ++i) {
+    content += line;
+  }
+
+  test_util::TempCsvFile f(content, ".fwf");
+
+  libvroom::FwfOptions opts;
+  opts.col_starts = {0, 8};
+  opts.col_ends = {8, -1};
+  opts.col_names = {"num", "str"};
+  opts.num_threads = 4;
+
+  libvroom::FwfReader reader(opts);
+  auto open_result = reader.open(f.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto stream_result = reader.start_streaming();
+  ASSERT_TRUE(stream_result.ok) << stream_result.error;
+
+  size_t total_rows = 0;
+  size_t num_chunks = 0;
+  while (auto chunk = reader.next_chunk()) {
+    if (!chunk->empty()) {
+      total_rows += (*chunk)[0]->size();
+      num_chunks++;
+    }
+  }
+
+  // Should have multiple chunks for parallel processing
+  EXPECT_GT(num_chunks, 1u) << "Expected multiple chunks for >1MB data";
+  EXPECT_EQ(total_rows, lines_needed);
+}
+
+// ============================================================================
+// TIME TYPE INFERENCE
+// ============================================================================
+
+TEST_F(FwfReaderTest, TimeTypeInference) {
+  std::string content = "08:30:00  Alice\n"
+                        "14:15:30  Bob  \n"
+                        "23:59:59  Carol\n";
+
+  libvroom::FwfOptions opts;
+  opts.col_starts = {0, 10};
+  opts.col_ends = {10, -1};
+  opts.col_names = {"time_col", "name"};
+
+  auto result = parseContent(content, opts);
+  ASSERT_EQ(result.total_rows, 3u);
+  EXPECT_EQ(result.schema[0].type, libvroom::DataType::TIME);
+  EXPECT_EQ(result.schema[1].type, libvroom::DataType::STRING);
+}
