@@ -10,6 +10,7 @@
  */
 
 #include "libvroom.h"
+#include "libvroom/parse_utils.h"
 #include "libvroom/types.h"
 
 #include "test_util.h"
@@ -566,15 +567,53 @@ TEST_F(CustomOptionsTest, SemicolonSeparatorInInferFromSample) {
 }
 
 // ============================================================================
+// E1b. NullChecker refactor tests
+// ============================================================================
+
+class NullCheckerTest : public ::testing::Test {};
+
+TEST_F(NullCheckerTest, EmptyNullValuesNothingIsNull) {
+  libvroom::NullChecker checker(std::string_view(""));
+  EXPECT_FALSE(checker.is_null(""));
+  EXPECT_FALSE(checker.is_null("NA"));
+  EXPECT_FALSE(checker.is_null("anything"));
+}
+
+TEST_F(NullCheckerTest, EmptyStringNotNullByDefault) {
+  // Only explicit trailing comma enables empty-is-null
+  libvroom::NullChecker checker(std::string_view("NA"));
+  EXPECT_FALSE(checker.is_null(""));
+  EXPECT_TRUE(checker.is_null("NA"));
+}
+
+TEST_F(NullCheckerTest, TrailingCommaEnablesEmptyIsNull) {
+  libvroom::NullChecker checker(std::string_view("NA,"));
+  EXPECT_TRUE(checker.is_null(""));
+  EXPECT_TRUE(checker.is_null("NA"));
+  EXPECT_FALSE(checker.is_null("other"));
+}
+
+TEST_F(NullCheckerTest, DeferredInitialization) {
+  libvroom::NullChecker checker(std::string_view(""));
+  EXPECT_FALSE(checker.is_null("NA"));
+
+  checker.init("NA,NULL,");
+  EXPECT_TRUE(checker.is_null("NA"));
+  EXPECT_TRUE(checker.is_null("NULL"));
+  EXPECT_TRUE(checker.is_null(""));
+}
+
+// ============================================================================
 // E2. guess_integer option tests
 // ============================================================================
 
 class GuessIntegerTest : public ::testing::Test {};
 
-TEST_F(GuessIntegerTest, DefaultGuessIntegerFalse_IntegersInferAsFloat) {
-  // Default guess_integer = false: integer-like values infer as FLOAT64
+TEST_F(GuessIntegerTest, GuessIntegerFalse_IntegersInferAsFloat) {
+  // guess_integer = false: integer-like values infer as FLOAT64
   CsvOptions opts;
   opts.separator = ",";
+  opts.guess_integer = false;
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("42"), DataType::FLOAT64);
   EXPECT_EQ(inference.infer_field("0"), DataType::FLOAT64);
@@ -583,17 +622,19 @@ TEST_F(GuessIntegerTest, DefaultGuessIntegerFalse_IntegersInferAsFloat) {
   EXPECT_EQ(inference.infer_field("9999999999"), DataType::FLOAT64);
 }
 
-TEST_F(GuessIntegerTest, DefaultGuessIntegerFalse_FloatsStillFloat) {
+TEST_F(GuessIntegerTest, GuessIntegerFalse_FloatsStillFloat) {
   CsvOptions opts;
   opts.separator = ",";
+  opts.guess_integer = false;
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("1.5"), DataType::FLOAT64);
   EXPECT_EQ(inference.infer_field("1e10"), DataType::FLOAT64);
 }
 
-TEST_F(GuessIntegerTest, DefaultGuessIntegerFalse_OtherTypesUnaffected) {
+TEST_F(GuessIntegerTest, GuessIntegerFalse_OtherTypesUnaffected) {
   CsvOptions opts;
   opts.separator = ",";
+  opts.guess_integer = false;
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("true"), DataType::BOOL);
   EXPECT_EQ(inference.infer_field("hello"), DataType::STRING);
@@ -614,9 +655,10 @@ TEST_F(GuessIntegerTest, GuessIntegerTrue_IntegersInferAsInt) {
   EXPECT_EQ(inference.infer_field("9999999999"), DataType::INT64);
 }
 
-TEST_F(GuessIntegerTest, InferFromSample_DefaultNoIntegers) {
+TEST_F(GuessIntegerTest, InferFromSample_GuessIntegerFalse) {
   CsvOptions opts;
   opts.separator = ",";
+  opts.guess_integer = false;
   TypeInference inference(opts);
   std::string data = "1,2.5,hello\n3,4.5,world\n";
   auto types = inference.infer_from_sample(data.data(), data.size(), 3);
@@ -785,4 +827,135 @@ TEST_F(TypeInferenceEndToEndTest, IntFloat64MixedSchemaType) {
   ASSERT_EQ(schema.size(), 1u);
   // Mixed int + float should widen to FLOAT64
   EXPECT_EQ(schema[0].type, DataType::FLOAT64);
+}
+
+// ============================================================================
+// H. Leading + in floats
+// ============================================================================
+
+class LeadingPlusFloatTest : public ::testing::Test {};
+
+TEST_F(LeadingPlusFloatTest, LeadingPlusInfersAsFloat) {
+  CsvOptions opts;
+  opts.separator = ",";
+  TypeInference inference(opts);
+  EXPECT_EQ(inference.infer_field("+1.5"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("+0.0"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("+3.14e2"), DataType::FLOAT64);
+}
+
+TEST_F(LeadingPlusFloatTest, LeadingPlusEndToEnd) {
+  test_util::TempCsvFile csv("val\n+1.5\n+2.5\n+3.5\n");
+
+  CsvReader reader(CsvOptions{});
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 1u);
+  EXPECT_EQ(schema[0].type, DataType::FLOAT64);
+  EXPECT_EQ(read_result.value.total_rows, 3u);
+}
+
+// ============================================================================
+// I. Extended boolean values
+// ============================================================================
+
+class ExtendedBoolTest : public ::testing::Test {};
+
+TEST_F(ExtendedBoolTest, SingleLetterBooleans) {
+  CsvOptions opts;
+  opts.separator = ",";
+  TypeInference inference(opts);
+  EXPECT_EQ(inference.infer_field("T"), DataType::BOOL);
+  EXPECT_EQ(inference.infer_field("t"), DataType::BOOL);
+  EXPECT_EQ(inference.infer_field("F"), DataType::BOOL);
+  EXPECT_EQ(inference.infer_field("f"), DataType::BOOL);
+}
+
+TEST_F(ExtendedBoolTest, EndToEndSingleLetterBools) {
+  test_util::TempCsvFile csv("flag\nT\nF\nt\nf\n");
+
+  CsvReader reader(CsvOptions{});
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 1u);
+  EXPECT_EQ(schema[0].type, DataType::BOOL);
+  EXPECT_EQ(read_result.value.total_rows, 4u);
+}
+
+// ============================================================================
+// J. Decimal mark option
+// ============================================================================
+
+class DecimalMarkTest : public ::testing::Test {};
+
+TEST_F(DecimalMarkTest, CommaDecimalMarkInference) {
+  CsvOptions opts;
+  opts.separator = ';';
+  opts.decimal_mark = ',';
+  TypeInference inference(opts);
+  EXPECT_EQ(inference.infer_field("1,5"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("3,14"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("-2,7"), DataType::FLOAT64);
+}
+
+TEST_F(DecimalMarkTest, CommaDecimalMarkEndToEnd) {
+  test_util::TempCsvFile csv("x;y\n1,5;hello\n2,7;world\n");
+
+  CsvOptions opts;
+  opts.separator = ';';
+  opts.decimal_mark = ',';
+  CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2u);
+  EXPECT_EQ(schema[0].type, DataType::FLOAT64);
+  EXPECT_EQ(schema[1].type, DataType::STRING);
+}
+
+// ============================================================================
+// K. Type inference sampling improvements
+// ============================================================================
+
+class InferenceSamplingTest : public ::testing::Test {};
+
+TEST_F(InferenceSamplingTest, SkipCommentLinesDuringSampling) {
+  CsvOptions opts;
+  opts.separator = ",";
+  opts.comment = '#';
+  opts.guess_integer = true;
+  TypeInference inference(opts);
+
+  std::string data = "1,hello\n# this is a comment\n2,world\n";
+  auto types = inference.infer_from_sample(data.data(), data.size(), 2);
+  EXPECT_EQ(types.size(), 2u);
+  EXPECT_EQ(types[0], DataType::INT32);
+  EXPECT_EQ(types[1], DataType::STRING);
+}
+
+TEST_F(InferenceSamplingTest, SkipEmptyLinesDuringSampling) {
+  CsvOptions opts;
+  opts.separator = ",";
+  opts.guess_integer = true;
+  TypeInference inference(opts);
+
+  std::string data = "1,hello\n\n\n2,world\n";
+  auto types = inference.infer_from_sample(data.data(), data.size(), 2);
+  EXPECT_EQ(types.size(), 2u);
+  EXPECT_EQ(types[0], DataType::INT32);
+  EXPECT_EQ(types[1], DataType::STRING);
 }

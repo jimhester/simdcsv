@@ -113,11 +113,20 @@ public:
     return false;
   }
 
-private:
+  // Public init for deferred initialization (resets and re-parses)
   void init(std::string_view null_values) {
+    null_values_.clear();
+    max_null_length_ = 0;
+    empty_is_null_ = false;
+
+    if (null_values.empty()) {
+      return; // Empty null_values = nothing is null
+    }
+
     size_t start = 0;
 
-    while (start < null_values.size()) {
+    // Use <= to handle trailing comma (e.g. "NA," has an empty token at end)
+    while (start <= null_values.size()) {
       size_t end = null_values.find(',', start);
       if (end == std::string_view::npos) {
         end = null_values.size();
@@ -135,9 +144,10 @@ private:
     }
   }
 
+private:
   std::vector<std::string> null_values_;
   size_t max_null_length_ = 0;
-  bool empty_is_null_ = true; // Default: empty strings are null
+  bool empty_is_null_ = false; // Only true when null_values has trailing comma
 };
 
 } // namespace libvroom

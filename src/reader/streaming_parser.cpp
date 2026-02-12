@@ -8,6 +8,7 @@
 
 #include <cstring>
 #include <deque>
+#include <stdexcept>
 #include <vector>
 
 namespace libvroom {
@@ -29,6 +30,8 @@ struct StreamingParser::Impl {
   bool schema_explicit = false; // Set by set_schema()
   bool header_parsed = false;
   bool batch_initialized = false;
+  size_t lines_skipped = 0; // For skip option
+  bool skip_saw_cr = false; // Track CR at buffer boundary during skip
 
   // Error handling
   ErrorCollector error_collector;
@@ -48,7 +51,14 @@ struct StreamingParser::Impl {
   bool finished = false;
 
   explicit Impl(const StreamingOptions& opts)
-      : options(opts), error_collector(opts.csv.error_mode, opts.csv.max_errors) {}
+      : options(opts), error_collector(opts.csv.error_mode, opts.csv.max_errors) {
+    // Validate that decimal_mark and separator don't conflict
+    if (options.csv.decimal_mark != '\0' && options.csv.separator.size() == 1 &&
+        options.csv.decimal_mark == options.csv.separator[0]) {
+      throw std::runtime_error("decimal_mark and separator cannot be the same character ('" +
+                               std::string(1, options.csv.decimal_mark) + "')");
+    }
+  }
 
   // Compact the buffer by removing consumed bytes
   void compact_buffer() {
@@ -76,6 +86,11 @@ struct StreamingParser::Impl {
     fast_contexts.reserve(current_columns.size());
     for (auto& col : current_columns) {
       fast_contexts.push_back(col->create_context());
+    }
+
+    // Propagate decimal_mark to all fast contexts
+    for (auto& fc : fast_contexts) {
+      fc.decimal_mark = options.csv.decimal_mark;
     }
 
     batch_initialized = true;
@@ -121,6 +136,41 @@ struct StreamingParser::Impl {
 
     if (avail == 0)
       return false;
+
+    // Skip leading lines if requested (raw newline counting, matching CsvReader::skip_n_lines)
+    // Handle CRLF split across buffer boundary: if previous feed ended on \r,
+    // consume the orphaned \n before resuming.
+    if (skip_saw_cr && avail > 0 && data[0] == '\n') {
+      consumed++;
+      data++;
+      avail--;
+      skip_saw_cr = false;
+    }
+    while (lines_skipped < options.csv.skip) {
+      // Find next line ending (not quote-aware, same as batch parser)
+      size_t pos = 0;
+      while (pos < avail && data[pos] != '\n' && data[pos] != '\r')
+        ++pos;
+      if (pos >= avail)
+        return false; // Not enough data to find end of skip line
+      if (data[pos] == '\r') {
+        pos++;
+        if (pos < avail && data[pos] == '\n') {
+          pos++; // CRLF
+        } else if (pos >= avail) {
+          // CR at buffer boundary - consume it but remember for next feed
+          skip_saw_cr = true;
+        }
+      } else {
+        pos++; // LF
+      }
+      consumed += pos;
+      data = buffer.data() + consumed;
+      avail = buffer.size() - consumed;
+      ++lines_skipped;
+      if (avail == 0)
+        return false;
+    }
 
     if (!options.csv.has_header) {
       // No header mode - infer column count from the first row

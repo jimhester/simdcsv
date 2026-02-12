@@ -691,15 +691,17 @@ TEST_F(CsvReaderTest, SchemaWithQuotedHeaders) {
 // ============================================================================
 
 TEST_F(CsvReaderTest, SetSchemaOverridesAllColumns) {
-  // CSV with numeric data that would be inferred as FLOAT64 (guess_integer defaults to false)
+  // CSV with numeric data that would be inferred as FLOAT64 with guess_integer=false
   std::string csv = "a,b,c\n1,2,3\n4,5,6\n";
   test_util::TempCsvFile file(csv);
 
-  libvroom::CsvReader reader({});
+  libvroom::CsvOptions opts;
+  opts.guess_integer = false;
+  libvroom::CsvReader reader(opts);
   auto open_result = reader.open(file.path());
   ASSERT_TRUE(open_result.ok);
 
-  // Verify inference gave us FLOAT64 (guess_integer defaults to false)
+  // Verify inference gave us FLOAT64 (guess_integer=false)
   ASSERT_EQ(reader.schema().size(), 3u);
   for (const auto& col : reader.schema()) {
     EXPECT_EQ(col.type, libvroom::DataType::FLOAT64);
@@ -767,7 +769,9 @@ TEST_F(CsvReaderTest, SetSchemaMismatchedLengthFails) {
   std::string csv = "a,b,c\n1,2,3\n";
   test_util::TempCsvFile file(csv);
 
-  libvroom::CsvReader reader({});
+  libvroom::CsvOptions opts;
+  opts.guess_integer = false;
+  libvroom::CsvReader reader(opts);
   auto open_result = reader.open(file.path());
   ASSERT_TRUE(open_result.ok);
   ASSERT_EQ(reader.schema().size(), 3u);
@@ -1031,6 +1035,59 @@ TEST(TrimWhitespaceParsingTest, HeadersAlwaysTrimmed) {
   const auto& schema = reader.schema();
   EXPECT_EQ(schema[0].name, "name");
   EXPECT_EQ(schema[1].name, "value");
+}
+
+// ============================================================================
+// Skip option tests
+// ============================================================================
+
+class SkipLinesTest : public ::testing::Test {};
+
+TEST_F(SkipLinesTest, SkipZeroLines) {
+  test_util::TempCsvFile csv("name,val\nalice,1\nbob,2\n");
+
+  libvroom::CsvOptions opts;
+  opts.skip = 0;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2u);
+  EXPECT_EQ(schema[0].name, "name");
+}
+
+TEST_F(SkipLinesTest, SkipTwoLines) {
+  test_util::TempCsvFile csv("junk line 1\njunk line 2\nname,val\nalice,1\nbob,2\n");
+
+  libvroom::CsvOptions opts;
+  opts.skip = 2;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2u);
+  EXPECT_EQ(schema[0].name, "name");
+  EXPECT_EQ(schema[1].name, "val");
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+  EXPECT_EQ(read_result.value.total_rows, 2u);
+}
+
+TEST_F(SkipLinesTest, SkipWithCRLF) {
+  test_util::TempCsvFile csv("skip me\r\nname,val\r\nalice,1\r\n");
+
+  libvroom::CsvOptions opts;
+  opts.skip = 1;
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2u);
+  EXPECT_EQ(schema[0].name, "name");
 }
 
 // ============================================================================

@@ -98,8 +98,17 @@ DataType TypeInference::infer_field(std::string_view value) {
 
   // Try to parse as float
   double result;
-  auto [ptr, ec] = fast_float::from_chars(value.data(), value.data() + value.size(), result);
-  if (ec == std::errc() && ptr == value.data() + value.size()) {
+  const char* float_start = value.data();
+  size_t float_len = value.size();
+  // Strip leading '+' that fast_float doesn't accept (C++17 spec forbids it)
+  if (float_len > 0 && *float_start == '+') {
+    float_start++;
+    float_len--;
+  }
+  fast_float::parse_options ff_opts{fast_float::chars_format::general, options_.decimal_mark};
+  auto [ptr, ec] =
+      fast_float::from_chars_advanced(float_start, float_start + float_len, result, ff_opts);
+  if (ec == std::errc() && ptr == float_start + float_len) {
     return DataType::FLOAT64;
   }
 
@@ -165,6 +174,28 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
 
     if (row_size == 0) {
       ++offset;
+      continue;
+    }
+
+    // Skip empty lines (only whitespace/newlines)
+    {
+      bool is_empty = true;
+      for (size_t i = offset; i < row_end; ++i) {
+        char c = data[i];
+        if (c != '\n' && c != '\r' && c != ' ' && c != '\t') {
+          is_empty = false;
+          break;
+        }
+      }
+      if (is_empty) {
+        offset = row_end;
+        continue;
+      }
+    }
+
+    // Skip comment lines
+    if (options_.comment != '\0' && data[offset] == options_.comment) {
+      offset = row_end;
       continue;
     }
 
