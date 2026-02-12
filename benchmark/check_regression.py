@@ -60,6 +60,10 @@ def load_benchmark(filepath, check_errors=False):
     time_unit = 'ns'  # default
     for bench in data.get('benchmarks', []):
         name = bench.get('name', '')
+        # Normalize name: strip /real_time suffix added by UseRealTime()
+        # so HEAD (with UseRealTime) and BASE (without) can be compared
+        if name.endswith('/real_time'):
+            name = name[:-len('/real_time')]
         # Skip aggregate results (mean, median, stddev)
         if bench.get('aggregate_name'):
             continue
