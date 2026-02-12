@@ -12,7 +12,10 @@
 // Generate dispatch tables and public API (only once)
 #if HWY_ONCE
 
+#include "libvroom/split_fields.h"
 #include "libvroom/vroom.h"
+
+#include <string_view>
 
 namespace libvroom {
 
@@ -218,6 +221,62 @@ void split_fields_into(const char* data, size_t size, char separator, char quote
     split_fields_simd_into(data, size, separator, quote, fields);
   } else {
     split_fields_scalar_into(data, size, separator, quote, fields);
+  }
+}
+
+// ============================================================================
+// Multi-byte separator overloads
+// ============================================================================
+
+std::vector<FieldView> split_fields(const char* data, size_t size, std::string_view separator,
+                                    char quote) {
+  if (separator.size() <= 1) {
+    char sep = separator.empty() ? ',' : separator[0];
+    return split_fields(data, size, sep, quote);
+  }
+  // Scalar multi-byte path
+  std::vector<FieldView> fields;
+  SplitFields iter(data, size, separator, quote, '\n');
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+  while (iter.next(field_data, field_len, needs_escaping)) {
+    FieldView fv;
+    fv.data = field_data;
+    fv.size = field_len;
+    fv.quoted = needs_escaping;
+    // Strip trailing \r
+    if (fv.size > 0 && fv.data[fv.size - 1] == '\r') {
+      fv.size--;
+    }
+    PostProcessFieldInline(fv, quote);
+    fields.push_back(fv);
+  }
+  return fields;
+}
+
+void split_fields_into(const char* data, size_t size, std::string_view separator, char quote,
+                       std::vector<FieldView>& fields) {
+  if (separator.size() <= 1) {
+    char sep = separator.empty() ? ',' : separator[0];
+    split_fields_into(data, size, sep, quote, fields);
+    return;
+  }
+  fields.clear();
+  SplitFields iter(data, size, separator, quote, '\n');
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+  while (iter.next(field_data, field_len, needs_escaping)) {
+    FieldView fv;
+    fv.data = field_data;
+    fv.size = field_len;
+    fv.quoted = needs_escaping;
+    if (fv.size > 0 && fv.data[fv.size - 1] == '\r') {
+      fv.size--;
+    }
+    PostProcessFieldInline(fv, quote);
+    fields.push_back(fv);
   }
 }
 

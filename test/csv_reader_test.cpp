@@ -144,7 +144,7 @@ TEST_F(CsvReaderTest, EmbeddedSeparators) {
 
 TEST_F(CsvReaderTest, SemicolonSeparator) {
   libvroom::CsvOptions opts;
-  opts.separator = ';';
+  opts.separator = ";";
   auto [chunks, schema] = parseFile(testDataPath("separators/semicolon.csv"), opts);
   EXPECT_EQ(schema.size(), 3u);
   EXPECT_EQ(chunks.total_rows, 3u);
@@ -154,7 +154,7 @@ TEST_F(CsvReaderTest, SemicolonSeparator) {
 
 TEST_F(CsvReaderTest, TabSeparator) {
   libvroom::CsvOptions opts;
-  opts.separator = '\t';
+  opts.separator = "\t";
   auto [chunks, schema] = parseFile(testDataPath("separators/tab.csv"), opts);
   EXPECT_EQ(schema.size(), 3u);
   EXPECT_EQ(chunks.total_rows, 3u);
@@ -163,7 +163,7 @@ TEST_F(CsvReaderTest, TabSeparator) {
 
 TEST_F(CsvReaderTest, PipeSeparator) {
   libvroom::CsvOptions opts;
-  opts.separator = '|';
+  opts.separator = "|";
   auto [chunks, schema] = parseFile(testDataPath("separators/pipe.csv"), opts);
   EXPECT_EQ(schema.size(), 3u);
   EXPECT_EQ(chunks.total_rows, 3u);
@@ -725,7 +725,7 @@ TEST_F(CsvReaderTest, AutoDetectCommaDelimiter) {
 
 TEST_F(CsvReaderTest, ExplicitDelimiterSkipsAutoDetect) {
   libvroom::CsvOptions opts;
-  opts.separator = '\t';
+  opts.separator = "\t";
   libvroom::CsvReader reader(opts);
   auto result = reader.open(testDataPath("separators/tab.csv"));
   ASSERT_TRUE(result.ok);
@@ -894,4 +894,245 @@ TEST_F(SkipLinesTest, SkipWithCRLF) {
   const auto& schema = reader.schema();
   ASSERT_EQ(schema.size(), 2u);
   EXPECT_EQ(schema[0].name, "name");
+}
+
+// ============================================================================
+// MULTI-BYTE DELIMITER TESTS (SplitFields)
+// ============================================================================
+
+TEST(MultiByteDelimiter, SplitFieldsMultiByte) {
+  std::string line = "hello|~|world|~|test\n";
+  libvroom::SplitFields iter(line.data(), line.size(), std::string_view("|~|"), '"', '\n');
+
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "hello");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "world");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "test");
+
+  EXPECT_FALSE(iter.next(field_data, field_len, needs_escaping));
+}
+
+TEST(MultiByteDelimiter, SplitFieldsDoubleTab) {
+  std::string line = "a\t\tb\t\tc\n";
+  libvroom::SplitFields iter(line.data(), line.size(), std::string_view("\t\t"), '"', '\n');
+
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "a");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "b");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "c");
+
+  EXPECT_FALSE(iter.next(field_data, field_len, needs_escaping));
+}
+
+TEST(MultiByteDelimiter, SplitFieldsQuotedMultiByte) {
+  std::string line = "\"hello|~|world\"|~|test\n";
+  libvroom::SplitFields iter(line.data(), line.size(), std::string_view("|~|"), '"', '\n');
+
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_TRUE(needs_escaping);
+  EXPECT_EQ(std::string_view(field_data, field_len), "\"hello|~|world\"");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "test");
+
+  EXPECT_FALSE(iter.next(field_data, field_len, needs_escaping));
+}
+
+TEST(MultiByteDelimiter, SplitFieldsEmptyFields) {
+  std::string line = "|~||~|test|~|\n";
+  libvroom::SplitFields iter(line.data(), line.size(), std::string_view("|~|"), '"', '\n');
+
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(field_len, 0u); // empty field
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(field_len, 0u); // empty field
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "test");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(field_len, 0u); // trailing empty field
+
+  EXPECT_FALSE(iter.next(field_data, field_len, needs_escaping));
+}
+
+TEST(MultiByteDelimiter, SingleByteThroughStringView) {
+  // Single-byte separator via string_view constructor should still work (uses SIMD path)
+  std::string line = "a,b,c\n";
+  libvroom::SplitFields iter(line.data(), line.size(), std::string_view(","), '"', '\n');
+
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "a");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "b");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "c");
+
+  EXPECT_FALSE(iter.next(field_data, field_len, needs_escaping));
+}
+
+// ============================================================================
+// Multi-byte delimiter full pipeline tests (CsvReader end-to-end)
+// ============================================================================
+
+TEST(MultiByteDelimiter, FullPipelinePipeWavePipe) {
+  std::string csv = "name|~|age|~|city\nAlice|~|30|~|NYC\nBob|~|25|~|LA\n";
+  auto buffer = libvroom::AlignedBuffer::allocate(csv.size());
+  std::memcpy(buffer.data(), csv.data(), csv.size());
+
+  libvroom::CsvOptions opts;
+  opts.separator = "|~|";
+  opts.has_header = true;
+
+  libvroom::CsvReader reader(opts);
+  auto open = reader.open_from_buffer(std::move(buffer));
+  ASSERT_TRUE(open.ok) << open.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 3u);
+  EXPECT_EQ(schema[0].name, "name");
+  EXPECT_EQ(schema[1].name, "age");
+  EXPECT_EQ(schema[2].name, "city");
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+  EXPECT_EQ(result.value.total_rows, 2u);
+
+  // Verify data
+  EXPECT_EQ(test_util::getStringValue(result.value, 0, 0), "Alice");
+  EXPECT_EQ(test_util::getStringValue(result.value, 0, 1), "Bob");
+  EXPECT_EQ(test_util::getStringValue(result.value, 2, 0), "NYC");
+  EXPECT_EQ(test_util::getStringValue(result.value, 2, 1), "LA");
+}
+
+TEST(MultiByteDelimiter, FullPipelineDoubleTab) {
+  std::string csv = "a\t\tb\t\tc\n1\t\t2\t\t3\n4\t\t5\t\t6\n";
+  auto buffer = libvroom::AlignedBuffer::allocate(csv.size());
+  std::memcpy(buffer.data(), csv.data(), csv.size());
+
+  libvroom::CsvOptions opts;
+  opts.separator = "\t\t";
+  opts.has_header = true;
+
+  libvroom::CsvReader reader(opts);
+  auto open = reader.open_from_buffer(std::move(buffer));
+  ASSERT_TRUE(open.ok) << open.error;
+  EXPECT_EQ(reader.schema().size(), 3u);
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+  EXPECT_EQ(result.value.total_rows, 2u);
+}
+
+TEST(MultiByteDelimiter, SepInsideQuotes) {
+  std::string csv = "a|~|b\n\"hello|~|world\"|~|test\n";
+  auto buffer = libvroom::AlignedBuffer::allocate(csv.size());
+  std::memcpy(buffer.data(), csv.data(), csv.size());
+
+  libvroom::CsvOptions opts;
+  opts.separator = "|~|";
+  opts.has_header = true;
+
+  libvroom::CsvReader reader(opts);
+  auto open = reader.open_from_buffer(std::move(buffer));
+  ASSERT_TRUE(open.ok) << open.error;
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+  EXPECT_EQ(result.value.total_rows, 1u);
+
+  // The quoted field should preserve the separator inside
+  EXPECT_EQ(test_util::getStringValue(result.value, 0, 0), "hello|~|world");
+  EXPECT_EQ(test_util::getStringValue(result.value, 1, 0), "test");
+}
+
+TEST(MultiByteDelimiter, EmptyFieldsBetweenSep) {
+  std::string csv = "a|~|b|~|c\n|~||~|\n";
+  auto buffer = libvroom::AlignedBuffer::allocate(csv.size());
+  std::memcpy(buffer.data(), csv.data(), csv.size());
+
+  libvroom::CsvOptions opts;
+  opts.separator = "|~|";
+  opts.has_header = true;
+
+  libvroom::CsvReader reader(opts);
+  auto open = reader.open_from_buffer(std::move(buffer));
+  ASSERT_TRUE(open.ok) << open.error;
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+  EXPECT_EQ(result.value.total_rows, 1u);
+}
+
+TEST(MultiByteDelimiter, NoHeader) {
+  std::string csv = "1|~|2|~|3\n4|~|5|~|6\n";
+  auto buffer = libvroom::AlignedBuffer::allocate(csv.size());
+  std::memcpy(buffer.data(), csv.data(), csv.size());
+
+  libvroom::CsvOptions opts;
+  opts.separator = "|~|";
+  opts.has_header = false;
+
+  libvroom::CsvReader reader(opts);
+  auto open = reader.open_from_buffer(std::move(buffer));
+  ASSERT_TRUE(open.ok) << open.error;
+  EXPECT_EQ(reader.schema().size(), 3u);
+  // Generic column names: V1, V2, V3
+  EXPECT_EQ(reader.schema()[0].name, "V1");
+  EXPECT_EQ(reader.schema()[1].name, "V2");
+  EXPECT_EQ(reader.schema()[2].name, "V3");
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+  EXPECT_EQ(result.value.total_rows, 2u);
+}
+
+TEST(MultiByteDelimiter, SingleByteRegression) {
+  std::string csv = "a,b,c\n1,2,3\n4,5,6\n";
+  auto buffer = libvroom::AlignedBuffer::allocate(csv.size());
+  std::memcpy(buffer.data(), csv.data(), csv.size());
+
+  libvroom::CsvOptions opts;
+  opts.separator = ",";
+  opts.has_header = true;
+
+  libvroom::CsvReader reader(opts);
+  auto open = reader.open_from_buffer(std::move(buffer));
+  ASSERT_TRUE(open.ok) << open.error;
+  EXPECT_EQ(reader.schema().size(), 3u);
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+  EXPECT_EQ(result.value.total_rows, 2u);
 }

@@ -38,7 +38,7 @@ class TypeInferenceTest : public ::testing::Test {
 protected:
   static libvroom::CsvOptions default_csv_opts() {
     libvroom::CsvOptions opts;
-    opts.separator = ','; // Explicit separator (bypass auto-detect sentinel)
+    opts.separator = ","; // Explicit separator (bypass auto-detect sentinel)
     opts.guess_integer = true;
     return opts;
   }
@@ -200,7 +200,7 @@ class TypeInferenceEdgeCasesTest : public ::testing::Test {
 protected:
   static libvroom::CsvOptions default_csv_opts() {
     libvroom::CsvOptions opts;
-    opts.separator = ','; // Explicit separator (bypass auto-detect sentinel)
+    opts.separator = ","; // Explicit separator (bypass auto-detect sentinel)
     opts.guess_integer = true;
     return opts;
   }
@@ -400,7 +400,7 @@ class InferFromSampleTest : public ::testing::Test {
 protected:
   static libvroom::CsvOptions default_csv_opts() {
     libvroom::CsvOptions opts;
-    opts.separator = ','; // Explicit separator (bypass auto-detect sentinel)
+    opts.separator = ","; // Explicit separator (bypass auto-detect sentinel)
     opts.guess_integer = true;
     return opts;
   }
@@ -554,7 +554,7 @@ TEST_F(CustomOptionsTest, EmptyBoolValuesDisablesBoolDetection) {
 
 TEST_F(CustomOptionsTest, SemicolonSeparatorInInferFromSample) {
   CsvOptions opts;
-  opts.separator = ';';
+  opts.separator = ";";
   opts.guess_integer = true;
   TypeInference inference(opts);
 
@@ -612,7 +612,7 @@ class GuessIntegerTest : public ::testing::Test {};
 TEST_F(GuessIntegerTest, GuessIntegerFalse_IntegersInferAsFloat) {
   // guess_integer = false: integer-like values infer as FLOAT64
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.guess_integer = false;
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("42"), DataType::FLOAT64);
@@ -624,7 +624,7 @@ TEST_F(GuessIntegerTest, GuessIntegerFalse_IntegersInferAsFloat) {
 
 TEST_F(GuessIntegerTest, GuessIntegerFalse_FloatsStillFloat) {
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.guess_integer = false;
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("1.5"), DataType::FLOAT64);
@@ -633,7 +633,7 @@ TEST_F(GuessIntegerTest, GuessIntegerFalse_FloatsStillFloat) {
 
 TEST_F(GuessIntegerTest, GuessIntegerFalse_OtherTypesUnaffected) {
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.guess_integer = false;
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("true"), DataType::BOOL);
@@ -644,7 +644,7 @@ TEST_F(GuessIntegerTest, GuessIntegerFalse_OtherTypesUnaffected) {
 
 TEST_F(GuessIntegerTest, GuessIntegerTrue_IntegersInferAsInt) {
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.guess_integer = true;
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("42"), DataType::INT32);
@@ -657,7 +657,7 @@ TEST_F(GuessIntegerTest, GuessIntegerTrue_IntegersInferAsInt) {
 
 TEST_F(GuessIntegerTest, InferFromSample_GuessIntegerFalse) {
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.guess_integer = false;
   TypeInference inference(opts);
   std::string data = "1,2.5,hello\n3,4.5,world\n";
@@ -669,7 +669,7 @@ TEST_F(GuessIntegerTest, InferFromSample_GuessIntegerFalse) {
 
 TEST_F(GuessIntegerTest, InferFromSample_GuessIntegerTrue) {
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.guess_integer = true;
   TypeInference inference(opts);
   std::string data = "1,2.5,hello\n3,4.5,world\n";
@@ -689,7 +689,7 @@ TEST_F(TrimWhitespaceInferenceTest, TrimWsTrueTrimsForInference) {
   // With trim_ws=true (default), whitespace around values is trimmed
   // during inference so "  42  " infers as numeric
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.guess_integer = true;
   TypeInference inference(opts);
   std::string data = "  42  ,  2.5  ,  hello  \n";
@@ -703,7 +703,7 @@ TEST_F(TrimWhitespaceInferenceTest, TrimWsFalsePreservesWhitespace) {
   // With trim_ws=false, whitespace is preserved during inference
   // so "  42  " infers as STRING (leading space fails digit check)
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.trim_ws = false;
   opts.guess_integer = true;
   TypeInference inference(opts);
@@ -837,7 +837,7 @@ class LeadingPlusFloatTest : public ::testing::Test {};
 
 TEST_F(LeadingPlusFloatTest, LeadingPlusInfersAsFloat) {
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("+1.5"), DataType::FLOAT64);
   EXPECT_EQ(inference.infer_field("+0.0"), DataType::FLOAT64);
@@ -868,7 +868,7 @@ class ExtendedBoolTest : public ::testing::Test {};
 
 TEST_F(ExtendedBoolTest, SingleLetterBooleans) {
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("T"), DataType::BOOL);
   EXPECT_EQ(inference.infer_field("t"), DataType::BOOL);
@@ -935,7 +935,7 @@ class InferenceSamplingTest : public ::testing::Test {};
 
 TEST_F(InferenceSamplingTest, SkipCommentLinesDuringSampling) {
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.comment = '#';
   opts.guess_integer = true;
   TypeInference inference(opts);
@@ -949,7 +949,7 @@ TEST_F(InferenceSamplingTest, SkipCommentLinesDuringSampling) {
 
 TEST_F(InferenceSamplingTest, SkipEmptyLinesDuringSampling) {
   CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.guess_integer = true;
   TypeInference inference(opts);
 

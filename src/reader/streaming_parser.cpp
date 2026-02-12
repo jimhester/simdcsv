@@ -53,7 +53,8 @@ struct StreamingParser::Impl {
   explicit Impl(const StreamingOptions& opts)
       : options(opts), error_collector(opts.csv.error_mode, opts.csv.max_errors) {
     // Validate that decimal_mark and separator don't conflict
-    if (options.csv.decimal_mark != '\0' && options.csv.decimal_mark == options.csv.separator) {
+    if (options.csv.decimal_mark != '\0' && options.csv.separator.size() == 1 &&
+        options.csv.decimal_mark == options.csv.separator[0]) {
       throw std::runtime_error("decimal_mark and separator cannot be the same character ('" +
                                std::string(1, options.csv.decimal_mark) + "')");
     }
@@ -184,18 +185,31 @@ struct StreamingParser::Impl {
         content_end--;
       }
 
-      bool in_q = false;
-      size_t col_count = 1;
-      for (size_t i = 0; i < content_end; ++i) {
-        char c = data[i];
-        if (c == options.csv.quote) {
-          if (in_q && i + 1 < content_end && data[i + 1] == options.csv.quote) {
-            ++i;
-          } else {
-            in_q = !in_q;
+      size_t col_count;
+      if (options.csv.separator.size() > 1) {
+        // Multi-byte separator: use SplitFields to count fields
+        SplitFields iter(data, content_end, std::string_view(options.csv.separator),
+                         options.csv.quote, '\n');
+        const char* fd;
+        size_t fl;
+        bool ne;
+        col_count = 0;
+        while (iter.next(fd, fl, ne))
+          col_count++;
+      } else {
+        bool in_q = false;
+        col_count = 1;
+        for (size_t i = 0; i < content_end; ++i) {
+          char c = data[i];
+          if (c == options.csv.quote) {
+            if (in_q && i + 1 < content_end && data[i + 1] == options.csv.quote) {
+              ++i;
+            } else {
+              in_q = !in_q;
+            }
+          } else if (!options.csv.separator.empty() && c == options.csv.separator[0] && !in_q) {
+            ++col_count;
           }
-        } else if (c == options.csv.separator && !in_q) {
-          ++col_count;
         }
       }
 
@@ -301,7 +315,9 @@ struct StreamingParser::Impl {
       return;
 
     const char quote = options.csv.quote;
-    const char sep = options.csv.separator;
+    static const std::string default_sep_streaming(",");
+    const std::string& sep =
+        options.csv.separator.empty() ? default_sep_streaming : options.csv.separator;
     const size_t num_cols = schema.size();
     const bool check_errors = error_collector.is_enabled();
     const size_t batch_size = options.batch_size;
@@ -331,7 +347,7 @@ struct StreamingParser::Impl {
 
       // Parse one row using SplitFields
       size_t row_remaining = parseable_size - offset;
-      SplitFields iter(data + offset, row_remaining, sep, quote, '\n');
+      SplitFields iter(data + offset, row_remaining, std::string_view(sep), quote, '\n');
 
       const char* field_data;
       size_t field_len;

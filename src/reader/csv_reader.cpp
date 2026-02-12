@@ -106,7 +106,8 @@ std::pair<size_t, bool> parse_chunk_with_state(
   // Now parse complete rows using Polars-style SplitFields iterator
   // Key optimization: no separate find_row_end call - iterator handles EOL
   const char quote = options.quote;
-  const char sep = options.separator;
+  static const std::string default_sep(",");
+  const std::string& sep = options.separator.empty() ? default_sep : options.separator;
   const size_t num_cols = columns.size();
 
   while (offset < size) {
@@ -151,7 +152,7 @@ std::pair<size_t, bool> parse_chunk_with_state(
     // Create iterator for remaining data - it stops at EOL
     size_t row_start_offset = offset;
     size_t start_remaining = size - offset;
-    SplitFields iter(data + offset, start_remaining, sep, quote, '\n');
+    SplitFields iter(data + offset, start_remaining, std::string_view(sep), quote, '\n');
 
     const char* field_data;
     size_t field_len;
@@ -317,14 +318,14 @@ struct CsvReader::Impl {
   // Auto-detect dialect if separator is the sentinel value ('\0').
   // Must be called after encoding detection/transcoding sets data_ptr/data_size.
   void auto_detect_dialect() {
-    if (options.separator != '\0')
+    if (!options.separator.empty())
       return;
 
     DialectDetector detector;
     auto detected = detector.detect(reinterpret_cast<const uint8_t*>(data_ptr), data_size);
 
     if (detected.success()) {
-      options.separator = detected.dialect.delimiter;
+      options.separator = std::string(1, detected.dialect.delimiter);
       options.quote = detected.dialect.quote_char;
       // Only override has_header from detection if user didn't explicitly disable it
       if (options.has_header) {
@@ -336,7 +337,7 @@ struct CsvReader::Impl {
       detected_dialect_result = detected;
     } else {
       // Fall back to comma if detection fails
-      options.separator = ',';
+      options.separator = ",";
     }
   }
 };
@@ -461,7 +462,8 @@ Result<bool> CsvReader::open(const std::string& path) {
   impl_->auto_detect_dialect();
 
   // Validate decimal_mark doesn't conflict with separator
-  if (impl_->options.decimal_mark == impl_->options.separator) {
+  if (impl_->options.separator.size() == 1 &&
+      impl_->options.decimal_mark == impl_->options.separator[0]) {
     return Result<bool>::failure("decimal_mark and separator cannot be the same character ('" +
                                  std::string(1, impl_->options.decimal_mark) + "')");
   }
@@ -469,7 +471,8 @@ Result<bool> CsvReader::open(const std::string& path) {
   const char* data = impl_->data_ptr;
   size_t size = impl_->data_size;
 
-  ChunkFinder finder(impl_->options.separator, impl_->options.quote);
+  ChunkFinder finder(impl_->options.separator.empty() ? ',' : impl_->options.separator[0],
+                     impl_->options.quote);
   LineParser parser(impl_->options);
 
   // Skip leading comment lines before header
@@ -527,19 +530,33 @@ Result<bool> CsvReader::open(const std::string& path) {
     // No header - count columns from first row
     size_t first_row_end = finder.find_row_end(data, size, 0);
 
-    // Count separators in first row
-    bool in_quote = false;
-    size_t col_count = 1;
-    for (size_t i = 0; i < first_row_end; ++i) {
-      char c = data[i];
-      if (c == impl_->options.quote) {
-        if (in_quote && i + 1 < first_row_end && data[i + 1] == impl_->options.quote) {
-          ++i;
-        } else {
-          in_quote = !in_quote;
+    size_t col_count;
+    if (impl_->options.separator.size() > 1) {
+      // Multi-byte separator: use SplitFields to count fields
+      SplitFields iter(data, first_row_end, std::string_view(impl_->options.separator),
+                       impl_->options.quote, '\n');
+      const char* fd;
+      size_t fl;
+      bool ne;
+      col_count = 0;
+      while (iter.next(fd, fl, ne))
+        col_count++;
+    } else {
+      // Count separators in first row (single-byte path)
+      bool in_quote = false;
+      col_count = 1;
+      for (size_t i = 0; i < first_row_end; ++i) {
+        char c = data[i];
+        if (c == impl_->options.quote) {
+          if (in_quote && i + 1 < first_row_end && data[i + 1] == impl_->options.quote) {
+            ++i;
+          } else {
+            in_quote = !in_quote;
+          }
+        } else if (!impl_->options.separator.empty() && c == impl_->options.separator[0] &&
+                   !in_quote) {
+          ++col_count;
         }
-      } else if (c == impl_->options.separator && !in_quote) {
-        ++col_count;
       }
     }
 
@@ -634,7 +651,8 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
   impl_->auto_detect_dialect();
 
   // Validate decimal_mark doesn't conflict with separator
-  if (impl_->options.decimal_mark == impl_->options.separator) {
+  if (impl_->options.separator.size() == 1 &&
+      impl_->options.decimal_mark == impl_->options.separator[0]) {
     return Result<bool>::failure("decimal_mark and separator cannot be the same character ('" +
                                  std::string(1, impl_->options.decimal_mark) + "')");
   }
@@ -642,7 +660,8 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
   const char* data = impl_->data_ptr;
   size_t size = impl_->data_size;
 
-  ChunkFinder finder(impl_->options.separator, impl_->options.quote);
+  ChunkFinder finder(impl_->options.separator.empty() ? ',' : impl_->options.separator[0],
+                     impl_->options.quote);
   LineParser parser(impl_->options);
 
   // Skip leading comment lines before header
@@ -700,19 +719,33 @@ Result<bool> CsvReader::open_from_buffer(AlignedBuffer buffer) {
     // No header - count columns from first row
     size_t first_row_end = finder.find_row_end(data, size, 0);
 
-    // Count separators in first row
-    bool in_quote = false;
-    size_t col_count = 1;
-    for (size_t i = 0; i < first_row_end; ++i) {
-      char c = data[i];
-      if (c == impl_->options.quote) {
-        if (in_quote && i + 1 < first_row_end && data[i + 1] == impl_->options.quote) {
-          ++i;
-        } else {
-          in_quote = !in_quote;
+    size_t col_count;
+    if (impl_->options.separator.size() > 1) {
+      // Multi-byte separator: use SplitFields to count fields
+      SplitFields iter(data, first_row_end, std::string_view(impl_->options.separator),
+                       impl_->options.quote, '\n');
+      const char* fd;
+      size_t fl;
+      bool ne;
+      col_count = 0;
+      while (iter.next(fd, fl, ne))
+        col_count++;
+    } else {
+      // Count separators in first row (single-byte path)
+      bool in_quote = false;
+      col_count = 1;
+      for (size_t i = 0; i < first_row_end; ++i) {
+        char c = data[i];
+        if (c == impl_->options.quote) {
+          if (in_quote && i + 1 < first_row_end && data[i + 1] == impl_->options.quote) {
+            ++i;
+          } else {
+            in_quote = !in_quote;
+          }
+        } else if (!impl_->options.separator.empty() && c == impl_->options.separator[0] &&
+                   !in_quote) {
+          ++col_count;
         }
-      } else if (c == impl_->options.separator && !in_quote) {
-        ++col_count;
       }
     }
 
@@ -956,7 +989,8 @@ Result<ParsedChunks> CsvReader::read_all() {
   std::vector<std::pair<size_t, size_t>> chunk_ranges; // (start_offset, end_offset)
   size_t offset = data_start;
 
-  ChunkFinder finder(impl_->options.separator, impl_->options.quote);
+  ChunkFinder finder(impl_->options.separator.empty() ? ',' : impl_->options.separator[0],
+                     impl_->options.quote);
 
   while (offset < size) {
     size_t target_end = std::min(offset + chunk_size, size);
@@ -1256,7 +1290,8 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
   // Key optimization: no separate find_row_end call - iterator handles EOL
   size_t offset = impl_->header_end_offset;
   const char quote = options.quote;
-  const char sep = options.separator;
+  static const std::string default_sep_serial(",");
+  const std::string& sep = options.separator.empty() ? default_sep_serial : options.separator;
   const size_t num_cols = columns.size();
   const bool check_errors = impl_->error_collector.is_enabled();
   // Row number is 1-indexed; row 1 is the header (if present)
@@ -1304,7 +1339,7 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
     // Create iterator for remaining data - it stops at EOL
     size_t row_start_offset = offset;
     size_t start_remaining = size - offset;
-    SplitFields iter(data + offset, start_remaining, sep, quote, '\n');
+    SplitFields iter(data + offset, start_remaining, std::string_view(sep), quote, '\n');
 
     const char* field_data;
     size_t field_len;
@@ -1471,7 +1506,8 @@ Result<bool> CsvReader::start_streaming() {
   auto& chunk_ranges = impl_->streaming_chunk_ranges;
   chunk_ranges.clear();
   size_t offset = data_start;
-  ChunkFinder finder(impl_->options.separator, impl_->options.quote);
+  ChunkFinder finder(impl_->options.separator.empty() ? ',' : impl_->options.separator[0],
+                     impl_->options.quote);
 
   while (offset < size) {
     size_t target_end = std::min(offset + chunk_size, size);

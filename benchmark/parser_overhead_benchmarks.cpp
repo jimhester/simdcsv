@@ -242,7 +242,7 @@ static void BM_CsvReaderExplicit(benchmark::State& state) {
   auto& ds = BenchmarkData::instance().get("test", kDefaultRows, kDefaultCols);
 
   libvroom::CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.quote = '"';
   opts.num_threads = 1;
 
@@ -298,7 +298,7 @@ static void BM_CsvReaderMultiThread(benchmark::State& state) {
   int n_threads = static_cast<int>(state.range(0));
 
   libvroom::CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.quote = '"';
   opts.num_threads = static_cast<size_t>(n_threads);
 
@@ -353,7 +353,7 @@ static void BM_CsvReaderScaling(benchmark::State& state) {
   auto& ds = BenchmarkData::instance().get("scaling", rows, 10);
 
   libvroom::CsvOptions opts;
-  opts.separator = ',';
+  opts.separator = ",";
   opts.quote = '"';
   opts.num_threads = 1;
 

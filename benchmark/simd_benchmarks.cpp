@@ -331,7 +331,7 @@ static void BM_SeparatorDetection_SIMD(benchmark::State& state) {
   }
 
   libvroom::CsvOptions opts;
-  opts.separator = separator;
+  opts.separator = std::string(1, separator);
   opts.num_threads = 1;
 
   for (auto _ : state) {

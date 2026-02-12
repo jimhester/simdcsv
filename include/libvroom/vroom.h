@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_set>
 #include <utility>
@@ -395,6 +396,12 @@ void split_fields_simd_into(const char* data, size_t size, char separator, char 
 void split_fields_scalar_into(const char* data, size_t size, char separator, char quote,
                               std::vector<FieldView>& fields // Output: cleared and populated
 );
+
+// Multi-byte separator overloads (delegates to SIMD for single-byte, scalar for multi-byte)
+std::vector<FieldView> split_fields(const char* data, size_t size, std::string_view separator,
+                                    char quote = '"');
+void split_fields_into(const char* data, size_t size, std::string_view separator, char quote,
+                       std::vector<FieldView>& fields);
 
 // ============================================================================
 // Date/Time parsing functions
