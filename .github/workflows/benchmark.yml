@@ -79,7 +79,7 @@ jobs:
         # Use taskset for CPU affinity (pin to CPU 0) and nice for scheduling priority
         # This reduces variance from CPU migration and context switching
         sudo nice -n -5 taskset -c 0 ./build/libvroom_benchmark \
-          --benchmark_filter="BM_CountRows$|BM_CsvReaderExplicit$|BM_CsvReaderAutoDetect$|BM_CsvReaderMultiThread/1$|BM_CsvReaderMultiThread/4$|BM_CsvReaderMultiThread/8$" \
+          --benchmark_filter="BM_CountRows(/real_time)?$|BM_CsvReaderExplicit(/real_time)?$|BM_CsvReaderAutoDetect(/real_time)?$|BM_CsvReaderMultiThread/1(/real_time)?$|BM_CsvReaderMultiThread/4(/real_time)?$|BM_CsvReaderMultiThread/8(/real_time)?$" \
           --benchmark_repetitions=3 \
           --benchmark_min_time=0.5s \
           --benchmark_out=build/head_results.json \
@@ -108,7 +108,7 @@ jobs:
         echo "=== Benchmarking BASE commit ==="
         # Use same CPU affinity and priority settings for fair comparison
         sudo nice -n -5 taskset -c 0 ./build/libvroom_benchmark \
-          --benchmark_filter="BM_CountRows$|BM_CsvReaderExplicit$|BM_CsvReaderAutoDetect$|BM_CsvReaderMultiThread/1$|BM_CsvReaderMultiThread/4$|BM_CsvReaderMultiThread/8$" \
+          --benchmark_filter="BM_CountRows(/real_time)?$|BM_CsvReaderExplicit(/real_time)?$|BM_CsvReaderAutoDetect(/real_time)?$|BM_CsvReaderMultiThread/1(/real_time)?$|BM_CsvReaderMultiThread/4(/real_time)?$|BM_CsvReaderMultiThread/8(/real_time)?$" \
           --benchmark_repetitions=3 \
           --benchmark_min_time=0.5s \
           --benchmark_out=build/base_results.json \
