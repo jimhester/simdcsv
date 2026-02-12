@@ -30,6 +30,7 @@ struct StreamingParser::Impl {
   bool header_parsed = false;
   bool batch_initialized = false;
   size_t lines_skipped = 0; // For skip option
+  bool skip_saw_cr = false; // Track CR at buffer boundary during skip
 
   // Error handling
   ErrorCollector error_collector;
@@ -129,6 +130,14 @@ struct StreamingParser::Impl {
       return false;
 
     // Skip leading lines if requested (raw newline counting, matching CsvReader::skip_n_lines)
+    // Handle CRLF split across buffer boundary: if previous feed ended on \r,
+    // consume the orphaned \n before resuming.
+    if (skip_saw_cr && avail > 0 && data[0] == '\n') {
+      consumed++;
+      data++;
+      avail--;
+      skip_saw_cr = false;
+    }
     while (lines_skipped < options.csv.skip) {
       // Find next line ending (not quote-aware, same as batch parser)
       size_t pos = 0;
@@ -138,8 +147,12 @@ struct StreamingParser::Impl {
         return false; // Not enough data to find end of skip line
       if (data[pos] == '\r') {
         pos++;
-        if (pos < avail && data[pos] == '\n')
+        if (pos < avail && data[pos] == '\n') {
           pos++; // CRLF
+        } else if (pos >= avail) {
+          // CR at buffer boundary - consume it but remember for next feed
+          skip_saw_cr = true;
+        }
       } else {
         pos++; // LF
       }
