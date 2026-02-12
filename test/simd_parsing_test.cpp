@@ -15,6 +15,7 @@
  */
 
 #include "libvroom.h"
+#include "libvroom/escape_mask.h"
 
 #include <atomic>
 #include <cstdio>
@@ -894,6 +895,82 @@ TEST_F(SIMDParsingTest, LargeMultiThreadedMixedQuotePatterns) {
   auto result = parseWithErrors(content, 4);
   ASSERT_TRUE(result.opened);
   EXPECT_TRUE(result.read_ok) << "Parser should handle mixed quote patterns multi-threaded";
+}
+
+// ============================================================================
+// BACKSLASH ESCAPE MASK COMPUTATION
+// ============================================================================
+
+TEST(EscapeMaskTest, SingleBackslashBeforeQuote) {
+  // a\"b: backslash at pos 1 escapes quote at pos 2
+  uint64_t bs_bits = 0b0010;
+  uint64_t prev = 0;
+  auto [escaped, escape] = libvroom::compute_escaped_mask(bs_bits, prev);
+  EXPECT_TRUE(escaped & (1ULL << 2));
+  EXPECT_FALSE(escaped & (1ULL << 1));
+  EXPECT_EQ(prev, 0ULL);
+}
+
+TEST(EscapeMaskTest, DoubleBackslashBeforeQuote) {
+  // a\\"b: \\ → literal \, quote at 3 NOT escaped
+  uint64_t bs_bits = 0b0110;
+  uint64_t prev = 0;
+  auto [escaped, escape] = libvroom::compute_escaped_mask(bs_bits, prev);
+  EXPECT_TRUE(escaped & (1ULL << 2));  // second \ is escaped
+  EXPECT_FALSE(escaped & (1ULL << 3)); // quote is NOT escaped
+  EXPECT_EQ(prev, 0ULL);
+}
+
+TEST(EscapeMaskTest, TripleBackslashBeforeQuote) {
+  // a\\\"b: positions 1,2,3 backslashes, 4 is quote → escaped
+  uint64_t bs_bits = 0b01110;
+  uint64_t prev = 0;
+  auto [escaped, escape] = libvroom::compute_escaped_mask(bs_bits, prev);
+  EXPECT_TRUE(escaped & (1ULL << 4));
+}
+
+TEST(EscapeMaskTest, QuadBackslashBeforeQuote) {
+  // a\\\\"b: 4 backslashes → quote at 5 NOT escaped
+  uint64_t bs_bits = 0b011110;
+  uint64_t prev = 0;
+  auto [escaped, escape] = libvroom::compute_escaped_mask(bs_bits, prev);
+  EXPECT_FALSE(escaped & (1ULL << 5));
+}
+
+TEST(EscapeMaskTest, NoBackslashes) {
+  uint64_t bs_bits = 0;
+  uint64_t prev = 0;
+  auto [escaped, escape] = libvroom::compute_escaped_mask(bs_bits, prev);
+  EXPECT_EQ(escaped, 0ULL);
+  EXPECT_EQ(escape, 0ULL);
+}
+
+TEST(EscapeMaskTest, CrossBlockCarry) {
+  // Block ends with single backslash at position 63
+  uint64_t bs_bits = 1ULL << 63;
+  uint64_t prev = 0;
+  auto [escaped, escape] = libvroom::compute_escaped_mask(bs_bits, prev);
+  EXPECT_NE(prev, 0ULL);
+
+  // Next block: first char should be escaped
+  uint64_t bs_bits2 = 0;
+  auto [escaped2, escape2] = libvroom::compute_escaped_mask(bs_bits2, prev);
+  EXPECT_TRUE(escaped2 & 1ULL);
+}
+
+TEST(EscapeMaskTest, CrossBlockCarryDoubleBackslash) {
+  // Block ends with two backslashes at positions 62, 63 (even → no carry)
+  uint64_t bs_bits = (1ULL << 62) | (1ULL << 63);
+  uint64_t prev = 0;
+  auto [escaped, escape] = libvroom::compute_escaped_mask(bs_bits, prev);
+  EXPECT_EQ(prev, 0ULL);
+}
+
+TEST(EscapeMaskTest, CarryFromPreviousBlock) {
+  uint64_t bs_bits = 0;
+  uint64_t prev = 1;
+  auto [escaped, escape] = libvroom::compute_escaped_mask(bs_bits, prev);
+  EXPECT_TRUE(escaped & 1ULL);
 }
 
 int main(int argc, char** argv) {
