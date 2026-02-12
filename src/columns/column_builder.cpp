@@ -418,6 +418,7 @@ public:
 // Forward declarations from type_parsers.cpp
 bool parse_date(std::string_view value, int32_t& days_since_epoch);
 bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch);
+bool parse_time(std::string_view value, int64_t& micros_since_midnight);
 
 class DateColumnBuilder : public ChunkedColumnBuilder<int32_t, DateColumnBuilder> {
 public:
@@ -548,6 +549,72 @@ public:
 };
 
 // ============================================================================
+// Time Column Builder (stores microseconds since midnight as int64)
+// ============================================================================
+
+class TimeColumnBuilder : public ChunkedColumnBuilder<int64_t, TimeColumnBuilder> {
+public:
+  void append(std::string_view value) override {
+    if (value.empty()) {
+      storage_.append(0, true);
+      invalidate_cache();
+      return;
+    }
+
+    int64_t micros;
+    if (parse_time(value, micros)) {
+      storage_.append(micros, false);
+    } else {
+      storage_.append(0, true);
+    }
+    invalidate_cache();
+  }
+
+  void append_null() override {
+    storage_.append(0, true);
+    invalidate_cache();
+  }
+
+  DataType type() const override { return DataType::TIME; }
+
+  ColumnStatistics statistics() const override {
+    ColumnStatistics result;
+    result.null_count = 0;
+
+    if (!finalized_) {
+      const_cast<TimeColumnBuilder*>(this)->finalize();
+    }
+
+    int64_t min_val = std::numeric_limits<int64_t>::max();
+    int64_t max_val = std::numeric_limits<int64_t>::min();
+    bool found = false;
+
+    for (const auto& chunk : storage_.chunks()) {
+      result.null_count += std::count(chunk->null_bitmap.begin(), chunk->null_bitmap.end(), true);
+      for (size_t i = 0; i < chunk->values.size(); ++i) {
+        if (!chunk->null_bitmap[i]) {
+          min_val = std::min(min_val, chunk->values[i]);
+          max_val = std::max(max_val, chunk->values[i]);
+          found = true;
+        }
+      }
+    }
+
+    result.has_null = result.null_count > 0;
+    if (found) {
+      result.min_value = min_val;
+      result.max_value = max_val;
+    }
+
+    return result;
+  }
+
+  std::unique_ptr<ColumnBuilder> clone_empty() const override {
+    return std::make_unique<TimeColumnBuilder>();
+  }
+};
+
+// ============================================================================
 // Bool Column Builder (with incremental statistics)
 // ============================================================================
 
@@ -641,6 +708,8 @@ std::unique_ptr<ColumnBuilder> ColumnBuilder::create(DataType type) {
     return std::make_unique<DateColumnBuilder>();
   case DataType::TIMESTAMP:
     return std::make_unique<TimestampColumnBuilder>();
+  case DataType::TIME:
+    return std::make_unique<TimeColumnBuilder>();
   case DataType::STRING:
   default:
     return std::make_unique<StringColumnBuilder>();
@@ -673,6 +742,10 @@ std::unique_ptr<ColumnBuilder> ColumnBuilder::create_date() {
 
 std::unique_ptr<ColumnBuilder> ColumnBuilder::create_timestamp() {
   return std::make_unique<TimestampColumnBuilder>();
+}
+
+std::unique_ptr<ColumnBuilder> ColumnBuilder::create_time() {
+  return std::make_unique<TimeColumnBuilder>();
 }
 
 } // namespace libvroom

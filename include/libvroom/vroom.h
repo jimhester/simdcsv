@@ -223,6 +223,7 @@ public:
   static std::unique_ptr<ColumnBuilder> create_bool();
   static std::unique_ptr<ColumnBuilder> create_date();
   static std::unique_ptr<ColumnBuilder> create_timestamp();
+  static std::unique_ptr<ColumnBuilder> create_time();
 };
 
 // Parquet writer
