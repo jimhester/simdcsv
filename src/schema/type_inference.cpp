@@ -1,3 +1,4 @@
+#include "libvroom/comment_util.h"
 #include "libvroom/vroom.h"
 
 #include <cctype>
@@ -194,7 +195,7 @@ std::vector<DataType> TypeInference::infer_from_sample(const char* data, size_t 
     }
 
     // Skip comment lines
-    if (options_.comment != '\0' && data[offset] == options_.comment) {
+    if (starts_with_comment(data + offset, size - offset, options_.comment)) {
       offset = row_end;
       continue;
     }

@@ -1,5 +1,6 @@
 #include "libvroom/arrow_column_builder.h"
 #include "libvroom/cache.h"
+#include "libvroom/comment_util.h"
 #include "libvroom/dialect.h"
 #include "libvroom/encoding.h"
 #include "libvroom/error.h"
@@ -157,18 +158,8 @@ std::pair<size_t, bool> parse_chunk_with_state(
       break;
 
     // Skip comment lines (handle \n, \r\n, and bare \r)
-    if (options.comment != '\0' && data[offset] == options.comment) {
-      while (offset < size && data[offset] != '\n' && data[offset] != '\r') {
-        offset++;
-      }
-      if (offset < size && data[offset] == '\r') {
-        offset++;
-        if (offset < size && data[offset] == '\n') {
-          offset++; // CRLF
-        }
-      } else if (offset < size && data[offset] == '\n') {
-        offset++;
-      }
+    if (starts_with_comment(data + offset, size - offset, options.comment)) {
+      offset = skip_to_next_line(data, size, offset);
       continue;
     }
 
@@ -370,8 +361,8 @@ struct CsvReader::Impl {
       if (options.has_header) {
         options.has_header = detected.has_header;
       }
-      if (detected.dialect.comment_char != '\0') {
-        options.comment = detected.dialect.comment_char;
+      if (!detected.dialect.comment_str.empty()) {
+        options.comment = detected.dialect.comment_str;
       }
       detected_dialect_result = detected;
     } else {
@@ -403,32 +394,22 @@ static size_t skip_n_lines(const char* data, size_t size, size_t n) {
 }
 
 // Skip leading comment lines in the data. Returns offset past all leading comment lines.
-// A comment line starts with the comment character (at column 0) and ends at newline.
-static size_t skip_leading_comment_lines(const char* data, size_t size, char comment_char) {
-  if (comment_char == '\0' || size == 0) {
+// A comment line starts with the comment string (at column 0) and ends at newline.
+static size_t skip_leading_comment_lines(const char* data, size_t size,
+                                         const std::string& comment) {
+  if (comment.empty() || size == 0) {
     return 0;
   }
 
   size_t offset = 0;
   while (offset < size) {
-    // Check if current line starts with comment char
-    if (data[offset] != comment_char) {
+    // Check if current line starts with comment string
+    if (!starts_with_comment(data + offset, size - offset, comment)) {
       break; // Not a comment line, stop
     }
 
-    // Skip to end of this comment line (handle \n, \r\n, and bare \r)
-    while (offset < size && data[offset] != '\n' && data[offset] != '\r') {
-      offset++;
-    }
-    // Skip past the line ending
-    if (offset < size && data[offset] == '\r') {
-      offset++;
-      if (offset < size && data[offset] == '\n') {
-        offset++; // CRLF
-      }
-    } else if (offset < size && data[offset] == '\n') {
-      offset++;
-    }
+    // Skip to end of this comment line
+    offset = skip_to_next_line(data, size, offset);
   }
   return offset;
 }
@@ -1398,18 +1379,8 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
       break;
 
     // Skip comment lines (handle \n, \r\n, and bare \r)
-    if (impl_->options.comment != '\0' && data[offset] == impl_->options.comment) {
-      while (offset < size && data[offset] != '\n' && data[offset] != '\r') {
-        offset++;
-      }
-      if (offset < size && data[offset] == '\r') {
-        offset++;
-        if (offset < size && data[offset] == '\n') {
-          offset++; // CRLF
-        }
-      } else if (offset < size && data[offset] == '\n') {
-        offset++;
-      }
+    if (starts_with_comment(data + offset, size - offset, impl_->options.comment)) {
+      offset = skip_to_next_line(data, size, offset);
       continue;
     }
 

@@ -43,7 +43,7 @@ public:
 
   // Parsing options (set from CsvOptions before use)
   char decimal_mark = '.';
-  
+
   // Error reporting (optional - null when error collection is disabled)
   ErrorCollector* error_collector = nullptr;
   size_t* error_row = nullptr;     // Pointer to current row number (caller updates)

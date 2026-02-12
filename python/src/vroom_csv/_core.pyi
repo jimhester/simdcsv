@@ -230,9 +230,9 @@ def read_csv(
         It is called periodically during parsing at chunk boundaries (typically
         every 1-4MB). Use this to display progress bars or update UIs.
     comment : str, optional
-        Character that marks comment lines. Lines starting with this
-        character are skipped during parsing. Default is None (no comment
-        skipping).
+        String that marks comment lines. Lines starting with this
+        string are skipped during parsing. Supports multi-character
+        prefixes like "//" or "##". Default is None (no comment skipping).
     skip_empty_rows : bool, optional
         Whether to skip empty lines in the input. Default is True.
 

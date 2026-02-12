@@ -16,7 +16,7 @@ struct CsvOptions {
   std::string separator; // empty = auto-detect via DialectDetector
   char quote = '"';
   bool escape_backslash = false; // Use backslash escaping (\") instead of doubled quotes ("")
-  char comment = '\0';           // No comment char by default
+  std::string comment;           // No comment by default (empty string)
   bool has_header = true;
   bool skip_empty_rows = true;
   bool guess_integer = true;                 // When false, integer-like values infer as FLOAT64
@@ -55,7 +55,7 @@ struct FwfOptions {
   std::vector<std::string> col_names; // Column names
   bool trim_ws = true;
   bool guess_integer = true; // When false, integer-like values infer as FLOAT64
-  char comment = '\0';
+  std::string comment;       // No comment by default (empty string)
   bool skip_empty_rows = true;
   std::string null_values = "NA,null,NULL,";
   std::string true_values = "true,TRUE,True,T,t,yes,YES,Yes";

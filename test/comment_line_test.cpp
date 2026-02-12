@@ -2,10 +2,10 @@
  * @file comment_line_test.cpp
  * @brief Tests for comment line handling in CSV parsing.
  *
- * Rewritten from old comment_line_test.cpp to use the libvroom2 CsvReader API.
- * Tests CsvOptions::comment for skipping comment lines during parsing.
+ * Tests CsvOptions::comment for skipping comment lines during parsing,
+ * including multi-character comment string support.
  *
- * @see GitHub issue #626
+ * @see GitHub issue #626, #665
  */
 
 #include "libvroom.h"
@@ -29,9 +29,9 @@ protected:
     std::vector<std::string> column_names;
   };
 
-  ParseResult parseFile(const std::string& path, char comment_char, char sep = ',') {
+  ParseResult parseFile(const std::string& path, const std::string& comment_str, char sep = ',') {
     libvroom::CsvOptions opts;
-    opts.comment = comment_char;
+    opts.comment = comment_str;
     opts.separator = std::string(1, sep);
     opts.num_threads = 1;
     libvroom::CsvReader reader(opts);
@@ -49,9 +49,10 @@ protected:
             reader.schema().size(), std::move(names)};
   }
 
-  ParseResult parseContent(const std::string& content, char comment_char, char sep = ',') {
+  ParseResult parseContent(const std::string& content, const std::string& comment_str,
+                           char sep = ',') {
     test_util::TempCsvFile csv(content);
-    return parseFile(csv.path(), comment_char, sep);
+    return parseFile(csv.path(), comment_str, sep);
   }
 };
 
@@ -61,7 +62,7 @@ protected:
 
 TEST_F(CommentLineTest, HashCommentsFromFile) {
 
-  auto result = parseFile(testDataPath("comments/hash_comments.csv"), '#');
+  auto result = parseFile(testDataPath("comments/hash_comments.csv"), "#");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
   EXPECT_EQ(result.column_names[0], "name");
@@ -71,7 +72,7 @@ TEST_F(CommentLineTest, HashCommentsFromFile) {
 
 TEST_F(CommentLineTest, CommentsBeforeHeader) {
 
-  auto result = parseContent("# comment 1\n# comment 2\nA,B\n1,2\n3,4\n", '#');
+  auto result = parseContent("# comment 1\n# comment 2\nA,B\n1,2\n3,4\n", "#");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
   EXPECT_EQ(result.column_names[0], "A");
@@ -80,28 +81,28 @@ TEST_F(CommentLineTest, CommentsBeforeHeader) {
 
 TEST_F(CommentLineTest, CommentsInMiddleOfData) {
 
-  auto result = parseContent("A,B\n1,2\n# skip this\n3,4\n# skip this too\n5,6\n", '#');
+  auto result = parseContent("A,B\n1,2\n# skip this\n3,4\n# skip this too\n5,6\n", "#");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 3u);
 }
 
 TEST_F(CommentLineTest, CommentAtEndOfFile) {
 
-  auto result = parseContent("A,B\n1,2\n3,4\n# trailing comment\n", '#');
+  auto result = parseContent("A,B\n1,2\n3,4\n# trailing comment\n", "#");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 2u);
 }
 
 TEST_F(CommentLineTest, OnlyComments) {
 
-  auto result = parseContent("# comment 1\n# comment 2\n# comment 3\n", '#');
+  auto result = parseContent("# comment 1\n# comment 2\n# comment 3\n", "#");
   // No header after comments, should fail to open
   EXPECT_FALSE(result.ok);
 }
 
 TEST_F(CommentLineTest, NoCommentCharSet) {
-  // With comment='\0' (default), lines starting with # are not comments
-  auto result = parseContent("A,B\n#1,2\n3,4\n", '\0');
+  // With comment="" (default), lines starting with # are not comments
+  auto result = parseContent("A,B\n#1,2\n3,4\n", "");
   ASSERT_TRUE(result.ok);
   // #1 is treated as data, not a comment
   EXPECT_EQ(result.total_rows, 2u);
@@ -113,7 +114,7 @@ TEST_F(CommentLineTest, NoCommentCharSet) {
 
 TEST_F(CommentLineTest, SemicolonComments) {
 
-  auto result = parseFile(testDataPath("comments/semicolon_comments.csv"), ';');
+  auto result = parseFile(testDataPath("comments/semicolon_comments.csv"), ";");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
   EXPECT_EQ(result.total_rows, 2u); // Alice, Bob
@@ -121,14 +122,14 @@ TEST_F(CommentLineTest, SemicolonComments) {
 
 TEST_F(CommentLineTest, PercentComment) {
 
-  auto result = parseContent("% comment\nA,B\n1,2\n", '%');
+  auto result = parseContent("% comment\nA,B\n1,2\n", "%");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 1u);
 }
 
 TEST_F(CommentLineTest, SlashComment) {
 
-  auto result = parseContent("/ comment\nA,B\n1,2\n/ another\n3,4\n", '/');
+  auto result = parseContent("/ comment\nA,B\n1,2\n/ another\n3,4\n", "/");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 2u);
 }
@@ -139,7 +140,7 @@ TEST_F(CommentLineTest, SlashComment) {
 
 TEST_F(CommentLineTest, HashInsideQuotedField) {
 
-  auto result = parseFile(testDataPath("comments/quoted_hash.csv"), '#');
+  auto result = parseFile(testDataPath("comments/quoted_hash.csv"), "#");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
   // All 3 data rows should be present - # inside quotes is not a comment
@@ -148,7 +149,7 @@ TEST_F(CommentLineTest, HashInsideQuotedField) {
 
 TEST_F(CommentLineTest, CommentCharInsideQuotedFieldIsNotComment) {
 
-  auto result = parseContent("A,B\n\"#not a comment\",data\nreal,data\n", '#');
+  auto result = parseContent("A,B\n\"#not a comment\",data\nreal,data\n", "#");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 2u);
 }
@@ -159,7 +160,7 @@ TEST_F(CommentLineTest, CommentCharInsideQuotedFieldIsNotComment) {
 
 TEST_F(CommentLineTest, CommentsWithTabDelimiter) {
 
-  auto result = parseContent("# comment\nA\tB\n1\t2\n# skip\n3\t4\n", '#', '\t');
+  auto result = parseContent("# comment\nA\tB\n1\t2\n# skip\n3\t4\n", "#", '\t');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
   EXPECT_EQ(result.total_rows, 2u);
@@ -167,7 +168,7 @@ TEST_F(CommentLineTest, CommentsWithTabDelimiter) {
 
 TEST_F(CommentLineTest, CommentsWithPipeDelimiter) {
 
-  auto result = parseContent("# comment\nA|B\n1|2\n3|4\n", '#', '|');
+  auto result = parseContent("# comment\nA|B\n1|2\n3|4\n", "#", '|');
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 2u);
   EXPECT_EQ(result.total_rows, 2u);
@@ -179,7 +180,7 @@ TEST_F(CommentLineTest, CommentsWithPipeDelimiter) {
 
 TEST_F(CommentLineTest, MultiHeaderComments) {
 
-  auto result = parseFile(testDataPath("comments/multi_header_comments.csv"), '#');
+  auto result = parseFile(testDataPath("comments/multi_header_comments.csv"), "#");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.num_columns, 4u);
   EXPECT_EQ(result.column_names[0], "ID");
@@ -192,7 +193,7 @@ TEST_F(CommentLineTest, MultiHeaderComments) {
 
 TEST_F(CommentLineTest, CommentsWithCRLF) {
 
-  auto result = parseContent("# comment\r\nA,B\r\n1,2\r\n# skip\r\n3,4\r\n", '#');
+  auto result = parseContent("# comment\r\nA,B\r\n1,2\r\n# skip\r\n3,4\r\n", "#");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 2u);
 }
@@ -204,14 +205,14 @@ TEST_F(CommentLineTest, CommentsWithCRLF) {
 TEST_F(CommentLineTest, EmptyCommentLine) {
 
   // A line with just the comment char
-  auto result = parseContent("#\nA,B\n1,2\n#\n3,4\n", '#');
+  auto result = parseContent("#\nA,B\n1,2\n#\n3,4\n", "#");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 2u);
 }
 
 TEST_F(CommentLineTest, CommentCharNotAtLineStart) {
   // # in middle of line is NOT a comment - this doesn't depend on comment handling
-  auto result = parseContent("A,B\n1,#2\n3,4\n", '#');
+  auto result = parseContent("A,B\n1,#2\n3,4\n", "#");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 2u);
 }
@@ -225,7 +226,7 @@ TEST_F(CommentLineTest, ManyConsecutiveComments) {
   for (int i = 0; i < 50; ++i)
     oss << i << "," << (i * 2) << "\n";
 
-  auto result = parseContent(oss.str(), '#');
+  auto result = parseContent(oss.str(), "#");
   ASSERT_TRUE(result.ok);
   EXPECT_EQ(result.total_rows, 50u);
 }
@@ -243,7 +244,7 @@ TEST_F(CommentLineTest, MultiThreadedWithComments) {
 
   test_util::TempCsvFile csv(oss.str());
   libvroom::CsvOptions opts;
-  opts.comment = '#';
+  opts.comment = "#";
   opts.num_threads = 4;
   libvroom::CsvReader reader(opts);
 
@@ -253,4 +254,108 @@ TEST_F(CommentLineTest, MultiThreadedWithComments) {
   auto read_result = reader.read_all();
   ASSERT_TRUE(read_result.ok);
   EXPECT_EQ(read_result.value.total_rows, 5000u);
+}
+
+// ============================================================================
+// MULTI-CHARACTER COMMENT STRINGS
+// ============================================================================
+
+TEST_F(CommentLineTest, DoubleHashComments) {
+  auto result = parseFile(testDataPath("comments/double_hash_comments.csv"), "##");
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.num_columns, 2u);
+  EXPECT_EQ(result.column_names[0], "name");
+  EXPECT_EQ(result.column_names[1], "value");
+  EXPECT_EQ(result.total_rows, 3u); // Alice, Bob, Charlie
+}
+
+TEST_F(CommentLineTest, DoubleSlashComments) {
+  auto result = parseFile(testDataPath("comments/double_slash_comments.csv"), "//");
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.num_columns, 2u);
+  EXPECT_EQ(result.column_names[0], "name");
+  EXPECT_EQ(result.column_names[1], "value");
+  EXPECT_EQ(result.total_rows, 3u);
+}
+
+TEST_F(CommentLineTest, MultiCharCommentBeforeHeader) {
+  auto result = parseContent("// comment 1\n// comment 2\nA,B\n1,2\n3,4\n", "//");
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.num_columns, 2u);
+  EXPECT_EQ(result.column_names[0], "A");
+  EXPECT_EQ(result.total_rows, 2u);
+}
+
+TEST_F(CommentLineTest, MultiCharCommentInMiddle) {
+  auto result = parseContent("A,B\n1,2\n// skip\n3,4\n// skip too\n5,6\n", "//");
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 3u);
+}
+
+TEST_F(CommentLineTest, MultiCharCommentAtEnd) {
+  auto result = parseContent("A,B\n1,2\n3,4\n// trailing\n", "//");
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 2u);
+}
+
+TEST_F(CommentLineTest, MultiCharOnlyComments) {
+  auto result = parseContent("// comment 1\n// comment 2\n", "//");
+  EXPECT_FALSE(result.ok);
+}
+
+TEST_F(CommentLineTest, MultiCharCommentPartialMatchIsNotComment) {
+  // Line starts with "/" but comment is "//" — should NOT be treated as comment
+  auto result = parseContent("A,B\n/not a comment,data\nreal,data\n", "//");
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 2u);
+}
+
+TEST_F(CommentLineTest, MultiCharCommentInsideQuotedField) {
+  // "//" inside quotes should not be treated as a comment
+  auto result = parseContent("A,B\n\"//not a comment\",data\nreal,data\n", "//");
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 2u);
+}
+
+TEST_F(CommentLineTest, MultiCharCommentWithCRLF) {
+  auto result = parseContent("// comment\r\nA,B\r\n1,2\r\n// skip\r\n3,4\r\n", "//");
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 2u);
+}
+
+TEST_F(CommentLineTest, ThreeCharComment) {
+  auto result = parseContent("### comment\nA,B\n1,2\n### skip\n3,4\n", "###");
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 2u);
+}
+
+TEST_F(CommentLineTest, MultiCharCommentMultiThreaded) {
+  std::ostringstream oss;
+  oss << "// header comment\n";
+  oss << "A,B,C\n";
+  for (int i = 0; i < 5000; ++i) {
+    if (i % 10 == 0)
+      oss << "// comment at row " << i << "\n";
+    oss << i << "," << (i * 2) << "," << (i * 3) << "\n";
+  }
+
+  test_util::TempCsvFile csv(oss.str());
+  libvroom::CsvOptions opts;
+  opts.comment = "//";
+  opts.num_threads = 4;
+  libvroom::CsvReader reader(opts);
+
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok);
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok);
+  EXPECT_EQ(read_result.value.total_rows, 5000u);
+}
+
+TEST_F(CommentLineTest, SingleHashNotMatchedByDoubleHash) {
+  // When comment string is "##", lines starting with single "#" are data, not comments
+  auto result = parseContent("A,B\n# single hash,data\n## double hash\nreal,data\n", "##");
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.total_rows, 2u); // "# single hash,data" and "real,data"
 }
