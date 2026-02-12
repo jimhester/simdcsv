@@ -842,3 +842,109 @@ TEST(TrimWhitespaceParsingTest, HeadersAlwaysTrimmed) {
   EXPECT_EQ(schema[0].name, "name");
   EXPECT_EQ(schema[1].name, "value");
 }
+
+// ============================================================================
+// MULTI-BYTE DELIMITER TESTS (SplitFields)
+// ============================================================================
+
+TEST(MultiByteDelimiter, SplitFieldsMultiByte) {
+  std::string line = "hello|~|world|~|test\n";
+  libvroom::SplitFields iter(line.data(), line.size(), std::string_view("|~|"), '"', '\n');
+
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "hello");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "world");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "test");
+
+  EXPECT_FALSE(iter.next(field_data, field_len, needs_escaping));
+}
+
+TEST(MultiByteDelimiter, SplitFieldsDoubleTab) {
+  std::string line = "a\t\tb\t\tc\n";
+  libvroom::SplitFields iter(line.data(), line.size(), std::string_view("\t\t"), '"', '\n');
+
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "a");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "b");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "c");
+
+  EXPECT_FALSE(iter.next(field_data, field_len, needs_escaping));
+}
+
+TEST(MultiByteDelimiter, SplitFieldsQuotedMultiByte) {
+  std::string line = "\"hello|~|world\"|~|test\n";
+  libvroom::SplitFields iter(line.data(), line.size(), std::string_view("|~|"), '"', '\n');
+
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_TRUE(needs_escaping);
+  EXPECT_EQ(std::string_view(field_data, field_len), "\"hello|~|world\"");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "test");
+
+  EXPECT_FALSE(iter.next(field_data, field_len, needs_escaping));
+}
+
+TEST(MultiByteDelimiter, SplitFieldsEmptyFields) {
+  std::string line = "|~||~|test|~|\n";
+  libvroom::SplitFields iter(line.data(), line.size(), std::string_view("|~|"), '"', '\n');
+
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(field_len, 0u); // empty field
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(field_len, 0u); // empty field
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "test");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(field_len, 0u); // trailing empty field
+
+  EXPECT_FALSE(iter.next(field_data, field_len, needs_escaping));
+}
+
+TEST(MultiByteDelimiter, SingleByteThroughStringView) {
+  // Single-byte separator via string_view constructor should still work (uses SIMD path)
+  std::string line = "a,b,c\n";
+  libvroom::SplitFields iter(line.data(), line.size(), std::string_view(","), '"', '\n');
+
+  const char* field_data;
+  size_t field_len;
+  bool needs_escaping;
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "a");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "b");
+
+  ASSERT_TRUE(iter.next(field_data, field_len, needs_escaping));
+  EXPECT_EQ(std::string_view(field_data, field_len), "c");
+
+  EXPECT_FALSE(iter.next(field_data, field_len, needs_escaping));
+}
