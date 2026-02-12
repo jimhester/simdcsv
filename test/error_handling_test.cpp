@@ -1,3 +1,4 @@
+#include "libvroom/arrow_column_builder.h"
 #include "libvroom/convert.h"
 #include "libvroom/error.h"
 #include "libvroom/vroom.h"
@@ -33,6 +34,7 @@ TEST(ErrorHandlingTest, ErrorCodeToString) {
                "INDEX_ALLOCATION_OVERFLOW");
   EXPECT_STREQ(error_code_to_string(ErrorCode::IO_ERROR), "IO_ERROR");
   EXPECT_STREQ(error_code_to_string(ErrorCode::INTERNAL_ERROR), "INTERNAL_ERROR");
+  EXPECT_STREQ(error_code_to_string(ErrorCode::TYPE_COERCION), "TYPE_COERCION");
 
   // Test default case with an invalid error code
   EXPECT_STREQ(error_code_to_string(static_cast<ErrorCode>(9999)), "UNKNOWN");
@@ -871,4 +873,46 @@ TEST(ConversionErrorTest, ErrorSummary) {
   std::string summary = result.error_summary();
   EXPECT_NE(summary.find("warnings"), std::string::npos)
       << "Summary should mention warnings: " << summary;
+}
+
+// ============================================================================
+// Type coercion error reporting tests
+// ============================================================================
+
+TEST(TypeCoercionErrorTest, Int32CoercionErrorReported) {
+  auto builder = libvroom::ArrowColumnBuilder::create_int32();
+  auto ctx = builder->create_context();
+
+  libvroom::ErrorCollector collector(libvroom::ErrorMode::PERMISSIVE);
+  size_t row_number = 5;
+  ctx.error_collector = &collector;
+  ctx.error_row = &row_number;
+  ctx.error_col_index = 2;
+  ctx.error_col_name = "age";
+  ctx.error_expected_type = libvroom::DataType::INT32;
+
+  ctx.append(std::string_view("42"));
+  EXPECT_EQ(collector.error_count(), 0);
+
+  row_number = 6;
+  ctx.append(std::string_view("abc"));
+  ASSERT_EQ(collector.error_count(), 1);
+
+  const auto& err = collector.errors()[0];
+  EXPECT_EQ(err.code, libvroom::ErrorCode::TYPE_COERCION);
+  EXPECT_EQ(err.severity, libvroom::ErrorSeverity::RECOVERABLE);
+  EXPECT_EQ(err.line, 6);
+  EXPECT_EQ(err.column, 3); // 1-indexed from error_col_index=2
+  EXPECT_NE(err.message.find("INT32"), std::string::npos);
+  EXPECT_NE(err.message.find("age"), std::string::npos);
+  EXPECT_NE(err.context.find("abc"), std::string::npos);
+}
+
+TEST(TypeCoercionErrorTest, NoErrorWhenCollectorNull) {
+  auto builder = libvroom::ArrowColumnBuilder::create_int32();
+  auto ctx = builder->create_context();
+
+  ctx.append(std::string_view("abc"));
+  EXPECT_EQ(builder->size(), 1);
+  EXPECT_EQ(builder->null_count(), 1);
 }

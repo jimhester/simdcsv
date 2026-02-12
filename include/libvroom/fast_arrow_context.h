@@ -1,11 +1,14 @@
 #pragma once
 
 #include "arrow_buffer.h"
+#include "error.h"
 #include "simd_atoi.h"
+#include "types.h"
 
 #include <charconv>
 #include <fast_float/fast_float.h>
 #include <limits>
+#include <string>
 #include <string_view>
 
 namespace libvroom {
@@ -37,6 +40,24 @@ public:
 
   AppendFn append_fn;
   AppendNullFn append_null_fn;
+
+  // Error reporting (optional - null when error collection is disabled)
+  ErrorCollector* error_collector = nullptr;
+  size_t* error_row = nullptr;     // Pointer to current row number (caller increments)
+  size_t error_col_index = 0;      // 0-indexed column index
+  const char* error_col_name = ""; // Column name (points to stable storage)
+  DataType error_expected_type = DataType::STRING;
+
+  // Report a type coercion error if error collection is enabled
+  inline void report_coercion_error(std::string_view actual_value) {
+    if (!error_collector)
+      return;
+    std::string msg = std::string("Cannot convert to ") + type_name(error_expected_type) +
+                      " in column '" + error_col_name + "'";
+    std::string ctx(actual_value.substr(0, 100));
+    error_collector->add_error(ErrorCode::TYPE_COERCION, ErrorSeverity::RECOVERABLE,
+                               error_row ? *error_row : 0, error_col_index + 1, 0, msg, ctx);
+  }
 
   // ============================================
   // Static append implementations
@@ -100,6 +121,7 @@ public:
       ctx.int32_buffer->push_back(result);
       ctx.null_bitmap->push_back_valid();
     } else {
+      ctx.report_coercion_error(value);
       ctx.int32_buffer->push_back(0);
       ctx.null_bitmap->push_back_null();
     }
@@ -157,6 +179,7 @@ public:
       ctx.int64_buffer->push_back(result);
       ctx.null_bitmap->push_back_valid();
     } else {
+      ctx.report_coercion_error(value);
       ctx.int64_buffer->push_back(0);
       ctx.null_bitmap->push_back_null();
     }
@@ -174,6 +197,7 @@ public:
       ctx.float64_buffer->push_back(result);
       ctx.null_bitmap->push_back_valid();
     } else {
+      ctx.report_coercion_error(value);
       ctx.float64_buffer->push_back(std::numeric_limits<double>::quiet_NaN());
       ctx.null_bitmap->push_back_null();
     }
@@ -197,6 +221,7 @@ public:
       ctx.null_bitmap->push_back_valid();
       return;
     }
+    ctx.report_coercion_error(value);
     ctx.bool_buffer->push_back(0);
     ctx.null_bitmap->push_back_null();
   }
@@ -217,6 +242,7 @@ public:
       ctx.int32_buffer->push_back(days);
       ctx.null_bitmap->push_back_valid();
     } else {
+      ctx.report_coercion_error(value);
       ctx.int32_buffer->push_back(0);
       ctx.null_bitmap->push_back_null();
     }
@@ -238,6 +264,7 @@ public:
       ctx.int64_buffer->push_back(micros);
       ctx.null_bitmap->push_back_valid();
     } else {
+      ctx.report_coercion_error(value);
       ctx.int64_buffer->push_back(0);
       ctx.null_bitmap->push_back_null();
     }
