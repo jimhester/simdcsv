@@ -250,8 +250,11 @@ COMMON OPTIONS:
     -e, --encoding <ENC>     Force encoding (utf-8, utf-16le, utf-16be,
                              utf-32le, utf-32be, latin1, windows-1252)
     --no-header              CSV has no header row
-    --guess-integer          Infer integer types (INT32/INT64) instead of FLOAT64
+    --guess-integer          Infer integer types (default; use --no-guess-integer to disable)
+    --no-guess-integer       Infer all numeric values as FLOAT64
     --no-trim-ws             Don't trim leading/trailing whitespace from fields
+    --decimal-mark <CHAR>    Decimal separator ('.' or ',', default: '.')
+    --skip <N>               Lines to skip before header (default: 0)
     -p, --progress           Show progress bar
     -v, --verbose            Verbose output
     -h, --help               Show this help message
@@ -300,8 +303,10 @@ struct CommonOptions {
   std::optional<libvroom::CharEncoding> encoding; // Character encoding override
 
   // Type inference
-  bool guess_integer = false; // When false, integer-like values infer as FLOAT64
-  bool trim_ws = true;        // Trim leading/trailing whitespace from fields
+  bool guess_integer = true; // When true, integer-like values infer as INT32/INT64
+  bool trim_ws = true;       // Trim leading/trailing whitespace from fields
+  char decimal_mark = '.';   // Decimal separator ('.' or ',')
+  size_t skip = 0;           // Lines to skip before header
 
   // Index caching
   bool enable_cache = false;
@@ -388,6 +393,20 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
       opts.has_header = false;
     } else if (arg == "--guess-integer") {
       opts.guess_integer = true;
+    } else if (arg == "--no-guess-integer") {
+      opts.guess_integer = false;
+    } else if (arg == "--decimal-mark") {
+      if (++i >= argc) {
+        cerr << "Error: --decimal-mark requires a character" << endl;
+        return -1;
+      }
+      opts.decimal_mark = argv[i][0];
+    } else if (arg == "--skip") {
+      if (++i >= argc) {
+        cerr << "Error: --skip requires a number" << endl;
+        return -1;
+      }
+      opts.skip = stoul(argv[i]);
     } else if (arg == "--no-trim-ws") {
       opts.trim_ws = false;
     } else if (arg == "-p" || arg == "--progress") {
@@ -529,8 +548,22 @@ int cmd_convert(int argc, char* argv[]) {
       common.has_header = false;
     } else if (arg == "--guess-integer") {
       common.guess_integer = true;
+    } else if (arg == "--no-guess-integer") {
+      common.guess_integer = false;
     } else if (arg == "--no-trim-ws") {
       common.trim_ws = false;
+    } else if (arg == "--decimal-mark") {
+      if (++i >= argc) {
+        cerr << "Error: --decimal-mark requires a character" << endl;
+        return 1;
+      }
+      common.decimal_mark = argv[i][0];
+    } else if (arg == "--skip") {
+      if (++i >= argc) {
+        cerr << "Error: --skip requires a number" << endl;
+        return 1;
+      }
+      common.skip = stoul(argv[i]);
     } else if (arg == "--strict") {
       common.error_mode = libvroom::ErrorMode::FAIL_FAST;
     } else if (arg == "--permissive") {
@@ -598,6 +631,8 @@ int cmd_convert(int argc, char* argv[]) {
   opts.csv.has_header = common.has_header;
   opts.csv.guess_integer = common.guess_integer;
   opts.csv.trim_ws = common.trim_ws;
+  opts.csv.decimal_mark = common.decimal_mark;
+  opts.csv.skip = common.skip;
   opts.csv.error_mode = common.error_mode;
   opts.csv.max_errors = common.max_errors;
   opts.csv.encoding = common.encoding;
@@ -706,6 +741,8 @@ int cmd_count(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.decimal_mark = opts.decimal_mark;
+  csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -781,6 +818,8 @@ int cmd_head(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.decimal_mark = opts.decimal_mark;
+  csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -892,6 +931,8 @@ int cmd_info(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.decimal_mark = opts.decimal_mark;
+  csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -1025,6 +1066,8 @@ int cmd_select(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.decimal_mark = opts.decimal_mark;
+  csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;
@@ -1171,6 +1214,8 @@ int cmd_pretty(int argc, char* argv[]) {
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
   csv_opts.trim_ws = opts.trim_ws;
+  csv_opts.decimal_mark = opts.decimal_mark;
+  csv_opts.skip = opts.skip;
   csv_opts.error_mode = opts.error_mode;
   csv_opts.max_errors = opts.max_errors;
   csv_opts.encoding = opts.encoding;

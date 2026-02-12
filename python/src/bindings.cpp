@@ -43,7 +43,7 @@ read_csv(const std::string& path, std::optional<char> separator = std::nullopt,
          std::optional<size_t> max_errors = std::nullopt,
          std::optional<std::string> encoding = std::nullopt,
          std::optional<char> comment = std::nullopt, bool skip_empty_rows = true,
-         bool guess_integer = false, bool trim_ws = true) {
+         bool guess_integer = true, bool trim_ws = true, char decimal_mark = '.', size_t skip = 0) {
   // Set up options
   libvroom::CsvOptions csv_opts;
   if (separator)
@@ -78,6 +78,12 @@ read_csv(const std::string& path, std::optional<char> separator = std::nullopt,
 
   // Set trim_ws
   csv_opts.trim_ws = trim_ws;
+
+  // Set decimal mark
+  csv_opts.decimal_mark = decimal_mark;
+
+  // Set skip
+  csv_opts.skip = skip;
 
   // Set error handling options
   if (error_mode) {
@@ -146,7 +152,8 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
                 std::optional<std::string> error_mode = std::nullopt,
                 std::optional<size_t> max_errors = std::nullopt,
                 std::optional<char> comment = std::nullopt, bool skip_empty_rows = true,
-                bool guess_integer = false, bool trim_ws = true) {
+                bool guess_integer = true, bool trim_ws = true, char decimal_mark = '.',
+                size_t skip = 0) {
   libvroom::VroomOptions opts;
   opts.input_path = input_path;
   opts.output_path = output_path;
@@ -193,6 +200,12 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
   // Set trim_ws
   opts.csv.trim_ws = trim_ws;
 
+  // Set decimal mark
+  opts.csv.decimal_mark = decimal_mark;
+
+  // Set skip
+  opts.csv.skip = skip;
+
   // Set error handling options
   if (error_mode) {
     if (*error_mode == "disabled") {
@@ -236,14 +249,16 @@ void to_parquet(const std::string& input_path, const std::string& output_path,
 
 void to_arrow_ipc(const std::string& input_path, const std::string& output_path,
                   std::optional<size_t> batch_size = std::nullopt,
-                  std::optional<size_t> num_threads = std::nullopt, bool guess_integer = false,
-                  bool trim_ws = true) {
+                  std::optional<size_t> num_threads = std::nullopt, bool guess_integer = true,
+                  bool trim_ws = true, char decimal_mark = '.', size_t skip = 0) {
   libvroom::CsvOptions csv_opts;
   if (num_threads) {
     csv_opts.num_threads = *num_threads;
   }
   csv_opts.guess_integer = guess_integer;
   csv_opts.trim_ws = trim_ws;
+  csv_opts.decimal_mark = decimal_mark;
+  csv_opts.skip = skip;
 
   libvroom::ArrowIpcOptions ipc_opts;
   if (batch_size) {
@@ -336,7 +351,8 @@ PYBIND11_MODULE(_core, m) {
         py::arg("num_threads") = py::none(), py::arg("error_mode") = py::none(),
         py::arg("max_errors") = py::none(), py::arg("encoding") = py::none(),
         py::arg("comment") = py::none(), py::arg("skip_empty_rows") = true,
-        py::arg("guess_integer") = false, py::arg("trim_ws") = true,
+        py::arg("guess_integer") = true, py::arg("trim_ws") = true, py::arg("decimal_mark") = '.',
+        py::arg("skip") = 0,
         R"doc(
         Read a CSV file into a Table.
 
@@ -373,11 +389,14 @@ PYBIND11_MODULE(_core, m) {
             Whether to skip empty lines in the input. Default is True.
         guess_integer : bool, optional
             Whether to infer integer types (INT32/INT64) for integer-like values.
-            When False (default), integer-like values are inferred as FLOAT64.
-            Set to True to match traditional CSV parser behavior.
+            Default is True.
         trim_ws : bool, optional
             Whether to trim leading and trailing whitespace from field values.
             Default is True.
+        decimal_mark : str, optional
+            Decimal separator character ('.' or ','). Default is '.'.
+        skip : int, optional
+            Number of lines to skip before the header row. Default is 0.
 
         Returns
         -------
@@ -411,8 +430,8 @@ PYBIND11_MODULE(_core, m) {
         py::arg("compression") = py::none(), py::arg("row_group_size") = py::none(),
         py::arg("num_threads") = py::none(), py::arg("error_mode") = py::none(),
         py::arg("max_errors") = py::none(), py::arg("comment") = py::none(),
-        py::arg("skip_empty_rows") = true, py::arg("guess_integer") = false,
-        py::arg("trim_ws") = true,
+        py::arg("skip_empty_rows") = true, py::arg("guess_integer") = true,
+        py::arg("trim_ws") = true, py::arg("decimal_mark") = '.', py::arg("skip") = 0,
         R"doc(
         Convert a CSV file to Parquet format.
 
@@ -446,11 +465,14 @@ PYBIND11_MODULE(_core, m) {
             Whether to skip empty lines in the input. Default is True.
         guess_integer : bool, optional
             Whether to infer integer types (INT32/INT64) for integer-like values.
-            When False (default), integer-like values are inferred as FLOAT64.
-            Set to True to match traditional CSV parser behavior.
+            Default is True.
         trim_ws : bool, optional
             Whether to trim leading and trailing whitespace from field values.
             Default is True.
+        decimal_mark : str, optional
+            Decimal separator character ('.' or ','). Default is '.'.
+        skip : int, optional
+            Number of lines to skip before the header row. Default is 0.
 
         Raises
         ------
@@ -470,7 +492,8 @@ PYBIND11_MODULE(_core, m) {
   // to_arrow_ipc function
   m.def("to_arrow_ipc", &to_arrow_ipc, py::arg("input_path"), py::arg("output_path"),
         py::arg("batch_size") = py::none(), py::arg("num_threads") = py::none(),
-        py::arg("guess_integer") = false, py::arg("trim_ws") = true,
+        py::arg("guess_integer") = true, py::arg("trim_ws") = true, py::arg("decimal_mark") = '.',
+        py::arg("skip") = 0,
         R"doc(
         Convert a CSV file to Arrow IPC format.
 
@@ -490,10 +513,14 @@ PYBIND11_MODULE(_core, m) {
             Number of threads to use. Default is auto-detect.
         guess_integer : bool, optional
             Whether to infer integer types (INT32/INT64) instead of FLOAT64
-            for integer-like values. Default is False.
+            for integer-like values. Default is True.
         trim_ws : bool, optional
             Whether to trim leading and trailing whitespace from field values.
             Default is True.
+        decimal_mark : str, optional
+            Decimal separator character ('.' or ','). Default is '.'.
+        skip : int, optional
+            Number of lines to skip before the header row. Default is 0.
 
         Raises
         ------
