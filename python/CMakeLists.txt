@@ -207,6 +207,8 @@ set(VROOM_SOURCES
     ${LIBVROOM_ROOT}/src/table.cpp
     ${LIBVROOM_ROOT}/src/reader/mmap_source.cpp
     ${LIBVROOM_ROOT}/src/reader/csv_reader.cpp
+    ${LIBVROOM_ROOT}/src/reader/fwf_reader.cpp
+    ${LIBVROOM_ROOT}/src/reader/streaming_parser.cpp
     ${LIBVROOM_ROOT}/src/parser/chunk_finder.cpp
     ${LIBVROOM_ROOT}/src/parser/simd_chunk_finder.cpp
     ${LIBVROOM_ROOT}/src/parser/line_parser.cpp
