@@ -434,4 +434,11 @@ bool parse_date(std::string_view value, int32_t& days_since_epoch);
 // Returns true on success, false on parse error
 bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch);
 
+// Parse time-of-day to microseconds since midnight
+// Supports formats:
+//   HH:MM:SS, HH:MM:SS.ffffff, HH:MM
+//   H:MM:SS AM/PM (12-hour, case-insensitive)
+// Returns true on success, false on parse error
+bool parse_time(std::string_view value, int64_t& micros_since_midnight);
+
 } // namespace libvroom
