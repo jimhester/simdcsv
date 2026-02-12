@@ -130,13 +130,19 @@ struct StreamingParser::Impl {
 
     // Skip leading lines if requested (raw newline counting, matching CsvReader::skip_n_lines)
     while (lines_skipped < options.csv.skip) {
-      // Find next newline (not quote-aware, same as batch parser)
+      // Find next line ending (not quote-aware, same as batch parser)
       size_t pos = 0;
-      while (pos < avail && data[pos] != '\n')
+      while (pos < avail && data[pos] != '\n' && data[pos] != '\r')
         ++pos;
       if (pos >= avail)
         return false; // Not enough data to find end of skip line
-      pos++;          // consume the '\n'
+      if (data[pos] == '\r') {
+        pos++;
+        if (pos < avail && data[pos] == '\n')
+          pos++; // CRLF
+      } else {
+        pos++; // LF
+      }
       consumed += pos;
       data = buffer.data() + consumed;
       avail = buffer.size() - consumed;
