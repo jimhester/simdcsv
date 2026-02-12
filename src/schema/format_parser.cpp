@@ -63,10 +63,11 @@ int64_t ParsedDateTime::to_epoch_micros() const {
 }
 
 int64_t ParsedDateTime::to_seconds_since_midnight_micros() const {
-  return static_cast<int64_t>(hour) * 3600LL * 1000000LL +
-         static_cast<int64_t>(minute) * 60LL * 1000000LL +
-         static_cast<int64_t>(second) * 1000000LL +
-         static_cast<int64_t>(fractional_seconds * 1000000.0);
+  int64_t micros = static_cast<int64_t>(hour) * 3600LL * 1000000LL +
+                   static_cast<int64_t>(minute) * 60LL * 1000000LL +
+                   static_cast<int64_t>(second) * 1000000LL +
+                   static_cast<int64_t>(fractional_seconds * 1000000.0);
+  return is_negative ? -micros : micros;
 }
 
 // Case-insensitive string prefix match. Returns length matched or 0.
@@ -94,8 +95,34 @@ static int parse_digits(const char*& pos, const char* end, int max_digits, int& 
   return count;
 }
 
+// Expand %x and %X in format string using locale date/time formats
+static std::string expand_format(std::string_view format, const FormatLocale& locale) {
+  std::string result;
+  result.reserve(format.size());
+  for (size_t i = 0; i < format.size(); ++i) {
+    if (format[i] == '%' && i + 1 < format.size()) {
+      char spec = format[i + 1];
+      if (spec == '%') {
+        result += "%%"; // Preserve escaped percent for main parser
+        ++i;
+        continue;
+      } else if (spec == 'x') {
+        result += locale.date_format;
+        ++i;
+        continue;
+      } else if (spec == 'X') {
+        result += locale.time_format;
+        ++i;
+        continue;
+      }
+    }
+    result += format[i];
+  }
+  return result;
+}
+
 FormatParser::FormatParser(std::string_view format, const FormatLocale& locale)
-    : format_(format), locale_(locale) {}
+    : format_(expand_format(format, locale)), locale_(locale) {}
 
 bool FormatParser::parse(std::string_view value, ParsedDateTime& dt) const {
   dt = ParsedDateTime{};
@@ -174,6 +201,26 @@ bool FormatParser::parse(std::string_view value, ParsedDateTime& dt) const {
       if (parse_digits(pos, end, 2, val) == 0 || val > 23)
         return false;
       dt.hour = val;
+      break;
+    }
+    case 'h': {
+      // Duration hours: unlimited range, optional leading minus sign
+      if (pos < end && *pos == '-') {
+        dt.is_negative = true;
+        pos++;
+      }
+      int64_t val = 0;
+      int digit_count = 0;
+      while (pos < end && *pos >= '0' && *pos <= '9' && digit_count < 10) {
+        val = val * 10 + (*pos - '0');
+        pos++;
+        digit_count++;
+      }
+      if (val > INT32_MAX)
+        return false; // Exceeds int range
+      if (digit_count == 0)
+        return false;
+      dt.hour = static_cast<int>(val);
       break;
     }
     case 'I': {
@@ -283,6 +330,111 @@ bool FormatParser::parse(std::string_view value, ParsedDateTime& dt) const {
       break;
     }
     case 'A': {
+      // %AD = auto-detect date, %AT = auto-detect time, %A = full day name
+      if (fmt < fmt_end && *fmt == 'D') {
+        fmt++; // consume 'D'
+        // Auto-detect date: try YYYY-MM-DD, YYYY/MM/DD, YY-MM-DD, YY/MM/DD
+        const char* save = pos;
+        // Count leading digits
+        int n_digits = 0;
+        const char* p = pos;
+        while (p < end && *p >= '0' && *p <= '9') {
+          p++;
+          n_digits++;
+        }
+        if (n_digits == 4 && p < end && (*p == '-' || *p == '/')) {
+          // YYYY-MM-DD or YYYY/MM/DD
+          int year_val;
+          if (parse_digits(pos, end, 4, year_val) != 4)
+            return false;
+          dt.year = year_val;
+          char sep = *pos++;
+          int month_val;
+          if (parse_digits(pos, end, 2, month_val) == 0)
+            return false;
+          dt.month = month_val;
+          if (pos >= end || *pos != sep)
+            return false;
+          pos++;
+          int day_val;
+          if (parse_digits(pos, end, 2, day_val) == 0)
+            return false;
+          dt.day = day_val;
+        } else if ((n_digits == 1 || n_digits == 2) && p < end && (*p == '-' || *p == '/')) {
+          // Y-MM-DD or YY-MM-DD or YY/MM/DD
+          pos = save;
+          int first;
+          int first_len = parse_digits(pos, end, 2, first);
+          if (first_len == 0)
+            return false;
+          char sep = *pos++;
+          int second_val;
+          if (parse_digits(pos, end, 2, second_val) == 0)
+            return false;
+          if (pos >= end || *pos != sep)
+            return false;
+          pos++;
+          int third;
+          int third_len = parse_digits(pos, end, 4, third);
+          if (third_len == 4) {
+            // MM/DD/YYYY
+            dt.month = first;
+            dt.day = second_val;
+            dt.year = third;
+          } else if (third_len >= 1 && third_len <= 2) {
+            // YY/MM/DD (2-digit year first)
+            dt.year = first < 69 ? 2000 + first : 1900 + first;
+            dt.month = second_val;
+            dt.day = third;
+          } else {
+            return false;
+          }
+        } else {
+          return false;
+        }
+        break;
+      }
+      if (fmt < fmt_end && *fmt == 'T') {
+        fmt++; // consume 'T'
+        // Auto-detect time: HH:MM:SS.fff or HH:MM:SS or HH:MM
+        int h;
+        if (parse_digits(pos, end, 2, h) == 0 || h > 23)
+          return false;
+        if (pos >= end || *pos != ':')
+          return false;
+        pos++;
+        int m;
+        if (parse_digits(pos, end, 2, m) == 0 || m > 59)
+          return false;
+        dt.hour = h;
+        dt.minute = m;
+        // Optional :SS
+        if (pos < end && *pos == ':') {
+          pos++;
+          int s;
+          if (parse_digits(pos, end, 2, s) == 0 || s > 59)
+            return false;
+          dt.second = s;
+          // Optional .fractional
+          if (pos < end && *pos == '.') {
+            pos++;
+            double frac = 0.0;
+            double place = 0.1;
+            int frac_digits = 0;
+            while (pos < end && *pos >= '0' && *pos <= '9' && frac_digits < 6) {
+              frac += (*pos - '0') * place;
+              place *= 0.1;
+              pos++;
+              frac_digits++;
+            }
+            while (pos < end && *pos >= '0' && *pos <= '9')
+              pos++;
+            dt.fractional_seconds = frac;
+          }
+        }
+        break;
+      }
+      // %A - full day name
       bool found = false;
       for (int i = 0; i < 7; ++i) {
         size_t len = match_string_ci(pos, end, locale_.day_names[i]);
@@ -405,6 +557,13 @@ bool FormatParser::parse(std::string_view value, ParsedDateTime& dt) const {
         return false;
       dt.hour = h;
       dt.minute = m;
+      break;
+    }
+    case '.': {
+      // Match any non-digit character (wildcard separator)
+      if (pos >= end || std::isdigit(static_cast<unsigned char>(*pos)))
+        return false;
+      pos++;
       break;
     }
     default:

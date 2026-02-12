@@ -787,6 +787,7 @@ TEST(CsvReaderErrorTest, EmptyHeader) {
   libvroom::CsvOptions opts;
   opts.separator = ","; // Explicit separator for malformed data (bypass auto-detect)
   opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+  opts.skip_empty_rows = false; // Don't skip the empty leading line
 
   libvroom::CsvReader reader(opts);
   auto result = reader.open("test/data/malformed/empty_header.csv");
