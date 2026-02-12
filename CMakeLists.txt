@@ -409,6 +409,7 @@ set(VROOM_SOURCES
     src/parser/simd_atoi.cpp
     src/schema/type_inference.cpp
     src/schema/type_parsers.cpp
+    src/schema/format_parser.cpp
     src/columns/column_builder.cpp
     src/encoding/plain.cpp
     src/encoding/rle.cpp
@@ -719,6 +720,12 @@ if(BUILD_TESTING)
     target_link_libraries(time_parsing_test PRIVATE vroom GTest::gtest_main pthread)
     target_include_directories(time_parsing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     gtest_discover_tests(time_parsing_test)
+
+    # Format parser tests (Issue #671)
+    add_executable(format_parser_test test/format_parser_test.cpp)
+    target_link_libraries(format_parser_test PRIVATE vroom GTest::gtest_main pthread)
+    target_include_directories(format_parser_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    gtest_discover_tests(format_parser_test)
 
 endif() # BUILD_TESTING
 
