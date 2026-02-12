@@ -35,7 +35,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Jupyter and quartodoc dependencies
-        run: pip install jupyter nbformat nbclient quartodoc
+        run: pip install jupyter nbformat nbclient quartodoc "griffe<2"
 
       - name: Install Doxygen
         run: sudo apt-get update && sudo apt-get install -y doxygen

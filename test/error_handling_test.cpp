@@ -785,7 +785,7 @@ TEST(ErrorModeTest, BestEffortModeDefinition) {
 // Test that CsvReader detects empty header
 TEST(CsvReaderErrorTest, EmptyHeader) {
   libvroom::CsvOptions opts;
-  opts.separator = ','; // Explicit separator for malformed data (bypass auto-detect)
+  opts.separator = ","; // Explicit separator for malformed data (bypass auto-detect)
   opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
 
   libvroom::CsvReader reader(opts);
