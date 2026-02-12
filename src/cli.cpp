@@ -156,7 +156,8 @@ static std::string getColumnValueAsString(const libvroom::ArrowColumnBuilder* co
 }
 
 // Output a row with proper CSV quoting
-static void outputRow(const std::vector<std::string>& row, char delimiter, char quote_char) {
+static void outputRow(const std::vector<std::string>& row, const std::string& delimiter,
+                      char quote_char) {
   for (size_t i = 0; i < row.size(); ++i) {
     if (i > 0)
       cout << delimiter;
@@ -179,21 +180,26 @@ static void outputRow(const std::vector<std::string>& row, char delimiter, char 
 }
 
 // Format delimiter for display
-static std::string formatDelimiter(char delim) {
-  switch (delim) {
-  case ',':
+static std::string formatDelimiter(const std::string& delim) {
+  if (delim == ",")
     return "comma";
-  case '\t':
+  if (delim == "\t")
     return "tab";
-  case ';':
+  if (delim == ";")
     return "semicolon";
-  case '|':
+  if (delim == "|")
     return "pipe";
-  case ':':
+  if (delim == ":")
     return "colon";
-  default:
-    return std::string(1, delim);
+  // Escape non-printable characters
+  std::string result;
+  for (char c : delim) {
+    if (c == '\t')
+      result += "\\t";
+    else
+      result += c;
   }
+  return result;
 }
 
 // =============================================================================
@@ -244,8 +250,9 @@ CONVERT OPTIONS:
 COMMON OPTIONS:
     -n, --rows <N>           Number of rows for head/pretty (default: 10)
     -j, --threads <N>        Number of threads (default: auto)
-    -d, --delimiter <CHAR>   Field delimiter (default: auto)
+    -d, --delimiter <STR>    Field delimiter (default: auto)
                              Named: auto, comma, tab, semicolon, pipe, colon
+                             Or any string (e.g., "|~|", "\\t\\t")
     -q, --quote <CHAR>       Quote character (default: ")
     -e, --encoding <ENC>     Force encoding (utf-8, utf-16le, utf-16be,
                              utf-32le, utf-32be, latin1, windows-1252)
@@ -287,7 +294,7 @@ For more information, visit: https://github.com/jimhester/libvroom
 
 struct CommonOptions {
   string input_path;
-  char delimiter = '\0'; // auto-detect by default
+  string delimiter; // empty = auto-detect
   char quote = '"';
   bool has_header = true;
   size_t num_threads = 0;
@@ -340,30 +347,25 @@ static int parseCommonOptions(int argc, char* argv[], CommonOptions& opts, int s
       opts.num_threads = stoul(argv[i]);
     } else if (arg == "-d" || arg == "--delimiter") {
       if (++i >= argc) {
-        cerr << "Error: --delimiter requires a character" << endl;
+        cerr << "Error: --delimiter requires a value" << endl;
         return -1;
       }
       string delim_str = argv[i];
       if (delim_str == "\\t" || delim_str == "tab") {
-        opts.delimiter = '\t';
+        opts.delimiter = "\t";
       } else if (delim_str == "auto") {
-        opts.delimiter = '\0';
+        opts.delimiter.clear();
       } else if (delim_str == "comma") {
-        opts.delimiter = ',';
+        opts.delimiter = ",";
       } else if (delim_str == "semicolon") {
-        opts.delimiter = ';';
+        opts.delimiter = ";";
       } else if (delim_str == "pipe") {
-        opts.delimiter = '|';
+        opts.delimiter = "|";
       } else if (delim_str == "colon") {
-        opts.delimiter = ':';
-      } else if (delim_str.length() == 1) {
-        opts.delimiter = delim_str[0];
+        opts.delimiter = ":";
       } else {
-        cerr << "Error: --delimiter must be a single character or name (auto, comma, tab, "
-                "semicolon, "
-                "pipe, colon)"
-             << endl;
-        return -1;
+        // Accept any string as delimiter (including multi-byte)
+        opts.delimiter = delim_str;
       }
     } else if (arg == "-q" || arg == "--quote") {
       if (++i >= argc) {
@@ -482,29 +484,25 @@ int cmd_convert(int argc, char* argv[]) {
       common.num_threads = stoul(argv[i]);
     } else if (arg == "-d" || arg == "--delimiter") {
       if (++i >= argc) {
-        cerr << "Error: --delimiter requires a character" << endl;
+        cerr << "Error: --delimiter requires a value" << endl;
         return 1;
       }
       string delim_str = argv[i];
       if (delim_str == "\\t" || delim_str == "tab") {
-        common.delimiter = '\t';
+        common.delimiter = "\t";
       } else if (delim_str == "auto") {
-        common.delimiter = '\0';
+        common.delimiter.clear();
       } else if (delim_str == "comma") {
-        common.delimiter = ',';
+        common.delimiter = ",";
       } else if (delim_str == "semicolon") {
-        common.delimiter = ';';
+        common.delimiter = ";";
       } else if (delim_str == "pipe") {
-        common.delimiter = '|';
+        common.delimiter = "|";
       } else if (delim_str == "colon") {
-        common.delimiter = ':';
-      } else if (delim_str.length() == 1) {
-        common.delimiter = delim_str[0];
+        common.delimiter = ":";
       } else {
-        cerr << "Error: --delimiter must be a single character or name (auto, comma, tab, "
-                "semicolon, pipe, colon)"
-             << endl;
-        return 1;
+        // Accept any string as delimiter (including multi-byte)
+        common.delimiter = delim_str;
       }
     } else if (arg == "-q" || arg == "--quote") {
       if (++i >= argc) {
@@ -593,8 +591,8 @@ int cmd_convert(int argc, char* argv[]) {
   opts.progress = common.show_progress;
 
   // CSV options
-  if (common.delimiter != '\0')
-    opts.csv.separator = std::string(1, common.delimiter);
+  if (!common.delimiter.empty())
+    opts.csv.separator = common.delimiter;
   opts.csv.quote = common.quote;
   opts.csv.has_header = common.has_header;
   opts.csv.guess_integer = common.guess_integer;
@@ -702,8 +700,8 @@ int cmd_count(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  if (opts.delimiter != '\0')
-    csv_opts.separator = std::string(1, opts.delimiter);
+  if (!opts.delimiter.empty())
+    csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
@@ -778,8 +776,8 @@ int cmd_head(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  if (opts.delimiter != '\0')
-    csv_opts.separator = std::string(1, opts.delimiter);
+  if (!opts.delimiter.empty())
+    csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
@@ -817,9 +815,9 @@ int cmd_head(int argc, char* argv[]) {
   }
 
   // Update delimiter from auto-detection for output formatting
-  if (opts.delimiter == '\0') {
+  if (opts.delimiter.empty()) {
     auto detected = reader.detected_dialect();
-    opts.delimiter = detected ? detected->dialect.delimiter : ',';
+    opts.delimiter = std::string(1, detected ? detected->dialect.delimiter : ',');
   }
 
   const auto& schema = reader.schema();
@@ -890,8 +888,8 @@ int cmd_info(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  if (opts.delimiter != '\0')
-    csv_opts.separator = std::string(1, opts.delimiter);
+  if (!opts.delimiter.empty())
+    csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
@@ -945,9 +943,9 @@ int cmd_info(int argc, char* argv[]) {
   }
 
   // Update delimiter from auto-detection for output formatting
-  if (opts.delimiter == '\0') {
+  if (opts.delimiter.empty()) {
     auto detected = reader.detected_dialect();
-    opts.delimiter = detected ? detected->dialect.delimiter : ',';
+    opts.delimiter = std::string(1, detected ? detected->dialect.delimiter : ',');
   }
 
   const auto& schema = reader.schema();
@@ -1024,8 +1022,8 @@ int cmd_select(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  if (opts.delimiter != '\0')
-    csv_opts.separator = std::string(1, opts.delimiter);
+  if (!opts.delimiter.empty())
+    csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
@@ -1063,9 +1061,9 @@ int cmd_select(int argc, char* argv[]) {
   }
 
   // Update delimiter from auto-detection for output formatting
-  if (opts.delimiter == '\0') {
+  if (opts.delimiter.empty()) {
     auto detected = reader.detected_dialect();
-    opts.delimiter = detected ? detected->dialect.delimiter : ',';
+    opts.delimiter = std::string(1, detected ? detected->dialect.delimiter : ',');
   }
 
   const auto& schema = reader.schema();
@@ -1171,8 +1169,8 @@ int cmd_pretty(int argc, char* argv[]) {
 
   // Set up CsvReader
   libvroom::CsvOptions csv_opts;
-  if (opts.delimiter != '\0')
-    csv_opts.separator = std::string(1, opts.delimiter);
+  if (!opts.delimiter.empty())
+    csv_opts.separator = opts.delimiter;
   csv_opts.quote = opts.quote;
   csv_opts.has_header = opts.has_header;
   csv_opts.guess_integer = opts.guess_integer;
