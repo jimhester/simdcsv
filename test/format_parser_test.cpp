@@ -432,3 +432,61 @@ TEST_F(FormatParserTest, CompoundR) {
   EXPECT_EQ(dt.hour, 14);
   EXPECT_EQ(dt.minute, 30);
 }
+
+// ============================================================================
+// Integration: FormatParser + ArrowColumnBuilder
+// ============================================================================
+
+#include "libvroom/arrow_column_builder.h"
+
+class FormatBuilderIntegrationTest : public ::testing::Test {
+protected:
+  FormatLocale locale = FormatLocale::english();
+};
+
+TEST_F(FormatBuilderIntegrationTest, DateColumnWithFormat) {
+  auto parser = std::make_shared<const FormatParser>("%d/%m/%Y", locale);
+  auto builder = ArrowColumnBuilder::create_date(parser);
+  auto ctx = builder->create_context();
+
+  ctx.append("15/03/2024");
+  ctx.append("01/01/1970");
+  ctx.append_null();
+
+  EXPECT_EQ(builder->size(), 3);
+  auto& values = static_cast<ArrowDateColumnBuilder&>(*builder).values();
+  EXPECT_EQ(values.get(0), 19797); // 2024-03-15
+  EXPECT_EQ(values.get(1), 0);     // 1970-01-01
+}
+
+TEST_F(FormatBuilderIntegrationTest, TimestampColumnWithFormat) {
+  auto parser = std::make_shared<const FormatParser>("%d/%m/%Y %H:%M:%S", locale);
+  auto builder = ArrowColumnBuilder::create_timestamp(parser);
+  auto ctx = builder->create_context();
+
+  ctx.append("01/01/1970 00:00:00");
+  EXPECT_EQ(builder->size(), 1);
+  auto& values = static_cast<ArrowTimestampColumnBuilder&>(*builder).values();
+  EXPECT_EQ(values.get(0), 0);
+}
+
+TEST_F(FormatBuilderIntegrationTest, TimeColumnWithFormat) {
+  auto parser = std::make_shared<const FormatParser>("%I:%M %p", locale);
+  auto builder = ArrowColumnBuilder::create_time(parser);
+  auto ctx = builder->create_context();
+
+  ctx.append("02:30 PM");
+  EXPECT_EQ(builder->size(), 1);
+  auto& values = static_cast<ArrowTimeColumnBuilder&>(*builder).values();
+  EXPECT_EQ(values.get(0), 52200000000LL);
+}
+
+TEST_F(FormatBuilderIntegrationTest, FormatParseErrorBecomesNull) {
+  auto parser = std::make_shared<const FormatParser>("%Y-%m-%d", locale);
+  auto builder = ArrowColumnBuilder::create_date(parser);
+  auto ctx = builder->create_context();
+
+  ctx.append("not-a-date");
+  EXPECT_EQ(builder->size(), 1);
+  EXPECT_EQ(builder->null_count(), 1);
+}
