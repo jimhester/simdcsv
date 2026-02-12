@@ -43,10 +43,11 @@ public:
 
   // Error reporting (optional - null when error collection is disabled)
   ErrorCollector* error_collector = nullptr;
-  size_t* error_row = nullptr;     // Pointer to current row number (caller increments)
+  size_t* error_row = nullptr;     // Pointer to current row number (caller updates)
   size_t error_col_index = 0;      // 0-indexed column index
   const char* error_col_name = ""; // Column name (points to stable storage)
   DataType error_expected_type = DataType::STRING;
+  size_t error_byte_offset = 0; // Byte offset of current field (caller updates)
 
   // Report a type coercion error if error collection is enabled
   inline void report_coercion_error(std::string_view actual_value) {
@@ -56,7 +57,8 @@ public:
                       " in column '" + error_col_name + "'";
     std::string ctx(actual_value.substr(0, 100));
     error_collector->add_error(ErrorCode::TYPE_COERCION, ErrorSeverity::RECOVERABLE,
-                               error_row ? *error_row : 0, error_col_index + 1, 0, msg, ctx);
+                               error_row ? *error_row : 0, error_col_index + 1, error_byte_offset,
+                               msg, ctx);
   }
 
   // ============================================

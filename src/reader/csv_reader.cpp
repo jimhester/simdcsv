@@ -54,12 +54,13 @@ std::pair<size_t, bool> parse_chunk_with_state(
     fast_contexts.push_back(col->create_context());
   }
 
-  // Wire up type coercion error reporting when error collection and schema are available
-  size_t parse_row = 0;
+  // Wire up type coercion error reporting when error collection and schema are available.
+  // Row number is left as nullptr (reports 0) in the multi-threaded path, consistent
+  // with structural errors (NULL_BYTE, QUOTE_IN_UNQUOTED_FIELD, etc.) which also use 0.
+  // Byte offset is set per-field before each append call below.
   if (error_collector && schema) {
     for (size_t i = 0; i < fast_contexts.size(); ++i) {
       fast_contexts[i].error_collector = error_collector;
-      fast_contexts[i].error_row = &parse_row;
       fast_contexts[i].error_col_index = i;
       fast_contexts[i].error_col_name = (*schema)[i].name.c_str();
       fast_contexts[i].error_expected_type = (*schema)[i].type;
@@ -241,11 +242,17 @@ std::pair<size_t, bool> parse_chunk_with_state(
             goto done_chunk;
         }
 
+        // Set byte offset for type coercion error reporting
+        fast_contexts[col_idx].error_byte_offset =
+            base_byte_offset + static_cast<size_t>(field_data - data);
         // Devirtualized append call
         fast_contexts[col_idx].append(unescaped);
         if (check_errors && error_collector->should_stop()) [[unlikely]]
           goto done_chunk;
       } else {
+        // Set byte offset for type coercion error reporting
+        fast_contexts[col_idx].error_byte_offset =
+            base_byte_offset + static_cast<size_t>(field_data - data);
         // Devirtualized append call
         fast_contexts[col_idx].append(field_view);
         if (check_errors && error_collector->should_stop()) [[unlikely]]
@@ -270,7 +277,6 @@ std::pair<size_t, bool> parse_chunk_with_state(
     }
 
     row_count++;
-    parse_row++;
     // Advance offset by consumed bytes
     offset += start_remaining - iter.remaining();
   }
@@ -1354,11 +1360,15 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
             goto done_serial;
         }
 
+        // Set byte offset for type coercion error reporting
+        fast_contexts[col_idx].error_byte_offset = static_cast<size_t>(field_data - data);
         // Devirtualized append call
         fast_contexts[col_idx].append(unescaped);
         if (check_errors && impl_->error_collector.should_stop()) [[unlikely]]
           goto done_serial;
       } else {
+        // Set byte offset for type coercion error reporting
+        fast_contexts[col_idx].error_byte_offset = static_cast<size_t>(field_data - data);
         // Devirtualized append call
         fast_contexts[col_idx].append(field_view);
         if (check_errors && impl_->error_collector.should_stop()) [[unlikely]]
