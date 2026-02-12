@@ -901,6 +901,78 @@ TEST_F(SIMDParsingTest, LargeMultiThreadedMixedQuotePatterns) {
 // BACKSLASH ESCAPE MASK COMPUTATION
 // ============================================================================
 
+// ============================================================================
+// SIMD BACKSLASH ESCAPE BOUNDARY TESTS
+// ============================================================================
+
+TEST(SimdParsingTest, BackslashEscape_SIMDBoundary) {
+  // Create data where a backslash escape spans the 64-byte SIMD boundary
+  std::string data(64, 'x');
+  data[0] = '"'; // opening quote
+  data[63] = '\\';
+  // Position 64 (first byte of second block) is the escaped character
+  data += "\""; // this " at position 64 should be escaped, not close the quote
+  data += ",rest";
+  data += "\n";
+
+  auto [row_count, last_end] = libvroom::count_rows_simd(data.data(), data.size(), '"', true);
+  EXPECT_EQ(row_count, 1u);
+}
+
+TEST(SimdParsingTest, BackslashEscape_DoubleBackslashSIMDBoundary) {
+  // Two backslashes spanning SIMD boundary: \\ at positions 62-63
+  std::string data(64, 'x');
+  data[0] = '"'; // opening quote
+  data[62] = '\\';
+  data[63] = '\\';
+  // Position 64: quote should NOT be escaped (even backslashes)
+  data += "\""; // closing quote
+  data += ",rest";
+  data += "\n";
+
+  auto [row_count, last_end] = libvroom::count_rows_simd(data.data(), data.size(), '"', true);
+  EXPECT_EQ(row_count, 1u);
+}
+
+TEST(SimdParsingTest, BackslashEscape_ScalarMatchesSIMD) {
+  // Verify SIMD and scalar produce same results for backslash-escaped data
+  std::string data = "\"he said \\\"hello\\\"\",100\n"
+                     "\"path: C:\\\\Users\\\\jane\",200\n"
+                     "\"tab:\\there\",300\n";
+
+  auto [simd_count, simd_end] = libvroom::count_rows_simd(data.data(), data.size(), '"', true);
+  auto [scalar_count, scalar_end] =
+      libvroom::count_rows_scalar(data.data(), data.size(), '"', true);
+  EXPECT_EQ(simd_count, scalar_count);
+  EXPECT_EQ(simd_end, scalar_end);
+  EXPECT_EQ(simd_count, 3u);
+}
+
+TEST(SimdParsingTest, BackslashEscape_FindRowEndSIMD) {
+  // Test find_row_end_simd with backslash escapes
+  std::string data = "\"he said \\\"hello\\\"\",100\n"
+                     "next\n";
+
+  size_t first_end = libvroom::find_row_end_simd(data.data(), data.size(), 0, '"', true);
+  // Should find end of first row (after \n following 100)
+  size_t expected = data.find('\n') + 1;
+  EXPECT_EQ(first_end, expected);
+}
+
+TEST(SimdParsingTest, BackslashEscape_DualState) {
+  // Test dual-state analysis with backslash escapes
+  std::string data = "\"val\\\"ue\",100\n"
+                     "plain,200\n";
+
+  auto stats = libvroom::analyze_chunk_dual_state_simd(data.data(), data.size(), '"', true);
+  // Starting outside quotes: should find 2 rows
+  EXPECT_EQ(stats.row_count_outside, 2u);
+}
+
+// ============================================================================
+// BACKSLASH ESCAPE MASK COMPUTATION
+// ============================================================================
+
 TEST(EscapeMaskTest, SingleBackslashBeforeQuote) {
   // a\"b: backslash at pos 1 escapes quote at pos 2
   uint64_t bs_bits = 0b0010;

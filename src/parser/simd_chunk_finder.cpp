@@ -63,6 +63,7 @@ AnalyzeChunkSimdImpl(const char* data, size_t size, char quote_char,
   const auto cr_vec = hn::Set(d, static_cast<uint8_t>('\r'));
 
   uint64_t quote_state = initial_quote_state;
+  uint64_t escape_state = 0;
   size_t offset = 0;
 
   // Process in 64-byte blocks for consistent quote parity tracking
@@ -70,6 +71,7 @@ AnalyzeChunkSimdImpl(const char* data, size_t size, char quote_char,
     uint64_t quote_bits = 0;
     uint64_t newline_bits = 0;
     uint64_t cr_bits = 0;
+    uint64_t backslash_bits = 0;
 
     // Process 64 bytes in chunks of vector width N
     for (size_t chunk_offset = 0; chunk_offset < 64; chunk_offset += N) {
@@ -99,6 +101,26 @@ AnalyzeChunkSimdImpl(const char* data, size_t size, char quote_char,
           cr_bits |= static_cast<uint64_t>(c_bytes[b]) << bit_offset;
         }
       }
+
+      // If escape_backslash, also scan for backslash characters
+      if (escape_backslash) {
+        auto bsm = hn::Eq(block, hn::Set(d, static_cast<uint8_t>('\\')));
+        uint8_t bs_bytes[HWY_MAX_BYTES / 8] = {0};
+        hn::StoreMaskBits(d, bsm, bs_bytes);
+        for (size_t b = 0; b < num_mask_bytes && chunk_offset + b * 8 < 64; ++b) {
+          size_t bit_offset = chunk_offset + b * 8;
+          if (bit_offset < 64) {
+            backslash_bits |= static_cast<uint64_t>(bs_bytes[b]) << bit_offset;
+          }
+        }
+      }
+    }
+
+    // Backslash escape handling: remove escaped quotes before computing parity
+    if (escape_backslash) {
+      auto [escaped, escape] = compute_escaped_mask(backslash_bits, escape_state);
+      // Remove escaped quotes - they don't toggle quote state
+      quote_bits &= ~escaped;
     }
 
     // Compute quote mask using CLMUL-based prefix XOR.
@@ -227,6 +249,7 @@ HWY_NOINLINE DualStateResultInternal AnalyzeChunkDualStateSimdImpl(const char* d
 
   // Global quote parity: 0 means even quotes seen so far
   uint64_t global_quote_parity_mask = 0;
+  uint64_t escape_state = 0;
   size_t offset = 0;
 
   // Process in 64-byte blocks for consistent quote parity tracking
@@ -234,6 +257,7 @@ HWY_NOINLINE DualStateResultInternal AnalyzeChunkDualStateSimdImpl(const char* d
     uint64_t quote_bits = 0;
     uint64_t newline_bits = 0;
     uint64_t cr_bits = 0;
+    uint64_t backslash_bits = 0;
 
     // Process 64 bytes in chunks of vector width N
     for (size_t chunk_offset = 0; chunk_offset < 64; chunk_offset += N) {
@@ -261,6 +285,26 @@ HWY_NOINLINE DualStateResultInternal AnalyzeChunkDualStateSimdImpl(const char* d
           cr_bits |= static_cast<uint64_t>(c_bytes[b]) << bit_offset;
         }
       }
+
+      // If escape_backslash, also scan for backslash characters
+      if (escape_backslash) {
+        auto bsm = hn::Eq(block, hn::Set(d, static_cast<uint8_t>('\\')));
+        uint8_t bs_bytes[HWY_MAX_BYTES / 8] = {0};
+        hn::StoreMaskBits(d, bsm, bs_bytes);
+        for (size_t b = 0; b < num_mask_bytes && chunk_offset + b * 8 < 64; ++b) {
+          size_t bit_offset = chunk_offset + b * 8;
+          if (bit_offset < 64) {
+            backslash_bits |= static_cast<uint64_t>(bs_bytes[b]) << bit_offset;
+          }
+        }
+      }
+    }
+
+    // Backslash escape handling: remove escaped quotes before computing parity
+    if (escape_backslash) {
+      auto [escaped, escape] = compute_escaped_mask(backslash_bits, escape_state);
+      // Remove escaped quotes - they don't toggle quote state
+      quote_bits &= ~escaped;
     }
 
     // Compute quote parity using CLMUL (XOR with global state to handle continuation)
@@ -433,12 +477,14 @@ HWY_NOINLINE size_t FindRowEndSimdImpl(const char* data, size_t size, size_t sta
 
   // Update quote_state for SIMD processing
   quote_state = in_quote ? ~0ULL : 0;
+  uint64_t escape_state = 0;
 
   // Process 64-byte blocks with SIMD
   while (offset + 64 <= size) {
     uint64_t quote_bits = 0;
     uint64_t newline_bits = 0;
     uint64_t cr_bits = 0;
+    uint64_t backslash_bits = 0;
 
     // Process 64 bytes in chunks of vector width N
     for (size_t chunk_offset = 0; chunk_offset < 64; chunk_offset += N) {
@@ -466,6 +512,26 @@ HWY_NOINLINE size_t FindRowEndSimdImpl(const char* data, size_t size, size_t sta
           cr_bits |= static_cast<uint64_t>(c_bytes[b]) << bit_offset;
         }
       }
+
+      // If escape_backslash, also scan for backslash characters
+      if (escape_backslash) {
+        auto bsm = hn::Eq(block, hn::Set(d, static_cast<uint8_t>('\\')));
+        uint8_t bs_bytes[HWY_MAX_BYTES / 8] = {0};
+        hn::StoreMaskBits(d, bsm, bs_bytes);
+        for (size_t b = 0; b < num_mask_bytes && chunk_offset + b * 8 < 64; ++b) {
+          size_t bit_offset = chunk_offset + b * 8;
+          if (bit_offset < 64) {
+            backslash_bits |= static_cast<uint64_t>(bs_bytes[b]) << bit_offset;
+          }
+        }
+      }
+    }
+
+    // Backslash escape handling: remove escaped quotes before computing parity
+    if (escape_backslash) {
+      auto [escaped, escape] = compute_escaped_mask(backslash_bits, escape_state);
+      // Remove escaped quotes - they don't toggle quote state
+      quote_bits &= ~escaped;
     }
 
     // Compute quote mask
