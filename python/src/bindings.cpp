@@ -43,7 +43,7 @@ read_csv(const std::string& path, std::optional<char> separator = std::nullopt,
          std::optional<size_t> max_errors = std::nullopt,
          std::optional<std::string> encoding = std::nullopt,
          std::optional<char> comment = std::nullopt, bool skip_empty_rows = true,
-         bool guess_integer = false, bool trim_ws = true) {
+         bool guess_integer = false, bool trim_ws = true, bool escape_backslash = false) {
   // Set up options
   libvroom::CsvOptions csv_opts;
   if (separator)
@@ -78,6 +78,9 @@ read_csv(const std::string& path, std::optional<char> separator = std::nullopt,
 
   // Set trim_ws
   csv_opts.trim_ws = trim_ws;
+
+  // Set escape_backslash
+  csv_opts.escape_backslash = escape_backslash;
 
   // Set error handling options
   if (error_mode) {
@@ -337,6 +340,7 @@ PYBIND11_MODULE(_core, m) {
         py::arg("max_errors") = py::none(), py::arg("encoding") = py::none(),
         py::arg("comment") = py::none(), py::arg("skip_empty_rows") = true,
         py::arg("guess_integer") = false, py::arg("trim_ws") = true,
+        py::arg("escape_backslash") = false,
         R"doc(
         Read a CSV file into a Table.
 
@@ -378,6 +382,11 @@ PYBIND11_MODULE(_core, m) {
         trim_ws : bool, optional
             Whether to trim leading and trailing whitespace from field values.
             Default is True.
+        escape_backslash : bool, optional
+            Whether to use backslash escaping (\") instead of doubled quotes ("").
+            When True, backslash sequences are interpreted: \" -> quote,
+            \\\\ -> backslash, \\n -> newline, \\t -> tab, \\r -> carriage return.
+            Default is False.
 
         Returns
         -------
