@@ -1022,3 +1022,56 @@ TEST_F(InferenceSamplingTest, SkipEmptyLinesDuringSampling) {
   EXPECT_EQ(types[0], DataType::INT32);
   EXPECT_EQ(types[1], DataType::STRING);
 }
+
+// ============================================================================
+// L. End-to-end TIME type tests
+// ============================================================================
+
+TEST_F(TypeInferenceEndToEndTest, TimeColumnInference) {
+  // Use two columns so dialect detection picks comma (not colon) as delimiter
+  test_util::TempCsvFile csv("time,label\n14:30:00,a\n23:59:59.999,b\n00:00:00,c\n");
+
+  CsvReader reader(CsvOptions{});
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2u);
+  EXPECT_EQ(schema[0].type, DataType::TIME);
+  EXPECT_EQ(schema[1].type, DataType::STRING);
+
+  // Verify parsed values
+  const auto& chunks = read_result.value.chunks;
+  ASSERT_FALSE(chunks.empty());
+  auto* time_col = static_cast<const libvroom::ArrowTimeColumnBuilder*>(chunks[0][0].get());
+  EXPECT_EQ(time_col->size(), 3u);
+  EXPECT_EQ(time_col->values().get(0), 52200000000LL); // 14:30:00
+  EXPECT_EQ(time_col->values().get(1), 86399999000LL); // 23:59:59.999
+  EXPECT_EQ(time_col->values().get(2), 0LL);           // 00:00:00
+}
+
+TEST_F(TypeInferenceEndToEndTest, TimeWithSchemaOverride) {
+  // Use explicit separator to prevent colon from being detected as delimiter
+  test_util::TempCsvFile csv("col1,col2\n14:30:00,x\nnot_a_time,y\n");
+
+  CsvReader reader(CsvOptions{});
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  // Override schema to force TIME type on first column
+  std::vector<libvroom::ColumnSchema> schema = {{.name = "col1", .type = DataType::TIME},
+                                                {.name = "col2", .type = DataType::STRING}};
+  reader.set_schema(schema);
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  const auto& chunks = read_result.value.chunks;
+  ASSERT_FALSE(chunks.empty());
+  auto* time_col = static_cast<const libvroom::ArrowTimeColumnBuilder*>(chunks[0][0].get());
+  EXPECT_EQ(time_col->size(), 2u);
+  EXPECT_EQ(time_col->null_count(), 1u); // "not_a_time" should be null
+}
