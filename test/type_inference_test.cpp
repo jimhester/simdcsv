@@ -609,10 +609,11 @@ TEST_F(NullCheckerTest, DeferredInitialization) {
 
 class GuessIntegerTest : public ::testing::Test {};
 
-TEST_F(GuessIntegerTest, DefaultGuessIntegerFalse_IntegersInferAsFloat) {
-  // Default guess_integer = false: integer-like values infer as FLOAT64
+TEST_F(GuessIntegerTest, GuessIntegerFalse_IntegersInferAsFloat) {
+  // guess_integer = false: integer-like values infer as FLOAT64
   CsvOptions opts;
   opts.separator = ',';
+  opts.guess_integer = false;
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("42"), DataType::FLOAT64);
   EXPECT_EQ(inference.infer_field("0"), DataType::FLOAT64);
@@ -621,17 +622,19 @@ TEST_F(GuessIntegerTest, DefaultGuessIntegerFalse_IntegersInferAsFloat) {
   EXPECT_EQ(inference.infer_field("9999999999"), DataType::FLOAT64);
 }
 
-TEST_F(GuessIntegerTest, DefaultGuessIntegerFalse_FloatsStillFloat) {
+TEST_F(GuessIntegerTest, GuessIntegerFalse_FloatsStillFloat) {
   CsvOptions opts;
   opts.separator = ',';
+  opts.guess_integer = false;
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("1.5"), DataType::FLOAT64);
   EXPECT_EQ(inference.infer_field("1e10"), DataType::FLOAT64);
 }
 
-TEST_F(GuessIntegerTest, DefaultGuessIntegerFalse_OtherTypesUnaffected) {
+TEST_F(GuessIntegerTest, GuessIntegerFalse_OtherTypesUnaffected) {
   CsvOptions opts;
   opts.separator = ',';
+  opts.guess_integer = false;
   TypeInference inference(opts);
   EXPECT_EQ(inference.infer_field("true"), DataType::BOOL);
   EXPECT_EQ(inference.infer_field("hello"), DataType::STRING);
@@ -652,9 +655,10 @@ TEST_F(GuessIntegerTest, GuessIntegerTrue_IntegersInferAsInt) {
   EXPECT_EQ(inference.infer_field("9999999999"), DataType::INT64);
 }
 
-TEST_F(GuessIntegerTest, InferFromSample_DefaultNoIntegers) {
+TEST_F(GuessIntegerTest, InferFromSample_GuessIntegerFalse) {
   CsvOptions opts;
   opts.separator = ',';
+  opts.guess_integer = false;
   TypeInference inference(opts);
   std::string data = "1,2.5,hello\n3,4.5,world\n";
   auto types = inference.infer_from_sample(data.data(), data.size(), 3);
