@@ -4,6 +4,7 @@
 #include "libvroom/dialect.h"
 #include "libvroom/encoding.h"
 #include "libvroom/error.h"
+#include "libvroom/format_parser.h"
 #include "libvroom/parse_utils.h"
 #include "libvroom/parsed_chunk_queue.h"
 #include "libvroom/split_fields.h"
@@ -313,6 +314,7 @@ struct CsvReader::Impl {
   std::string file_path;                                  // Stored from open() for caching
   EncodingResult detected_encoding;                       // Character encoding detection result
   std::optional<DetectionResult> detected_dialect_result; // From DialectDetector
+  FormatLocale format_locale = FormatLocale::english();
 
   // Streaming state
   std::unique_ptr<ParsedChunkQueue> streaming_queue;
@@ -371,6 +373,25 @@ struct CsvReader::Impl {
     }
   }
 };
+
+// Create a column builder, using format-aware parsing if format string is specified
+static std::unique_ptr<ArrowColumnBuilder> create_builder_for_schema(const ColumnSchema& col_schema,
+                                                                     const FormatLocale& locale) {
+  if (!col_schema.format.empty()) {
+    auto parser = std::make_shared<const FormatParser>(col_schema.format, locale);
+    switch (col_schema.type) {
+    case DataType::DATE:
+      return ArrowColumnBuilder::create_date(std::move(parser));
+    case DataType::TIMESTAMP:
+      return ArrowColumnBuilder::create_timestamp(std::move(parser));
+    case DataType::TIME:
+      return ArrowColumnBuilder::create_time(std::move(parser));
+    default:
+      break;
+    }
+  }
+  return ArrowColumnBuilder::create(col_schema.type);
+}
 
 // Skip N lines unconditionally. Returns offset past the skipped lines.
 static size_t skip_n_lines(const char* data, size_t size, size_t n) {
@@ -829,6 +850,10 @@ Result<bool> CsvReader::set_schema(const std::vector<ColumnSchema>& schema) {
   return Result<bool>::success(true);
 }
 
+void CsvReader::set_format_locale(const FormatLocale& locale) {
+  impl_->format_locale = locale;
+}
+
 const EncodingResult& CsvReader::encoding() const {
   return impl_->detected_encoding;
 }
@@ -927,6 +952,7 @@ Result<ParsedChunks> CsvReader::read_all() {
       BS::thread_pool pool(pool_threads);
       const CsvOptions options = impl_->options;
       const std::vector<ColumnSchema> schema = impl_->schema;
+      const FormatLocale format_locale = impl_->format_locale;
 
       std::vector<ChunkParseResult> chunk_results(num_chunks);
       {
@@ -943,7 +969,7 @@ Result<ParsedChunks> CsvReader::read_all() {
 
           futures.push_back(pool.submit_task([&chunk_results, data, size, chunk_idx, start_offset,
                                               end_offset, start_inside, expected_rows, options,
-                                              &schema, chunk_error_collector]() {
+                                              &schema, chunk_error_collector, format_locale]() {
             if (start_offset >= size || end_offset > size || start_offset >= end_offset)
               return;
 
@@ -951,7 +977,7 @@ Result<ParsedChunks> CsvReader::read_all() {
             NullChecker null_checker(options);
 
             for (const auto& col_schema : schema) {
-              auto builder = ArrowColumnBuilder::create(col_schema.type);
+              auto builder = create_builder_for_schema(col_schema, format_locale);
               builder->reserve(expected_rows);
               cr.columns.push_back(std::move(builder));
             }
@@ -1093,6 +1119,7 @@ Result<ParsedChunks> CsvReader::read_all() {
   // Capture what we need by value to avoid any lifetime issues
   const CsvOptions options = impl_->options;
   const std::vector<ColumnSchema> schema = impl_->schema;
+  const FormatLocale format_locale = impl_->format_locale;
 
   // ========================================================================
   // POLARS ALGORITHM: Two-phase approach
@@ -1200,7 +1227,7 @@ Result<ParsedChunks> CsvReader::read_all() {
 
       futures.push_back(pool.submit_task([&chunk_results, data, size, chunk_idx, start_offset,
                                           end_offset, start_inside, expected_rows, options, &schema,
-                                          chunk_error_collector]() {
+                                          chunk_error_collector, format_locale]() {
         if (start_offset >= size || end_offset > size || start_offset >= end_offset) {
           return;
         }
@@ -1213,7 +1240,7 @@ Result<ParsedChunks> CsvReader::read_all() {
 
         // Create column builders with pre-allocated capacity
         for (const auto& col_schema : schema) {
-          auto builder = ArrowColumnBuilder::create(col_schema.type);
+          auto builder = create_builder_for_schema(col_schema, format_locale);
           builder->reserve(expected_rows);
           result.columns.push_back(std::move(builder));
         }
@@ -1311,7 +1338,7 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
   // For serial path (small files), we don't pre-compute row count to avoid extra pass
   // The builder will grow dynamically, which is fine for small data
   for (const auto& col_schema : impl_->schema) {
-    auto builder = ArrowColumnBuilder::create(col_schema.type);
+    auto builder = create_builder_for_schema(col_schema, impl_->format_locale);
     columns.push_back(std::move(builder));
   }
 
@@ -1671,6 +1698,7 @@ Result<bool> CsvReader::start_streaming() {
 
   // Phase 3: Dispatch parse tasks (fire-and-forget -- they push to queue)
   const std::vector<ColumnSchema> schema = impl_->schema;
+  const FormatLocale format_locale = impl_->format_locale;
   auto* queue_ptr = impl_->streaming_queue.get();
   auto* error_collectors_ptr = check_errors ? &impl_->streaming_error_collectors : nullptr;
 
@@ -1684,7 +1712,7 @@ Result<bool> CsvReader::start_streaming() {
         check_errors ? &(*error_collectors_ptr)[chunk_idx] : nullptr;
 
     pool.detach_task([queue_ptr, data, size, chunk_idx, start_offset, end_offset, start_inside,
-                      expected_rows, options, schema, chunk_error_collector]() {
+                      expected_rows, options, schema, chunk_error_collector, format_locale]() {
       if (start_offset >= size || end_offset > size || start_offset >= end_offset) {
         std::vector<std::unique_ptr<ArrowColumnBuilder>> empty;
         queue_ptr->push(chunk_idx, std::move(empty));
@@ -1694,7 +1722,7 @@ Result<bool> CsvReader::start_streaming() {
       NullChecker null_checker(options);
       std::vector<std::unique_ptr<ArrowColumnBuilder>> columns;
       for (const auto& col_schema : schema) {
-        auto builder = ArrowColumnBuilder::create(col_schema.type);
+        auto builder = create_builder_for_schema(col_schema, format_locale);
         builder->reserve(expected_rows);
         columns.push_back(std::move(builder));
       }

@@ -490,3 +490,126 @@ TEST_F(FormatBuilderIntegrationTest, FormatParseErrorBecomesNull) {
   EXPECT_EQ(builder->size(), 1);
   EXPECT_EQ(builder->null_count(), 1);
 }
+
+// ============================================================================
+// End-to-end: CsvReader with format strings in schema
+// ============================================================================
+
+#include "libvroom/vroom.h"
+
+#include <cstring>
+
+class FormatCsvReaderTest : public ::testing::Test {};
+
+TEST_F(FormatCsvReaderTest, DateColumnWithFormatString) {
+  std::string csv = "date\n15/03/2024\n01/01/2000\n";
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
+
+  auto buf = libvroom::AlignedBuffer::allocate(csv.size());
+  std::memcpy(buf.data(), csv.data(), csv.size());
+  auto open_result = reader.open_from_buffer(std::move(buf));
+  ASSERT_TRUE(open_result);
+
+  auto schema = reader.schema();
+  schema[0].type = libvroom::DataType::DATE;
+  schema[0].format = "%d/%m/%Y";
+  auto set_result = reader.set_schema(schema);
+  ASSERT_TRUE(set_result);
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result);
+
+  EXPECT_EQ(result.value.total_rows, 2);
+  auto& col = *result.value.chunks[0][0];
+  EXPECT_EQ(col.type(), libvroom::DataType::DATE);
+  auto& values = static_cast<libvroom::ArrowDateColumnBuilder&>(col).values();
+  EXPECT_EQ(values.get(0), 19797); // 2024-03-15
+  EXPECT_EQ(values.get(1), 10957); // 2000-01-01
+}
+
+TEST_F(FormatCsvReaderTest, TimestampColumnWithFormatString) {
+  std::string csv = "dt\n15/03/2024 14:30:00\n";
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
+
+  auto buf = libvroom::AlignedBuffer::allocate(csv.size());
+  std::memcpy(buf.data(), csv.data(), csv.size());
+  auto open_result = reader.open_from_buffer(std::move(buf));
+  ASSERT_TRUE(open_result);
+
+  auto schema = reader.schema();
+  schema[0].type = libvroom::DataType::TIMESTAMP;
+  schema[0].format = "%d/%m/%Y %H:%M:%S";
+  auto set_result = reader.set_schema(schema);
+  ASSERT_TRUE(set_result);
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result);
+
+  EXPECT_EQ(result.value.total_rows, 1);
+  auto& col = *result.value.chunks[0][0];
+  auto& values = static_cast<libvroom::ArrowTimestampColumnBuilder&>(col).values();
+  int64_t expected = 19797LL * 86400000000LL + 14LL * 3600000000LL + 30LL * 60000000LL;
+  EXPECT_EQ(values.get(0), expected);
+}
+
+TEST_F(FormatCsvReaderTest, TimeColumnWithFormatString) {
+  std::string csv = "time\n02:30 PM\n09:15 AM\n";
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
+
+  auto buf = libvroom::AlignedBuffer::allocate(csv.size());
+  std::memcpy(buf.data(), csv.data(), csv.size());
+  auto open_result = reader.open_from_buffer(std::move(buf));
+  ASSERT_TRUE(open_result);
+
+  auto schema = reader.schema();
+  schema[0].type = libvroom::DataType::TIME;
+  schema[0].format = "%I:%M %p";
+  auto set_result = reader.set_schema(schema);
+  ASSERT_TRUE(set_result);
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result);
+
+  EXPECT_EQ(result.value.total_rows, 2);
+  auto& col = *result.value.chunks[0][0];
+  auto& values = static_cast<libvroom::ArrowTimeColumnBuilder&>(col).values();
+  EXPECT_EQ(values.get(0), 52200000000LL); // 14:30
+  EXPECT_EQ(values.get(1), 33300000000LL); // 09:15
+}
+
+TEST_F(FormatCsvReaderTest, NonEnglishMonthNames) {
+  std::string csv = "date\n15 mars 2024\n01 janvier 2000\n";
+  libvroom::CsvOptions opts;
+  libvroom::CsvReader reader(opts);
+
+  auto buf = libvroom::AlignedBuffer::allocate(csv.size());
+  std::memcpy(buf.data(), csv.data(), csv.size());
+  auto open_result = reader.open_from_buffer(std::move(buf));
+  ASSERT_TRUE(open_result);
+
+  libvroom::FormatLocale fr;
+  fr.month_names = {"janvier", "fevrier", "mars",      "avril",   "mai",      "juin",
+                    "juillet", "aout",    "septembre", "octobre", "novembre", "decembre"};
+  fr.month_abbrev = {"janv.", "fevr.", "mars",  "avr.", "mai",  "juin",
+                     "juil.", "aout",  "sept.", "oct.", "nov.", "dec."};
+  fr.day_names = {"dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"};
+  fr.day_abbrev = {"dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."};
+  reader.set_format_locale(fr);
+
+  auto schema = reader.schema();
+  schema[0].type = libvroom::DataType::DATE;
+  schema[0].format = "%d %B %Y";
+  auto set_result = reader.set_schema(schema);
+  ASSERT_TRUE(set_result);
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result);
+  EXPECT_EQ(result.value.total_rows, 2);
+  auto& values =
+      static_cast<libvroom::ArrowDateColumnBuilder&>(*result.value.chunks[0][0]).values();
+  EXPECT_EQ(values.get(0), 19797); // 2024-03-15
+  EXPECT_EQ(values.get(1), 10957); // 2000-01-01
+}

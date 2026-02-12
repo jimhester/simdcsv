@@ -2,6 +2,7 @@
 
 #include "arrow_column_builder.h"
 #include "error.h"
+#include "format_parser.h"
 #include "options.h"
 #include "types.h"
 
@@ -66,6 +67,10 @@ public:
   // Explicitly set the schema (column names + types).
   // Must be called before feed() if used. Disables auto-inference.
   void set_schema(const std::vector<ColumnSchema>& schema);
+
+  // Set locale for format-string datetime parsing.
+  // Must be called before feed() if used.
+  void set_format_locale(const FormatLocale& locale);
 
   // Check if schema has been determined (either auto-inferred or set explicitly).
   bool schema_ready() const;
