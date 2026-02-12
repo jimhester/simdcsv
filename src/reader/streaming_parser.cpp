@@ -8,6 +8,7 @@
 
 #include <cstring>
 #include <deque>
+#include <stdexcept>
 #include <vector>
 
 namespace libvroom {
@@ -50,7 +51,13 @@ struct StreamingParser::Impl {
   bool finished = false;
 
   explicit Impl(const StreamingOptions& opts)
-      : options(opts), error_collector(opts.csv.error_mode, opts.csv.max_errors) {}
+      : options(opts), error_collector(opts.csv.error_mode, opts.csv.max_errors) {
+    // Validate that decimal_mark and separator don't conflict
+    if (options.csv.decimal_mark != '\0' && options.csv.decimal_mark == options.csv.separator) {
+      throw std::runtime_error("decimal_mark and separator cannot be the same character ('" +
+                               std::string(1, options.csv.decimal_mark) + "')");
+    }
+  }
 
   // Compact the buffer by removing consumed bytes
   void compact_buffer() {
