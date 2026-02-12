@@ -24,6 +24,7 @@ will be added in future releases.
 from vroom_csv._core import (
     Table,
     read_csv,
+    read_fwf,
     to_parquet,
     to_arrow_ipc,
     VroomError,
@@ -42,6 +43,7 @@ __all__ = [
     "Table",
     "default_progress",
     "read_csv",
+    "read_fwf",
     "to_parquet",
     "to_arrow_ipc",
     "VroomError",

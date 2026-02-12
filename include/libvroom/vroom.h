@@ -113,6 +113,11 @@ public:
   // Get detected schema after opening
   const std::vector<ColumnSchema>& schema() const;
 
+  // Override the inferred schema with user-provided types.
+  // Must be called after open() and before start_streaming().
+  // Schema length must match the number of detected columns.
+  Result<bool> set_schema(const std::vector<ColumnSchema>& schema);
+
   // Streaming API: start parsing, then consume chunks one at a time
   Result<bool> start_streaming();
   std::optional<std::vector<std::unique_ptr<ArrowColumnBuilder>>> next_chunk();

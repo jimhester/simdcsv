@@ -146,6 +146,63 @@ read_csv(const std::string& path, std::optional<std::string> separator = std::nu
 }
 
 // =============================================================================
+// read_fwf function - fixed-width file reading
+// =============================================================================
+
+std::shared_ptr<libvroom::Table>
+read_fwf(const std::string& path, std::vector<int> col_starts, std::vector<int> col_ends,
+         std::optional<std::vector<std::string>> col_names = std::nullopt, bool trim_ws = true,
+         bool guess_integer = true, std::optional<std::string> comment = std::nullopt,
+         size_t skip = 0, std::optional<size_t> num_threads = std::nullopt,
+         std::optional<std::string> encoding = std::nullopt) {
+  libvroom::FwfOptions opts;
+  opts.col_starts = std::move(col_starts);
+  opts.col_ends = std::move(col_ends);
+  if (col_names)
+    opts.col_names = std::move(*col_names);
+  opts.trim_ws = trim_ws;
+  opts.guess_integer = guess_integer;
+  if (comment)
+    opts.comment = *comment;
+  opts.skip = skip;
+  if (num_threads)
+    opts.num_threads = *num_threads;
+
+  if (encoding) {
+    auto enc = libvroom::parse_encoding_name(*encoding);
+    if (enc == libvroom::CharEncoding::UNKNOWN) {
+      throw std::runtime_error(
+          "Unknown encoding: " + *encoding +
+          " (use 'utf-8', 'utf-16le', 'utf-16be', 'utf-32le', 'utf-32be', 'latin1', "
+          "'windows-1252')");
+    }
+    opts.encoding = enc;
+  }
+
+  libvroom::FwfReader reader(opts);
+  auto open_result = reader.open(path);
+  if (!open_result.ok) {
+    throw std::runtime_error(open_result.error);
+  }
+
+  auto stream_result = reader.start_streaming();
+  if (!stream_result.ok) {
+    throw std::runtime_error(stream_result.error);
+  }
+
+  // Collect all chunks
+  libvroom::ParsedChunks parsed;
+  while (auto chunk = reader.next_chunk()) {
+    if (!chunk->empty()) {
+      parsed.total_rows += (*chunk)[0]->size();
+    }
+    parsed.chunks.push_back(std::move(*chunk));
+  }
+
+  return libvroom::Table::from_parsed_chunks(reader.schema(), std::move(parsed));
+}
+
+// =============================================================================
 // to_parquet function - CSV to Parquet conversion
 // =============================================================================
 
@@ -437,6 +494,63 @@ PYBIND11_MODULE(_core, m) {
 
         # With comment skipping
         >>> table = vroom_csv.read_csv("data.csv", comment="#")
+    )doc");
+
+  // read_fwf function
+  m.def("read_fwf", &read_fwf, py::arg("path"), py::arg("col_starts"), py::arg("col_ends"),
+        py::arg("col_names") = py::none(), py::arg("trim_ws") = true,
+        py::arg("guess_integer") = true, py::arg("comment") = py::none(), py::arg("skip") = 0,
+        py::arg("num_threads") = py::none(), py::arg("encoding") = py::none(),
+        R"doc(
+        Read a fixed-width file into a Table.
+
+        Parameters
+        ----------
+        path : str
+            Path to the fixed-width file to read.
+        col_starts : list[int]
+            0-based byte offsets for the start of each column.
+        col_ends : list[int]
+            Exclusive end byte offsets for each column. Use -1 for
+            "to end of line" (typically the last column).
+        col_names : list[str], optional
+            Column names. Default is auto-generated ("V1", "V2", ...).
+        trim_ws : bool, optional
+            Whether to trim leading and trailing whitespace from fields.
+            Default is True.
+        guess_integer : bool, optional
+            Whether to infer integer types (INT32/INT64) for integer-like values.
+            Default is True.
+        comment : str, optional
+            String that marks comment lines. Lines starting with this
+            string are skipped. Default is None (no comment skipping).
+        skip : int, optional
+            Number of lines to skip at the start of the file. Default is 0.
+        num_threads : int, optional
+            Number of threads to use. Default is auto-detect.
+        encoding : str, optional
+            Force input encoding. Default is auto-detect.
+            Supported: "utf-8", "utf-16le", "utf-16be", "utf-32le",
+            "utf-32be", "latin1", "windows-1252".
+
+        Returns
+        -------
+        Table
+            A Table object containing the parsed data.
+
+        Raises
+        ------
+        RuntimeError
+            If parsing fails (e.g., invalid column specifications).
+
+        Examples
+        --------
+        >>> import vroom_csv
+        >>> table = vroom_csv.read_fwf("data.fwf",
+        ...     col_starts=[0, 10, 20],
+        ...     col_ends=[10, 20, -1],
+        ...     col_names=["name", "age", "city"])
+        >>> print(table.num_rows, table.num_columns)
     )doc");
 
   // to_parquet function
