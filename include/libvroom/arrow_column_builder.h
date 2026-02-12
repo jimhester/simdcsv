@@ -61,6 +61,7 @@ public:
   static std::unique_ptr<ArrowColumnBuilder> create_bool();
   static std::unique_ptr<ArrowColumnBuilder> create_date();
   static std::unique_ptr<ArrowColumnBuilder> create_timestamp();
+  static std::unique_ptr<ArrowColumnBuilder> create_time();
   static std::unique_ptr<ArrowColumnBuilder> create_string();
 };
 
@@ -504,6 +505,79 @@ private:
   NullBitmap nulls_;
 };
 
+// Time column (stored as int64 microseconds since midnight)
+class ArrowTimeColumnBuilder : public ArrowColumnBuilder {
+public:
+  DataType type() const override { return DataType::TIME; }
+  size_t size() const override { return values_.size(); }
+
+  void reserve(size_t capacity) override {
+    values_.reserve(capacity);
+    nulls_.reserve(capacity);
+  }
+
+  void clear() override {
+    values_.clear();
+    nulls_.clear();
+  }
+
+  const NullBitmap& null_bitmap() const override { return nulls_; }
+  size_t null_count() const override { return nulls_.null_count_fast(); }
+
+  FastArrowContext create_context() override {
+    FastArrowContext ctx;
+    ctx.int64_buffer = &values_;
+    ctx.null_bitmap = &nulls_;
+    ctx.append_fn = FastArrowContext::append_time;
+    ctx.append_null_fn = FastArrowContext::append_null_time;
+    return ctx;
+  }
+
+  void merge_from(ArrowColumnBuilder& other) override {
+    auto& typed_other = static_cast<ArrowTimeColumnBuilder&>(other);
+    values_.append_from(typed_other.values_);
+    nulls_.append_from(typed_other.nulls_);
+  }
+
+  const NumericBuffer<int64_t>& values() const { return values_; }
+
+  void export_to_arrow(ArrowArray* out, ArrowColumnPrivate* priv) const override {
+    priv->buffers.resize(2);
+    priv->buffers[0] = nulls_.has_nulls() ? nulls_.data() : nullptr;
+    priv->buffers[1] = values_.data();
+
+    out->length = static_cast<int64_t>(values_.size());
+    out->null_count = static_cast<int64_t>(nulls_.null_count_fast());
+    out->offset = 0;
+    out->n_buffers = 2;
+    out->n_children = 0;
+    out->buffers = priv->buffers.data();
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_array;
+    out->private_data = priv;
+  }
+
+  void export_schema(ArrowSchema* out, const std::string& name) const override {
+    auto* schema_priv = new ArrowSchemaPrivate();
+    schema_priv->name_storage = name;
+
+    out->format = arrow_format::TIME64_US;
+    out->name = schema_priv->name_storage.c_str();
+    out->metadata = nullptr;
+    out->flags = ARROW_FLAG_NULLABLE;
+    out->n_children = 0;
+    out->children = nullptr;
+    out->dictionary = nullptr;
+    out->release = release_arrow_schema;
+    out->private_data = schema_priv;
+  }
+
+private:
+  NumericBuffer<int64_t> values_;
+  NullBitmap nulls_;
+};
+
 // String column (contiguous buffer + offsets)
 class ArrowStringColumnBuilder : public ArrowColumnBuilder {
 public:
@@ -595,6 +669,8 @@ inline std::unique_ptr<ArrowColumnBuilder> ArrowColumnBuilder::create(DataType t
     return create_date();
   case DataType::TIMESTAMP:
     return create_timestamp();
+  case DataType::TIME:
+    return create_time();
   case DataType::STRING:
   default:
     return create_string();
@@ -623,6 +699,10 @@ inline std::unique_ptr<ArrowColumnBuilder> ArrowColumnBuilder::create_date() {
 
 inline std::unique_ptr<ArrowColumnBuilder> ArrowColumnBuilder::create_timestamp() {
   return std::make_unique<ArrowTimestampColumnBuilder>();
+}
+
+inline std::unique_ptr<ArrowColumnBuilder> ArrowColumnBuilder::create_time() {
+  return std::make_unique<ArrowTimeColumnBuilder>();
 }
 
 inline std::unique_ptr<ArrowColumnBuilder> ArrowColumnBuilder::create_string() {

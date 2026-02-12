@@ -22,6 +22,7 @@ enum class DataType : uint8_t {
   STRING = 5,
   DATE = 6,      // ISO8601 date
   TIMESTAMP = 7, // ISO8601 timestamp
+  TIME = 8,      // Time of day (HH:MM:SS)
   NA = 255       // Null/missing value
 };
 
@@ -43,12 +44,15 @@ inline DataType wider_type(DataType a, DataType b) {
   // STRING is the universal fallback
   if (a == DataType::STRING || b == DataType::STRING)
     return DataType::STRING;
-  // DATE/TIMESTAMP don't promote to numeric types
-  if ((a == DataType::DATE || a == DataType::TIMESTAMP) &&
-      (b >= DataType::BOOL && b <= DataType::FLOAT64))
+  // DATE/TIMESTAMP/TIME don't promote to numeric types or each other
+  bool a_temporal = (a == DataType::DATE || a == DataType::TIMESTAMP || a == DataType::TIME);
+  bool b_temporal = (b == DataType::DATE || b == DataType::TIMESTAMP || b == DataType::TIME);
+  if (a_temporal && (b >= DataType::BOOL && b <= DataType::FLOAT64))
     return DataType::STRING;
-  if ((b == DataType::DATE || b == DataType::TIMESTAMP) &&
-      (a >= DataType::BOOL && a <= DataType::FLOAT64))
+  if (b_temporal && (a >= DataType::BOOL && a <= DataType::FLOAT64))
+    return DataType::STRING;
+  // Different temporal types don't promote to each other
+  if (a_temporal && b_temporal && a != b)
     return DataType::STRING;
   return static_cast<uint8_t>(a) > static_cast<uint8_t>(b) ? a : b;
 }
@@ -72,6 +76,8 @@ inline const char* type_name(DataType type) {
     return "DATE";
   case DataType::TIMESTAMP:
     return "TIMESTAMP";
+  case DataType::TIME:
+    return "TIME";
   case DataType::NA:
     return "NA";
   default:

@@ -16,6 +16,7 @@ namespace libvroom {
 // Forward declarations
 bool parse_date(std::string_view value, int32_t& days_since_epoch);
 bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch);
+bool parse_time(std::string_view value, int64_t& micros_since_midnight);
 
 // FastArrowContext - uses Arrow-style buffers for zero-copy batch operations
 // Key differences from FastColumnContext:
@@ -283,6 +284,28 @@ public:
     }
   }
   static void append_null_timestamp(FastArrowContext& ctx) {
+    ctx.int64_buffer->push_back(0);
+    ctx.null_bitmap->push_back_null();
+  }
+
+  // Time (stores microseconds since midnight as int64)
+  static void append_time(FastArrowContext& ctx, std::string_view value) {
+    if (value.empty()) {
+      ctx.int64_buffer->push_back(0);
+      ctx.null_bitmap->push_back_null();
+      return;
+    }
+    int64_t micros;
+    if (parse_time(value, micros)) {
+      ctx.int64_buffer->push_back(micros);
+      ctx.null_bitmap->push_back_valid();
+    } else {
+      ctx.report_coercion_error(value);
+      ctx.int64_buffer->push_back(0);
+      ctx.null_bitmap->push_back_null();
+    }
+  }
+  static void append_null_time(FastArrowContext& ctx) {
     ctx.int64_buffer->push_back(0);
     ctx.null_bitmap->push_back_null();
   }

@@ -180,6 +180,30 @@ TEST_F(TypeInferenceTest, TimestampWithSpace) {
   EXPECT_EQ(default_inference.infer_field("2024-01-15 10:30:00"), DataType::TIMESTAMP);
 }
 
+TEST_F(TypeInferenceTest, TimeHHMMSS) {
+  EXPECT_EQ(default_inference.infer_field("14:30:00"), DataType::TIME);
+}
+
+TEST_F(TypeInferenceTest, TimeHHMM) {
+  EXPECT_EQ(default_inference.infer_field("14:30"), DataType::TIME);
+}
+
+TEST_F(TypeInferenceTest, TimeFractional) {
+  EXPECT_EQ(default_inference.infer_field("23:59:59.999"), DataType::TIME);
+}
+
+TEST_F(TypeInferenceTest, TimeAMPM) {
+  EXPECT_EQ(default_inference.infer_field("2:15:30 PM"), DataType::TIME);
+}
+
+TEST_F(TypeInferenceTest, TimeMidnight) {
+  EXPECT_EQ(default_inference.infer_field("00:00:00"), DataType::TIME);
+}
+
+TEST_F(TypeInferenceTest, TimeTwoDigitAMPM) {
+  EXPECT_EQ(default_inference.infer_field("02:15:30 PM"), DataType::TIME);
+}
+
 TEST_F(TypeInferenceTest, StringPlain) {
   EXPECT_EQ(default_inference.infer_field("hello"), DataType::STRING);
 }
@@ -374,6 +398,31 @@ TEST_F(TypePromotionTest, WiderTypeTimestampAndFloat64FallsBackToString) {
   EXPECT_EQ(wider_type(DataType::TIMESTAMP, DataType::FLOAT64), DataType::STRING);
 }
 
+TEST_F(TypePromotionTest, WiderTypeTimeAndNumericFallsBackToString) {
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::INT32), DataType::STRING);
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::INT64), DataType::STRING);
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::FLOAT64), DataType::STRING);
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::BOOL), DataType::STRING);
+}
+
+TEST_F(TypePromotionTest, WiderTypeTimeAndDateFallsBackToString) {
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::DATE), DataType::STRING);
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::TIMESTAMP), DataType::STRING);
+}
+
+TEST_F(TypePromotionTest, WiderTypeTimeAndTimeSameType) {
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::TIME), DataType::TIME);
+}
+
+TEST_F(TypePromotionTest, WiderTypeTimeAndNAReturnsTime) {
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::NA), DataType::TIME);
+  EXPECT_EQ(wider_type(DataType::NA, DataType::TIME), DataType::TIME);
+}
+
+TEST_F(TypePromotionTest, WiderTypeTimeAndStringReturnsString) {
+  EXPECT_EQ(wider_type(DataType::TIME, DataType::STRING), DataType::STRING);
+}
+
 // ============================================================================
 // type_name()
 // ============================================================================
@@ -389,6 +438,7 @@ TEST_F(TypeNameTest, AllTypeNames) {
   EXPECT_STREQ(type_name(DataType::STRING), "STRING");
   EXPECT_STREQ(type_name(DataType::DATE), "DATE");
   EXPECT_STREQ(type_name(DataType::TIMESTAMP), "TIMESTAMP");
+  EXPECT_STREQ(type_name(DataType::TIME), "TIME");
   EXPECT_STREQ(type_name(DataType::NA), "NA");
 }
 
@@ -468,6 +518,19 @@ TEST_F(InferFromSampleTest, DateColumn) {
   auto types = default_inference.infer_from_sample(data.data(), data.size(), 2);
   EXPECT_EQ(types[0], DataType::DATE);
   EXPECT_EQ(types[1], DataType::STRING);
+}
+
+TEST_F(InferFromSampleTest, TimeColumn) {
+  std::string data = "14:30:00,hello\n23:59:59,world\n";
+  auto types = default_inference.infer_from_sample(data.data(), data.size(), 2);
+  EXPECT_EQ(types[0], DataType::TIME);
+  EXPECT_EQ(types[1], DataType::STRING);
+}
+
+TEST_F(InferFromSampleTest, TimeColumnMixedFallsToString) {
+  std::string data = "14:30:00\n42\n";
+  auto types = default_inference.infer_from_sample(data.data(), data.size(), 1);
+  EXPECT_EQ(types[0], DataType::STRING);
 }
 
 TEST_F(InferFromSampleTest, MaxRowsLimitsInference) {
@@ -958,4 +1021,57 @@ TEST_F(InferenceSamplingTest, SkipEmptyLinesDuringSampling) {
   EXPECT_EQ(types.size(), 2u);
   EXPECT_EQ(types[0], DataType::INT32);
   EXPECT_EQ(types[1], DataType::STRING);
+}
+
+// ============================================================================
+// L. End-to-end TIME type tests
+// ============================================================================
+
+TEST_F(TypeInferenceEndToEndTest, TimeColumnInference) {
+  // Use two columns so dialect detection picks comma (not colon) as delimiter
+  test_util::TempCsvFile csv("time,label\n14:30:00,a\n23:59:59.999,b\n00:00:00,c\n");
+
+  CsvReader reader(CsvOptions{});
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2u);
+  EXPECT_EQ(schema[0].type, DataType::TIME);
+  EXPECT_EQ(schema[1].type, DataType::STRING);
+
+  // Verify parsed values
+  const auto& chunks = read_result.value.chunks;
+  ASSERT_FALSE(chunks.empty());
+  auto* time_col = static_cast<const libvroom::ArrowTimeColumnBuilder*>(chunks[0][0].get());
+  EXPECT_EQ(time_col->size(), 3u);
+  EXPECT_EQ(time_col->values().get(0), 52200000000LL); // 14:30:00
+  EXPECT_EQ(time_col->values().get(1), 86399999000LL); // 23:59:59.999
+  EXPECT_EQ(time_col->values().get(2), 0LL);           // 00:00:00
+}
+
+TEST_F(TypeInferenceEndToEndTest, TimeWithSchemaOverride) {
+  // Use explicit separator to prevent colon from being detected as delimiter
+  test_util::TempCsvFile csv("col1,col2\n14:30:00,x\nnot_a_time,y\n");
+
+  CsvReader reader(CsvOptions{});
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  // Override schema to force TIME type on first column
+  std::vector<libvroom::ColumnSchema> schema = {{.name = "col1", .type = DataType::TIME},
+                                                {.name = "col2", .type = DataType::STRING}};
+  reader.set_schema(schema);
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  const auto& chunks = read_result.value.chunks;
+  ASSERT_FALSE(chunks.empty());
+  auto* time_col = static_cast<const libvroom::ArrowTimeColumnBuilder*>(chunks[0][0].get());
+  EXPECT_EQ(time_col->size(), 2u);
+  EXPECT_EQ(time_col->null_count(), 1u); // "not_a_time" should be null
 }

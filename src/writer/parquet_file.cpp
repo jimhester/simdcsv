@@ -80,6 +80,8 @@ ParquetType to_parquet_type(DataType type) {
     return ParquetType::INT32; // DATE is INT32 days since epoch
   case DataType::TIMESTAMP:
     return ParquetType::INT64; // TIMESTAMP is INT64 microseconds
+  case DataType::TIME:
+    return ParquetType::INT64; // TIME is INT64 microseconds since midnight
   case DataType::FLOAT64:
     return ParquetType::DOUBLE;
   case DataType::STRING:
@@ -220,6 +222,7 @@ static writer::EncodedColumn encode_column(const ColumnBuilder& column,
     break;
   case DataType::INT64:
   case DataType::TIMESTAMP:
+  case DataType::TIME:
     estimated_size = non_null_count * sizeof(int64_t);
     break;
   case DataType::FLOAT64:
@@ -272,6 +275,15 @@ static writer::EncodedColumn encode_column(const ColumnBuilder& column,
   }
   case DataType::TIMESTAMP: {
     // TIMESTAMP is stored as INT64 (microseconds since epoch)
+    for (size_t c = 0; c < num_chunks; ++c) {
+      const auto& values = *static_cast<const std::vector<int64_t>*>(column.chunk_raw_values(c));
+      const auto& nulls = column.chunk_null_bitmap(c);
+      writer::encoding::encode_int64_plain(values, nulls, encoded_data);
+    }
+    break;
+  }
+  case DataType::TIME: {
+    // TIME is stored as INT64 (microseconds since midnight)
     for (size_t c = 0; c < num_chunks; ++c) {
       const auto& values = *static_cast<const std::vector<int64_t>*>(column.chunk_raw_values(c));
       const auto& nulls = column.chunk_null_bitmap(c);
@@ -406,6 +418,7 @@ static writer::EncodedColumn encode_column_arrow(const ArrowColumnBuilder& colum
     break;
   case DataType::INT64:
   case DataType::TIMESTAMP:
+  case DataType::TIME:
     estimated_data_size = non_null_count * sizeof(int64_t);
     break;
   case DataType::FLOAT64:
@@ -532,6 +545,11 @@ static writer::EncodedColumn encode_column_arrow(const ArrowColumnBuilder& colum
   }
   case DataType::TIMESTAMP: {
     const auto& builder = static_cast<const ArrowTimestampColumnBuilder&>(column);
+    writer::encoding::encode_int64_plain_arrow(builder.values(), nulls, page_content);
+    break;
+  }
+  case DataType::TIME: {
+    const auto& builder = static_cast<const ArrowTimeColumnBuilder&>(column);
     writer::encoding::encode_int64_plain_arrow(builder.values(), nulls, page_content);
     break;
   }
@@ -835,6 +853,12 @@ struct ParquetWriter::Impl {
       writer::encoding::encode_int64_plain(values, null_bitmap, encoded_data);
       break;
     }
+    case DataType::TIME: {
+      // TIME is stored as INT64 (microseconds since midnight)
+      const auto& values = *static_cast<const std::vector<int64_t>*>(raw);
+      writer::encoding::encode_int64_plain(values, null_bitmap, encoded_data);
+      break;
+    }
     case DataType::FLOAT64: {
       const auto& values = *static_cast<const std::vector<double>*>(raw);
       writer::encoding::encode_float64_plain(values, null_bitmap, encoded_data);
@@ -1079,6 +1103,11 @@ Result<bool> ParquetWriter::close() {
     // Add converted type for strings (UTF8)
     if (col.type == DataType::STRING) {
       elem.converted_type = writer::ConvertedType::UTF8;
+    }
+
+    // Add converted type for TIME (TIME_MICROS)
+    if (col.type == DataType::TIME) {
+      elem.converted_type = writer::ConvertedType::TIME_MICROS;
     }
 
     file_meta.schema.push_back(elem);
