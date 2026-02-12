@@ -128,12 +128,16 @@ struct StreamingParser::Impl {
     if (avail == 0)
       return false;
 
-    // Skip leading lines if requested
+    // Skip leading lines if requested (raw newline counting, matching CsvReader::skip_n_lines)
     while (lines_skipped < options.csv.skip) {
-      size_t row_end = find_row_end_in_buffer(data, avail);
-      if (row_end == 0)
-        return false; // Not enough data to skip this line yet
-      consumed += row_end;
+      // Find next newline (not quote-aware, same as batch parser)
+      size_t pos = 0;
+      while (pos < avail && data[pos] != '\n')
+        ++pos;
+      if (pos >= avail)
+        return false; // Not enough data to find end of skip line
+      pos++;          // consume the '\n'
+      consumed += pos;
       data = buffer.data() + consumed;
       avail = buffer.size() - consumed;
       ++lines_skipped;

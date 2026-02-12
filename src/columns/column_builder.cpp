@@ -340,8 +340,6 @@ public:
 
 class Float64ColumnBuilder : public ChunkedColumnBuilder<double, Float64ColumnBuilder> {
 public:
-  char decimal_mark = '.';
-
   void append(std::string_view value) override {
     if (value.empty()) {
       storage_.append(std::numeric_limits<double>::quiet_NaN(), true);
@@ -357,8 +355,9 @@ public:
       start++;
       len--;
     }
-    fast_float::parse_options ff_opts{fast_float::chars_format::general, decimal_mark};
-    auto [ptr, ec] = fast_float::from_chars_advanced(start, start + len, result, ff_opts);
+    // Note: this legacy path always uses '.' as decimal mark.
+    // The active Arrow-based paths use FastArrowContext which supports decimal_mark.
+    auto [ptr, ec] = fast_float::from_chars(start, start + len, result);
 
     if (ec == std::errc() && ptr == start + len) {
       storage_.append(result, false);
