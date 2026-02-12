@@ -10,6 +10,7 @@
  */
 
 #include "libvroom.h"
+#include "libvroom/parse_utils.h"
 
 #include "test_util.h"
 
@@ -841,4 +842,48 @@ TEST(TrimWhitespaceParsingTest, HeadersAlwaysTrimmed) {
   const auto& schema = reader.schema();
   EXPECT_EQ(schema[0].name, "name");
   EXPECT_EQ(schema[1].name, "value");
+}
+
+// ============================================================================
+// UNESCAPE BACKSLASH TESTS
+// ============================================================================
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedQuote) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(he said \"hello\")", '"'), "he said \"hello\"");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedBackslash) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(C:\\Users\\jane)", '"'), "C:\\Users\\jane");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedTab) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(Tab:\there)", '"'), "Tab:\there");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedNewline) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(line1\nline2)", '"'), "line1\nline2");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EscapedCR) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(before\rafter)", '"'), "before\rafter");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_NoEscapes) {
+  EXPECT_EQ(libvroom::unescape_backslash("plain text", '"'), "plain text");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_EmptyString) {
+  EXPECT_EQ(libvroom::unescape_backslash("", '"'), "");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_UnknownEscape) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(\x)", '"'), "x");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_TrailingBackslash) {
+  EXPECT_EQ(libvroom::unescape_backslash("trail\\", '"'), "trail\\");
+}
+
+TEST_F(CsvReaderTest, UnescapeBackslash_MultipleEscapes) {
+  EXPECT_EQ(libvroom::unescape_backslash(R"(\"\\\")", '"'), "\"\\\"");
 }
