@@ -13,6 +13,7 @@ namespace libvroom {
 // Forward declarations from type_parsers.cpp
 bool parse_date(std::string_view value, int32_t& days_since_epoch);
 bool parse_timestamp(std::string_view value, int64_t& micros_since_epoch);
+bool parse_time(std::string_view value, int64_t& micros_since_midnight);
 
 // FastColumnContext - devirtualized column appending for the hot path
 // Uses function pointers resolved once at setup time to avoid virtual dispatch
@@ -263,6 +264,27 @@ public:
     }
   }
   static void append_null_timestamp(FastColumnContext& ctx) {
+    ctx.int64_values->push_back(0);
+    ctx.null_bitmap->push_back(true);
+  }
+
+  // Time (stores microseconds since midnight as int64)
+  static void append_time(FastColumnContext& ctx, std::string_view value) {
+    if (value.empty()) {
+      ctx.int64_values->push_back(0);
+      ctx.null_bitmap->push_back(true);
+      return;
+    }
+    int64_t micros;
+    if (parse_time(value, micros)) {
+      ctx.int64_values->push_back(micros);
+      ctx.null_bitmap->push_back(false);
+    } else {
+      ctx.int64_values->push_back(0);
+      ctx.null_bitmap->push_back(true);
+    }
+  }
+  static void append_null_time(FastColumnContext& ctx) {
     ctx.int64_values->push_back(0);
     ctx.null_bitmap->push_back(true);
   }

@@ -19,6 +19,7 @@ constexpr const char* BOOL = "b";            // boolean (1 bit per value, packed
 constexpr const char* UTF8 = "u";            // UTF-8 string (32-bit offsets)
 constexpr const char* DATE32 = "tdD";        // date32 (days since Unix epoch)
 constexpr const char* TIMESTAMP_US = "tsu:"; // timestamp (microseconds, no timezone)
+constexpr const char* TIME64_US = "ttu";     // time64 (microseconds since midnight)
 constexpr const char* STRUCT = "+s";         // struct (for table export)
 } // namespace arrow_format
 
