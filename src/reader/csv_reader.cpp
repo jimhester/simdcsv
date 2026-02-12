@@ -41,7 +41,8 @@ struct ChunkParseResult {
 std::pair<size_t, bool> parse_chunk_with_state(
     const char* data, size_t size, const CsvOptions& options, const NullChecker& null_checker,
     std::vector<std::unique_ptr<ArrowColumnBuilder>>& columns, bool start_inside_quote,
-    ErrorCollector* error_collector = nullptr, size_t base_byte_offset = 0) {
+    ErrorCollector* error_collector = nullptr, size_t base_byte_offset = 0,
+    const std::vector<ColumnSchema>* schema = nullptr) {
   if (size == 0 || columns.empty()) {
     return {0, start_inside_quote};
   }
@@ -55,6 +56,19 @@ std::pair<size_t, bool> parse_chunk_with_state(
   // Thread parsing options to contexts
   for (auto& fc : fast_contexts) {
     fc.decimal_mark = options.decimal_mark;
+  }
+
+  // Wire up type coercion error reporting when error collection and schema are available.
+  // Row number is left as nullptr (reports 0) in the multi-threaded path, consistent
+  // with structural errors (NULL_BYTE, QUOTE_IN_UNQUOTED_FIELD, etc.) which also use 0.
+  // Byte offset is set per-field before each append call below.
+  if (error_collector && schema) {
+    for (size_t i = 0; i < fast_contexts.size(); ++i) {
+      fast_contexts[i].error_collector = error_collector;
+      fast_contexts[i].error_col_index = i;
+      fast_contexts[i].error_col_name = (*schema)[i].name.c_str();
+      fast_contexts[i].error_expected_type = (*schema)[i].type;
+    }
   }
 
   bool in_quote = start_inside_quote;
@@ -230,6 +244,9 @@ std::pair<size_t, bool> parse_chunk_with_state(
         if (field_len >= 2 && field_data[0] == quote && field_data[field_len - 1] == quote) {
           field_view = std::string_view(field_data + 1, field_len - 2);
         }
+        // Set byte offset for type coercion error reporting
+        fast_contexts[col_idx].error_byte_offset =
+            base_byte_offset + static_cast<size_t>(field_data - data);
         if (options.escape_backslash) {
           std::string unescaped = unescape_backslash(field_view, quote);
           fast_contexts[col_idx].append(unescaped);
@@ -250,9 +267,16 @@ std::pair<size_t, bool> parse_chunk_with_state(
           // Devirtualized append call
           fast_contexts[col_idx].append(unescaped);
         }
+        if (check_errors && error_collector->should_stop()) [[unlikely]]
+          goto done_chunk;
       } else {
+        // Set byte offset for type coercion error reporting
+        fast_contexts[col_idx].error_byte_offset =
+            base_byte_offset + static_cast<size_t>(field_data - data);
         // Devirtualized append call
         fast_contexts[col_idx].append(field_view);
+        if (check_errors && error_collector->should_stop()) [[unlikely]]
+          goto done_chunk;
       }
       col_idx++;
     }
@@ -953,7 +977,7 @@ Result<ParsedChunks> CsvReader::read_all() {
 
             auto [rows, ends_inside] = parse_chunk_with_state(
                 data + start_offset, end_offset - start_offset, options, null_checker, cr.columns,
-                start_inside, chunk_error_collector, start_offset);
+                start_inside, chunk_error_collector, start_offset, &schema);
             (void)ends_inside;
             cr.row_count = rows;
           }));
@@ -1216,7 +1240,7 @@ Result<ParsedChunks> CsvReader::read_all() {
         // Parse ONCE with the correct starting state
         auto [rows, ends_inside] =
             parse_chunk_with_state(chunk_data, chunk_size, options, null_checker, result.columns,
-                                   start_inside, chunk_error_collector, start_offset);
+                                   start_inside, chunk_error_collector, start_offset, &schema);
         (void)ends_inside; // Already computed in analysis phase
         result.row_count = rows;
       }));
@@ -1339,6 +1363,17 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
   // Row number is 1-indexed; row 1 is the header (if present)
   size_t row_number = impl_->options.has_header ? 2 : 1;
 
+  // Wire up type coercion error reporting when error collection is enabled
+  if (check_errors) {
+    for (size_t i = 0; i < fast_contexts.size(); ++i) {
+      fast_contexts[i].error_collector = &impl_->error_collector;
+      fast_contexts[i].error_row = &row_number;
+      fast_contexts[i].error_col_index = i;
+      fast_contexts[i].error_col_name = impl_->schema[i].name.c_str();
+      fast_contexts[i].error_expected_type = impl_->schema[i].type;
+    }
+  }
+
   while (offset < size) {
     // Skip empty lines (when enabled)
     if (impl_->options.skip_empty_rows) {
@@ -1450,6 +1485,8 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
         if (field_len >= 2 && field_data[0] == quote && field_data[field_len - 1] == quote) {
           field_view = std::string_view(field_data + 1, field_len - 2);
         }
+        // Set byte offset for type coercion error reporting
+        fast_contexts[col_idx].error_byte_offset = static_cast<size_t>(field_data - data);
         if (options.escape_backslash) {
           std::string unescaped = unescape_backslash(field_view, quote);
           fast_contexts[col_idx].append(unescaped);
@@ -1471,9 +1508,15 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
           // Devirtualized append call
           fast_contexts[col_idx].append(unescaped);
         }
+        if (check_errors && impl_->error_collector.should_stop()) [[unlikely]]
+          goto done_serial;
       } else {
+        // Set byte offset for type coercion error reporting
+        fast_contexts[col_idx].error_byte_offset = static_cast<size_t>(field_data - data);
         // Devirtualized append call
         fast_contexts[col_idx].append(field_view);
+        if (check_errors && impl_->error_collector.should_stop()) [[unlikely]]
+          goto done_serial;
       }
       col_idx++;
     }
@@ -1687,7 +1730,7 @@ Result<bool> CsvReader::start_streaming() {
 
       auto [rows, ends_inside] = parse_chunk_with_state(
           data + start_offset, end_offset - start_offset, options, null_checker, columns,
-          start_inside, chunk_error_collector, start_offset);
+          start_inside, chunk_error_collector, start_offset, &schema);
       (void)ends_inside;
       (void)rows;
 

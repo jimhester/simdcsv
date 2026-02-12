@@ -1,10 +1,13 @@
+#include "libvroom/arrow_column_builder.h"
 #include "libvroom/convert.h"
 #include "libvroom/error.h"
 #include "libvroom/vroom.h"
 
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 using namespace libvroom;
@@ -33,6 +36,7 @@ TEST(ErrorHandlingTest, ErrorCodeToString) {
                "INDEX_ALLOCATION_OVERFLOW");
   EXPECT_STREQ(error_code_to_string(ErrorCode::IO_ERROR), "IO_ERROR");
   EXPECT_STREQ(error_code_to_string(ErrorCode::INTERNAL_ERROR), "INTERNAL_ERROR");
+  EXPECT_STREQ(error_code_to_string(ErrorCode::TYPE_COERCION), "TYPE_COERCION");
 
   // Test default case with an invalid error code
   EXPECT_STREQ(error_code_to_string(static_cast<ErrorCode>(9999)), "UNKNOWN");
@@ -149,16 +153,21 @@ TEST(ErrorCollectorTest, FatalErrorStopsEvenInPermissiveMode) {
 }
 
 TEST(ErrorCollectorTest, WarningsDontStopParsing) {
+  // FAIL_FAST mode should NOT stop on warnings (only RECOVERABLE and FATAL)
   ErrorCollector collector(ErrorMode::FAIL_FAST);
 
   collector.add_error(ErrorCode::MIXED_LINE_ENDINGS, ErrorSeverity::WARNING, 1, 1, 10,
                       "Mixed line endings detected");
 
-  // In strict mode, warnings should still allow continuation
-  // (only ERROR and FATAL severity should trigger stops)
-  EXPECT_TRUE(collector.should_stop()); // Actually, strict mode stops on ANY error
+  EXPECT_FALSE(collector.should_stop());
+  EXPECT_TRUE(collector.has_errors());
 
-  // Let's test permissive mode for warnings
+  // But FAIL_FAST should stop on RECOVERABLE errors
+  collector.add_error(ErrorCode::TYPE_COERCION, ErrorSeverity::RECOVERABLE, 1, 1, 10,
+                      "Cannot convert to integer");
+  EXPECT_TRUE(collector.should_stop());
+
+  // Permissive mode should not stop on warnings either
   ErrorCollector collector2(ErrorMode::PERMISSIVE);
   collector2.add_error(ErrorCode::MIXED_LINE_ENDINGS, ErrorSeverity::WARNING, 1, 1, 10,
                        "Mixed line endings detected");
@@ -871,4 +880,350 @@ TEST(ConversionErrorTest, ErrorSummary) {
   std::string summary = result.error_summary();
   EXPECT_NE(summary.find("warnings"), std::string::npos)
       << "Summary should mention warnings: " << summary;
+}
+
+// ============================================================================
+// Type coercion error reporting tests
+// ============================================================================
+
+TEST(TypeCoercionErrorTest, Int32CoercionErrorReported) {
+  auto builder = libvroom::ArrowColumnBuilder::create_int32();
+  auto ctx = builder->create_context();
+
+  libvroom::ErrorCollector collector(libvroom::ErrorMode::PERMISSIVE);
+  size_t row_number = 5;
+  ctx.error_collector = &collector;
+  ctx.error_row = &row_number;
+  ctx.error_col_index = 2;
+  ctx.error_col_name = "age";
+  ctx.error_expected_type = libvroom::DataType::INT32;
+
+  ctx.append(std::string_view("42"));
+  EXPECT_EQ(collector.error_count(), 0);
+
+  row_number = 6;
+  ctx.append(std::string_view("abc"));
+  ASSERT_EQ(collector.error_count(), 1);
+
+  const auto& err = collector.errors()[0];
+  EXPECT_EQ(err.code, libvroom::ErrorCode::TYPE_COERCION);
+  EXPECT_EQ(err.severity, libvroom::ErrorSeverity::RECOVERABLE);
+  EXPECT_EQ(err.line, 6);
+  EXPECT_EQ(err.column, 3); // 1-indexed from error_col_index=2
+  EXPECT_NE(err.message.find("INT32"), std::string::npos);
+  EXPECT_NE(err.message.find("age"), std::string::npos);
+  EXPECT_NE(err.context.find("abc"), std::string::npos);
+}
+
+TEST(TypeCoercionErrorTest, NoErrorWhenCollectorNull) {
+  auto builder = libvroom::ArrowColumnBuilder::create_int32();
+  auto ctx = builder->create_context();
+
+  ctx.append(std::string_view("abc"));
+  EXPECT_EQ(builder->size(), 1);
+  EXPECT_EQ(builder->null_count(), 1);
+}
+
+// Helper to write a temp file for integration tests
+static std::string write_temp_file(const std::string& content) {
+  char tmp[] = "/tmp/coercion_test_XXXXXX";
+  int fd = mkstemp(tmp);
+  if (fd < 0)
+    return "";
+  ::close(fd);
+  std::ofstream f(tmp);
+  f << content;
+  f.close();
+  return tmp;
+}
+
+TEST(TypeCoercionErrorTest, CsvReaderSerialReportsCoercionErrors) {
+  // Column a: integers with one bad value -> inferred as INT32 (guess_integer=true)
+  // Column b: floats with one bad value -> inferred as FLOAT64
+  std::string csv = "a,b\n1,1.5\n2,2.5\nabc,xyz\n4,4.5\n";
+  auto tmp = write_temp_file(csv);
+  ASSERT_FALSE(tmp.empty());
+
+  libvroom::CsvOptions opts;
+  opts.separator = ',';
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+  opts.num_threads = 1;      // Force serial path
+  opts.guess_integer = true; // So integer columns infer as INT32
+  opts.sample_rows = 2;      // Only sample first 2 rows so bad data isn't seen during inference
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(tmp);
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  // Verify type inference picked up the right types
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2);
+  EXPECT_EQ(schema[0].type, libvroom::DataType::INT32) << "Column 'a' should be inferred as INT32";
+  EXPECT_EQ(schema[1].type, libvroom::DataType::FLOAT64)
+      << "Column 'b' should be inferred as FLOAT64";
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+
+  // Should have collected 2 coercion errors (abc for int, xyz for float)
+  ASSERT_TRUE(reader.has_errors());
+  const auto& errors = reader.errors();
+
+  size_t coercion_count = 0;
+  for (const auto& err : errors) {
+    if (err.code == libvroom::ErrorCode::TYPE_COERCION) {
+      coercion_count++;
+      EXPECT_EQ(err.severity, libvroom::ErrorSeverity::RECOVERABLE);
+      EXPECT_EQ(err.line, 4); // Row 4 (header=1, data rows 2,3,4)
+    }
+  }
+  EXPECT_EQ(coercion_count, 2)
+      << "Expected 2 TYPE_COERCION errors (abc for INT32, xyz for FLOAT64)";
+
+  std::remove(tmp.c_str());
+}
+
+TEST(TypeCoercionErrorTest, CsvReaderMultiThreadedReportsCoercionErrors) {
+  // Create CSV large enough for multi-threaded path (>1MB PARALLEL_THRESHOLD)
+  // Each valid row is ~20 bytes, so we need ~60K rows to exceed 1MB
+  std::string csv = "a,b\n";
+  const int num_rows = 100000;
+  csv.reserve(num_rows * 20);
+  for (int i = 0; i < num_rows; ++i) {
+    if (i == 500 || i == 50000 || i == 99999) {
+      csv += "abc,xyz\n";
+    } else {
+      csv += std::to_string(i) + "," + std::to_string(i * 1.5) + "\n";
+    }
+  }
+  auto tmp = write_temp_file(csv);
+  ASSERT_FALSE(tmp.empty());
+
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+  opts.guess_integer = true;
+  opts.sample_rows = 100;
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(tmp);
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+
+  size_t coercion_count = 0;
+  for (const auto& err : reader.errors()) {
+    if (err.code == libvroom::ErrorCode::TYPE_COERCION) {
+      coercion_count++;
+    }
+  }
+  EXPECT_EQ(coercion_count, 6); // 3 bad rows x 2 columns
+
+  std::remove(tmp.c_str());
+}
+
+TEST(TypeCoercionErrorTest, Float64CoercionErrorReported) {
+  auto builder = libvroom::ArrowColumnBuilder::create_float64();
+  auto ctx = builder->create_context();
+
+  libvroom::ErrorCollector collector(libvroom::ErrorMode::PERMISSIVE);
+  size_t row = 3;
+  ctx.error_collector = &collector;
+  ctx.error_row = &row;
+  ctx.error_col_index = 0;
+  ctx.error_col_name = "price";
+  ctx.error_expected_type = libvroom::DataType::FLOAT64;
+
+  ctx.append(std::string_view("not_a_number"));
+  ASSERT_EQ(collector.error_count(), 1);
+  EXPECT_EQ(collector.errors()[0].code, libvroom::ErrorCode::TYPE_COERCION);
+  EXPECT_NE(collector.errors()[0].message.find("FLOAT64"), std::string::npos);
+  EXPECT_NE(collector.errors()[0].context.find("not_a_number"), std::string::npos);
+}
+
+TEST(TypeCoercionErrorTest, BoolCoercionErrorReported) {
+  auto builder = libvroom::ArrowColumnBuilder::create_bool();
+  auto ctx = builder->create_context();
+
+  libvroom::ErrorCollector collector(libvroom::ErrorMode::PERMISSIVE);
+  size_t row = 1;
+  ctx.error_collector = &collector;
+  ctx.error_row = &row;
+  ctx.error_col_index = 0;
+  ctx.error_col_name = "active";
+  ctx.error_expected_type = libvroom::DataType::BOOL;
+
+  ctx.append(std::string_view("maybe"));
+  ASSERT_EQ(collector.error_count(), 1);
+  EXPECT_EQ(collector.errors()[0].code, libvroom::ErrorCode::TYPE_COERCION);
+}
+
+TEST(TypeCoercionErrorTest, DateCoercionErrorReported) {
+  auto builder = libvroom::ArrowColumnBuilder::create_date();
+  auto ctx = builder->create_context();
+
+  libvroom::ErrorCollector collector(libvroom::ErrorMode::PERMISSIVE);
+  size_t row = 2;
+  ctx.error_collector = &collector;
+  ctx.error_row = &row;
+  ctx.error_col_index = 0;
+  ctx.error_col_name = "birthday";
+  ctx.error_expected_type = libvroom::DataType::DATE;
+
+  ctx.append(std::string_view("not-a-date"));
+  ASSERT_EQ(collector.error_count(), 1);
+  EXPECT_EQ(collector.errors()[0].code, libvroom::ErrorCode::TYPE_COERCION);
+}
+
+TEST(TypeCoercionErrorTest, TimestampCoercionErrorReported) {
+  auto builder = libvroom::ArrowColumnBuilder::create_timestamp();
+  auto ctx = builder->create_context();
+
+  libvroom::ErrorCollector collector(libvroom::ErrorMode::PERMISSIVE);
+  size_t row = 2;
+  ctx.error_collector = &collector;
+  ctx.error_row = &row;
+  ctx.error_col_index = 0;
+  ctx.error_col_name = "created_at";
+  ctx.error_expected_type = libvroom::DataType::TIMESTAMP;
+
+  ctx.append(std::string_view("yesterday"));
+  ASSERT_EQ(collector.error_count(), 1);
+  EXPECT_EQ(collector.errors()[0].code, libvroom::ErrorCode::TYPE_COERCION);
+}
+
+TEST(TypeCoercionErrorTest, Int64CoercionErrorReported) {
+  auto builder = libvroom::ArrowColumnBuilder::create_int64();
+  auto ctx = builder->create_context();
+
+  libvroom::ErrorCollector collector(libvroom::ErrorMode::PERMISSIVE);
+  size_t row = 7;
+  ctx.error_collector = &collector;
+  ctx.error_row = &row;
+  ctx.error_col_index = 1;
+  ctx.error_col_name = "big_num";
+  ctx.error_expected_type = libvroom::DataType::INT64;
+
+  ctx.append(std::string_view("nope"));
+  ASSERT_EQ(collector.error_count(), 1);
+  EXPECT_EQ(collector.errors()[0].code, libvroom::ErrorCode::TYPE_COERCION);
+  EXPECT_EQ(collector.errors()[0].line, 7);
+  EXPECT_EQ(collector.errors()[0].column, 2); // 1-indexed
+}
+
+TEST(TypeCoercionErrorTest, NoErrorForValidValues) {
+  auto builder = libvroom::ArrowColumnBuilder::create_int32();
+  auto ctx = builder->create_context();
+
+  libvroom::ErrorCollector collector(libvroom::ErrorMode::PERMISSIVE);
+  size_t row = 1;
+  ctx.error_collector = &collector;
+  ctx.error_row = &row;
+  ctx.error_col_index = 0;
+  ctx.error_col_name = "id";
+  ctx.error_expected_type = libvroom::DataType::INT32;
+
+  ctx.append(std::string_view("42"));
+  ctx.append(std::string_view("-100"));
+  ctx.append(std::string_view("0"));
+
+  EXPECT_EQ(collector.error_count(), 0);
+  EXPECT_EQ(builder->size(), 3);
+  EXPECT_EQ(builder->null_count(), 0);
+}
+
+TEST(TypeCoercionErrorTest, DisabledModeNoCoercionErrors) {
+  std::string csv = "a\n1\n2\nabc\n";
+  auto tmp = write_temp_file(csv);
+
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::DISABLED;
+  opts.num_threads = 1;
+  opts.guess_integer = true;
+  opts.sample_rows = 2;
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(tmp);
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+  EXPECT_FALSE(reader.has_errors());
+
+  std::remove(tmp.c_str());
+}
+
+TEST(TypeCoercionErrorTest, MultipleErrorsAcrossColumns) {
+  std::string csv = "a,b,c\n1,2.0,true\nabc,xyz,maybe\n3,4.0,false\n";
+  auto tmp = write_temp_file(csv);
+
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+  opts.num_threads = 1;
+  opts.guess_integer = true;
+  opts.sample_rows = 1;
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(tmp);
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+
+  size_t coercion_count = 0;
+  bool found_col_a = false, found_col_b = false, found_col_c = false;
+  for (const auto& err : reader.errors()) {
+    if (err.code == libvroom::ErrorCode::TYPE_COERCION) {
+      coercion_count++;
+      if (err.message.find("'a'") != std::string::npos)
+        found_col_a = true;
+      if (err.message.find("'b'") != std::string::npos)
+        found_col_b = true;
+      if (err.message.find("'c'") != std::string::npos)
+        found_col_c = true;
+    }
+  }
+  EXPECT_EQ(coercion_count, 3);
+  EXPECT_TRUE(found_col_a);
+  EXPECT_TRUE(found_col_b);
+  EXPECT_TRUE(found_col_c);
+
+  std::remove(tmp.c_str());
+}
+
+TEST(TypeCoercionErrorTest, FailFastStopsOnFirstCoercionError) {
+  // Use enough valid rows first so type inference sees them, then bad data
+  std::string csv = "a\n";
+  for (int i = 0; i < 10; ++i) {
+    csv += std::to_string(i) + "\n";
+  }
+  csv += "abc\ndef\n";
+  auto tmp = write_temp_file(csv);
+  ASSERT_FALSE(tmp.empty());
+
+  libvroom::CsvOptions opts;
+  opts.error_mode = libvroom::ErrorMode::FAIL_FAST;
+  opts.num_threads = 1;
+  opts.guess_integer = true;
+  opts.sample_rows = 5; // Only sample first 5 rows (all valid ints)
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(tmp);
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  // Verify type inference picked INT32
+  ASSERT_EQ(reader.schema().size(), 1);
+  EXPECT_EQ(reader.schema()[0].type, libvroom::DataType::INT32);
+
+  auto result = reader.read_all();
+  EXPECT_TRUE(reader.has_errors());
+  // FAIL_FAST should stop after first error
+  size_t coercion_count = 0;
+  for (const auto& err : reader.errors()) {
+    if (err.code == libvroom::ErrorCode::TYPE_COERCION)
+      coercion_count++;
+  }
+  EXPECT_EQ(coercion_count, 1);
+
+  std::remove(tmp.c_str());
 }
