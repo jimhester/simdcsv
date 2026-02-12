@@ -179,7 +179,7 @@ TEST_F(FwfReaderTest, CommentLines) {
   opts.col_starts = {0, 4};
   opts.col_ends = {4, -1};
   opts.col_names = {"num", "str"};
-  opts.comment = '#';
+  opts.comment = "#";
 
   auto result = parseContent(content, opts);
   ASSERT_EQ(result.total_rows, 2u);
