@@ -824,3 +824,66 @@ TEST_F(TypeInferenceEndToEndTest, IntFloat64MixedSchemaType) {
   // Mixed int + float should widen to FLOAT64
   EXPECT_EQ(schema[0].type, DataType::FLOAT64);
 }
+
+// ============================================================================
+// H. Leading + in floats
+// ============================================================================
+
+class LeadingPlusFloatTest : public ::testing::Test {};
+
+TEST_F(LeadingPlusFloatTest, LeadingPlusInfersAsFloat) {
+  CsvOptions opts;
+  opts.separator = ',';
+  TypeInference inference(opts);
+  EXPECT_EQ(inference.infer_field("+1.5"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("+0.0"), DataType::FLOAT64);
+  EXPECT_EQ(inference.infer_field("+3.14e2"), DataType::FLOAT64);
+}
+
+TEST_F(LeadingPlusFloatTest, LeadingPlusEndToEnd) {
+  test_util::TempCsvFile csv("val\n+1.5\n+2.5\n+3.5\n");
+
+  CsvReader reader(CsvOptions{});
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 1u);
+  EXPECT_EQ(schema[0].type, DataType::FLOAT64);
+  EXPECT_EQ(read_result.value.total_rows, 3u);
+}
+
+// ============================================================================
+// I. Extended boolean values
+// ============================================================================
+
+class ExtendedBoolTest : public ::testing::Test {};
+
+TEST_F(ExtendedBoolTest, SingleLetterBooleans) {
+  CsvOptions opts;
+  opts.separator = ',';
+  TypeInference inference(opts);
+  EXPECT_EQ(inference.infer_field("T"), DataType::BOOL);
+  EXPECT_EQ(inference.infer_field("t"), DataType::BOOL);
+  EXPECT_EQ(inference.infer_field("F"), DataType::BOOL);
+  EXPECT_EQ(inference.infer_field("f"), DataType::BOOL);
+}
+
+TEST_F(ExtendedBoolTest, EndToEndSingleLetterBools) {
+  test_util::TempCsvFile csv("flag\nT\nF\nt\nf\n");
+
+  CsvReader reader(CsvOptions{});
+  auto open_result = reader.open(csv.path());
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  auto read_result = reader.read_all();
+  ASSERT_TRUE(read_result.ok) << read_result.error;
+
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 1u);
+  EXPECT_EQ(schema[0].type, DataType::BOOL);
+  EXPECT_EQ(read_result.value.total_rows, 4u);
+}

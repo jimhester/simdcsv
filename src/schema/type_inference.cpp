@@ -97,8 +97,15 @@ DataType TypeInference::infer_field(std::string_view value) {
 
   // Try to parse as float
   double result;
-  auto [ptr, ec] = fast_float::from_chars(value.data(), value.data() + value.size(), result);
-  if (ec == std::errc() && ptr == value.data() + value.size()) {
+  const char* float_start = value.data();
+  size_t float_len = value.size();
+  // Strip leading '+' that fast_float doesn't accept (C++17 spec forbids it)
+  if (float_len > 0 && *float_start == '+') {
+    float_start++;
+    float_len--;
+  }
+  auto [ptr, ec] = fast_float::from_chars(float_start, float_start + float_len, result);
+  if (ec == std::errc() && ptr == float_start + float_len) {
     return DataType::FLOAT64;
   }
 
