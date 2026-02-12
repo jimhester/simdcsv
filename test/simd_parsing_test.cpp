@@ -68,7 +68,7 @@ protected:
     TempCsv csv(content);
 
     CsvOptions opts;
-    opts.separator = ','; // Explicit separator for low-level tests (bypass auto-detect)
+    opts.separator = ","; // Explicit separator for low-level tests (bypass auto-detect)
     opts.error_mode = ErrorMode::PERMISSIVE;
     opts.num_threads = num_threads;
 
@@ -94,7 +94,7 @@ protected:
     std::memcpy(buffer.data(), content.data(), content.size());
 
     CsvOptions opts;
-    opts.separator = ','; // Explicit separator for low-level tests (bypass auto-detect)
+    opts.separator = ","; // Explicit separator for low-level tests (bypass auto-detect)
     opts.error_mode = ErrorMode::PERMISSIVE;
     opts.num_threads = num_threads;
 

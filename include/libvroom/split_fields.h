@@ -11,6 +11,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <string_view>
 
 // Force inline macro for hot path functions
 #if defined(__GNUC__) || defined(__clang__)
@@ -97,9 +99,24 @@ public:
         eol_char_(eol_char), escape_backslash_(escape_backslash), previous_valid_ends_(0),
         prev_escaped_(0) {}
 
+  VROOM_FORCE_INLINE SplitFields(const char* slice, size_t size, std::string_view separator,
+                                 char quote_char, char eol_char, bool escape_backslash = false)
+      : v_(slice), remaining_(size), separator_(separator.size() == 1 ? separator[0] : '\0'),
+        finished_(false), finished_inside_quote_(false), quote_char_(quote_char),
+        quoting_(quote_char != 0), eol_char_(eol_char), escape_backslash_(escape_backslash),
+        previous_valid_ends_(0), prev_escaped_(0), multi_byte_(separator.size() > 1) {
+    if (multi_byte_) {
+      multi_sep_ = separator;
+    }
+  }
+
   VROOM_FORCE_INLINE bool next(const char*& field_data, size_t& field_len, bool& needs_escaping) {
     if (finished_) {
       return false;
+    }
+
+    if (multi_byte_) {
+      return next_multi_byte(field_data, field_len, needs_escaping);
     }
 
     // HOT PATH: Check cache first
@@ -171,6 +188,8 @@ private:
   bool escape_backslash_;
   uint64_t previous_valid_ends_;
   uint64_t prev_escaped_; // Cross-block state for escape mask computation
+  std::string_view multi_sep_;
+  bool multi_byte_ = false;
 
   VROOM_FORCE_INLINE bool eof_eol(char c) const { return c == separator_ || c == eol_char_; }
 
@@ -199,6 +218,45 @@ private:
     v_ += remaining_;
     remaining_ = 0;
     return true;
+  }
+
+  VROOM_FORCE_INLINE bool next_multi_byte(const char*& field_data, size_t& field_len,
+                                          bool& needs_escaping) {
+    if (remaining_ == 0) {
+      return finish(field_data, field_len, false);
+    }
+
+    needs_escaping = false;
+    bool in_quote = false;
+    const size_t sep_len = multi_sep_.size();
+
+    if (quoting_ && remaining_ > 0 && v_[0] == quote_char_) {
+      needs_escaping = true;
+    }
+
+    for (size_t i = 0; i < remaining_; ++i) {
+      char c = v_[i];
+      if (c == quote_char_ && quoting_) {
+        if (in_quote && i + 1 < remaining_ && v_[i + 1] == quote_char_) {
+          ++i; // escaped quote
+          continue;
+        }
+        in_quote = !in_quote;
+      }
+      if (!in_quote) {
+        if (c == eol_char_) {
+          return finish_eol(field_data, field_len, needs_escaping, i);
+        }
+        if (i + sep_len <= remaining_ && std::memcmp(v_ + i, multi_sep_.data(), sep_len) == 0) {
+          field_data = v_;
+          field_len = i;
+          v_ += i + sep_len;
+          remaining_ -= i + sep_len;
+          return true;
+        }
+      }
+    }
+    return finish(field_data, field_len, needs_escaping);
   }
 
   VROOM_FORCE_INLINE size_t scan_quoted_field(bool& not_in_field_previous_iter) {

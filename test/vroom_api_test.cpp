@@ -133,7 +133,7 @@ TEST(CsvReaderTest, CustomDelimiter) {
   TempCsvFile csv("a;b;c\n1;2;3\n");
 
   libvroom::CsvOptions opts;
-  opts.separator = ';';
+  opts.separator = ";";
   libvroom::CsvReader reader(opts);
 
   auto open_result = reader.open(csv.path());

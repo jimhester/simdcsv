@@ -36,7 +36,7 @@ static PyObject* IOError_custom = nullptr;
 // =============================================================================
 
 std::shared_ptr<libvroom::Table>
-read_csv(const std::string& path, std::optional<char> separator = std::nullopt,
+read_csv(const std::string& path, std::optional<std::string> separator = std::nullopt,
          std::optional<char> quote = std::nullopt, bool has_header = true,
          std::optional<size_t> num_threads = std::nullopt,
          std::optional<std::string> error_mode = std::nullopt,
