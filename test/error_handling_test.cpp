@@ -3,9 +3,11 @@
 #include "libvroom/error.h"
 #include "libvroom/vroom.h"
 
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 using namespace libvroom;
@@ -915,4 +917,63 @@ TEST(TypeCoercionErrorTest, NoErrorWhenCollectorNull) {
   ctx.append(std::string_view("abc"));
   EXPECT_EQ(builder->size(), 1);
   EXPECT_EQ(builder->null_count(), 1);
+}
+
+// Helper to write a temp file for integration tests
+static std::string write_temp_file(const std::string& content) {
+  char tmp[] = "/tmp/coercion_test_XXXXXX";
+  int fd = mkstemp(tmp);
+  if (fd < 0)
+    return "";
+  ::close(fd);
+  std::ofstream f(tmp);
+  f << content;
+  f.close();
+  return tmp;
+}
+
+TEST(TypeCoercionErrorTest, CsvReaderSerialReportsCoercionErrors) {
+  // Column a: integers with one bad value -> inferred as INT32 (guess_integer=true)
+  // Column b: floats with one bad value -> inferred as FLOAT64
+  std::string csv = "a,b\n1,1.5\n2,2.5\nabc,xyz\n4,4.5\n";
+  auto tmp = write_temp_file(csv);
+  ASSERT_FALSE(tmp.empty());
+
+  libvroom::CsvOptions opts;
+  opts.separator = ',';
+  opts.error_mode = libvroom::ErrorMode::PERMISSIVE;
+  opts.num_threads = 1;      // Force serial path
+  opts.guess_integer = true; // So integer columns infer as INT32
+  opts.sample_rows = 2;      // Only sample first 2 rows so bad data isn't seen during inference
+
+  libvroom::CsvReader reader(opts);
+  auto open_result = reader.open(tmp);
+  ASSERT_TRUE(open_result.ok) << open_result.error;
+
+  // Verify type inference picked up the right types
+  const auto& schema = reader.schema();
+  ASSERT_EQ(schema.size(), 2);
+  EXPECT_EQ(schema[0].type, libvroom::DataType::INT32) << "Column 'a' should be inferred as INT32";
+  EXPECT_EQ(schema[1].type, libvroom::DataType::FLOAT64)
+      << "Column 'b' should be inferred as FLOAT64";
+
+  auto result = reader.read_all();
+  ASSERT_TRUE(result.ok) << result.error;
+
+  // Should have collected 2 coercion errors (abc for int, xyz for float)
+  ASSERT_TRUE(reader.has_errors());
+  const auto& errors = reader.errors();
+
+  size_t coercion_count = 0;
+  for (const auto& err : errors) {
+    if (err.code == libvroom::ErrorCode::TYPE_COERCION) {
+      coercion_count++;
+      EXPECT_EQ(err.severity, libvroom::ErrorSeverity::RECOVERABLE);
+      EXPECT_EQ(err.line, 4); // Row 4 (header=1, data rows 2,3,4)
+    }
+  }
+  EXPECT_EQ(coercion_count, 2)
+      << "Expected 2 TYPE_COERCION errors (abc for INT32, xyz for FLOAT64)";
+
+  std::remove(tmp.c_str());
 }

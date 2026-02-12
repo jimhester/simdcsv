@@ -1201,6 +1201,17 @@ Result<ParsedChunks> CsvReader::read_all_serial() {
   // Row number is 1-indexed; row 1 is the header (if present)
   size_t row_number = impl_->options.has_header ? 2 : 1;
 
+  // Wire up type coercion error reporting when error collection is enabled
+  if (check_errors) {
+    for (size_t i = 0; i < fast_contexts.size(); ++i) {
+      fast_contexts[i].error_collector = &impl_->error_collector;
+      fast_contexts[i].error_row = &row_number;
+      fast_contexts[i].error_col_index = i;
+      fast_contexts[i].error_col_name = impl_->schema[i].name.c_str();
+      fast_contexts[i].error_expected_type = impl_->schema[i].type;
+    }
+  }
+
   while (offset < size) {
     // Skip empty lines (when enabled)
     if (impl_->options.skip_empty_rows) {
